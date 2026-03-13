@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from src.config import AgentConfig
+
 
 @pytest.fixture
 def tmp_context(tmp_path):
@@ -18,3 +20,12 @@ def tmp_skills(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     return skills_dir
+
+
+@pytest.fixture
+def agent_config(tmp_context, tmp_skills):
+    """AgentConfig pointing at temporary directories."""
+    return AgentConfig(
+        identity_file=tmp_context / "identity.md",
+        skills_dir=tmp_skills,
+    )
