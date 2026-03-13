@@ -15,10 +15,11 @@ This spec does NOT cover the agent loop, tools, LLM integration, skills, or memo
 
 ## Message Types
 
-Defined in `src/channels/base.py`, shared by all channels:
+Defined in `src/channels/base.py`, shared by all channels. These extend the parent spec's message types with two optional fields:
 
 ```python
 from dataclasses import dataclass
+from typing import Protocol
 
 @dataclass
 class IncomingMessage:
@@ -26,7 +27,7 @@ class IncomingMessage:
     channel: str            # "cli", "slack", "email"
     session_id: str         # "cli" for CLI channel
     reply_address: dict     # {} for CLI (stdout is implicit)
-    command: str | None = None  # "clear", etc.
+    command: str | None = None  # "clear", etc. — extension over parent spec
 
 @dataclass
 class OutgoingMessage:
@@ -34,11 +35,29 @@ class OutgoingMessage:
     channel: str
     session_id: str
     reply_address: dict
-    tool_calls: list[str] | None = None
+    tool_calls: list[str] | None = None  # extension over parent spec
 ```
 
 - `command` field on `IncomingMessage` allows channels to send control signals (e.g., `"clear"` for session reset) without magic strings in `content`.
 - `tool_calls` field on `OutgoingMessage` carries tool call summaries for optional verbose rendering.
+- Both fields are `None` by default and backward-compatible with the parent spec's definitions.
+
+## Channel Protocol
+
+Defined in `src/channels/base.py`. All channels implement this interface:
+
+```python
+class Channel(Protocol):
+    async def start(self) -> None:
+        """Run the channel's input loop."""
+        ...
+
+    async def send(self, msg: OutgoingMessage) -> None:
+        """Receive an outbound message for delivery."""
+        ...
+```
+
+The router depends on `send()`. The startup code calls `start()`. Using a `Protocol` (structural typing) rather than an ABC — channels don't need to inherit, just implement the methods.
 
 ## Architecture
 
@@ -64,14 +83,17 @@ Email ──push──►                  ▼  ▼  ▼
 `src/channels/router.py` — a single async function:
 
 ```python
-async def route_outbound(out_queue: asyncio.Queue, channels: dict[str, object]):
+async def route_outbound(out_queue: asyncio.Queue, channels: dict[str, Channel]):
     while True:
         msg = await out_queue.get()
-        channel = channels[msg.channel]
+        channel = channels.get(msg.channel)
+        if channel is None:
+            logger.warning("No channel registered for %r, discarding message", msg.channel)
+            continue
         await channel.send(msg)
 ```
 
-Channels register themselves in a `dict[str, Channel]` keyed by channel name. The router is the sole consumer of the outbound queue.
+Channels register themselves in a `dict[str, Channel]` keyed by channel name. The router is the sole consumer of the outbound queue. Unroutable messages are logged and discarded.
 
 ## CLIChannel
 
@@ -80,6 +102,8 @@ Channels register themselves in a `dict[str, Channel]` keyed by channel name. Th
 ### Constructor
 
 ```python
+SESSION_ID = "cli"
+
 class CLIChannel:
     def __init__(self, in_queue: asyncio.Queue, console: Console | None = None):
         self.in_queue = in_queue
@@ -88,7 +112,7 @@ class CLIChannel:
         self._live = None
 ```
 
-Takes the shared inbound queue and an optional Rich `Console` (injectable for testing).
+Takes the shared inbound queue and an optional Rich `Console` (injectable for testing). `SESSION_ID` is a module-level constant — CLI always uses a single session.
 
 ### Input Loop
 
@@ -154,6 +178,7 @@ Called by the router. Stops the spinner, optionally renders tool call panels, th
 
 ```python
 def _start_spinner(self):
+    self._stop_spinner()  # stop any existing spinner first
     self._live = self._console.status("[bold cyan]Thinking...[/bold cyan]")
     self._live.start()
 
@@ -164,6 +189,8 @@ def _stop_spinner(self):
 ```
 
 Rich's `Console.status()` provides an animated spinner. Started when user sends a message, stopped when `send()` is called.
+
+**Concurrency note:** `_start_spinner()` is called from the input loop (which runs stdin reads in a thread executor), and `_stop_spinner()` is called from `send()` (invoked by the router coroutine). Both run on the same asyncio event loop thread — the executor only blocks the `input()` call, not the coroutine. Since asyncio is single-threaded and these methods are called from coroutines (not from within the executor), there are no thread-safety concerns. If the user sends multiple messages before a response arrives, `_start_spinner()` cleans up the previous spinner before starting a new one.
 
 ## Dependencies
 
