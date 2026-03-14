@@ -35,8 +35,29 @@ class EmailChannel:
         await self._poll_loop()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply and label the thread as processed."""
-        pass  # implemented in Task 6
+        """Send a reply in the original thread and label it as processed."""
+        try:
+            await asyncio.to_thread(
+                gog.send_reply,
+                to=msg.reply_address["to"],
+                subject=msg.reply_address["subject"],
+                body=msg.content,
+                reply_to_message_id=msg.reply_address["in_reply_to"],
+                account=self.account,
+            )
+        except gog.GogError:
+            logger.exception("Failed to send reply for thread %s", msg.session_id)
+            return
+
+        try:
+            await asyncio.to_thread(
+                gog.thread_modify,
+                msg.session_id,
+                add_label=self.processed_label,
+                account=self.account,
+            )
+        except gog.GogError:
+            logger.exception("Failed to label thread %s as processed", msg.session_id)
 
     async def _poll_loop(self) -> None:
         """Poll for new messages on an interval."""
