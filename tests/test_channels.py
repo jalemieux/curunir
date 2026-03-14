@@ -22,6 +22,18 @@ def test_incoming_message_with_command():
     assert msg.command == "clear"
 
 
+def test_incoming_message_attachments_default():
+    msg = IncomingMessage(content="hello", channel="cli", session_id="cli", reply_address={})
+    assert msg.attachments is None
+
+
+def test_incoming_message_with_attachments():
+    attachments = [{"filename": "report.pdf", "path": "/tmp/report.pdf", "mime_type": "application/pdf", "size": 1024}]
+    msg = IncomingMessage(content="hello", channel="cli", session_id="cli", reply_address={}, attachments=attachments)
+    assert msg.attachments == attachments
+    assert msg.attachments[0]["filename"] == "report.pdf"
+
+
 def test_outgoing_message_defaults():
     msg = OutgoingMessage(content="hi", channel="cli", session_id="cli", reply_address={})
     assert msg.tool_calls is None
