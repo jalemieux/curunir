@@ -29,3 +29,7 @@ tmp/
 
 # Secrets (gog tokens, credentials)
 secrets/
+
+# Agent memory (instance-specific, keep README.md and .gitkeep)
+context/memory/*.md
+!context/memory/README.md
