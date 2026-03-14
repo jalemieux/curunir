@@ -60,7 +60,7 @@ def get_tool_schemas() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "read",
-                "description": "Read a file with line numbers.",
+                "description": "Read a file. Supports text files (with line numbers), PDF, DOCX, XLSX, and CSV.",
                 "parameters": {
                     "type": "object",
                     "properties": {
