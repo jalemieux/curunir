@@ -37,7 +37,7 @@ class EmailChannel:
         await self._poll_loop()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply in the original thread and label it as processed."""
+        """Send a reply in the original thread."""
         if not msg.content:
             return
         logger.info("Sending reply to %s (thread %s)", msg.reply_address.get("to"), msg.session_id)
@@ -52,17 +52,6 @@ class EmailChannel:
             )
         except gog.GogError:
             logger.exception("Failed to send reply for thread %s", msg.session_id)
-            return
-
-        try:
-            await asyncio.to_thread(
-                gog.thread_modify,
-                msg.session_id,
-                add_label=self.processed_label,
-                account=self.account,
-            )
-        except gog.GogError:
-            logger.exception("Failed to label thread %s as processed", msg.session_id)
 
     async def _poll_loop(self) -> None:
         """Poll for new messages on an interval."""
@@ -87,6 +76,15 @@ class EmailChannel:
             except gog.GogError:
                 logger.exception("Failed to fetch thread %s", thread_id)
                 continue
+
+            # Label immediately so we don't re-process on next poll
+            try:
+                await asyncio.to_thread(
+                    gog.thread_modify, thread_id,
+                    add_label=self.processed_label, account=self.account,
+                )
+            except gog.GogError:
+                logger.exception("Failed to label thread %s on ingest", thread_id)
 
             messages = thread.get("messages", [])
             last_seen_id = self.last_seen.get(thread_id)
