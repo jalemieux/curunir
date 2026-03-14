@@ -1,4 +1,4 @@
-# Curunir
+# Curunir — *the man of skill*
 
 ![Curunir](docs/curunir.jpg)
 
