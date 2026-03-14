@@ -135,6 +135,8 @@ def _read_csv(path: Path) -> str:
     return "\n".join(rows)
 
 
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico"}
+
 _BINARY_READERS: dict[str, callable] = {
     ".pdf": _read_pdf,
     ".docx": _read_docx,
@@ -155,6 +157,9 @@ def exec_read(args: dict, config: AgentConfig) -> str:
         reader = _BINARY_READERS.get(suffix)
         if reader:
             return reader(path)
+
+        if suffix in _IMAGE_EXTENSIONS:
+            return f"This is an image file ({suffix}). Image content was already provided inline when the email was received. Use the information from the original message to respond."
 
         lines = path.read_text().splitlines()
         offset = args.get("offset", 1)
