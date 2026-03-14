@@ -19,7 +19,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 flowchart TD
     CLI[CLI Channel] --> Q[Message Queue]
     Slack[Slack Channel] -.-> Q
-    Email[Email Channel] -.-> Q
+    Email[Email Channel] --> Q
 
     Q --> Agent[Agent Loop]
     Agent --> Tools
@@ -41,15 +41,16 @@ flowchart TD
     Agent --> Router[Outbound Router]
     Router --> CLI
     Router -.-> Slack
-    Router -.-> Email
+    Router --> Email
 
     style Slack stroke-dasharray: 5 5
-    style Email stroke-dasharray: 5 5
+    Agent --> Extractor[Memory Extractor]
+    Extractor --> LLM
 ```
 
 Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 15 tool-calling rounds per turn. Replies are routed back to the originating channel.
 
-Dashed nodes are planned but not yet implemented.
+Dashed nodes are planned but not yet implemented. The memory extractor runs post-session (on `/clear`, EOF, or a periodic timer) to extract durable facts into `context/memory/`.
 
 ## Project Structure
 
@@ -58,10 +59,11 @@ curunir/
 ├── run.py                  # Entry point — wires channels, queues, agent
 ├── src/
 │   ├── agent/              # Core agent loop and system prompt builder
-│   ├── channels/           # Channel implementations (CLI) and router
+│   ├── channels/           # Channel implementations (CLI, Email) and router
 │   ├── tools/              # Tool schemas, dispatch, and executors
 │   ├── config.py           # AgentConfig dataclass
 │   ├── llm.py              # LLM interface (LiteLLM)
+│   ├── memory_extractor.py # Post-session memory extraction
 │   └── skills.py           # Skill manifest and loader
 ├── skills/                 # Drop-in skills (each a dir with SKILL.md)
 │   └── extract-learnings/  # Extract durable knowledge from comms
@@ -126,6 +128,7 @@ Configuration is handled via `src/config.py`:
 | `model` | `anthropic/claude-sonnet-4-20250514` | LLM model (any LiteLLM-supported model) |
 | `max_iterations` | `15` | Max tool-calling rounds per turn |
 | `identity_file` | `./context/identity.md` | Path to persona file |
+| `context_dir` | `./context` | Path to context directory (memory, etc.) |
 | `skills_dir` | `./skills` | Path to skills directory |
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
