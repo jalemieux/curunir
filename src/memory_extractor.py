@@ -179,7 +179,7 @@ def _write_summary(memory_dir, summary: dict) -> None:
         if not content:
             return
 
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
         archive_dir = memory_dir / "archives" / "conversations"
         archive_dir.mkdir(parents=True, exist_ok=True)
 
