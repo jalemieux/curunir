@@ -40,4 +40,98 @@ class EmailChannel:
 
     async def _poll_loop(self) -> None:
         """Poll for new messages on an interval."""
-        pass  # implemented in Task 5
+        while True:
+            try:
+                await self._poll_once()
+            except Exception:
+                logger.exception("Error during email poll")
+            await asyncio.sleep(self.poll_interval)
+
+    async def _poll_once(self) -> None:
+        """Run one poll cycle: search for unprocessed threads and process new messages."""
+        query = f"-label:{self.processed_label}"
+        threads = await asyncio.to_thread(gog.search, query, self.account)
+
+        for thread_summary in threads:
+            thread_id = thread_summary["id"]
+            try:
+                thread = await asyncio.to_thread(gog.thread_get, thread_id, self.account)
+            except gog.GogError:
+                logger.exception("Failed to fetch thread %s", thread_id)
+                continue
+
+            messages = thread.get("messages", [])
+            last_seen_id = self.last_seen.get(thread_id)
+
+            new_messages = self._new_messages(messages, last_seen_id)
+
+            for message in new_messages:
+                self.last_seen[thread_id] = message["id"]
+
+                sender = message.get("from", "")
+                if self.allowed_senders and sender not in self.allowed_senders:
+                    continue
+
+                subject = message.get("subject", "")
+                reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+                attachments = await self._process_attachments(thread_id, message)
+
+                content = message.get("body", "")
+                if attachments:
+                    content += "\n\nAttachments:\n"
+                    for att in attachments:
+                        size_kb = att["size"] // 1024
+                        content += f"- {att['filename']} ({att['mime_type']}, {size_kb}KB) -> {att['path']}\n"
+
+                incoming = IncomingMessage(
+                    content=content,
+                    channel="email",
+                    session_id=thread_id,
+                    reply_address={
+                        "to": sender,
+                        "subject": reply_subject,
+                        "in_reply_to": message["id"],
+                    },
+                    attachments=attachments if attachments else None,
+                )
+                await self.in_queue.put(incoming)
+
+    @staticmethod
+    def _new_messages(messages: list[dict], last_seen_id: str | None) -> list[dict]:
+        """Return messages after last_seen_id, or all if not seen before."""
+        if last_seen_id is None:
+            return messages
+
+        found = False
+        new = []
+        for msg in messages:
+            if found:
+                new.append(msg)
+            elif msg["id"] == last_seen_id:
+                found = True
+        return new
+
+    async def _process_attachments(self, thread_id: str, message: dict) -> list[dict] | None:
+        """Download and build attachment manifest if message has attachments."""
+        raw_attachments = message.get("attachments", [])
+        if not raw_attachments:
+            return None
+
+        out_dir = os.path.join(self.attachment_dir, thread_id)
+
+        try:
+            await asyncio.to_thread(gog.thread_download_attachments, thread_id, out_dir, self.account)
+        except gog.GogError:
+            logger.exception("Failed to download attachments for thread %s", thread_id)
+            return None
+
+        manifest = []
+        for att in raw_attachments:
+            manifest.append({
+                "filename": att["filename"],
+                "path": os.path.join(out_dir, att["filename"]),
+                "mime_type": att.get("mimeType", "application/octet-stream"),
+                "size": att.get("size", 0),
+            })
+        return manifest
