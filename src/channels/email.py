@@ -31,11 +31,14 @@ class EmailChannel:
     async def start(self) -> None:
         """Verify gog, bootstrap label, enter polling loop."""
         await asyncio.to_thread(gog.check_installed)
+        logger.info("gog CLI verified")
         await self._ensure_label()
+        logger.info("Email channel started, polling every %ds", self.poll_interval)
         await self._poll_loop()
 
     async def send(self, msg: OutgoingMessage) -> None:
         """Send a reply in the original thread and label it as processed."""
+        logger.info("Sending reply to %s (thread %s)", msg.reply_address.get("to"), msg.session_id)
         try:
             await asyncio.to_thread(
                 gog.send_reply,
@@ -72,6 +75,8 @@ class EmailChannel:
         """Run one poll cycle: search for unprocessed threads and process new messages."""
         query = f"-label:{self.processed_label}"
         threads = await asyncio.to_thread(gog.search, query, self.account)
+        if threads:
+            logger.info("Found %d unprocessed thread(s)", len(threads))
 
         for thread_summary in threads:
             thread_id = thread_summary["id"]
@@ -117,6 +122,7 @@ class EmailChannel:
                     attachments=attachments if attachments else None,
                 )
                 await self.in_queue.put(incoming)
+                logger.info("Queued email from %s (thread %s): %s", sender, thread_id, subject)
 
     @staticmethod
     def _new_messages(messages: list[dict], last_seen_id: str | None) -> list[dict]:
