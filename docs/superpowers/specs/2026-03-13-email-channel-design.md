@@ -40,13 +40,25 @@ Until the `config.yaml` loader is implemented, `run.py` hydrates `EmailChannelCo
 
 ## Channel Structure
 
-`src/channels/email.py` implements the `Channel` protocol:
+`src/channels/email.py` implements the `Channel` protocol. Follows the same pattern as `CLIChannel`:
 
 ```python
 class EmailChannel:
-    async def start(self)                   # Label bootstrap + polling loop
-    async def send(self, msg: OutgoingMessage)  # Reply + label as processed
+    def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
+        self.in_queue = in_queue
+        self.config = config
+        self.account = config.account
+        self.poll_interval = config.poll_interval_sec
+        self.allowed_senders = config.allowed_senders
+        self.processed_label = config.processed_label
+        self.attachment_dir = config.attachment_dir
+        self.last_seen: dict[str, str] = {}  # {thread_id: last_processed_message_id}
+
+    async def start(self) -> None            # Label bootstrap + polling loop
+    async def send(self, msg: OutgoingMessage) -> None  # Reply + label as processed
 ```
+
+The channel receives `in_queue` to push inbound messages (same as `CLIChannel`). Outbound messages arrive via `send()`, called by the router.
 
 ### Startup
 
@@ -60,8 +72,9 @@ Each poll cycle:
 
 1. **Search** for unprocessed emails:
    ```
-   gog gmail search 'label:inbox -label:<processed_label>' --json --max 20 --account <account>
+   gog gmail search '-label:<processed_label>' --json --max 20 --account <account>
    ```
+   Note: this searches all mail, not just inbox. Gmail filters that skip the inbox are still picked up.
 
 2. **Filter** results by `allowed_senders` (if configured)
 
@@ -77,7 +90,7 @@ Each poll cycle:
       - `content`: plain text body (strip HTML tags if only HTML available)
       - `channel`: `"email"`
       - `session_id`: `threadId`
-      - `reply_address`: `{to: <sender>, subject: "Re: <subject>", reply_to_message_id: <messageId>}`
+      - `reply_address`: `{to: <sender>, subject: "Re: <subject>", in_reply_to: <messageId>}`
       - `attachments`: `[{filename, path, mime_type, size}, ...]` (manifest)
    f. Push to `in_queue`
    g. Update `last_seen[thread_id] = messageId`
@@ -102,7 +115,7 @@ When the router calls `email_channel.send(msg)`:
 1. **Send reply** in the original thread:
    ```
    gog gmail send \
-     --reply-to-message-id <reply_address.reply_to_message_id> \
+     --reply-to-message-id <reply_address.in_reply_to> \
      --to <reply_address.to> \
      --subject <reply_address.subject> \
      --body <content> \
@@ -120,20 +133,14 @@ If the send fails, the processed label is not applied — the thread will be pic
 
 ### IncomingMessage Change
 
-Add an optional `attachments` field to `IncomingMessage` in `src/channels/base.py`:
+Add an optional `attachments` field to `IncomingMessage` in `src/channels/base.py`. This is an additive change — all existing fields remain unchanged:
 
 ```python
-@dataclass
-class IncomingMessage:
-    content: str
-    channel: str
-    session_id: str
-    reply_address: dict
-    command: str | None = None
-    attachments: list[dict] | None = None  # [{filename, path, mime_type, size}]
+# Add after the existing `command` field:
+attachments: list[dict] | None = None  # [{filename, path, mime_type, size}]
 ```
 
-CLI and Slack channels pass `None` (default). No impact on existing code.
+Defaults to `None`, so existing channels (CLI) are unaffected — they don't pass it.
 
 ### Attachment Flow
 
