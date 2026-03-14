@@ -13,43 +13,122 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 - **Context rot is real.** Drift and noise degrade model performance. The system prompt stays minimal — identity, skill manifest, timestamp — and skills are loaded only when needed.
 - **Memory is markdown.** Frontier models are very good at reading multi-layered structured markdown files. In our experimentation, this produced better results than sophisticated vector-based RAG pipelines.
 
-## How It Works
+## Architecture
+
+```mermaid
+flowchart TD
+    CLI[CLI Channel] --> Q[Message Queue]
+    Slack[Slack Channel] -.-> Q
+    Email[Email Channel] -.-> Q
+
+    Q --> Agent[Agent Loop]
+    Agent --> Tools
+
+    subgraph Tools
+        direction LR
+        Glob
+        Grep
+        Read
+        Edit
+        Write
+        Bash
+        LoadSkill[load_skill]
+    end
+
+    Agent --> LLM[LLM via LiteLLM]
+    LLM --> Agent
+
+    Agent --> Router[Outbound Router]
+    Router --> CLI
+    Router -.-> Slack
+    Router -.-> Email
+
+    style Slack stroke-dasharray: 5 5
+    style Email stroke-dasharray: 5 5
+```
+
+Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 15 tool-calling rounds per turn. Replies are routed back to the originating channel.
+
+Dashed nodes are planned but not yet implemented.
+
+## Project Structure
 
 ```
-Channels (CLI, Slack, Email)
-        │
-        ▼
-    Message Queue
-        │
-        ▼
-    Agent Loop ──→ 7 Tools (Glob, Grep, Read, Edit, Write, Bash, load_skill)
-        │
-        ▼
-  Memory Extraction
-        │
-        ▼
-    Reply routed back to origin channel
+curunir/
+├── run.py                  # Entry point — wires channels, queues, agent
+├── src/
+│   ├── agent/              # Core agent loop and system prompt builder
+│   ├── channels/           # Channel implementations (CLI) and router
+│   ├── tools/              # Tool schemas, dispatch, and executors
+│   ├── config.py           # AgentConfig dataclass
+│   ├── llm.py              # LLM interface (LiteLLM)
+│   └── skills.py           # Skill manifest and loader
+├── skills/                 # Drop-in skills (each a dir with SKILL.md)
+│   └── extract-learnings/  # Extract durable knowledge from comms
+├── context/
+│   ├── identity.md         # Assistant persona and instructions
+│   └── memory/             # Persistent markdown memory store
+└── Dockerfile              # Container with Python 3.12, ripgrep, git
 ```
-
-Messages arrive from any channel, enter a queue, and are processed sequentially. The agent loop calls an LLM with the conversation history and tool schemas. After each conversation, a separate pass extracts durable facts into the memory system.
-
-One process. One profile. One message at a time.
 
 ## Quick Start
 
+### Local
+
 ```bash
-git clone https://github.com/your-org/curunir.git
+git clone https://github.com/jalemieux/curunir.git
 cd curunir
-cp .env.example .env        # add API keys
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # add your API key
 vim context/identity.md     # define your assistant's persona
-python main.py              # starts CLI channel by default
+python run.py               # starts CLI channel
 ```
 
-Configure channels and model in `config.yaml`. Add skills by dropping a `SKILL.md` into `skills/your-skill/`.
+### Docker
 
-## Project Status
+```bash
+docker build -t curunir .
+docker run --env-file .env -it curunir
+```
 
-Pre-implementation. The [design spec](docs/superpowers/specs/2026-03-13-valar-design.md) is complete. Code is next.
+## Adding Skills
+
+Drop a directory into `skills/` with a `SKILL.md` file:
+
+```
+skills/
+└── my-skill/
+    └── SKILL.md
+```
+
+The `SKILL.md` uses YAML frontmatter for discovery:
+
+```yaml
+---
+name: my-skill
+description: When to use this skill
+---
+
+# My Skill
+
+Instructions the agent follows when it loads this skill...
+```
+
+Skills appear in the agent's system prompt as a manifest table. The agent calls `load_skill` to fetch full instructions on demand.
+
+## Configuration
+
+Configuration is handled via `src/config.py`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `model` | `anthropic/claude-sonnet-4-20250514` | LLM model (any LiteLLM-supported model) |
+| `max_iterations` | `15` | Max tool-calling rounds per turn |
+| `identity_file` | `./context/identity.md` | Path to persona file |
+| `skills_dir` | `./skills` | Path to skills directory |
+
+API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
 ## License
 
