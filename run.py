@@ -131,12 +131,12 @@ logger = logging.getLogger(__name__)
 
 async def main():
     load_dotenv()
-    log_file = os.environ.get("LOG_FILE", "curunir.log")
+    log_file = os.environ.get("LOG_FILE", "")
     logging.basicConfig(
         level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
-        filename=log_file,
+        **({"filename": log_file} if log_file else {}),
     )
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     config = AgentConfig()
