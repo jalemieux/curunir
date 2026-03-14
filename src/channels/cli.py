@@ -16,6 +16,7 @@ class CLIChannel:
         self.verbose = False
         self._console = console or Console()
         self._live = None
+        self._pending_tool_calls: list[str] = []
         self._ready = asyncio.Event()
         self._ready.set()
 
@@ -25,18 +26,33 @@ class CLIChannel:
     async def send(self, msg: OutgoingMessage) -> None:
         self._stop_spinner()
 
-        if msg.tool_calls and self.verbose:
+        if msg.tool_calls:
             for tc in msg.tool_calls:
+                self._pending_tool_calls.append(tc)
                 line = Text()
-                line.append("  ● ", style="bold cyan")
-                line.append(tc, style="dim")
+                line.append("  ├─ ", style="dim")
+                line.append(tc)
                 self._console.print(line)
 
         if msg.content:
+            self._flush_tool_calls()
             self._console.print(Markdown(msg.content))
 
         if msg.final:
+            self._flush_tool_calls()
             self._ready.set()
+
+    def _flush_tool_calls(self) -> None:
+        """Rewrite the last tool call line to use ╰─ as the closer."""
+        if not self._pending_tool_calls:
+            return
+        # Move up one line, clear it, reprint with ╰─
+        self._console.file.write("\033[A\033[2K")
+        line = Text()
+        line.append("  ╰─ ", style="dim")
+        line.append(self._pending_tool_calls[-1])
+        self._console.print(line)
+        self._pending_tool_calls.clear()
 
     async def _input_loop(self) -> None:
         loop = asyncio.get_event_loop()
