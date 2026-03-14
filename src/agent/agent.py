@@ -16,8 +16,15 @@ class Agent:
         self.sessions: dict[str, list[dict]] = {}
         self.static_prompt = build_static_prompt(config)
 
-    async def handle(self, message: str, session_id: str) -> str:
-        """Process a message and return the agent's response."""
+    async def handle(self, message: str, session_id: str, on_tool_call=None) -> str:
+        """Process a message and return the agent's response.
+
+        Args:
+            message: User input text.
+            session_id: Session identifier for conversation history.
+            on_tool_call: Optional async callback called with (name, args_str)
+                          for each tool call, enabling real-time UI updates.
+        """
         history = self.sessions.setdefault(session_id, [])
         history.append({"role": "user", "content": message})
 
@@ -34,10 +41,16 @@ class Agent:
                 history.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
+                    name = tool_call["function"]["name"]
+                    args_str = tool_call["function"]["arguments"]
+
+                    if on_tool_call:
+                        await on_tool_call(name, args_str)
+
                     result = await asyncio.to_thread(
                         execute_tool_call,
-                        tool_call["function"]["name"],
-                        json.loads(tool_call["function"]["arguments"]),
+                        name,
+                        json.loads(args_str),
                         self.config,
                     )
                     history.append({
