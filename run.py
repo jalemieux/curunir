@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -48,6 +49,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
     """Bridge between the message queues and the agent loop."""
     while True:
         msg = await in_queue.get()
+        logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
         if msg.command == "clear":
             history = agent.sessions.pop(msg.session_id, None)
@@ -93,8 +95,18 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
                 last_extracted_len[session_id] = len(history)
 
 
+logger = logging.getLogger(__name__)
+
+
 async def main():
     load_dotenv()
+    log_file = os.environ.get("LOG_FILE", "curunir.log")
+    logging.basicConfig(
+        level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        filename=log_file,
+    )
     config = AgentConfig()
 
     agent = Agent(config)
@@ -117,8 +129,11 @@ async def main():
     if email_config.enabled:
         email_channel = EmailChannel(in_queue, email_config)
         channels["email"] = email_channel
+        logger.info("Email channel enabled for %s (poll every %ds)", email_config.account, email_config.poll_interval_sec)
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
+
+    logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
     # Start all channels, the router, and the agent worker
     async with asyncio.TaskGroup() as tg:

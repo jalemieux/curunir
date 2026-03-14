@@ -9,6 +9,10 @@ venv/
 
 # Environment
 .env
+client_secret*.json
+
+# Logs
+*.log
 
 # OS
 .DS_Store
@@ -21,3 +25,4 @@ venv/
 
 # Worktrees
 .worktrees/
+tmp/
