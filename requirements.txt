@@ -1,4 +1,5 @@
 litellm
 python-dotenv
+rich
 pytest
 pytest-asyncio
