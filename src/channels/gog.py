@@ -1,5 +1,6 @@
 """Thin wrapper around the gog CLI for Gmail operations."""
 
+import base64
 import json
 import subprocess
 
@@ -35,7 +36,8 @@ def _run_json(args: list[str]) -> list | dict:
 
 def labels_list(account: str) -> list[dict]:
     """List all Gmail labels."""
-    return _run_json(["gog", "gmail", "labels", "list", "--json", "--account", account])
+    data = _run_json(["gog", "gmail", "labels", "list", "--json", "--account", account])
+    return data.get("labels", []) if isinstance(data, dict) else data
 
 
 def labels_create(label: str, account: str) -> None:
@@ -45,18 +47,80 @@ def labels_create(label: str, account: str) -> None:
 
 def search(query: str, account: str, max_results: int = 20) -> list[dict]:
     """Search Gmail threads matching a query."""
-    return _run_json([
-        "gog", "gmail", "search", query,
+    data = _run_json([
+        "gog", "gmail", "search",
         "--json", "--max", str(max_results), "--account", account,
+        "--", query,
     ])
+    return data.get("threads", []) if isinstance(data, dict) else data
 
 
 def thread_get(thread_id: str, account: str) -> dict:
-    """Get a thread by ID."""
-    return _run_json([
+    """Get a thread by ID, with messages normalized to flat format."""
+    data = _run_json([
         "gog", "gmail", "thread", "get", thread_id,
         "--json", "--account", account,
     ])
+    thread = data.get("thread", data) if isinstance(data, dict) else data
+    thread["messages"] = [_normalize_message(m) for m in thread.get("messages", [])]
+    return thread
+
+
+def _get_header(headers: list[dict], name: str) -> str:
+    """Extract a header value by name (case-insensitive)."""
+    for h in headers:
+        if h["name"].lower() == name.lower():
+            return h["value"]
+    return ""
+
+
+def _decode_body(payload: dict) -> str:
+    """Extract plain-text body from a Gmail message payload."""
+    # Single-part message
+    if not payload.get("parts"):
+        data = payload.get("body", {}).get("data", "")
+        if data:
+            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+        return ""
+
+    # Multipart — prefer text/plain, fall back to text/html
+    for preferred in ("text/plain", "text/html"):
+        for part in payload["parts"]:
+            if part.get("mimeType") == preferred:
+                data = part.get("body", {}).get("data", "")
+                if data:
+                    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+    return ""
+
+
+def _extract_attachments(payload: dict) -> list[dict]:
+    """Extract attachment metadata from a Gmail message payload."""
+    attachments = []
+    for part in payload.get("parts", []):
+        filename = part.get("filename", "")
+        if filename:
+            attachments.append({
+                "filename": filename,
+                "mimeType": part.get("mimeType", "application/octet-stream"),
+                "size": part.get("body", {}).get("size", 0),
+            })
+    return attachments
+
+
+def _normalize_message(raw: dict) -> dict:
+    """Convert a raw Gmail API message into flat format expected by EmailChannel."""
+    payload = raw.get("payload", {})
+    headers = payload.get("headers", [])
+    attachments = _extract_attachments(payload)
+    return {
+        "id": raw["id"],
+        "thread_id": raw.get("threadId", ""),
+        "from": _get_header(headers, "From"),
+        "to": _get_header(headers, "To"),
+        "subject": _get_header(headers, "Subject"),
+        "body": _decode_body(payload),
+        "attachments": attachments if attachments else [],
+    }
 
 
 def thread_download_attachments(thread_id: str, out_dir: str, account: str) -> None:

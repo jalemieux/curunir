@@ -94,12 +94,67 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
         return f"Error: {e}"
 
 
+def _read_pdf(path: Path) -> str:
+    import pymupdf
+    doc = pymupdf.open(str(path))
+    pages = []
+    for i, page in enumerate(doc, 1):
+        text = page.get_text()
+        if text.strip():
+            pages.append(f"--- Page {i} ---\n{text}")
+    doc.close()
+    return "\n".join(pages) if pages else "(no text content found in PDF)"
+
+
+def _read_docx(path: Path) -> str:
+    import docx
+    doc = docx.Document(str(path))
+    return "\n".join(p.text for p in doc.paragraphs)
+
+
+def _read_xlsx(path: Path) -> str:
+    import openpyxl
+    wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    parts = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append("\t".join(str(c) if c is not None else "" for c in row))
+        if rows:
+            parts.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
+    wb.close()
+    return "\n".join(parts) if parts else "(empty spreadsheet)"
+
+
+def _read_csv(path: Path) -> str:
+    import csv
+    with open(path, newline="", errors="replace") as f:
+        reader = csv.reader(f)
+        rows = ["\t".join(row) for row in reader]
+    return "\n".join(rows)
+
+
+_BINARY_READERS: dict[str, callable] = {
+    ".pdf": _read_pdf,
+    ".docx": _read_docx,
+    ".xlsx": _read_xlsx,
+    ".xls": _read_xlsx,
+    ".csv": _read_csv,
+}
+
+
 def exec_read(args: dict, config: AgentConfig) -> str:
-    """Read a file with line numbers."""
+    """Read a file. Handles text, PDF, DOCX, XLSX, and CSV."""
     try:
         path = Path(args["file_path"])
         if not path.exists():
             return f"Error: File not found: {path}"
+
+        suffix = path.suffix.lower()
+        reader = _BINARY_READERS.get(suffix)
+        if reader:
+            return reader(path)
 
         lines = path.read_text().splitlines()
         offset = args.get("offset", 1)

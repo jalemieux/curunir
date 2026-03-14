@@ -38,6 +38,8 @@ class EmailChannel:
 
     async def send(self, msg: OutgoingMessage) -> None:
         """Send a reply in the original thread and label it as processed."""
+        if not msg.content:
+            return
         logger.info("Sending reply to %s (thread %s)", msg.reply_address.get("to"), msg.session_id)
         try:
             await asyncio.to_thread(
@@ -95,7 +97,9 @@ class EmailChannel:
                 self.last_seen[thread_id] = message["id"]
 
                 sender = message.get("from", "")
-                if self.allowed_senders and sender not in self.allowed_senders:
+                if self.allowed_senders and not any(
+                    allowed in sender for allowed in self.allowed_senders
+                ):
                     continue
 
                 subject = message.get("subject", "")

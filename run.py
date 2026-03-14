@@ -107,6 +107,7 @@ async def main():
         datefmt="%H:%M:%S",
         filename=log_file,
     )
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     config = AgentConfig()
 
     agent = Agent(config)
