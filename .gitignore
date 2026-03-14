@@ -26,3 +26,6 @@ client_secret*.json
 # Worktrees
 .worktrees/
 tmp/
+
+# Secrets (gog tokens, credentials)
+secrets/

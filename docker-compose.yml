@@ -1,0 +1,10 @@
+services:
+  curunir:
+    build: .
+    env_file: .env
+    environment:
+      - CLI_ENABLED=false
+    volumes:
+      - ./secrets:/secrets:ro
+      - ./workspace:/app/workspace
+    restart: unless-stopped
