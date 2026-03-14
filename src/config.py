@@ -1,5 +1,5 @@
 # src/config.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -9,3 +9,13 @@ class AgentConfig:
     max_iterations: int = 15
     identity_file: Path = Path("./context/identity.md")
     skills_dir: Path = Path("./skills")
+
+
+@dataclass
+class EmailChannelConfig:
+    enabled: bool = False
+    account: str = ""
+    poll_interval_sec: int = 60
+    allowed_senders: list[str] = field(default_factory=list)
+    processed_label: str = "agent/processed"
+    attachment_dir: str = "/tmp/attachments"
