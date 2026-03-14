@@ -27,5 +27,6 @@ def agent_config(tmp_context, tmp_skills):
     """AgentConfig pointing at temporary directories."""
     return AgentConfig(
         identity_file=tmp_context / "identity.md",
+        context_dir=tmp_context,
         skills_dir=tmp_skills,
     )

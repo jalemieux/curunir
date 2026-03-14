@@ -12,6 +12,7 @@ from src.channels.cli import CLIChannel
 from src.channels.email import EmailChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
+from src.memory_extractor import extract_learnings
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -49,7 +50,15 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         msg = await in_queue.get()
 
         if msg.command == "clear":
-            agent.sessions.pop(msg.session_id, None)
+            history = agent.sessions.pop(msg.session_id, None)
+            if history:
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
+            continue
+
+        if msg.command == "extract":
+            history = agent.sessions.get(msg.session_id)
+            if history:
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
             continue
 
         async def on_tool_call(name: str, args_str: str):
@@ -70,6 +79,18 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             session_id=msg.session_id,
             reply_address=msg.reply_address,
         ))
+
+
+async def periodic_extraction(agent: Agent, interval_sec: int):
+    """Periodically extract learnings from sessions that have grown."""
+    last_extracted_len: dict[str, int] = {}
+    while True:
+        await asyncio.sleep(interval_sec)
+        for session_id, history in agent.sessions.items():
+            prev_len = last_extracted_len.get(session_id, 0)
+            if len(history) > prev_len:
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
+                last_extracted_len[session_id] = len(history)
 
 
 async def main():
@@ -97,12 +118,15 @@ async def main():
         email_channel = EmailChannel(in_queue, email_config)
         channels["email"] = email_channel
 
+    extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
+
     # Start all channels, the router, and the agent worker
     async with asyncio.TaskGroup() as tg:
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
+        tg.create_task(periodic_extraction(agent, extraction_interval))
 
 
 if __name__ == "__main__":
