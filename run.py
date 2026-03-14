@@ -2,14 +2,16 @@
 
 import asyncio
 import json
+import os
 
 from dotenv import load_dotenv
 
 from src.agent.agent import Agent
 from src.channels.base import OutgoingMessage
 from src.channels.cli import CLIChannel
+from src.channels.email import EmailChannel
 from src.channels.router import route_outbound
-from src.config import AgentConfig
+from src.config import AgentConfig, EmailChannelConfig
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -81,6 +83,19 @@ async def main():
     # Register channels
     cli = CLIChannel(in_queue, model=config.model)
     channels = {"cli": cli}
+
+    # Email channel (conditional)
+    email_config = EmailChannelConfig(
+        enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
+        account=os.environ.get("GOG_ACCOUNT", ""),
+        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
+        allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
+        processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
+        attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
+    )
+    if email_config.enabled:
+        email_channel = EmailChannel(in_queue, email_config)
+        channels["email"] = email_channel
 
     # Start all channels, the router, and the agent worker
     async with asyncio.TaskGroup() as tg:
