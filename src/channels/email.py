@@ -64,7 +64,7 @@ class EmailChannel:
 
     async def _poll_once(self) -> None:
         """Run one poll cycle: search for unprocessed threads and process new messages."""
-        query = f"-label:{self.processed_label}"
+        query = f"in:inbox -label:{self.processed_label}"
         threads = await asyncio.to_thread(gog.search, query, self.account)
         new_threads = [t for t in threads if t["id"] not in self.last_seen]
         if new_threads:
@@ -131,9 +131,10 @@ class EmailChannel:
 
     @staticmethod
     def _new_messages(messages: list[dict], last_seen_id: str | None) -> list[dict]:
-        """Return messages after last_seen_id, or all if not seen before."""
+        """Return messages after last_seen_id, or only the latest if not seen before."""
         if last_seen_id is None:
-            return messages
+            # First encounter — only process the most recent message
+            return messages[-1:] if messages else []
 
         found = False
         new = []
