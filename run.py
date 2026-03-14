@@ -1,29 +1,97 @@
-# run.py
+"""Curunir runtime — configures channels, wires queues, starts the agent loop."""
+
 import asyncio
+import json
 
 from dotenv import load_dotenv
 
 from src.agent.agent import Agent
+from src.channels.base import OutgoingMessage
+from src.channels.cli import CLIChannel
+from src.channels.router import route_outbound
 from src.config import AgentConfig
+
+
+def _summarize_tool_call(name: str, args_str: str) -> str:
+    """Format a tool call for display, e.g. 'Read src/config.py'."""
+    try:
+        args = json.loads(args_str)
+    except json.JSONDecodeError:
+        return name
+
+    match name:
+        case "read":
+            return f"Read {args.get('file_path', '')}"
+        case "write":
+            return f"Write {args.get('file_path', '')}"
+        case "edit":
+            return f"Edit {args.get('file_path', '')}"
+        case "glob":
+            return f"Glob {args.get('pattern', '')}"
+        case "grep":
+            return f"Grep pattern={args.get('pattern', '')!r}"
+        case "bash":
+            cmd = args.get("command", "")
+            if len(cmd) > 60:
+                cmd = cmd[:57] + "..."
+            return f"Bash {cmd}"
+        case "load_skill":
+            return f"LoadSkill {args.get('name', '')}"
+        case _:
+            return f"{name} {args_str}"
+
+
+async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+    """Bridge between the message queues and the agent loop."""
+    while True:
+        msg = await in_queue.get()
+
+        if msg.command == "clear":
+            agent.sessions.pop(msg.session_id, None)
+            continue
+
+        async def on_tool_call(name: str, args_str: str):
+            await out_queue.put(OutgoingMessage(
+                content="",
+                channel=msg.channel,
+                session_id=msg.session_id,
+                reply_address=msg.reply_address,
+                tool_calls=[_summarize_tool_call(name, args_str)],
+                final=False,
+            ))
+
+        text = await agent.handle(msg.content, msg.session_id, on_tool_call=on_tool_call)
+
+        await out_queue.put(OutgoingMessage(
+            content=text,
+            channel=msg.channel,
+            session_id=msg.session_id,
+            reply_address=msg.reply_address,
+        ))
 
 
 async def main():
     load_dotenv()
     config = AgentConfig()
-    agent = Agent(config)
 
-    print("Curunir agent ready. Type 'quit' to exit.\n")
-    while True:
-        try:
-            user_input = input("> ")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if user_input.strip().lower() == "quit":
-            break
-        response = await agent.handle(user_input, session_id="cli")
-        print(f"\n{response}\n")
+    agent = Agent(config)
+    in_queue = asyncio.Queue()
+    out_queue = asyncio.Queue()
+
+    # Register channels
+    cli = CLIChannel(in_queue, model=config.model)
+    channels = {"cli": cli}
+
+    # Start all channels, the router, and the agent worker
+    async with asyncio.TaskGroup() as tg:
+        for channel in channels.values():
+            tg.create_task(channel.start())
+        tg.create_task(route_outbound(out_queue, channels))
+        tg.create_task(agent_worker(agent, in_queue, out_queue))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, EOFError):
+        pass
