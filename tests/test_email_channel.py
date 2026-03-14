@@ -266,3 +266,61 @@ async def test_poll_once_continues_on_thread_error(email_config, in_queue):
 
     msg = in_queue.get_nowait()
     assert msg.content == "Works!"
+
+
+from src.channels.base import OutgoingMessage
+
+
+@pytest.mark.asyncio
+async def test_send_reply_and_label(email_config, in_queue):
+    ch = EmailChannel(in_queue, email_config)
+
+    msg = OutgoingMessage(
+        content="Got it, thanks!",
+        channel="email",
+        session_id="thread_1",
+        reply_address={
+            "to": "alice@example.com",
+            "subject": "Re: Hello",
+            "in_reply_to": "msg_1",
+        },
+    )
+
+    with patch("src.channels.email.gog") as mock_gog:
+        await ch.send(msg)
+
+    mock_gog.send_reply.assert_called_once_with(
+        to="alice@example.com",
+        subject="Re: Hello",
+        body="Got it, thanks!",
+        reply_to_message_id="msg_1",
+        account="bot@example.com",
+    )
+    mock_gog.thread_modify.assert_called_once_with(
+        "thread_1", add_label="agent/processed", account="bot@example.com",
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_failure_does_not_label(email_config, in_queue):
+    ch = EmailChannel(in_queue, email_config)
+
+    msg = OutgoingMessage(
+        content="Reply text",
+        channel="email",
+        session_id="thread_1",
+        reply_address={
+            "to": "alice@example.com",
+            "subject": "Re: Hello",
+            "in_reply_to": "msg_1",
+        },
+    )
+
+    from src.channels.gog import GogError
+
+    with patch("src.channels.email.gog") as mock_gog:
+        mock_gog.GogError = GogError
+        mock_gog.send_reply.side_effect = GogError("send failed")
+        await ch.send(msg)  # should not raise
+
+    mock_gog.thread_modify.assert_not_called()
