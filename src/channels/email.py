@@ -66,11 +66,13 @@ class EmailChannel:
         """Run one poll cycle: search for unprocessed threads and process new messages."""
         query = f"-label:{self.processed_label}"
         threads = await asyncio.to_thread(gog.search, query, self.account)
-        if threads:
-            logger.info("Found %d unprocessed thread(s)", len(threads))
+        new_threads = [t for t in threads if t["id"] not in self.last_seen]
+        if new_threads:
+            logger.info("Found %d new thread(s) (%d total unprocessed)", len(new_threads), len(threads))
 
-        for thread_summary in threads:
+        for thread_summary in new_threads:
             thread_id = thread_summary["id"]
+
             try:
                 thread = await asyncio.to_thread(gog.thread_get, thread_id, self.account)
             except gog.GogError:
@@ -87,12 +89,13 @@ class EmailChannel:
                 logger.exception("Failed to label thread %s on ingest", thread_id)
 
             messages = thread.get("messages", [])
-            last_seen_id = self.last_seen.get(thread_id)
+            new_messages = self._new_messages(messages, self.last_seen.get(thread_id))
 
-            new_messages = self._new_messages(messages, last_seen_id)
+            # Mark thread as seen up to latest message, even if none are queued
+            if messages:
+                self.last_seen[thread_id] = messages[-1]["id"]
 
             for message in new_messages:
-                self.last_seen[thread_id] = message["id"]
 
                 sender = message.get("from", "")
                 if self.allowed_senders and not any(
