@@ -147,7 +147,7 @@ class EmailChannel:
         if not raw_attachments:
             return None
 
-        out_dir = os.path.join(self.attachment_dir, thread_id)
+        out_dir = os.path.join(os.path.abspath(self.attachment_dir), thread_id)
 
         try:
             await asyncio.to_thread(gog.thread_download_attachments, thread_id, out_dir, self.account)
