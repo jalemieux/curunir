@@ -9,14 +9,7 @@ Extract stable, reusable knowledge from transient communications.
 
 ## What to Extract
 
-| Keep (Durable) | Discard (Ephemeral) |
-|----------------|---------------------|
-| Architecture decisions | Incidents/outages |
-| Technical constraints | Action items |
-| Deployment topology | Transient errors |
-| System limitations | Status updates |
-| Integration patterns | Who-said-what |
-| Service relationships | Meeting logistics |
+Read `context/memory/README.md` for the current memory taxonomy — it defines which categories exist and what belongs in each. Place extracted facts in the appropriate category file.
 
 ## Quick Filter
 

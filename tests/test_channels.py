@@ -235,7 +235,10 @@ async def test_input_loop_verbose_toggle():
     await ch.start()
 
     assert ch.verbose is False  # toggled on then off
-    assert q.empty()  # verbose doesn't push to queue
+    # EOFError enqueues an extract command; verbose itself doesn't push
+    msg = q.get_nowait()
+    assert msg.command == "extract"
+    assert q.empty()
 
 
 @pytest.mark.asyncio
@@ -248,6 +251,9 @@ async def test_input_loop_skips_empty_lines():
 
     await ch.start()
 
+    # EOFError enqueues an extract command; empty lines don't
+    msg = q.get_nowait()
+    assert msg.command == "extract"
     assert q.empty()
 
 

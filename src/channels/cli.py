@@ -65,6 +65,8 @@ class CLIChannel:
             try:
                 line = await loop.run_in_executor(None, lambda: self._console.input("[bold green]> [/bold green]"))
             except EOFError:
+                msg = IncomingMessage(content="", channel="cli", session_id=SESSION_ID, reply_address={}, command="extract")
+                await self.in_queue.put(msg)
                 break
 
             text = line.strip()
