@@ -124,31 +124,31 @@ async def test_send_renders_markdown():
 
 
 @pytest.mark.asyncio
-async def test_send_shows_tool_calls_when_verbose():
+async def test_send_shows_tool_calls():
     console = MagicMock()
+    console.file = MagicMock()
     ch = CLIChannel(asyncio.Queue(), console=console)
-    ch.verbose = True
     msg = OutgoingMessage(content="result", channel="cli", session_id="cli", reply_address={}, tool_calls=["Read x", "Write y"])
 
     await ch.send(msg)
 
-    # 2 tool call lines + 1 markdown content = 3 prints
-    assert console.print.call_count == 3
+    # 2 tool call lines (├─) + 1 flush (╰─) + 1 markdown content = 4 prints
+    assert console.print.call_count == 4
     from rich.text import Text
     assert isinstance(console.print.call_args_list[0][0][0], Text)
 
 
 @pytest.mark.asyncio
-async def test_send_hides_tool_calls_when_not_verbose():
+async def test_send_shows_tool_calls_always():
     console = MagicMock()
+    console.file = MagicMock()
     ch = CLIChannel(asyncio.Queue(), console=console)
-    ch.verbose = False
     msg = OutgoingMessage(content="result", channel="cli", session_id="cli", reply_address={}, tool_calls=["read x"])
 
     await ch.send(msg)
 
-    # Only the markdown content
-    assert console.print.call_count == 1
+    # 1 tool call line (├─) + 1 flush (╰─) + 1 markdown content = 3 prints
+    assert console.print.call_count == 3
 
 
 @pytest.mark.asyncio
