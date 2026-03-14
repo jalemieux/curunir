@@ -15,37 +15,31 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    CLI[CLI Channel] --> Q[Message Queue]
-    Slack[Slack Channel] -.-> Q
-    Email[Email Channel] --> Q
+```
+  Channels              Core                    LLM
+  ────────          ──────────              ──────────
+  CLI ──────┐
+  Email ────┤       ┌──────────┐        ┌──────────────┐
+  Slack* ───┴──►  Queue  ──►  Agent Loop  ◄──►  LiteLLM  │
+                    └──────────┘        └──────────────┘
+                         │
+                         ▼
+                 ┌───────────────┐
+                 │     Tools     │
+                 │───────────────│
+                 │ glob    read  │
+                 │ grep    edit  │
+                 │ write   bash  │
+                 │ load_skill    │
+                 └───────────────┘
+                         │
+                         ▼
+                 ┌───────────────┐
+                 │   Memory      │
+                 │  Extractor    │
+                 └───────────────┘
 
-    Q --> Agent[Agent Loop]
-    Agent --> Tools
-
-    subgraph Tools
-        direction LR
-        Glob
-        Grep
-        Read
-        Edit
-        Write
-        Bash
-        LoadSkill[load_skill]
-    end
-
-    Agent --> LLM[LLM via LiteLLM]
-    LLM --> Agent
-
-    Agent --> Router[Outbound Router]
-    Router --> CLI
-    Router -.-> Slack
-    Router --> Email
-
-    style Slack stroke-dasharray: 5 5
-    Agent --> Extractor[Memory Extractor]
-    Extractor --> LLM
+  * planned
 ```
 
 Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 15 tool-calling rounds per turn. Replies are routed back to the originating channel.
