@@ -146,8 +146,11 @@ async def main():
     out_queue = asyncio.Queue()
 
     # Register channels
-    cli = CLIChannel(in_queue, model=config.model)
-    channels = {"cli": cli}
+    channels = {}
+    cli_enabled = os.environ.get("CLI_ENABLED", "true").lower() == "true"
+    if cli_enabled:
+        cli = CLIChannel(in_queue, model=config.model)
+        channels["cli"] = cli
 
     # Email channel (conditional)
     email_config = EmailChannelConfig(

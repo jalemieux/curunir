@@ -1,9 +1,15 @@
 FROM python:3.12-slim
 
-# Install ripgrep (used by grep tool) and git (useful for bash tool)
+# Install system deps: ripgrep (grep tool), git, jq (web-search skill), curl
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ripgrep git && \
+    apt-get install -y --no-install-recommends ripgrep git jq curl && \
     rm -rf /var/lib/apt/lists/*
+
+# Install gog CLI (Google Workspace — Gmail, Calendar, Drive, etc.)
+ARG GOG_VERSION=0.12.0
+RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_amd64.tar.gz" \
+    | tar -xz -C /usr/local/bin gog && \
+    chmod +x /usr/local/bin/gog
 
 WORKDIR /app
 
@@ -12,4 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "run.py"]
