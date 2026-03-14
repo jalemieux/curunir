@@ -36,11 +36,29 @@ Environment variables (via `.env`):
 | `EMAIL_PROCESSED_LABEL` | Gmail label for processed threads |
 | `EMAIL_ATTACHMENT_DIR` | Directory for downloaded attachments |
 
-Until the `config.yaml` loader is implemented, `run.py` hydrates `EmailChannelConfig` from environment variables directly.
+Until the `config.yaml` loader is implemented, `run.py` hydrates `EmailChannelConfig` from environment variables:
+
+```python
+# In run.py
+email_config = EmailChannelConfig(
+    enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
+    account=os.environ.get("GOG_ACCOUNT", ""),
+    poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
+    allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
+    processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
+    attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
+)
+
+# Conditional wiring (alongside existing CLI channel setup)
+if email_config.enabled:
+    email_channel = EmailChannel(in_queue, email_config)
+    channels["email"] = email_channel
+    # email_channel.start() added to TaskGroup alongside other channels
+```
 
 ## Channel Structure
 
-`src/channels/email.py` implements the `Channel` protocol. Follows the same pattern as `CLIChannel`:
+`src/channels/email.py` implements the `Channel` protocol (`start()` + `send()`):
 
 ```python
 class EmailChannel:
@@ -76,12 +94,10 @@ Each poll cycle:
    ```
    Note: this searches all mail, not just inbox. Gmail filters that skip the inbox are still picked up.
 
-2. **Filter** results by `allowed_senders` (if configured)
-
-3. **For each matching thread:**
+2. **For each thread:**
    a. Fetch thread: `gog gmail thread get <threadId> --json --account <account>`
-   b. Find the newest unprocessed message (skip messages with ID <= `last_seen[thread_id]`)
-   c. If the sender is not in `allowed_senders` (when configured), skip
+   b. Find new messages by comparing against `last_seen[thread_id]`: iterate the thread's message array (ordered chronologically by Gmail), skip all messages up to and including the stored message ID, process any after it
+   c. Filter by `allowed_senders` per-message (if configured) — a thread may contain messages from multiple senders, so filtering happens at the message level, not the thread level
    d. If the message has attachments:
       ```
       gog gmail thread get <threadId> --download --out-dir <attachment_dir>/<threadId>/
@@ -112,12 +128,12 @@ Threads are processed oldest-unprocessed-first so conversations flow naturally t
 
 When the router calls `email_channel.send(msg)`:
 
-1. **Send reply** in the original thread:
+1. **Send reply** in the original thread (`reply_address` is a dict, keys accessed via `msg.reply_address["key"]`):
    ```
    gog gmail send \
-     --reply-to-message-id <reply_address.in_reply_to> \
-     --to <reply_address.to> \
-     --subject <reply_address.subject> \
+     --reply-to-message-id <reply_address["in_reply_to"]> \
+     --to <reply_address["to"]> \
+     --subject <reply_address["subject"]> \
      --body <content> \
      --account <account>
    ```
@@ -137,7 +153,18 @@ Add an optional `attachments` field to `IncomingMessage` in `src/channels/base.p
 
 ```python
 # Add after the existing `command` field:
-attachments: list[dict] | None = None  # [{filename, path, mime_type, size}]
+attachments: list[dict] | None = None
+```
+
+Each attachment dict has this shape:
+
+```python
+{
+    "filename": str,   # original filename
+    "path": str,       # absolute path to downloaded file
+    "mime_type": str,   # e.g. "application/pdf"
+    "size": int,       # bytes
+}
 ```
 
 Defaults to `None`, so existing channels (CLI) are unaffected — they don't pass it.
