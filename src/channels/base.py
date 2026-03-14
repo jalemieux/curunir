@@ -9,6 +9,7 @@ class IncomingMessage:
     session_id: str
     reply_address: dict
     command: str | None = None
+    attachments: list[dict] | None = None
 
 
 @dataclass
