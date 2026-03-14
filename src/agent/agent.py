@@ -16,11 +16,11 @@ class Agent:
         self.sessions: dict[str, list[dict]] = {}
         self.static_prompt = build_static_prompt(config)
 
-    async def handle(self, message: str, session_id: str, on_tool_call=None) -> str:
+    async def handle(self, message: str | list, session_id: str, on_tool_call=None) -> str:
         """Process a message and return the agent's response.
 
         Args:
-            message: User input text.
+            message: User input text, or a list of content blocks for multimodal input.
             session_id: Session identifier for conversation history.
             on_tool_call: Optional async callback called with (name, args_str)
                           for each tool call, enabling real-time UI updates.
