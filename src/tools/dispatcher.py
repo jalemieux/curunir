@@ -13,8 +13,7 @@ EXECUTORS = {
     "load_skill": exec_load_skill,
 }
 
-ASYNC_EXECUTORS: set[str] = set()
-ASYNC_EXECUTORS_MAP: dict = {}
+ASYNC_EXECUTORS: set[str] = {"delegate"}
 
 
 def is_async_executor(name: str) -> bool:
@@ -22,9 +21,17 @@ def is_async_executor(name: str) -> bool:
     return name.lower() in ASYNC_EXECUTORS
 
 
+def _get_async_executor(name: str):
+    """Lazily import async executors to avoid circular dependencies."""
+    if name == "delegate":
+        from src.tools.delegate import exec_delegate
+        return exec_delegate
+    return None
+
+
 async def execute_tool_call_async(name: str, args: dict, config: AgentConfig) -> str:
     """Dispatch an async tool call."""
-    executor = ASYNC_EXECUTORS_MAP.get(name.lower())
+    executor = _get_async_executor(name.lower())
     if not executor:
         return f"Unknown async tool: {name}"
     return await executor(args, config)

@@ -169,4 +169,33 @@ def get_tool_schemas() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "delegate",
+                "description": (
+                    "Delegate a task to a sub-agent with a clean context window. "
+                    "Use this for tasks that involve processing large documents, "
+                    "analyzing images, or doing multi-step research. The sub-agent "
+                    "has access to all tools (read, write, bash, etc.) but runs in "
+                    "isolation — its intermediate work won't fill up your context. "
+                    "You get back only the final answer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": "Clear description of what the sub-agent should do.",
+                        },
+                        "image_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of image file paths to include for visual analysis.",
+                        },
+                    },
+                    "required": ["task"],
+                },
+            },
+        },
     ]
