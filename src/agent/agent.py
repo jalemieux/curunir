@@ -11,10 +11,17 @@ from src.tools.schemas import get_tool_schemas
 
 
 class Agent:
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig, exclude_tools: set[str] | None = None):
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
         self.static_prompt = build_static_prompt(config)
+        self.exclude_tools = {t.lower() for t in exclude_tools} if exclude_tools else set()
+
+    def _get_tool_schemas(self) -> list[dict]:
+        schemas = get_tool_schemas()
+        if self.exclude_tools:
+            schemas = [s for s in schemas if s["function"]["name"].lower() not in self.exclude_tools]
+        return schemas
 
     async def handle(self, message: str | list, session_id: str, on_tool_call=None) -> str:
         """Process a message and return the agent's response.
@@ -32,7 +39,7 @@ class Agent:
         messages = [{"role": "system", "content": system_prompt}] + history
 
         for _ in range(self.config.max_iterations):
-            response = await call_llm(self.config.model, messages, get_tool_schemas())
+            response = await call_llm(self.config.model, messages, self._get_tool_schemas())
 
             if response.tool_calls:
                 assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -43,6 +50,14 @@ class Agent:
                 for tool_call in response.tool_calls:
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
+
+                    if name.lower() in self.exclude_tools:
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": f"Tool '{name}' is not available in this context.",
+                        })
+                        continue
 
                     if on_tool_call:
                         await on_tool_call(name, args_str)

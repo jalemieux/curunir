@@ -124,6 +124,35 @@ class TestAsyncToolExecution:
         assert result == "Done"
 
 
+class TestToolExclusion:
+    async def test_excluded_tools_not_in_schemas(self, agent_config):
+        agent = Agent(agent_config, exclude_tools={"bash"})
+        mock_response = LLMResponse(text="Hi", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hello", "s1")
+        schemas = mock_llm.call_args[0][2]  # third positional arg
+        tool_names = [s["function"]["name"] for s in schemas]
+        assert "bash" not in tool_names
+
+    async def test_excluded_tool_call_rejected(self, agent_config):
+        agent = Agent(agent_config, exclude_tools={"bash"})
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_blocked",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo no"})},
+            }],
+        )
+        text_response = LLMResponse(text="Ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]):
+            result = await agent.handle("run bash", "s1")
+        assert result == "Ok"
+        history = agent.sessions["s1"]
+        tool_msg = [m for m in history if m["role"] == "tool"][0]
+        assert "not available" in tool_msg["content"].lower()
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
