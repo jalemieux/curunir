@@ -78,14 +78,6 @@ class Agent:
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
 
-                    if self.tools is not None and name not in self.tools:
-                        history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": f"Tool '{name}' is not available in this context.",
-                        })
-                        continue
-
                     if on_tool_call:
                         await on_tool_call(name, args_str)
 
