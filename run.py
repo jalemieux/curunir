@@ -1,7 +1,6 @@
 """Curunir runtime — configures channels, wires queues, starts the agent loop."""
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -42,37 +41,23 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
             return f"Bash {cmd}"
         case "load_skill":
             return f"LoadSkill {args.get('name', '')}"
+        case "delegate":
+            task = args.get("task", "")
+            if len(task) > 60:
+                task = task[:57] + "..."
+            return f"Delegate: {task}"
         case _:
             return f"{name} {args_str}"
 
 
-_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+def _build_content(msg) -> str:
+    """Build LLM content from a message.
 
-
-def _build_content(msg) -> str | list:
-    """Build LLM content from a message, inlining image attachments as base64."""
-    if not msg.attachments:
-        return msg.content
-
-    images = [att for att in msg.attachments if att.get("mime_type") in _IMAGE_MIMES]
-    if not images:
-        return msg.content
-
-    blocks: list[dict] = [{"type": "text", "text": msg.content}]
-    for img in images:
-        try:
-            with open(img["path"], "rb") as f:
-                data = base64.b64encode(f.read()).decode("ascii")
-            blocks.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{img['mime_type']};base64,{data}",
-                },
-            })
-        except Exception:
-            logger.warning("Could not read image attachment %s", img["path"])
-
-    return blocks if len(blocks) > 1 else msg.content
+    Attachments are referenced by file path in msg.content (added by the
+    channel). The agent uses the delegate tool to analyze images and
+    large documents in a sub-agent with a clean context window.
+    """
+    return msg.content
 
 
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
