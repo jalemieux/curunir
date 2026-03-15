@@ -13,6 +13,22 @@ EXECUTORS = {
     "load_skill": exec_load_skill,
 }
 
+ASYNC_EXECUTORS: set[str] = set()
+ASYNC_EXECUTORS_MAP: dict = {}
+
+
+def is_async_executor(name: str) -> bool:
+    """Check if a tool executor is async (needs await, not to_thread)."""
+    return name.lower() in ASYNC_EXECUTORS
+
+
+async def execute_tool_call_async(name: str, args: dict, config: AgentConfig) -> str:
+    """Dispatch an async tool call."""
+    executor = ASYNC_EXECUTORS_MAP.get(name.lower())
+    if not executor:
+        return f"Unknown async tool: {name}"
+    return await executor(args, config)
+
 
 def execute_tool_call(name: str, args: dict, config: AgentConfig) -> str:
     """Dispatch a tool call to the appropriate executor."""

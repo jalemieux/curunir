@@ -1,4 +1,23 @@
-from src.tools.dispatcher import execute_tool_call
+import pytest
+
+from src.tools.dispatcher import execute_tool_call, is_async_executor
+
+
+class TestAsyncDispatch:
+    def test_is_async_executor_false_for_sync(self):
+        assert is_async_executor("bash") is False
+
+    @pytest.mark.skip(reason="delegate not registered until Task 3")
+    def test_is_async_executor_true_for_async(self):
+        # Will be true once delegate is registered in Task 3
+        assert is_async_executor("delegate") is True
+
+
+class TestExecuteToolCallAsync:
+    async def test_unknown_async_tool_returns_error(self, agent_config):
+        from src.tools.dispatcher import execute_tool_call_async
+        result = await execute_tool_call_async("nonexistent", {}, agent_config)
+        assert "unknown" in result.lower()
 
 
 class TestExecuteToolCall:

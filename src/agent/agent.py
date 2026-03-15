@@ -6,7 +6,7 @@ from datetime import datetime
 from src.agent.system_prompt import build_static_prompt
 from src.config import AgentConfig
 from src.llm import call_llm
-from src.tools.dispatcher import execute_tool_call
+from src.tools.dispatcher import execute_tool_call, execute_tool_call_async, is_async_executor
 from src.tools.schemas import get_tool_schemas
 
 
@@ -47,12 +47,19 @@ class Agent:
                     if on_tool_call:
                         await on_tool_call(name, args_str)
 
-                    result = await asyncio.to_thread(
-                        execute_tool_call,
-                        name,
-                        json.loads(args_str),
-                        self.config,
-                    )
+                    if is_async_executor(name):
+                        result = await execute_tool_call_async(
+                            name,
+                            json.loads(args_str),
+                            self.config,
+                        )
+                    else:
+                        result = await asyncio.to_thread(
+                            execute_tool_call,
+                            name,
+                            json.loads(args_str),
+                            self.config,
+                        )
                     history.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],

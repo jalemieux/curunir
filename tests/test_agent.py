@@ -103,6 +103,27 @@ class TestAgentHandle:
         assert "iteration limit" in result.lower()
 
 
+class TestAsyncToolExecution:
+    async def test_calls_async_executor_directly(self, agent):
+        """Async tools should be awaited, not run via to_thread."""
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_async",
+                "type": "function",
+                "function": {"name": "delegate", "arguments": json.dumps({"task": "say hello"})},
+            }],
+        )
+        text_response = LLMResponse(text="Done", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]), \
+             patch("src.agent.agent.is_async_executor", return_value=True), \
+             patch("src.agent.agent.execute_tool_call_async", new_callable=AsyncMock, return_value="sub-agent result"):
+            result = await agent.handle("delegate this", "s1")
+
+        assert result == "Done"
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
