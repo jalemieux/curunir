@@ -127,18 +127,18 @@ class TestDelegateToolExecution:
         assert tool_msg["content"] == "sub-agent result"
 
 
-class TestToolExclusion:
-    async def test_excluded_tools_not_in_schemas(self, agent_config):
-        agent = Agent(agent_config, exclude_tools={"bash"})
+class TestToolAllowlist:
+    async def test_only_allowed_tools_in_schemas(self, agent_config):
+        agent = Agent(agent_config, tools=["read", "grep"])
         mock_response = LLMResponse(text="Hi", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hello", "s1")
-        schemas = mock_llm.call_args[0][2]  # third positional arg
-        tool_names = [s["function"]["name"] for s in schemas]
-        assert "bash" not in tool_names
+        schemas = mock_llm.call_args[0][2]
+        tool_names = {s["function"]["name"] for s in schemas}
+        assert tool_names == {"read", "grep"}
 
-    async def test_excluded_tool_call_rejected(self, agent_config):
-        agent = Agent(agent_config, exclude_tools={"bash"})
+    async def test_unlisted_tool_call_rejected(self, agent_config):
+        agent = Agent(agent_config, tools=["read", "grep"])
         tool_response = LLMResponse(
             text=None,
             tool_calls=[{
@@ -154,6 +154,14 @@ class TestToolExclusion:
         history = agent.sessions["s1"]
         tool_msg = [m for m in history if m["role"] == "tool"][0]
         assert "not available" in tool_msg["content"].lower()
+
+    async def test_none_means_all_tools(self, agent_config):
+        agent = Agent(agent_config)  # tools=None (default)
+        mock_response = LLMResponse(text="Hi", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hello", "s1")
+        schemas = mock_llm.call_args[0][2]
+        assert len(schemas) == 8  # all tools including delegate
 
 
 class TestHistoryTruncation:

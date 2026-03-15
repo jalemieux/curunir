@@ -10,8 +10,8 @@ from src.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
-# Tools the sub-agent cannot use (prevent recursive delegation)
-_EXCLUDED_TOOLS = {"delegate"}
+# Tools available to sub-agents (everything except delegate — no recursive spawning)
+_SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill"]
 
 # Sub-agent timeout in seconds
 _TIMEOUT = 300
@@ -34,7 +34,7 @@ async def exec_delegate(args: dict, config: AgentConfig) -> str:
     else:
         content = task
 
-    sub_agent = Agent(config, exclude_tools=_EXCLUDED_TOOLS)
+    sub_agent = Agent(config, tools=_SUB_AGENT_TOOLS)
     session_id = str(uuid4())
 
     logger.info("Spawning sub-agent %s: %.80s", session_id[:8], task)

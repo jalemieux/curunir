@@ -19,3 +19,15 @@ def test_schema_format():
 def test_expected_tool_names():
     names = {s["function"]["name"] for s in get_tool_schemas()}
     assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "delegate"}
+
+
+def test_filter_by_names():
+    schemas = get_tool_schemas(names=["read", "bash"])
+    names = {s["function"]["name"] for s in schemas}
+    assert names == {"read", "bash"}
+
+
+def test_filter_ignores_unknown_names():
+    schemas = get_tool_schemas(names=["read", "nonexistent"])
+    names = {s["function"]["name"] for s in schemas}
+    assert names == {"read"}
