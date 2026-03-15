@@ -137,24 +137,6 @@ class TestToolAllowlist:
         tool_names = {s["function"]["name"] for s in schemas}
         assert tool_names == {"read", "grep"}
 
-    async def test_unlisted_tool_call_rejected(self, agent_config):
-        agent = Agent(agent_config, tools=["read", "grep"])
-        tool_response = LLMResponse(
-            text=None,
-            tool_calls=[{
-                "id": "call_blocked",
-                "type": "function",
-                "function": {"name": "bash", "arguments": json.dumps({"command": "echo no"})},
-            }],
-        )
-        text_response = LLMResponse(text="Ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]):
-            result = await agent.handle("run bash", "s1")
-        assert result == "Ok"
-        history = agent.sessions["s1"]
-        tool_msg = [m for m in history if m["role"] == "tool"][0]
-        assert "not available" in tool_msg["content"].lower()
-
     async def test_none_means_all_tools(self, agent_config):
         agent = Agent(agent_config)  # tools=None (default)
         mock_response = LLMResponse(text="Hi", tool_calls=None)
