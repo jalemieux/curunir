@@ -103,6 +103,85 @@ class TestAgentHandle:
         assert "iteration limit" in result.lower()
 
 
+class TestDelegateToolExecution:
+    async def test_delegate_via_agent_handle(self, agent):
+        """Delegate tool calls go through the unified execute_tool_call."""
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_delegate",
+                "type": "function",
+                "function": {"name": "delegate", "arguments": json.dumps({"task": "say hello"})},
+            }],
+        )
+        text_response = LLMResponse(text="Done", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]), \
+             patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="sub-agent result"):
+            result = await agent.handle("delegate this", "s1")
+
+        assert result == "Done"
+        # Verify the tool result was recorded in history
+        history = agent.sessions["s1"]
+        tool_msg = [m for m in history if m["role"] == "tool"][0]
+        assert tool_msg["content"] == "sub-agent result"
+
+
+class TestToolAllowlist:
+    async def test_only_allowed_tools_in_schemas(self, agent_config):
+        agent = Agent(agent_config, tools=["read", "grep"])
+        mock_response = LLMResponse(text="Hi", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hello", "s1")
+        schemas = mock_llm.call_args[0][2]
+        tool_names = {s["function"]["name"] for s in schemas}
+        assert tool_names == {"read", "grep"}
+
+    async def test_none_means_all_tools(self, agent_config):
+        agent = Agent(agent_config)  # tools=None (default)
+        mock_response = LLMResponse(text="Hi", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hello", "s1")
+        schemas = mock_llm.call_args[0][2]
+        assert len(schemas) == 8  # all tools including delegate
+
+
+class TestHistoryTruncation:
+    async def test_trims_old_messages_when_over_limit(self, agent_config):
+        agent = Agent(agent_config)
+        session_id = "s-trunc"
+        history = agent.sessions.setdefault(session_id, [])
+        for i in range(100):
+            history.append({"role": "user", "content": "x" * 10_000})
+            history.append({"role": "assistant", "content": "y" * 10_000})
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("new message", "s-trunc")
+
+        messages = mock_llm.call_args[0][1]
+        # Should be trimmed (system + trimmed history + new user msg)
+        assert len(messages) < 202
+
+    async def test_truncation_preserves_message_pairs(self, agent_config):
+        """Truncation should not leave orphaned tool results or split pairs."""
+        agent = Agent(agent_config)
+        session_id = "s-pairs"
+        history = agent.sessions.setdefault(session_id, [])
+        for i in range(50):
+            history.append({"role": "user", "content": "x" * 20_000})
+            history.append({"role": "assistant", "content": "y" * 20_000})
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("new message", "s-pairs")
+
+        messages = mock_llm.call_args[0][1]
+        # After system prompt, first message should be "user" (not orphaned assistant/tool)
+        non_system = [m for m in messages if m["role"] != "system"]
+        assert non_system[0]["role"] == "user"
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
