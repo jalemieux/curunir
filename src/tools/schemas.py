@@ -1,6 +1,21 @@
-def get_tool_schemas() -> list[dict]:
-    """Return OpenAI function-calling schemas for all tools."""
-    return [
+ALL_TOOL_SCHEMAS: dict[str, dict] = {}
+
+
+def _register(schema: dict) -> dict:
+    """Register a schema in the global dict and return it."""
+    ALL_TOOL_SCHEMAS[schema["function"]["name"]] = schema
+    return schema
+
+
+def get_tool_schemas(names: list[str] | None = None) -> list[dict]:
+    """Return tool schemas. If names is provided, return only those tools."""
+    if names is not None:
+        return [ALL_TOOL_SCHEMAS[n] for n in names if n in ALL_TOOL_SCHEMAS]
+    return list(ALL_TOOL_SCHEMAS.values())
+
+
+# Register all tool schemas at import time
+_SCHEMAS = [
         {
             "type": "function",
             "function": {
@@ -198,4 +213,7 @@ def get_tool_schemas() -> list[dict]:
                 },
             },
         },
-    ]
+]
+
+for _s in _SCHEMAS:
+    _register(_s)
