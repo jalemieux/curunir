@@ -153,6 +153,42 @@ class TestToolExclusion:
         assert "not available" in tool_msg["content"].lower()
 
 
+class TestHistoryTruncation:
+    async def test_trims_old_messages_when_over_limit(self, agent_config):
+        agent = Agent(agent_config)
+        session_id = "s-trunc"
+        history = agent.sessions.setdefault(session_id, [])
+        for i in range(100):
+            history.append({"role": "user", "content": "x" * 10_000})
+            history.append({"role": "assistant", "content": "y" * 10_000})
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("new message", "s-trunc")
+
+        messages = mock_llm.call_args[0][1]
+        # Should be trimmed (system + trimmed history + new user msg)
+        assert len(messages) < 202
+
+    async def test_truncation_preserves_message_pairs(self, agent_config):
+        """Truncation should not leave orphaned tool results or split pairs."""
+        agent = Agent(agent_config)
+        session_id = "s-pairs"
+        history = agent.sessions.setdefault(session_id, [])
+        for i in range(50):
+            history.append({"role": "user", "content": "x" * 20_000})
+            history.append({"role": "assistant", "content": "y" * 20_000})
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("new message", "s-pairs")
+
+        messages = mock_llm.call_args[0][1]
+        # After system prompt, first message should be "user" (not orphaned assistant/tool)
+        non_system = [m for m in messages if m["role"] != "system"]
+        assert non_system[0]["role"] == "user"
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()

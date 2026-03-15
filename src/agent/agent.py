@@ -10,6 +10,36 @@ from src.tools.dispatcher import execute_tool_call, execute_tool_call_async, is_
 from src.tools.schemas import get_tool_schemas
 
 
+_MAX_HISTORY_CHARS = 600_000  # ~150k tokens, leaves room for system prompt + response
+
+
+def _estimate_chars(messages: list[dict]) -> int:
+    """Rough character count across all message contents."""
+    total = 0
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                total += len(str(block))
+    return total
+
+
+def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> None:
+    """Remove oldest messages in coherent groups until under the char limit.
+
+    Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
+    Always removes from the front so the most recent context is preserved.
+    After trimming, the first message should be role=user.
+    """
+    while len(history) > 2 and _estimate_chars(history) > max_chars:
+        # Remove messages from the front until we hit the next "user" message
+        history.pop(0)
+        while history and history[0]["role"] != "user":
+            history.pop(0)
+
+
 class Agent:
     def __init__(self, config: AgentConfig, exclude_tools: set[str] | None = None):
         self.config = config
@@ -36,6 +66,7 @@ class Agent:
         history.append({"role": "user", "content": message})
 
         system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
+        _trim_history(history)
         messages = [{"role": "system", "content": system_prompt}] + history
 
         for _ in range(self.config.max_iterations):
@@ -81,6 +112,7 @@ class Agent:
                         "content": result,
                     })
 
+                _trim_history(history)
                 messages = [{"role": "system", "content": system_prompt}] + history
                 continue
 
