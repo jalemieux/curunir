@@ -163,6 +163,25 @@ class TestHistoryTruncation:
         # Should be trimmed (system + trimmed history + new user msg)
         assert len(messages) < 202
 
+    async def test_no_trim_when_single_user_message(self, agent_config):
+        """Sub-agents have one user message — trimming must not remove it."""
+        agent = Agent(agent_config)
+        session_id = "s-single"
+        history = agent.sessions.setdefault(session_id, [])
+        # Simulate sub-agent: one user msg, then a huge tool result
+        history.append({"role": "user", "content": "analyze this"})
+        history.append({"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "read", "arguments": "{}"}}]})
+        history.append({"role": "tool", "tool_call_id": "c1", "content": "x" * 1_000_000})
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("continue", session_id)
+
+        messages = mock_llm.call_args[0][1]
+        non_system = [m for m in messages if m["role"] != "system"]
+        # Must still have at least one user message
+        assert any(m["role"] == "user" for m in non_system)
+
     async def test_truncation_preserves_message_pairs(self, agent_config):
         """Truncation should not leave orphaned tool results or split pairs."""
         agent = Agent(agent_config)

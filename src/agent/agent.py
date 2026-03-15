@@ -31,9 +31,13 @@ def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> N
     Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
     Always removes from the front so the most recent context is preserved.
     After trimming, the first message should be role=user.
+    Keeps at least one user message to avoid empty-messages API errors.
     """
-    while len(history) > 2 and _estimate_chars(history) > max_chars:
+    user_count = sum(1 for m in history if m["role"] == "user")
+    while user_count > 1 and _estimate_chars(history) > max_chars:
         # Remove messages from the front until we hit the next "user" message
+        if history[0]["role"] == "user":
+            user_count -= 1
         history.pop(0)
         while history and history[0]["role"] != "user":
             history.pop(0)

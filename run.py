@@ -89,7 +89,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
 
         content = _build_content(msg)
-        text = await agent.handle(content, msg.session_id, on_tool_call=on_tool_call)
+        try:
+            text = await agent.handle(content, msg.session_id, on_tool_call=on_tool_call)
+        except Exception as e:
+            logger.error("Agent error for session %s: %s", msg.session_id, e)
+            text = "Sorry, I encountered an error processing your message."
 
         await out_queue.put(OutgoingMessage(
             content=text,
