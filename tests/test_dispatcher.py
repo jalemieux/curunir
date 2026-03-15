@@ -7,7 +7,6 @@ class TestAsyncDispatch:
     def test_is_async_executor_false_for_sync(self):
         assert is_async_executor("bash") is False
 
-    @pytest.mark.skip(reason="delegate not registered until Task 3")
     def test_is_async_executor_true_for_async(self):
         # Will be true once delegate is registered in Task 3
         assert is_async_executor("delegate") is True
