@@ -79,13 +79,14 @@ For each search:
 
 1. Search with a specific query
 2. Extract titles, URLs, and descriptions with `jq`
-3. Use `curl` to fetch the full content of the most relevant URLs
+3. Use `web_fetch` to read the full content of the most relevant URLs — it
+   extracts readable text automatically (no raw HTML)
 4. Synthesize findings across searches
 
 ## Tips
 
 - Always use `$BRAVE_API_KEY` — never hardcode the token.
 - Use `jq` to parse results — the raw JSON is verbose.
-- For deep research, fetch the actual page content of promising URLs with `curl`.
+- Use `web_fetch` (not `curl`) to read page content — it strips HTML and returns clean text.
 - Use `freshness` to filter for recent results when timeliness matters.
 - Run multiple targeted queries rather than one broad query for better coverage.

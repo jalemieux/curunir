@@ -41,6 +41,8 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
             return f"Bash {cmd}"
         case "load_skill":
             return f"LoadSkill {args.get('name', '')}"
+        case "web_fetch":
+            return f"WebFetch {args.get('url', '')}"
         case "delegate":
             task = args.get("task", "")
             if len(task) > 60:
@@ -53,11 +55,22 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
 def _build_content(msg) -> str:
     """Build LLM content from a message.
 
+    Prepends channel metadata so the agent knows the source and sender.
     Attachments are referenced by file path in msg.content (added by the
     channel). The agent uses the delegate tool to analyze images and
     large documents in a sub-agent with a clean context window.
     """
-    return msg.content
+    parts = []
+    if msg.channel and msg.channel != "cli":
+        meta = f"[channel: {msg.channel}"
+        if msg.reply_address:
+            sender = msg.reply_address.get("to", "")
+            if sender:
+                meta += f", from: {sender}"
+        meta += "]"
+        parts.append(meta)
+    parts.append(msg.content)
+    return "\n".join(parts)
 
 
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):

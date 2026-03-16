@@ -3,6 +3,7 @@ import subprocess
 from src.config import AgentConfig
 
 DEFAULT_TIMEOUT = 30
+MAX_OUTPUT_CHARS = 30_000  # ~8k tokens — prevents a single curl from blowing the context
 
 
 def exec_bash(args: dict, config: AgentConfig) -> str:
@@ -19,7 +20,11 @@ def exec_bash(args: dict, config: AgentConfig) -> str:
         output = result.stdout
         if result.stderr:
             output += result.stderr
-        return output if output else ""
+        if not output:
+            return ""
+        if len(output) > MAX_OUTPUT_CHARS:
+            return output[:MAX_OUTPUT_CHARS] + f"\n\n... truncated ({len(output)} chars total, showing first {MAX_OUTPUT_CHARS})"
+        return output
     except subprocess.TimeoutExpired:
         return f"Error: Command timed out after {args.get('timeout', DEFAULT_TIMEOUT)} seconds."
     except Exception as e:
