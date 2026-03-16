@@ -24,23 +24,6 @@ _BASE_PORT = 19000
 # Helpers
 # ---------------------------------------------------------------------------
 
-
-async def _echo_server(websocket: websockets.ServerConnection) -> None:
-    """Simple server that echoes every received message back verbatim."""
-    async for msg in websocket:
-        await websocket.send(msg)
-
-
-async def _fixed_reply_server(reply: dict):
-    """Return a handler that sends *reply* for every message received."""
-
-    async def handler(websocket: websockets.ServerConnection) -> None:
-        async for _ in websocket:
-            await websocket.send(json.dumps(reply))
-
-    return handler
-
-
 def _make_console_with_input(lines: list[str]):
     """Return a Rich Console whose input() delivers *lines* then raises EOFError."""
     from rich.console import Console
