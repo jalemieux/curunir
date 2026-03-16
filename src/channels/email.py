@@ -101,6 +101,7 @@ class EmailChannel:
                 if self.allowed_senders and not any(
                     allowed in sender for allowed in self.allowed_senders
                 ):
+                    logger.info("Skipping email from %s (not in allowed_senders)", sender)
                     continue
 
                 subject = message.get("subject", "")

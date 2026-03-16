@@ -11,7 +11,7 @@ from src.config import AgentConfig
 logger = logging.getLogger(__name__)
 
 # Tools available to sub-agents (everything except delegate — no recursive spawning)
-_SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill"]
+_SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch"]
 
 # Sub-agent timeout in seconds
 _TIMEOUT = 300

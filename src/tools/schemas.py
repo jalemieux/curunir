@@ -187,6 +187,27 @@ _SCHEMAS = [
         {
             "type": "function",
             "function": {
+                "name": "web_fetch",
+                "description": (
+                    "Fetch a URL and return the extracted text content (no HTML). "
+                    "Use this instead of curl for reading web pages — it strips "
+                    "navigation, scripts, and ads, returning only readable text."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to fetch.",
+                        },
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "delegate",
                 "description": (
                     "Delegate a task to a sub-agent with a clean context window. "

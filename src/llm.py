@@ -15,6 +15,7 @@ async def call_llm(model: str, messages: list[dict], tools: list[dict]) -> LLMRe
     kwargs = {
         "model": model,
         "messages": messages,
+        "max_tokens": 16000,
     }
     if tools:
         kwargs["tools"] = tools
