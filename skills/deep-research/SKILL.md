@@ -1,13 +1,14 @@
 ---
 name: deep-research
-description: "Research a topic in depth — searches the web, synthesizes findings, emails a structured report"
+description: "Research a topic in depth — searches the web, synthesizes findings, delivers a structured report"
+tools: attach
 ---
 
 # Deep Research
 
 ## Overview
 Research a topic by decomposing it into sub-questions, searching the web for
-each, synthesizing findings, and emailing a structured report.
+each, synthesizing findings, and delivering a structured report as an attachment.
 
 **Prerequisite skills:** Before starting, load this skill:
 - `web-search` — how to search the web via Brave API
@@ -51,22 +52,22 @@ each, synthesizing findings, and emailing a structured report.
    - [Title](URL) — what was found here
    ```
 
-6. **Save report** — Write the report to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`
+6. **Save and attach report** — Write the report to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`,
+   convert it to PDF with `pandoc report.md -o report.pdf`, then use the
+   `attach` tool to attach the PDF. This delivers a nicely formatted report
+   as a file alongside your reply (e.g. as an email attachment).
 
-7. **Reply with report** — Return the full report as your response. The channel
-   will deliver it to the user automatically (email reply, CLI output, etc.).
-   Do NOT send a separate email — the reply routing handles delivery.
+7. **Reply with summary** — Return a concise summary (key findings + bullet points)
+   as your text response. The full report is delivered as the attachment.
 
 ## Tips
 - Run multiple focused searches rather than one broad one.
 - Use `freshness=pw` or `freshness=pm` when recency matters.
 - Cite every claim — include the source URL inline.
 - Use `jq` to parse search results efficiently.
-- Write the report to a temp file first, then use `--body-file` to email it
-  to avoid shell quoting issues with long content.
 
 ## Common Mistakes
 - Doing one big search instead of targeted queries per sub-question
 - Forgetting to cite sources with URLs
 - Not fetching actual page content — search snippets alone are too shallow (use `web_fetch`)
-- Trying to send the report via a separate email instead of just returning it as the response
+- Forgetting to use the `attach` tool after writing the report file
