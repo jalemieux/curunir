@@ -22,5 +22,6 @@ COPY . .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+EXPOSE 8765
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "run.py"]
