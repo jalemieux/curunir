@@ -56,6 +56,7 @@ each, synthesizing findings, and delivering a structured report as an attachment
    then convert it to PDF: `pandoc {file}.md -o {file}.pdf`
    Then attach the **PDF** (not the .md): `attach(path="{file}.pdf")`
    The PDF is what gets delivered to the user as a file attachment.
+   If PDF conversion fails, attach the `.md` file instead. Do NOT convert to HTML or any other format.
 
 7. **Reply with summary** — Return a concise summary (key findings + bullet points)
    as your text response. The full report is delivered as the attachment.
@@ -72,3 +73,4 @@ each, synthesizing findings, and delivering a structured report as an attachment
 - Not fetching actual page content — search snippets alone are too shallow (use `web_fetch`)
 - Forgetting to use the `attach` tool after writing the report file
 - Attaching the .md file instead of the .pdf — always attach the converted PDF
+- Falling back to HTML or other formats when PDF fails — attach .md if PDF won't convert
