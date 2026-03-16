@@ -53,9 +53,9 @@ each, synthesizing findings, and delivering a structured report as an attachment
    ```
 
 6. **Save and attach report** — Write the report to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`,
-   convert it to PDF with `pandoc report.md -o report.pdf`, then use the
-   `attach` tool to attach the PDF. This delivers a nicely formatted report
-   as a file alongside your reply (e.g. as an email attachment).
+   then convert it to PDF: `pandoc {file}.md -o {file}.pdf`
+   Then attach the **PDF** (not the .md): `attach(path="{file}.pdf")`
+   The PDF is what gets delivered to the user as a file attachment.
 
 7. **Reply with summary** — Return a concise summary (key findings + bullet points)
    as your text response. The full report is delivered as the attachment.
@@ -71,3 +71,4 @@ each, synthesizing findings, and delivering a structured report as an attachment
 - Forgetting to cite sources with URLs
 - Not fetching actual page content — search snippets alone are too shallow (use `web_fetch`)
 - Forgetting to use the `attach` tool after writing the report file
+- Attaching the .md file instead of the .pdf — always attach the converted PDF
