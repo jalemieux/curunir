@@ -3,5 +3,6 @@ python-dotenv
 rich
 httpx
 trafilatura
+websockets
 pytest
 pytest-asyncio
