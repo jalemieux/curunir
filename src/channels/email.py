@@ -56,6 +56,14 @@ class EmailChannel:
             )
         except gog.GogError:
             logger.exception("Failed to send reply for thread %s", msg.session_id)
+            return
+        try:
+            await asyncio.to_thread(
+                gog.thread_modify, msg.session_id,
+                add_label=self.processed_label, account=self.account,
+            )
+        except gog.GogError:
+            logger.exception("Failed to label thread %s after send", msg.session_id)
 
     async def _poll_loop(self) -> None:
         """Poll for new messages on an interval."""
@@ -70,11 +78,8 @@ class EmailChannel:
         """Run one poll cycle: search for unprocessed threads and process new messages."""
         query = f"in:inbox -label:{self.processed_label}"
         threads = await asyncio.to_thread(gog.search, query, self.account)
-        new_threads = [t for t in threads if t["id"] not in self.last_seen]
-        if new_threads:
-            logger.info("Found %d new thread(s) (%d total unprocessed)", len(new_threads), len(threads))
 
-        for thread_summary in new_threads:
+        for thread_summary in threads:
             thread_id = thread_summary["id"]
 
             try:
@@ -82,15 +87,6 @@ class EmailChannel:
             except gog.GogError:
                 logger.exception("Failed to fetch thread %s", thread_id)
                 continue
-
-            # Label immediately so we don't re-process on next poll
-            try:
-                await asyncio.to_thread(
-                    gog.thread_modify, thread_id,
-                    add_label=self.processed_label, account=self.account,
-                )
-            except gog.GogError:
-                logger.exception("Failed to label thread %s on ingest", thread_id)
 
             messages = thread.get("messages", [])
             new_messages = self._new_messages(messages, self.last_seen.get(thread_id))
