@@ -16,6 +16,52 @@ from src.tools.schemas import get_tool_schemas
 
 _MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
 
+# Map tool names to their key argument(s) for log display
+_TOOL_KEY_ARGS: dict[str, list[str]] = {
+    "web_fetch": ["url"],
+    "bash": ["command"],
+    "write": ["file_path"],
+    "read": ["file_path"],
+    "edit": ["file_path"],
+    "glob": ["pattern"],
+    "grep": ["pattern"],
+    "load_skill": ["name"],
+    "delegate": ["task"],
+}
+
+_MAX_ARG_LEN = 120
+
+
+def _display_name(tool_name: str) -> str:
+    """Convert snake_case tool name to PascalCase display name."""
+    return "".join(part.capitalize() for part in tool_name.split("_"))
+
+
+def _tool_detail_lines(name: str, args_str: str) -> list[str]:
+    """Build tree-formatted detail lines for a tool call."""
+    try:
+        args = json.loads(args_str)
+    except (json.JSONDecodeError, TypeError):
+        return [f"├─ {_display_name(name)} (unparseable args)"]
+
+    key_names = _TOOL_KEY_ARGS.get(name, list(args.keys())[:1])
+    lines = []
+    for key in key_names:
+        val = args.get(key, "")
+        val_str = str(val)
+        if len(val_str) > _MAX_ARG_LEN:
+            val_str = val_str[:_MAX_ARG_LEN] + "..."
+        lines.append(f"{_display_name(name)} {val_str}")
+
+    if not lines:
+        return [f"╰─ {_display_name(name)}"]
+
+    result = []
+    for i, line in enumerate(lines):
+        connector = "╰─" if i == len(lines) - 1 else "├─"
+        result.append(f"{connector} {line}")
+    return result
+
 
 def _estimate_chars(messages: list[dict]) -> int:
     """Rough character count across all message contents."""
@@ -115,8 +161,10 @@ class Agent:
                 for tool_call in response.tool_calls:
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
+                    detail_lines = _tool_detail_lines(name, args_str)
                     logger.info("[%s] tool call: %s", sid, name)
-                    logger.debug("[%s] tool args: %s", sid, args_str[:200])
+                    for line in detail_lines:
+                        logger.info("  %s", line)
 
                     if on_tool_call:
                         await on_tool_call(name, args_str)
