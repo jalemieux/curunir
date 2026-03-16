@@ -1,9 +1,9 @@
 from src.tools.schemas import get_tool_schemas
 
 
-def test_returns_eight_schemas():
+def test_returns_nine_schemas():
     schemas = get_tool_schemas()
-    assert len(schemas) == 8
+    assert len(schemas) == 9
 
 
 def test_schema_format():
@@ -18,7 +18,7 @@ def test_schema_format():
 
 def test_expected_tool_names():
     names = {s["function"]["name"] for s in get_tool_schemas()}
-    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "delegate"}
+    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch", "delegate"}
 
 
 def test_filter_by_names():

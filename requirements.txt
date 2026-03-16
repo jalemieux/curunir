@@ -1,5 +1,7 @@
 litellm
 python-dotenv
 rich
+httpx
+trafilatura
 pytest
 pytest-asyncio

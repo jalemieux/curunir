@@ -9,17 +9,16 @@ description: "Research a topic in depth — searches the web, synthesizes findin
 Research a topic by decomposing it into sub-questions, searching the web for
 each, synthesizing findings, and emailing a structured report.
 
-**Prerequisite skills:** Before starting, load these skills:
+**Prerequisite skills:** Before starting, load this skill:
 - `web-search` — how to search the web via Brave API
-- `email-send` — how to send the report via gog CLI
 
 ## Workflow
 
 1. **Clarify scope** — If the request is vague, ask ONE question to narrow it
    (timeframe, angle, depth). If already clear, skip this step.
 
-2. **Load prerequisite skills** — Use `load_skill` to load `web-search` and
-   `email-send`. Read and understand both before proceeding.
+2. **Load prerequisite skills** — Use `load_skill` to load `web-search`.
+   Read and understand it before proceeding.
 
 3. **Decompose** — Break the topic into 3-5 research sub-questions:
    - Background and context
@@ -31,7 +30,7 @@ each, synthesizing findings, and emailing a structured report.
 4. **Research each sub-question** — For each sub-question:
    - Run 1-2 targeted web searches using the `web-search` skill
    - Extract the most relevant results (titles, URLs, descriptions)
-   - Fetch full page content from the most promising URLs with `curl`
+   - Use `web_fetch` to read the full content of the most promising URLs
    - Take notes on key findings and source URLs
 
 5. **Synthesize** — Compile findings into a structured report:
@@ -54,12 +53,9 @@ each, synthesizing findings, and emailing a structured report.
 
 6. **Save report** — Write the report to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`
 
-7. **Email report** — Using the `email-send` skill, send the report to the user.
-   Use `--body-file` for the report content and set the subject to
-   `Research Report: [Topic]`.
-
-8. **Confirm** — Tell the user: "Research complete. Report emailed and saved to
-   workspace/reports/."
+7. **Reply with report** — Return the full report as your response. The channel
+   will deliver it to the user automatically (email reply, CLI output, etc.).
+   Do NOT send a separate email — the reply routing handles delivery.
 
 ## Tips
 - Run multiple focused searches rather than one broad one.
@@ -72,5 +68,5 @@ each, synthesizing findings, and emailing a structured report.
 ## Common Mistakes
 - Doing one big search instead of targeted queries per sub-question
 - Forgetting to cite sources with URLs
-- Not fetching actual page content — search snippets alone are too shallow
-- Trying to email the report inline instead of using `--body-file`
+- Not fetching actual page content — search snippets alone are too shallow (use `web_fetch`)
+- Trying to send the report via a separate email instead of just returning it as the response

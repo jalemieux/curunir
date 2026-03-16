@@ -1,15 +1,20 @@
 # src/agent/agent.py
 import json
+import logging
 from datetime import datetime
 
+import litellm
+
 from src.agent.system_prompt import build_static_prompt
+
+logger = logging.getLogger(__name__)
 from src.config import AgentConfig
 from src.llm import call_llm
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
 
 
-_MAX_HISTORY_CHARS = 600_000  # ~150k tokens, leaves room for system prompt + response
+_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
 
 
 def _estimate_chars(messages: list[dict]) -> int:
@@ -43,6 +48,14 @@ def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> N
             history.pop(0)
 
 
+def _is_context_overflow(exc: Exception) -> bool:
+    """Check if an exception is a context window / input length overflow."""
+    if isinstance(exc, litellm.ContextWindowExceededError):
+        return True
+    msg = str(exc).lower()
+    return "context limit" in msg or "prompt is too long" in msg or "exceed" in msg and "token" in msg
+
+
 class Agent:
     def __init__(self, config: AgentConfig, tools: list[str] | None = None):
         self.config = config
@@ -69,8 +82,29 @@ class Agent:
         _trim_history(history)
         messages = [{"role": "system", "content": system_prompt}] + history
 
-        for _ in range(self.config.max_iterations):
-            response = await call_llm(self.config.model, messages, self._get_tool_schemas())
+        sid = session_id[:8]
+        msg_chars = _estimate_chars(history)
+        logger.info("[%s] agent loop start — %d messages, ~%dk chars", sid, len(history), msg_chars // 1000)
+
+        for iteration in range(self.config.max_iterations):
+            logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
+            try:
+                response = await call_llm(self.config.model, messages, self._get_tool_schemas())
+            except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
+                if not _is_context_overflow(e):
+                    raise
+                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, _MAX_HISTORY_CHARS // 2000)
+                _trim_history(history, max_chars=_MAX_HISTORY_CHARS // 2)
+                if not history:
+                    return "Sorry, the message was too long for me to process."
+                messages = [{"role": "system", "content": system_prompt}] + history
+                try:
+                    response = await call_llm(self.config.model, messages, self._get_tool_schemas())
+                except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
+                    if not _is_context_overflow(e2):
+                        raise
+                    logger.error("[%s] context window still exceeded after trim, aborting", sid)
+                    return "Sorry, the conversation is too long. Please start a new thread."
 
             if response.tool_calls:
                 assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -81,6 +115,8 @@ class Agent:
                 for tool_call in response.tool_calls:
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
+                    logger.info("[%s] tool call: %s", sid, name)
+                    logger.debug("[%s] tool args: %s", sid, args_str[:200])
 
                     if on_tool_call:
                         await on_tool_call(name, args_str)
@@ -90,6 +126,8 @@ class Agent:
                         json.loads(args_str),
                         self.config,
                     )
+                    result_preview = result[:200] if result else "(empty)"
+                    logger.debug("[%s] tool result: %s", sid, result_preview)
                     history.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
@@ -101,10 +139,13 @@ class Agent:
                 continue
 
             if response.text:
+                logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                 history.append({"role": "assistant", "content": response.text})
                 return response.text
 
+            logger.warning("[%s] LLM returned empty response", sid)
             history.append({"role": "assistant", "content": ""})
             return "Error: LLM returned empty response."
 
+        logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
         return "Iteration limit reached."

@@ -33,3 +33,4 @@ secrets/
 # Agent memory (instance-specific, keep README.md and .gitkeep)
 context/memory/*.md
 !context/memory/README.md
+workspace/
