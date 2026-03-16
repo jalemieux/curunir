@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 from src.agent.agent import Agent
 from src.channels.base import OutgoingMessage
-from src.channels.cli import CLIChannel
 from src.channels.email import EmailChannel
+from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
 from src.memory_extractor import extract_learnings
@@ -157,10 +157,10 @@ async def main():
 
     # Register channels
     channels = {}
-    cli_enabled = os.environ.get("CLI_ENABLED", "true").lower() == "true"
-    if cli_enabled:
-        cli = CLIChannel(in_queue, model=config.model)
-        channels["cli"] = cli
+    ws_host = os.environ.get("WS_HOST", "0.0.0.0")
+    ws_port = int(os.environ.get("WS_PORT", "8765"))
+    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port)
+    channels["cli"] = ws
 
     # Email channel (conditional)
     email_config = EmailChannelConfig(
