@@ -58,7 +58,7 @@ def test_search_returns_threads():
         result = search("-label:agent/processed", "bot@example.com", max_results=20)
     assert result == [{"id": "thread_1", "snippet": "hello"}]
     mock_run.assert_called_once_with(
-        ["gog", "gmail", "search", "-label:agent/processed", "--json", "--max", "20", "--account", "bot@example.com"],
+        ["gog", "gmail", "search", "--json", "--max", "20", "--account", "bot@example.com", "--", "-label:agent/processed"],
         capture_output=True, text=True, check=False,
     )
 
@@ -71,11 +71,17 @@ def test_search_empty_results():
 
 
 def test_thread_get():
-    thread_json = json.dumps({"id": "thread_1", "messages": [{"id": "msg_1"}]})
+    thread_json = json.dumps({"id": "thread_1", "messages": [{"id": "msg_1", "threadId": "thread_1", "payload": {"headers": [{"name": "From", "value": "alice@example.com"}, {"name": "To", "value": "bot@example.com"}, {"name": "Subject", "value": "Hello"}], "body": {"data": ""}, "parts": []}}]})
     with patch("src.channels.gog.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=thread_json)
         result = thread_get("thread_1", "bot@example.com")
-    assert result == {"id": "thread_1", "messages": [{"id": "msg_1"}]}
+    assert result["id"] == "thread_1"
+    assert len(result["messages"]) == 1
+    msg = result["messages"][0]
+    assert msg["id"] == "msg_1"
+    assert msg["from"] == "alice@example.com"
+    assert msg["subject"] == "Hello"
+    assert msg["attachments"] == []
     mock_run.assert_called_once_with(
         ["gog", "gmail", "thread", "get", "thread_1", "--json", "--account", "bot@example.com"],
         capture_output=True, text=True, check=False,
