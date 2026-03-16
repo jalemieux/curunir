@@ -23,7 +23,7 @@ class WebSocketChannel:
         try:
             async with websockets.serve(self._handle_connection, self.host, self.port) as server:
                 logger.info("WebSocket server listening on %s:%d", self.host, self.port)
-                await asyncio.get_event_loop().create_future()
+                await asyncio.get_running_loop().create_future()
         except asyncio.CancelledError:
             logger.info("WebSocket server shutting down")
             if self._connection is not None:
@@ -57,8 +57,6 @@ class WebSocketChannel:
                 )
                 await self.in_queue.put(msg)
         except websockets.exceptions.ConnectionClosedError:
-            pass
-        except websockets.exceptions.ConnectionClosedOK:
             pass
         finally:
             self._connection = None
