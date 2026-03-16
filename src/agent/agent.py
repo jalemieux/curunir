@@ -10,6 +10,7 @@ from src.agent.system_prompt import build_static_prompt
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
 from src.llm import call_llm
+from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
 
@@ -27,6 +28,7 @@ _TOOL_KEY_ARGS: dict[str, list[str]] = {
     "grep": ["pattern"],
     "load_skill": ["name"],
     "delegate": ["task"],
+    "attach": ["path"],
 }
 
 _MAX_ARG_LEN = 120
@@ -102,17 +104,34 @@ def _is_context_overflow(exc: Exception) -> bool:
     return "context limit" in msg or "prompt is too long" in msg or "exceed" in msg and "token" in msg
 
 
+def _parse_skill_tools(skill_content: str) -> list[str]:
+    """Extract required tool names from a skill's frontmatter."""
+    fm = parse_frontmatter(skill_content)
+    tools_str = fm.get("tools", "")
+    if not tools_str:
+        return []
+    return [t.strip() for t in tools_str.split(",") if t.strip()]
+
+
 class Agent:
     def __init__(self, config: AgentConfig, tools: list[str] | None = None):
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
+        self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
 
-    def _get_tool_schemas(self) -> list[dict]:
-        return get_tool_schemas(self.tools)
+    def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
+        base = get_tool_schemas(self.tools)
+        if session_id and session_id in self._session_tools:
+            extra = get_tool_schemas(list(self._session_tools[session_id]))
+            base = base + extra
+        return base
 
-    async def handle(self, message: str | list, session_id: str, on_tool_call=None) -> str:
+    async def handle(
+        self, message: str | list, session_id: str,
+        on_tool_call=None, attachments: list[dict] | None = None,
+    ) -> str:
         """Process a message and return the agent's response.
 
         Args:
@@ -120,6 +139,8 @@ class Agent:
             session_id: Session identifier for conversation history.
             on_tool_call: Optional async callback called with (name, args_str)
                           for each tool call, enabling real-time UI updates.
+            attachments: Optional list that will be populated with any files
+                         the agent attaches during this request via the attach tool.
         """
         history = self.sessions.setdefault(session_id, [])
         history.append({"role": "user", "content": message})
@@ -132,10 +153,12 @@ class Agent:
         msg_chars = _estimate_chars(history)
         logger.info("[%s] agent loop start — %d messages, ~%dk chars", sid, len(history), msg_chars // 1000)
 
+        tool_schemas = self._get_tool_schemas(session_id)
+
         for iteration in range(self.config.max_iterations):
             logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
             try:
-                response = await call_llm(self.config.model, messages, self._get_tool_schemas())
+                response = await call_llm(self.config.model, messages, tool_schemas)
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
                     raise
@@ -145,7 +168,7 @@ class Agent:
                     return "Sorry, the message was too long for me to process."
                 messages = [{"role": "system", "content": system_prompt}] + history
                 try:
-                    response = await call_llm(self.config.model, messages, self._get_tool_schemas())
+                    response = await call_llm(self.config.model, messages, tool_schemas)
                 except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
                     if not _is_context_overflow(e2):
                         raise
@@ -173,7 +196,17 @@ class Agent:
                         name,
                         json.loads(args_str),
                         self.config,
+                        attachments=attachments,
                     )
+
+                    # After load_skill, check for required tools in frontmatter
+                    if name == "load_skill":
+                        required = _parse_skill_tools(result)
+                        if required:
+                            self._session_tools.setdefault(session_id, set()).update(required)
+                            tool_schemas = self._get_tool_schemas(session_id)
+                            logger.info("[%s] skill loaded tools: %s", sid, required)
+
                     result_preview = result[:200] if result else "(empty)"
                     logger.debug("[%s] tool result: %s", sid, result_preview)
                     history.append({

@@ -48,6 +48,9 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
             if len(task) > 60:
                 task = task[:57] + "..."
             return f"Delegate: {task}"
+        case "attach":
+            name = args.get("name") or args.get("path", "")
+            return f"Attach {name}"
         case _:
             return f"{name} {args_str}"
 
@@ -102,8 +105,12 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
 
         content = _build_content(msg)
+        attachments = []
         try:
-            text = await agent.handle(content, msg.session_id, on_tool_call=on_tool_call)
+            text = await agent.handle(
+                content, msg.session_id,
+                on_tool_call=on_tool_call, attachments=attachments,
+            )
         except Exception as e:
             logger.error("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
@@ -113,6 +120,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             channel=msg.channel,
             session_id=msg.session_id,
             reply_address=msg.reply_address,
+            attachments=attachments or None,
         ))
 
 

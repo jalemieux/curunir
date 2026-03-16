@@ -1,6 +1,7 @@
 import asyncio
 
 from src.config import AgentConfig
+from src.tools.attach import exec_attach
 from src.tools.bash_tool import exec_bash
 from src.tools.fs_tools import exec_edit, exec_glob, exec_grep, exec_read, exec_write
 from src.tools.skill_tool import exec_load_skill
@@ -16,6 +17,7 @@ _SYNC_EXECUTORS = {
     "bash": exec_bash,
     "load_skill": exec_load_skill,
     "web_fetch": exec_web_fetch,
+    "attach": exec_attach,
 }
 
 
@@ -27,7 +29,10 @@ def _get_native_async_executor(name: str):
     return None
 
 
-async def execute_tool_call(name: str, args: dict, config: AgentConfig) -> str:
+async def execute_tool_call(
+    name: str, args: dict, config: AgentConfig,
+    attachments: list[dict] | None = None,
+) -> str:
     """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly."""
     key = name.lower()
 
@@ -39,6 +44,9 @@ async def execute_tool_call(name: str, args: dict, config: AgentConfig) -> str:
     # Sync executors run in a thread to avoid blocking the event loop
     sync_executor = _SYNC_EXECUTORS.get(key)
     if sync_executor:
+        # Pass attachments list to tools that accept it (e.g. attach)
+        if key == "attach":
+            return await asyncio.to_thread(sync_executor, args, config, attachments)
         return await asyncio.to_thread(sync_executor, args, config)
 
     return f"Unknown tool: {name}"
