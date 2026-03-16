@@ -28,7 +28,7 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
             if attempt > 0:
                 console.print(f"[green]Reconnected to {uri}[/green]")
             return ws
-        except OSError as exc:
+        except (OSError, websockets.exceptions.WebSocketException) as exc:
             attempt += 1
             console.print(
                 f"[yellow]Cannot connect to {uri} ({exc}). "
