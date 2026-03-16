@@ -31,7 +31,11 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
                  │ grep    edit  │
                  │ write   bash  │
                  │ load_skill    │
+                 │ web_fetch     │
+                 │ delegate      │
+                 │ attach*       │
                  └───────────────┘
+                 * opt-in, loaded by skills
                          │
                          ▼
                  ┌───────────────┐
@@ -112,6 +116,26 @@ Instructions the agent follows when it loads this skill...
 ```
 
 Skills appear in the agent's system prompt as a manifest table. The agent calls `load_skill` to fetch full instructions on demand.
+
+### Skill-Requested Tools
+
+Skills can declare opt-in tools that are only available when the skill is loaded. Add a `tools` field to the frontmatter:
+
+```yaml
+---
+name: deep-research
+description: Research a topic in depth
+tools: attach
+---
+```
+
+When the agent loads this skill via `load_skill`, the listed tools are added to the agent's tool set for the remainder of the session. This keeps the default tool set lean while allowing skills to unlock capabilities they need.
+
+**Available opt-in tools:**
+
+| Tool | Description |
+|------|-------------|
+| `attach` | Attach a file to the agent's response. Delivered as an email attachment, CLI file path, etc. depending on channel. |
 
 ## Configuration
 

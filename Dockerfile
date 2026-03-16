@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 
-# Install system deps: ripgrep (grep tool), git, jq (web-search skill), curl
+# Install system deps: ripgrep (grep tool), git, jq (web-search skill), curl,
+# pandoc (markdown→PDF/HTML conversion for report attachments)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ripgrep git jq curl && \
+    apt-get install -y --no-install-recommends ripgrep git jq curl pandoc && \
     rm -rf /var/lib/apt/lists/*
 
 # Install gog CLI (Google Workspace — Gmail, Calendar, Drive, etc.)

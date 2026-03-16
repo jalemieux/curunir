@@ -38,6 +38,14 @@ class CLIChannel:
             self._flush_tool_calls()
             self._console.print(Markdown(msg.content))
 
+        if msg.attachments:
+            for att in msg.attachments:
+                line = Text()
+                line.append("  📎 ", style="dim")
+                line.append(att["filename"], style="bold")
+                line.append(f" → {att['path']}", style="dim")
+                self._console.print(line)
+
         if msg.final:
             self._flush_tool_calls()
             self._ready.set()

@@ -131,16 +131,22 @@ def thread_download_attachments(thread_id: str, out_dir: str, account: str) -> N
     ])
 
 
-def send_reply(to: str, subject: str, body: str, reply_to_message_id: str, account: str) -> None:
-    """Send a reply to a message."""
-    _run([
+def send_reply(
+    to: str, subject: str, body: str, reply_to_message_id: str, account: str,
+    attachments: list[str] | None = None,
+) -> None:
+    """Send a reply to a message, optionally with file attachments."""
+    cmd = [
         "gog", "gmail", "send",
         "--reply-to-message-id", reply_to_message_id,
         "--to", to,
         "--subject", subject,
         "--body", body,
         "--account", account,
-    ])
+    ]
+    for path in (attachments or []):
+        cmd.extend(["--attach", path])
+    _run(cmd)
 
 
 def thread_modify(thread_id: str, add_label: str, account: str) -> None:

@@ -295,6 +295,7 @@ async def test_send_reply_and_label(email_config, in_queue):
         body="Got it, thanks!",
         reply_to_message_id="msg_1",
         account="bot@example.com",
+        attachments=None,
     )
     mock_gog.thread_modify.assert_called_once_with(
         "thread_1", add_label="agent/processed", account="bot@example.com",

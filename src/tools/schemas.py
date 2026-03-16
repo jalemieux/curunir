@@ -1,17 +1,28 @@
 ALL_TOOL_SCHEMAS: dict[str, dict] = {}
+_DEFAULT_TOOL_NAMES: list[str] = []
+_OPT_IN_TOOL_NAMES: list[str] = []
 
 
-def _register(schema: dict) -> dict:
+def _register(schema: dict, *, opt_in: bool = False) -> dict:
     """Register a schema in the global dict and return it."""
-    ALL_TOOL_SCHEMAS[schema["function"]["name"]] = schema
+    name = schema["function"]["name"]
+    ALL_TOOL_SCHEMAS[name] = schema
+    if opt_in:
+        _OPT_IN_TOOL_NAMES.append(name)
+    else:
+        _DEFAULT_TOOL_NAMES.append(name)
     return schema
 
 
 def get_tool_schemas(names: list[str] | None = None) -> list[dict]:
-    """Return tool schemas. If names is provided, return only those tools."""
+    """Return tool schemas.
+
+    If names is provided, return only those tools (from both default and opt-in).
+    Otherwise, return only default tools (excludes opt-in tools).
+    """
     if names is not None:
         return [ALL_TOOL_SCHEMAS[n] for n in names if n in ALL_TOOL_SCHEMAS]
-    return list(ALL_TOOL_SCHEMAS.values())
+    return [ALL_TOOL_SCHEMAS[n] for n in _DEFAULT_TOOL_NAMES]
 
 
 # Register all tool schemas at import time
@@ -238,3 +249,37 @@ _SCHEMAS = [
 
 for _s in _SCHEMAS:
     _register(_s)
+
+
+# Opt-in tools — not included by default, loaded when a skill requires them.
+_OPT_IN_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "attach",
+            "description": (
+                "Attach a file to your response. The file will be delivered "
+                "to the user alongside your text reply. Use this when you've "
+                "created a report, document, or other artifact the user should "
+                "receive as a file rather than inline text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the file to attach.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name for the attachment (e.g. 'research-report.md').",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+]
+
+for _s in _OPT_IN_SCHEMAS:
+    _register(_s, opt_in=True)

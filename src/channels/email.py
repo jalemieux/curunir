@@ -37,10 +37,13 @@ class EmailChannel:
         await self._poll_loop()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply in the original thread."""
+        """Send a reply in the original thread, with optional attachments."""
         if not msg.content:
             return
-        logger.info("Sending reply to %s (thread %s)", msg.reply_address.get("to"), msg.session_id)
+        attachment_paths = [att["path"] for att in msg.attachments] if msg.attachments else None
+        logger.info("Sending reply to %s (thread %s, %d attachment(s))",
+                     msg.reply_address.get("to"), msg.session_id,
+                     len(attachment_paths) if attachment_paths else 0)
         try:
             await asyncio.to_thread(
                 gog.send_reply,
@@ -49,6 +52,7 @@ class EmailChannel:
                 body=msg.content,
                 reply_to_message_id=msg.reply_address["in_reply_to"],
                 account=self.account,
+                attachments=attachment_paths,
             )
         except gog.GogError:
             logger.exception("Failed to send reply for thread %s", msg.session_id)
