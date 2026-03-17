@@ -10,9 +10,9 @@ GOG_CREDENTIALS_FILE="/secrets/gog-credentials.json"
 if [ -f "$GOG_TOKEN_FILE" ]; then
     mkdir -p "$GOG_CONFIG_DIR"
 
-    # Copy credentials (OAuth client ID/secret) if provided
+    # Register credentials (OAuth client ID/secret) if provided
     if [ -f "$GOG_CREDENTIALS_FILE" ]; then
-        cp "$GOG_CREDENTIALS_FILE" "$GOG_CONFIG_DIR/credentials.json"
+        gog auth credentials set "$GOG_CREDENTIALS_FILE"
     fi
 
     # File keyring needs a password — default to "curunir" if not set
