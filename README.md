@@ -88,9 +88,44 @@ python run.py               # starts CLI channel
 ### Docker
 
 ```bash
-docker build -t curunir .
-docker run --env-file .env -it curunir
+docker compose up --build
 ```
+
+#### Email Channel (Gmail)
+
+The email channel requires Google OAuth credentials and a token. To set up:
+
+1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+2. **Create Credentials → OAuth client ID → Desktop app** → Download the JSON file
+3. Authenticate locally with `gog` and export your token:
+   ```bash
+   gog auth credentials <downloaded-credentials.json>
+   gog auth login --email you@gmail.com
+   gog auth tokens export > gog-token.json
+   ```
+4. Place both files in the `secrets/` directory:
+   ```bash
+   mkdir -p secrets
+   cp <downloaded-credentials.json> secrets/gog-credentials.json
+   cp gog-token.json secrets/gog-token.json
+   ```
+
+5. Enable the email channel in your `.env`:
+   ```bash
+   EMAIL_ENABLED=true
+   GOG_ACCOUNT=you@gmail.com
+   EMAIL_ALLOWED_SENDERS=boss@example.com,colleague@example.com
+   ```
+
+The `secrets/` directory is mounted read-only into the container at `/secrets`. The entrypoint script automatically imports both files into the `gog` CLI configuration on startup.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMAIL_ENABLED` | `false` | Enable the email channel |
+| `GOG_ACCOUNT` | — | Gmail address to poll and send from |
+| `EMAIL_ALLOWED_SENDERS` | — | Comma-separated list of allowed sender addresses (empty = allow all) |
+| `EMAIL_POLL_INTERVAL` | `60` | Seconds between inbox polls |
+| `EMAIL_PROCESSED_LABEL` | `agent/processed` | Gmail label applied to processed threads |
 
 ## Adding Skills
 
