@@ -149,7 +149,12 @@ async def main():
         **({"filename": log_file} if log_file else {}),
     )
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-    config = AgentConfig()
+    model = os.environ.get("MODEL")
+    api_base = os.environ.get("API_BASE")
+    config = AgentConfig(
+        **({"model": model} if model else {}),
+        **({"api_base": api_base} if api_base else {}),
+    )
 
     agent = Agent(config)
     in_queue = asyncio.Queue()
