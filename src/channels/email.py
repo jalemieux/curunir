@@ -160,12 +160,28 @@ class EmailChannel:
             logger.exception("Failed to download attachments for thread %s", thread_id)
             return None
 
+        # gog saves files with an attachment-ID prefix (e.g. "19d00de1_ANGj_orig.png").
+        # Build a lookup from original filename suffix to actual path on disk.
+        try:
+            downloaded = os.listdir(out_dir)
+        except OSError:
+            logger.warning("Attachment dir missing after download: %s", out_dir)
+            return None
+
         manifest = []
         for att in raw_attachments:
+            fname = att["filename"]
+            # Try exact match first, then suffix match for prefixed filenames
+            actual = fname if fname in downloaded else next(
+                (f for f in downloaded if f.endswith("_" + fname)), None
+            )
+            if actual is None:
+                logger.warning("Attachment not found on disk: %s (dir: %s)", fname, out_dir)
+                continue
             manifest.append({
-                "filename": att["filename"],
-                "path": os.path.join(out_dir, att["filename"]),
+                "filename": fname,
+                "path": os.path.join(out_dir, actual),
                 "mime_type": att.get("mimeType", "application/octet-stream"),
                 "size": att.get("size", 0),
             })
-        return manifest
+        return manifest or None
