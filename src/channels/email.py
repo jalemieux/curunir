@@ -153,6 +153,7 @@ class EmailChannel:
             return None
 
         out_dir = os.path.join(os.path.abspath(self.attachment_dir), thread_id)
+        os.makedirs(out_dir, exist_ok=True)
 
         try:
             await asyncio.to_thread(gog.thread_download_attachments, thread_id, out_dir, self.account)
@@ -161,12 +162,9 @@ class EmailChannel:
             return None
 
         # gog saves files with an attachment-ID prefix (e.g. "19d00de1_ANGj_orig.png").
-        # Build a lookup from original filename suffix to actual path on disk.
-        try:
-            downloaded = os.listdir(out_dir)
-        except OSError:
-            logger.warning("Attachment dir missing after download: %s", out_dir)
-            return None
+        # Match downloaded files to expected attachments by suffix.
+        downloaded = os.listdir(out_dir)
+        logger.debug("Attachment dir %s contains: %s", out_dir, downloaded)
 
         manifest = []
         for att in raw_attachments:
@@ -176,11 +174,15 @@ class EmailChannel:
                 (f for f in downloaded if f.endswith("_" + fname)), None
             )
             if actual is None:
-                logger.warning("Attachment not found on disk: %s (dir: %s)", fname, out_dir)
+                logger.warning("Attachment not found on disk: %s (dir contains: %s)", fname, downloaded)
+                continue
+            full_path = os.path.join(out_dir, actual)
+            if not os.path.isfile(full_path):
+                logger.warning("Attachment matched but not a file: %s", full_path)
                 continue
             manifest.append({
                 "filename": fname,
-                "path": os.path.join(out_dir, actual),
+                "path": full_path,
                 "mime_type": att.get("mimeType", "application/octet-stream"),
                 "size": att.get("size", 0),
             })

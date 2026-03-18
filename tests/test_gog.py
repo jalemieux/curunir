@@ -7,6 +7,7 @@ import pytest
 from src.channels.gog import (
     check_installed, GogError, labels_list, labels_create,
     search, thread_get, thread_download_attachments, send_reply, thread_modify,
+    _extract_attachments,
 )
 
 
@@ -129,6 +130,28 @@ def test_thread_modify_add_label():
         ["gog", "gmail", "thread", "modify", "thread_1", "--add", "agent/processed", "--account", "bot@example.com"],
         capture_output=True, text=True, check=False,
     )
+
+
+def test_extract_attachments_nested_parts():
+    """Forwarded emails have attachments in nested MIME parts."""
+    payload = {
+        "parts": [
+            {"mimeType": "text/plain", "body": {"data": ""}, "filename": ""},
+            {
+                "mimeType": "multipart/mixed",
+                "filename": "",
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": ""}, "filename": ""},
+                    {"mimeType": "image/png", "filename": "screenshot.png", "body": {"size": 4096}},
+                ],
+            },
+        ]
+    }
+    attachments = _extract_attachments(payload)
+    assert len(attachments) == 1
+    assert attachments[0]["filename"] == "screenshot.png"
+    assert attachments[0]["mimeType"] == "image/png"
+    assert attachments[0]["size"] == 4096
 
 
 def test_run_json_malformed():
