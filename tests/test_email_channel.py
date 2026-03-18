@@ -211,79 +211,100 @@ async def test_poll_once_no_double_re_prefix(email_config, in_queue):
 
 
 @pytest.mark.asyncio
-async def test_poll_once_with_attachments(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+async def test_poll_once_with_attachments(in_queue):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            account="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = EmailChannel(in_queue, config)
 
-    thread = {
-        "id": "thread_1",
-        "messages": [
-            {
-                "id": "msg_1",
-                "from": "alice@example.com",
-                "subject": "Report",
-                "body": "See attached.",
-                "attachments": [
-                    {"filename": "report.pdf", "mimeType": "application/pdf", "size": 12288},
-                ],
-            }
-        ],
-    }
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Report",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "report.pdf", "mimeType": "application/pdf", "size": 12288},
+                    ],
+                }
+            ],
+        }
 
-    with patch("src.channels.email.gog") as mock_gog, \
-         patch("src.channels.email.os.listdir", return_value=["report.pdf"]), \
-         patch("src.channels.email.os.makedirs"), \
-         patch("src.channels.email.os.path.isfile", return_value=True):
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
-        mock_gog.thread_download_attachments.return_value = None
-        await ch._poll_once()
+        def fake_download(thread_id, out_dir, account):
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, "report.pdf"), "wb") as f:
+                f.write(b"fake pdf")
 
-    msg = in_queue.get_nowait()
-    assert msg.attachments is not None
-    assert len(msg.attachments) == 1
-    assert msg.attachments[0]["filename"] == "report.pdf"
-    assert msg.attachments[0]["path"] == "/tmp/attachments/thread_1/report.pdf"
-    assert msg.attachments[0]["mime_type"] == "application/pdf"
-    assert msg.attachments[0]["size"] == 12288
-    assert "report.pdf" in msg.content
-    assert "12KB" in msg.content
+        with patch("src.channels.email.gog") as mock_gog:
+            mock_gog.search.return_value = [{"id": "thread_1"}]
+            mock_gog.thread_get.return_value = thread
+            mock_gog.thread_download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+        assert msg.attachments[0]["filename"] == "report.pdf"
+        assert msg.attachments[0]["path"].endswith("/thread_1/report.pdf")
+        assert msg.attachments[0]["mime_type"] == "application/pdf"
+        assert msg.attachments[0]["size"] == 12288
+        assert "report.pdf" in msg.content
+        assert "12KB" in msg.content
+        # Verify the file is actually openable at the manifest path
+        with open(msg.attachments[0]["path"], "rb") as f:
+            assert f.read() == b"fake pdf"
 
 
 @pytest.mark.asyncio
-async def test_poll_once_with_prefixed_attachments(email_config, in_queue):
+async def test_poll_once_with_prefixed_attachments(in_queue):
     """gog saves files with an attachment-ID prefix; manifest should resolve them."""
-    ch = EmailChannel(in_queue, email_config)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            account="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = EmailChannel(in_queue, config)
 
-    thread = {
-        "id": "thread_1",
-        "messages": [
-            {
-                "id": "msg_1",
-                "from": "alice@example.com",
-                "subject": "Screenshot",
-                "body": "See attached.",
-                "attachments": [
-                    {"filename": "screenshot.png", "mimeType": "image/png", "size": 4096},
-                ],
-            }
-        ],
-    }
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Screenshot",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "screenshot.png", "mimeType": "image/png", "size": 4096},
+                    ],
+                }
+            ],
+        }
 
-    prefixed_name = "19d00de117c89d79_ANGjdJ9P_screenshot.png"
-    with patch("src.channels.email.gog") as mock_gog, \
-         patch("src.channels.email.os.listdir", return_value=[prefixed_name]), \
-         patch("src.channels.email.os.makedirs"), \
-         patch("src.channels.email.os.path.isfile", return_value=True):
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
-        mock_gog.thread_download_attachments.return_value = None
-        await ch._poll_once()
+        prefixed_name = "19d00de117c89d79_ANGjdJ9P_screenshot.png"
+        def fake_download(thread_id, out_dir, account):
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, prefixed_name), "wb") as f:
+                f.write(b"fake png")
 
-    msg = in_queue.get_nowait()
-    assert msg.attachments is not None
-    assert len(msg.attachments) == 1
-    assert msg.attachments[0]["filename"] == "screenshot.png"
-    assert msg.attachments[0]["path"] == f"/tmp/attachments/thread_1/{prefixed_name}"
+        with patch("src.channels.email.gog") as mock_gog:
+            mock_gog.search.return_value = [{"id": "thread_1"}]
+            mock_gog.thread_get.return_value = thread
+            mock_gog.thread_download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+        assert msg.attachments[0]["filename"] == "screenshot.png"
+        assert prefixed_name in msg.attachments[0]["path"]
+        with open(msg.attachments[0]["path"], "rb") as f:
+            assert f.read() == b"fake png"
 
 
 @pytest.mark.asyncio
