@@ -166,7 +166,7 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "0.0.0.0")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port)
+    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model)
     channels["cli"] = ws
 
     # Email channel (conditional)

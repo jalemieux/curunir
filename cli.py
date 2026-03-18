@@ -43,9 +43,9 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     uri = f"ws://{host}:{port}"
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim]")
-    console.print("[dim]type /clear to reset, /verbose to toggle tool output[/dim]\n")
+    console.print("[dim]type /clear to reset, /verbose to toggle tool output[/dim]")
 
-    verbose = False
+    verbose = True
     ready = asyncio.Event()
     ready.set()
 
@@ -85,6 +85,11 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 data = json.loads(raw)
 
                 stop_spinner()
+
+                # Welcome message with model info
+                if "model" in data:
+                    console.print(f"[dim]model: {data['model']}[/dim]\n")
+                    continue
 
                 tool_calls = data.get("tool_calls") or []
                 content = data.get("content") or ""

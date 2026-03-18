@@ -13,10 +13,11 @@ SESSION_ID = "cli"
 
 
 class WebSocketChannel:
-    def __init__(self, in_queue: asyncio.Queue, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, in_queue: asyncio.Queue, host: str = "0.0.0.0", port: int = 8765, model: str = ""):
         self.in_queue = in_queue
         self.host = host
         self.port = port
+        self.model = model
         self._connection: websockets.ServerConnection | None = None
 
     async def start(self) -> None:
@@ -39,6 +40,11 @@ class WebSocketChannel:
         self._connection = websocket
         remote = websocket.remote_address
         logger.info("Client connected from %s", remote)
+
+        # Send welcome message with model info
+        if self.model:
+            welcome = json.dumps({"content": "", "model": self.model, "final": False})
+            await websocket.send(welcome)
 
         try:
             async for raw in websocket:
