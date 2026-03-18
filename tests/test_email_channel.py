@@ -227,7 +227,8 @@ async def test_poll_once_with_attachments(email_config, in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
+    with patch("src.channels.email.gog") as mock_gog, \
+         patch("src.channels.email.os.listdir", return_value=["report.pdf"]):
         mock_gog.search.return_value = [{"id": "thread_1"}]
         mock_gog.thread_get.return_value = thread
         mock_gog.thread_download_attachments.return_value = None
@@ -242,6 +243,41 @@ async def test_poll_once_with_attachments(email_config, in_queue):
     assert msg.attachments[0]["size"] == 12288
     assert "report.pdf" in msg.content
     assert "12KB" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_poll_once_with_prefixed_attachments(email_config, in_queue):
+    """gog saves files with an attachment-ID prefix; manifest should resolve them."""
+    ch = EmailChannel(in_queue, email_config)
+
+    thread = {
+        "id": "thread_1",
+        "messages": [
+            {
+                "id": "msg_1",
+                "from": "alice@example.com",
+                "subject": "Screenshot",
+                "body": "See attached.",
+                "attachments": [
+                    {"filename": "screenshot.png", "mimeType": "image/png", "size": 4096},
+                ],
+            }
+        ],
+    }
+
+    prefixed_name = "19d00de117c89d79_ANGjdJ9P_screenshot.png"
+    with patch("src.channels.email.gog") as mock_gog, \
+         patch("src.channels.email.os.listdir", return_value=[prefixed_name]):
+        mock_gog.search.return_value = [{"id": "thread_1"}]
+        mock_gog.thread_get.return_value = thread
+        mock_gog.thread_download_attachments.return_value = None
+        await ch._poll_once()
+
+    msg = in_queue.get_nowait()
+    assert msg.attachments is not None
+    assert len(msg.attachments) == 1
+    assert msg.attachments[0]["filename"] == "screenshot.png"
+    assert msg.attachments[0]["path"] == f"/tmp/attachments/thread_1/{prefixed_name}"
 
 
 @pytest.mark.asyncio
