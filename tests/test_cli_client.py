@@ -185,8 +185,8 @@ async def test_output_renders_attachments():
 
 
 @pytest.mark.asyncio
-async def test_tool_calls_hidden_by_default():
-    """Tool calls are NOT rendered when verbose is off (default)."""
+async def test_tool_calls_shown_by_default():
+    """Tool calls ARE rendered by default (verbose is on)."""
     port = _BASE_PORT + 6
 
     async def handler(ws: websockets.ServerConnection) -> None:
@@ -204,36 +204,36 @@ async def test_tool_calls_hidden_by_default():
         await cli.run("127.0.0.1", port, console=console)
 
     output = console.file.getvalue()
-    assert "secret_tool.py" not in output
+    assert "secret_tool.py" in output
 
 
 @pytest.mark.asyncio
-async def test_tool_calls_shown_when_verbose():
-    """/verbose enables tool call display."""
+async def test_tool_calls_hidden_when_verbose_toggled_off():
+    """/verbose toggles tool call display off (verbose is on by default)."""
     port = _BASE_PORT + 7
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for _ in ws:
             await ws.send(json.dumps({
                 "content": "done",
-                "tool_calls": ["Read visible_tool.py"],
+                "tool_calls": ["Read hidden_tool.py"],
                 "final": True,
                 "attachments": None,
             }))
 
-    # /verbose first, then the real message
+    # /verbose toggles off (default is on), then send message
     console = _make_console_with_input(["/verbose", "hi"])
 
     async with websockets.serve(handler, "127.0.0.1", port):
         await cli.run("127.0.0.1", port, console=console)
 
     output = console.file.getvalue()
-    assert "visible_tool.py" in output
+    assert "hidden_tool.py" not in output
 
 
 @pytest.mark.asyncio
-async def test_verbose_toggles_off():
-    """/verbose a second time disables tool call display again."""
+async def test_verbose_toggle_messages():
+    """/verbose toggles off then on (verbose starts on by default)."""
     port = _BASE_PORT + 8
     call_count = [0]
 
@@ -247,22 +247,15 @@ async def test_verbose_toggles_off():
                 "attachments": None,
             }))
 
-    # Toggle on, send first message, toggle off, send second message, EOF
+    # Toggle off, send msg, toggle on, send msg
     console = _make_console_with_input(["/verbose", "msg1", "/verbose", "msg2"])
 
     async with websockets.serve(handler, "127.0.0.1", port):
         await cli.run("127.0.0.1", port, console=console)
 
     output = console.file.getvalue()
-    # tool.py should appear for msg1 (verbose on) but not after msg2 (verbose off).
-    # The ANSI rewrite trick (move-up + erase) means tool.py may appear twice in the
-    # raw buffer (once for ├─ and once for the ╰─ rewrite), but it must NOT appear in
-    # the portion of output after "response 2".
-    assert "response 2" in output
-    idx_response2 = output.index("response 2")
-    assert "tool.py" not in output[idx_response2:]
-    # And tool.py should appear at least once before response 2 (msg1 with verbose on)
-    assert "tool.py" in output[:idx_response2]
+    assert "Verbose mode off" in output
+    assert "Verbose mode on" in output
 
 
 # ---------------------------------------------------------------------------
