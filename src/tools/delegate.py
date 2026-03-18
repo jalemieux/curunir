@@ -30,6 +30,7 @@ async def exec_delegate(args: dict, config: AgentConfig) -> str:
 
     # Build the sub-agent's input: text, or multimodal blocks if images
     if image_paths:
+        logger.info("Delegate image_paths: %s", image_paths)
         content = _build_multimodal_content(task, image_paths)
     else:
         content = task

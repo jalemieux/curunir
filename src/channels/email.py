@@ -3,12 +3,21 @@
 import asyncio
 import logging
 import os
+import re
 
 from src.channels import gog
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
+
+# Regex matching any Unicode whitespace character that isn't a regular space
+_UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
+
+
+def _normalize_unicode_whitespace(s: str) -> str:
+    """Replace Unicode whitespace characters (e.g. \\u202f) with regular spaces."""
+    return _UNICODE_WHITESPACE_RE.sub(' ', s)
 
 
 class EmailChannel:
@@ -108,6 +117,9 @@ class EmailChannel:
                 reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
 
                 attachments = await self._process_attachments(thread_id, message)
+                logger.info("Attachments for msg %s: %s",
+                            message["id"],
+                            [a["path"] for a in attachments] if attachments else None)
 
                 content = message.get("body", "")
                 if attachments:
@@ -161,14 +173,19 @@ class EmailChannel:
             logger.exception("Failed to download attachments for thread %s", thread_id)
             return None
 
+        # Rename downloaded files to normalize Unicode whitespace (e.g. \u202f)
+        # to regular spaces. LLMs convert exotic whitespace to regular spaces
+        # when generating tool calls, causing file-not-found errors.
+        self._normalize_filenames(out_dir)
+
         # gog saves files with an attachment-ID prefix (e.g. "19d00de1_ANGj_orig.png").
         # Match downloaded files to expected attachments by suffix.
         downloaded = os.listdir(out_dir)
-        logger.debug("Attachment dir %s contains: %s", out_dir, downloaded)
+        logger.info("Attachment dir %s: %d file(s) %s", out_dir, len(downloaded), downloaded)
 
         manifest = []
         for att in raw_attachments:
-            fname = att["filename"]
+            fname = _normalize_unicode_whitespace(att["filename"])
             # Try exact match first, then suffix match for prefixed filenames
             actual = fname if fname in downloaded else next(
                 (f for f in downloaded if f.endswith("_" + fname)), None
@@ -187,3 +204,14 @@ class EmailChannel:
                 "size": att.get("size", 0),
             })
         return manifest or None
+
+    @staticmethod
+    def _normalize_filenames(directory: str) -> None:
+        """Rename files to replace Unicode whitespace with regular spaces."""
+        for name in os.listdir(directory):
+            normalized = _normalize_unicode_whitespace(name)
+            if normalized != name:
+                old = os.path.join(directory, name)
+                new = os.path.join(directory, normalized)
+                os.rename(old, new)
+                logger.info("Renamed attachment: %r -> %r", name, normalized)
