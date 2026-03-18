@@ -82,7 +82,7 @@ async def _extract(config: AgentConfig, history: list[dict]) -> None:
         {"role": "user", "content": _format_history(history)},
     ]
 
-    response = await call_llm(config.model, messages, tools=[], api_base=config.api_base)
+    response = await call_llm(config.model, messages, tools=[], api_base=config.api_base, openrouter_provider=config.openrouter_provider)
 
     if not response.text:
         log.warning("extraction returned empty response")

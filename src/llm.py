@@ -15,6 +15,7 @@ async def call_llm(
     messages: list[dict],
     tools: list[dict],
     api_base: str | None = None,
+    openrouter_provider: str | None = None,
 ) -> LLMResponse:
     """Call LLM via LiteLLM, return normalized response."""
     kwargs = {
@@ -24,6 +25,8 @@ async def call_llm(
     }
     if api_base:
         kwargs["api_base"] = api_base
+    if openrouter_provider:
+        kwargs["extra_body"] = {"provider": {"order": [openrouter_provider]}}
     if tools:
         kwargs["tools"] = tools
 
