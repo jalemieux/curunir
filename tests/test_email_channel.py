@@ -228,7 +228,9 @@ async def test_poll_once_with_attachments(email_config, in_queue):
     }
 
     with patch("src.channels.email.gog") as mock_gog, \
-         patch("src.channels.email.os.listdir", return_value=["report.pdf"]):
+         patch("src.channels.email.os.listdir", return_value=["report.pdf"]), \
+         patch("src.channels.email.os.makedirs"), \
+         patch("src.channels.email.os.path.isfile", return_value=True):
         mock_gog.search.return_value = [{"id": "thread_1"}]
         mock_gog.thread_get.return_value = thread
         mock_gog.thread_download_attachments.return_value = None
@@ -267,7 +269,9 @@ async def test_poll_once_with_prefixed_attachments(email_config, in_queue):
 
     prefixed_name = "19d00de117c89d79_ANGjdJ9P_screenshot.png"
     with patch("src.channels.email.gog") as mock_gog, \
-         patch("src.channels.email.os.listdir", return_value=[prefixed_name]):
+         patch("src.channels.email.os.listdir", return_value=[prefixed_name]), \
+         patch("src.channels.email.os.makedirs"), \
+         patch("src.channels.email.os.path.isfile", return_value=True):
         mock_gog.search.return_value = [{"id": "thread_1"}]
         mock_gog.thread_get.return_value = thread
         mock_gog.thread_download_attachments.return_value = None

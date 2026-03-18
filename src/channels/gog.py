@@ -94,7 +94,7 @@ def _decode_body(payload: dict) -> str:
 
 
 def _extract_attachments(payload: dict) -> list[dict]:
-    """Extract attachment metadata from a Gmail message payload."""
+    """Extract attachment metadata from a Gmail message payload (recursive)."""
     attachments = []
     for part in payload.get("parts", []):
         filename = part.get("filename", "")
@@ -104,6 +104,9 @@ def _extract_attachments(payload: dict) -> list[dict]:
                 "mimeType": part.get("mimeType", "application/octet-stream"),
                 "size": part.get("body", {}).get("size", 0),
             })
+        # Recurse into nested multipart structures (e.g. forwarded emails)
+        if part.get("parts"):
+            attachments.extend(_extract_attachments(part))
     return attachments
 
 
