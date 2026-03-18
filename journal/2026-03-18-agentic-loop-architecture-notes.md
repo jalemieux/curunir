@@ -73,3 +73,17 @@ Best fit when the bottleneck is **cost, not capability**. For personal assistant
 Start with **Option 2** — swap the model, keep the architecture simple. Test Kimi K2 or Gemini 2.5 Flash (thinking) across your actual looper workload. Only revisit Option 1 if you find a specific task class where a cheaper orchestrator fails and you need Opus-level planning but still want to contain costs on the execution side.
 
 The two-model pattern makes more sense at scale (platform/enterprise workloads) than for a personal assistant running on a MacBook.
+
+---
+
+## Addendum: OpenRouter Testing (2026-03-18)
+
+Added support for configurable model, API base, and OpenRouter provider routing via env vars (`MODEL`, `API_BASE`, `OPENROUTER_PROVIDER`). This lets us point the agent at any model available through OpenRouter and pin a specific inference provider.
+
+### Kimi K2.5
+
+Tried Kimi K2.5 via OpenRouter (DeepInfra provider). The model was unable to handle tool call responses — it would make tool calls, receive results, and then repeat the same calls (e.g. reading the same file 3 times in a single turn). It couldn't track what it had already done from the conversation history. Not viable for an agentic loop that relies on coherent multi-step tool use.
+
+### GLM-5-Turbo
+
+Settled on GLM-5-Turbo (via OpenRouter) for now. Handles tool calling correctly and is significantly cheaper than Sonnet 4.6.

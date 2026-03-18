@@ -158,7 +158,7 @@ class Agent:
         for iteration in range(self.config.max_iterations):
             logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
             try:
-                response = await call_llm(self.config.model, messages, tool_schemas, api_base=self.config.api_base)
+                response = await call_llm(self.config.model, messages, tool_schemas, api_base=self.config.api_base, openrouter_provider=self.config.openrouter_provider)
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
                     raise
@@ -168,7 +168,7 @@ class Agent:
                     return "Sorry, the message was too long for me to process."
                 messages = [{"role": "system", "content": system_prompt}] + history
                 try:
-                    response = await call_llm(self.config.model, messages, tool_schemas, api_base=self.config.api_base)
+                    response = await call_llm(self.config.model, messages, tool_schemas, api_base=self.config.api_base, openrouter_provider=self.config.openrouter_provider)
                 except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
                     if not _is_context_overflow(e2):
                         raise

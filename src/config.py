@@ -7,6 +7,7 @@ from pathlib import Path
 class AgentConfig:
     model: str = "anthropic/claude-sonnet-4-20250514"
     api_base: str | None = None
+    openrouter_provider: str | None = None
     max_iterations: int = 75
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
