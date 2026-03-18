@@ -151,9 +151,11 @@ async def main():
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
+    openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
+        **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
     )
 
     agent = Agent(config)
