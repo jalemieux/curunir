@@ -10,13 +10,20 @@ class LLMResponse:
     tool_calls: list[dict] | None
 
 
-async def call_llm(model: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+async def call_llm(
+    model: str,
+    messages: list[dict],
+    tools: list[dict],
+    api_base: str | None = None,
+) -> LLMResponse:
     """Call LLM via LiteLLM, return normalized response."""
     kwargs = {
         "model": model,
         "messages": messages,
         "max_tokens": 16000,
     }
+    if api_base:
+        kwargs["api_base"] = api_base
     if tools:
         kwargs["tools"] = tools
 
