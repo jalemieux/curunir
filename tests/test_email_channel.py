@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
@@ -282,6 +284,167 @@ async def test_poll_once_with_prefixed_attachments(email_config, in_queue):
     assert len(msg.attachments) == 1
     assert msg.attachments[0]["filename"] == "screenshot.png"
     assert msg.attachments[0]["path"] == f"/tmp/attachments/thread_1/{prefixed_name}"
+
+
+@pytest.mark.asyncio
+async def test_attachment_manifest_uses_real_filesystem(in_queue):
+    """End-to-end test: gog creates prefixed files on disk, manifest resolves them,
+    and the file is actually openable at the manifest path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            account="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = EmailChannel(in_queue, config)
+
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Screenshot",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "Screenshot 2026-03-18 at 5.13.10 AM.png",
+                         "mimeType": "image/png", "size": 4096},
+                    ],
+                }
+            ],
+        }
+
+        # Simulate what gog does: create the prefixed file on disk
+        prefixed_name = "19d011139876056b_ANGjdJ83_Screenshot 2026-03-18 at 5.13.10 AM.png"
+        def fake_download(thread_id, out_dir, account):
+            os.makedirs(out_dir, exist_ok=True)
+            filepath = os.path.join(out_dir, prefixed_name)
+            with open(filepath, "wb") as f:
+                f.write(b"\x89PNG fake image data")
+
+        with patch("src.channels.email.gog") as mock_gog:
+            mock_gog.search.return_value = [{"id": "thread_1"}]
+            mock_gog.thread_get.return_value = thread
+            mock_gog.thread_download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+
+        att = msg.attachments[0]
+        assert att["filename"] == "Screenshot 2026-03-18 at 5.13.10 AM.png"
+        assert prefixed_name in att["path"]
+
+        # THE CRITICAL CHECK: the file must actually be openable at this path
+        with open(att["path"], "rb") as f:
+            data = f.read()
+        assert data == b"\x89PNG fake image data"
+
+        # Verify the path is in the message content (what the agent sees)
+        assert att["path"] in msg.content
+
+
+@pytest.mark.asyncio
+async def test_attachment_unicode_whitespace_normalized(in_queue):
+    """Gmail uses \\u202f (narrow no-break space) in filenames like
+    'Screenshot 2026-03-18 at 5.13.10\\u202fAM.png'. LLMs convert this
+    to a regular space in tool calls, causing file-not-found. Verify
+    we normalize the filename on disk so the path always uses regular spaces."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            account="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = EmailChannel(in_queue, config)
+
+        # Gmail API returns filename with \u202f (narrow no-break space)
+        unicode_fname = "Screenshot 2026-03-18 at 5.13.10\u202fAM.png"
+        normal_fname = "Screenshot 2026-03-18 at 5.13.10 AM.png"
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Screenshot",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": unicode_fname, "mimeType": "image/png", "size": 4096},
+                    ],
+                }
+            ],
+        }
+
+        # gog also saves the file with \u202f in the filename
+        prefixed_unicode = f"19d011139876056b_ANGjdJ83_{unicode_fname}"
+        def fake_download(thread_id, out_dir, account):
+            os.makedirs(out_dir, exist_ok=True)
+            filepath = os.path.join(out_dir, prefixed_unicode)
+            with open(filepath, "wb") as f:
+                f.write(b"\x89PNG fake image data")
+
+        with patch("src.channels.email.gog") as mock_gog:
+            mock_gog.search.return_value = [{"id": "thread_1"}]
+            mock_gog.thread_get.return_value = thread
+            mock_gog.thread_download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is not None
+
+        att = msg.attachments[0]
+        # Filename should be normalized to regular spaces
+        assert att["filename"] == normal_fname
+        assert "\u202f" not in att["path"]
+
+        # The file must be openable at the manifest path (with regular spaces)
+        with open(att["path"], "rb") as f:
+            data = f.read()
+        assert data == b"\x89PNG fake image data"
+
+
+@pytest.mark.asyncio
+async def test_attachment_missing_from_disk_is_excluded(in_queue):
+    """If gog doesn't download the file, it should NOT appear in the manifest."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            account="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = EmailChannel(in_queue, config)
+
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Fwd: Screenshot",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "screenshot.png", "mimeType": "image/png", "size": 4096},
+                    ],
+                }
+            ],
+        }
+
+        # gog "succeeds" but writes NO files (e.g. forwarded email attachment not downloadable)
+        def fake_download_noop(thread_id, out_dir, account):
+            pass  # directory created by our code, but gog downloads nothing
+
+        with patch("src.channels.email.gog") as mock_gog:
+            mock_gog.search.return_value = [{"id": "thread_1"}]
+            mock_gog.thread_get.return_value = thread
+            mock_gog.thread_download_attachments.side_effect = fake_download_noop
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        # Attachment should NOT be in the manifest since file doesn't exist
+        assert msg.attachments is None
+        assert "screenshot.png" not in msg.content
 
 
 @pytest.mark.asyncio
