@@ -181,7 +181,7 @@ class EmailChannel:
         # gog saves files with an attachment-ID prefix (e.g. "19d00de1_ANGj_orig.png").
         # Match downloaded files to expected attachments by suffix.
         downloaded = os.listdir(out_dir)
-        logger.info("Attachment dir %s: %d file(s) %s", out_dir, len(downloaded), downloaded)
+        logger.debug("Attachment dir %s: %d file(s) %s", out_dir, len(downloaded), downloaded)
 
         manifest = []
         for att in raw_attachments:
