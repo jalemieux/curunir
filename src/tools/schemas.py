@@ -245,6 +245,49 @@ _SCHEMAS = [
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "schedule",
+                "description": (
+                    "Manage scheduled tasks that run autonomously on a cron schedule. "
+                    "Use this to set up recurring tasks like morning briefs, PR checks, "
+                    "or maintenance jobs. Scheduled tasks run in their own session with "
+                    "no conversation context, so make prompts self-contained."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "add", "update", "remove"],
+                            "description": "The operation to perform.",
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Human-readable task ID (e.g. 'morning-brief'). Required for add/update/remove.",
+                        },
+                        "cron": {
+                            "type": "string",
+                            "description": "5-field cron expression (e.g. '0 9 * * *' for 9am daily). Required for add.",
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The instruction to execute when the task fires. Must be self-contained. Required for add.",
+                        },
+                        "skill": {
+                            "type": "string",
+                            "description": "Optional skill name to load before executing the prompt.",
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Enable or disable the task. Used with update.",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
 ]
 
 for _s in _SCHEMAS:
