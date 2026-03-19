@@ -5,6 +5,7 @@ from src.tools.attach import exec_attach
 from src.tools.bash_tool import exec_bash
 from src.tools.fs_tools import exec_edit, exec_glob, exec_grep, exec_read, exec_write
 from src.tools.skill_tool import exec_load_skill
+from src.tools.schedule_tool import exec_schedule
 from src.tools.web_fetch import exec_web_fetch
 
 # Sync executors — wrapped in asyncio.to_thread at call time
@@ -18,6 +19,7 @@ _SYNC_EXECUTORS = {
     "load_skill": exec_load_skill,
     "web_fetch": exec_web_fetch,
     "attach": exec_attach,
+    "schedule": exec_schedule,
 }
 
 
