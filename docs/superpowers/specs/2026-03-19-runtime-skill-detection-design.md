@@ -26,17 +26,27 @@ Rebuild the skill manifest on new session creation. The trigger is `session_id n
 
 **`_refresh_manifest()`** — new private method. Calls `build_skill_manifest(self.config.skills_dir)` and stores the result in `self._skill_manifest`.
 
-**`_build_system_prompt()`** — new private method. Joins `self._identity`, `self._skill_manifest`, and the current timestamp. Replaces the inline concat currently on line 148.
+**`_build_system_prompt()`** — new private method. Joins `self._identity`, `self._skill_manifest`, and the current timestamp. Replaces both `build_static_prompt()` and the inline `system_prompt = self.static_prompt + ...` assignment in `handle()`.
 
 **`handle()`** — before `self.sessions.setdefault(session_id, [])`, check `if session_id not in self.sessions` and call `self._refresh_manifest()` if true.
+
+Note: The first session triggers a redundant re-scan since the manifest was just built at init. This is acceptable — the cost is one extra directory listing, and adding a skip flag would add complexity for negligible benefit.
+
+### Changes to `system_prompt.py`
+
+`build_static_prompt()` is removed. Its responsibilities (reading identity + building manifest) move into `Agent.__init__` and `_build_system_prompt()`. The `Agent` import of `build_static_prompt` is replaced with a direct import of `build_skill_manifest` from `src/skills.py`.
 
 ### Files unchanged
 
 - `src/skills.py` — `build_skill_manifest()` and `load_skill()` stay as-is.
-- `src/agent/system_prompt.py` — `build_static_prompt()` stays as-is, used only at init time.
 - `src/config.py` — no changes.
+
+### Concurrency note
+
+If two new sessions arrive concurrently, both may trigger `_refresh_manifest()`. This is safe — `build_skill_manifest()` is a pure read, and the attribute assignment is atomic under the GIL.
 
 ## Testing
 
 1. **New session picks up new skills:** Create an `Agent`, call `handle()` with session "s1", add a new skill dir to the tmp skills folder, call `handle()` with session "s2" — assert the new skill name appears in the system prompt sent to the LLM.
 2. **Same session does not re-scan:** Call `handle()` twice with the same session ID — assert `build_skill_manifest` is NOT called on the second invocation.
+3. **Empty skills dir after refresh:** Agent with no skills or nonexistent skills_dir still works after `_refresh_manifest()` — returns empty manifest without error.
