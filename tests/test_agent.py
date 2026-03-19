@@ -200,26 +200,51 @@ class TestHistoryTruncation:
         non_system = [m for m in messages if m["role"] != "system"]
         assert non_system[0]["role"] == "user"
 
+    async def test_system_task_trims_tool_groups_after_user_prompt(self, agent_config):
+        """System tasks (single user message) should trim old tool groups, not the task prompt."""
+        agent = Agent(agent_config)
+        session_id = "sched:trim:1"
+        history = agent.sessions.setdefault(session_id, [])
+        # Simulate: task prompt + many large tool call rounds
+        history.append({"role": "user", "content": "## Scheduled Task\nDo something."})
+        for i in range(20):
+            history.append({"role": "assistant", "tool_calls": [{"id": f"c{i}", "function": {"name": "bash", "arguments": "{}"}}]})
+            history.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 100_000})
+
+        mock_response = LLMResponse(text="done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            result = await agent.handle("", session_id, system_task_prompt="Do something.")
+
+        messages = mock_llm.call_args[0][1]
+        non_system = [m for m in messages if m["role"] != "system"]
+        # Task prompt must survive trimming
+        assert non_system[0]["role"] == "user"
+        assert "Scheduled Task" in non_system[0]["content"]
+        # History should have been trimmed (less than original 41 messages)
+        assert len(non_system) < 41
+
 
 class TestSystemTaskMode:
-    async def test_system_task_no_user_message_sent_to_llm(self, agent):
+    async def test_system_task_sends_user_message(self, agent):
         mock_response = LLMResponse(text="Task done.", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             result = await agent.handle("", "sched:test:123", system_task_prompt="Do the thing.")
         assert result == "Task done."
-        # Check via the LLM call: no user message should be in the messages list
+        # Task prompt should be sent as a user message for provider compatibility
         messages = mock_llm.call_args[0][1]
-        non_system = [m for m in messages if m["role"] != "system"]
-        assert not any(m["role"] == "user" for m in non_system)
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert "Do the thing." in user_msgs[0]["content"]
 
-    async def test_system_task_prompt_in_system_message(self, agent):
+    async def test_system_task_prompt_in_user_message(self, agent):
         mock_response = LLMResponse(text="Done", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("", "sched:test:123", system_task_prompt="Check PRs.")
         messages = mock_llm.call_args[0][1]
-        system_msg = messages[0]["content"]
-        assert "## Scheduled Task" in system_msg
-        assert "Check PRs." in system_msg
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert "## Scheduled Task" in user_msgs[0]["content"]
+        assert "Check PRs." in user_msgs[0]["content"]
 
     async def test_system_task_cleans_up_session(self, agent):
         mock_response = LLMResponse(text="Done", tool_calls=None)
