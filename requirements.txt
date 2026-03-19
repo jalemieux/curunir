@@ -6,3 +6,4 @@ trafilatura
 websockets
 pytest
 pytest-asyncio
+croniter
