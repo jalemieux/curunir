@@ -86,7 +86,7 @@ Error responses (starting with `"Error:"` or `"Sorry,"`) are suppressed from del
 
 - **`run.py`**: Pass `out_queue` to `run_scheduler()`.
 - **`src/scheduler.py`**: `run_scheduler()` accepts `out_queue` and passes it to `_run_task()`. `_run_task()` receives both `out_queue` and the full task dict (including `delivery`), constructs and enqueues the `OutgoingMessage` when delivery is configured.
-- **`src/channels/email.py`**: `EmailChannel.send()` currently calls `gog.send_reply()`, which requires `subject` and `in_reply_to`. For scheduled task delivery, `in_reply_to` will be `None` (no existing thread). `send()` must handle this case — when `in_reply_to` is `None`, send a new email rather than a reply-in-thread. This may require a `gog.send_new()` method or branching within `send()` based on the presence of `in_reply_to`.
+- **`src/channels/email.py`**: `EmailChannel.send()` currently calls `gog.send_reply()`, which requires `subject` and `in_reply_to`. For scheduled task delivery, `in_reply_to` will be `None` (no existing thread). `send()` must branch on the presence of `in_reply_to`: when present, call `gog.send_reply()` as today; when `None`, call `gog.send_reply()` with the `--reply-to-message-id` flag omitted (conditionally build the CLI args). Additionally, `send()` must skip the `gog.thread_modify()` labeling step when `in_reply_to` is `None`, since the `session_id` for scheduled deliveries (e.g., `"sched:morning-brief:1742400000"`) is not a Gmail thread ID and would cause a noisy error.
 - **Router**: No changes. Already consumes `OutgoingMessage` from `out_queue` and routes by `channel` field.
 
 ### Channel Availability
