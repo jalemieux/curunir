@@ -30,6 +30,13 @@ class TestExecuteToolCall:
         result = await execute_tool_call("Bash", {"command": "echo case_test"}, agent_config)
         assert "case_test" in result
 
+    async def test_dispatches_schedule(self, tmp_path, agent_config):
+        agent_config.context_dir = tmp_path
+        result = await execute_tool_call(
+            "schedule", {"action": "list"}, agent_config,
+        )
+        assert "no scheduled tasks" in result.lower()
+
     async def test_dispatches_delegate_async(self, agent_config):
         """Delegate is a native async executor, dispatched without to_thread."""
         from unittest.mock import AsyncMock, patch

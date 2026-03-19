@@ -20,3 +20,10 @@ You have persistent memory in `context/memory/`. Read `context/memory/README.md`
 Search memory BEFORE external lookups when encountering unfamiliar references (projects, people, past decisions). 
 Memories are auto-captured after conversations; manual saves only for corrections or explicit requests.
 
+## Scheduling
+
+You can schedule tasks to run autonomously on a cron schedule using the `schedule` tool.
+When a user asks you to do something regularly or at a specific time, use this tool to
+set it up. Scheduled tasks run in their own session — you won't have conversation context,
+so make the prompt self-contained. If the task needs a specific skill, set the skill field.
+
