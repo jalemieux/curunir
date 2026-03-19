@@ -32,6 +32,7 @@ def _get_native_async_executor(name: str):
 async def execute_tool_call(
     name: str, args: dict, config: AgentConfig,
     attachments: list[dict] | None = None,
+    on_tool_call=None,
 ) -> str:
     """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly."""
     key = name.lower()
@@ -39,7 +40,7 @@ async def execute_tool_call(
     # Check native async executors first (e.g. delegate)
     async_executor = _get_native_async_executor(key)
     if async_executor:
-        return await async_executor(args, config)
+        return await async_executor(args, config, on_tool_call=on_tool_call)
 
     # Sync executors run in a thread to avoid blocking the event loop
     sync_executor = _SYNC_EXECUTORS.get(key)
