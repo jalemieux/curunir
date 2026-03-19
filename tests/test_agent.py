@@ -201,6 +201,60 @@ class TestHistoryTruncation:
         assert non_system[0]["role"] == "user"
 
 
+class TestSystemTaskMode:
+    async def test_system_task_no_user_message_sent_to_llm(self, agent):
+        mock_response = LLMResponse(text="Task done.", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            result = await agent.handle("", "sched:test:123", system_task_prompt="Do the thing.")
+        assert result == "Task done."
+        # Check via the LLM call: no user message should be in the messages list
+        messages = mock_llm.call_args[0][1]
+        non_system = [m for m in messages if m["role"] != "system"]
+        assert not any(m["role"] == "user" for m in non_system)
+
+    async def test_system_task_prompt_in_system_message(self, agent):
+        mock_response = LLMResponse(text="Done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("", "sched:test:123", system_task_prompt="Check PRs.")
+        messages = mock_llm.call_args[0][1]
+        system_msg = messages[0]["content"]
+        assert "## Scheduled Task" in system_msg
+        assert "Check PRs." in system_msg
+
+    async def test_system_task_cleans_up_session(self, agent):
+        mock_response = LLMResponse(text="Done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
+            await agent.handle("", "sched:test:123", system_task_prompt="Do it.")
+        # Session should be cleaned up after completion
+        assert "sched:test:123" not in agent.sessions
+
+    async def test_system_task_with_tool_calls(self, agent):
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo scheduled"})},
+            }],
+        )
+        text_response = LLMResponse(text="Task complete.", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]):
+            result = await agent.handle("", "sched:test:456", system_task_prompt="Run a command.")
+        assert result == "Task complete."
+        # Session cleaned up after completion
+        assert "sched:test:456" not in agent.sessions
+
+    async def test_normal_handle_unchanged(self, agent):
+        """Ensure regular user messages still work as before."""
+        mock_response = LLMResponse(text="Hello!", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
+            result = await agent.handle("hi", "normal-session")
+        assert result == "Hello!"
+        history = agent.sessions["normal-session"]
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "hi"
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()

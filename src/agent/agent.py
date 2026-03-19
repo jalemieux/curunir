@@ -83,17 +83,25 @@ def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> N
 
     Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
     Always removes from the front so the most recent context is preserved.
-    After trimming, the first message should be role=user.
-    Keeps at least one user message to avoid empty-messages API errors.
+    Keeps at least one user message (if any exist) to avoid empty-messages API errors.
+    For system-task sessions (no user messages), trims assistant+tool groups from the front.
     """
     user_count = sum(1 for m in history if m["role"] == "user")
-    while user_count > 1 and _estimate_chars(history) > max_chars:
-        # Remove messages from the front until we hit the next "user" message
-        if history[0]["role"] == "user":
-            user_count -= 1
-        history.pop(0)
-        while history and history[0]["role"] != "user":
+
+    if user_count > 0:
+        # Normal session: trim by user message groups, keep at least one
+        while user_count > 1 and _estimate_chars(history) > max_chars:
+            if history[0]["role"] == "user":
+                user_count -= 1
             history.pop(0)
+            while history and history[0]["role"] != "user":
+                history.pop(0)
+    else:
+        # System-task session: trim assistant+tool groups from front
+        while len(history) > 1 and _estimate_chars(history) > max_chars:
+            history.pop(0)
+            while history and history[0]["role"] == "tool":
+                history.pop(0)
 
 
 def _is_context_overflow(exc: Exception) -> bool:
@@ -131,6 +139,7 @@ class Agent:
     async def handle(
         self, message: str | list, session_id: str,
         on_tool_call=None, attachments: list[dict] | None = None,
+        system_task_prompt: str | None = None,
     ) -> str:
         """Process a message and return the agent's response.
 
@@ -143,9 +152,17 @@ class Agent:
                          the agent attaches during this request via the attach tool.
         """
         history = self.sessions.setdefault(session_id, [])
-        history.append({"role": "user", "content": message})
 
-        system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
+        if system_task_prompt:
+            # System-initiated task: no user message, task prompt goes in system prompt
+            system_prompt = (
+                self.static_prompt
+                + f"\n\nCurrent time: {datetime.now().isoformat()}"
+                + f"\n\n## Scheduled Task\n{system_task_prompt}"
+            )
+        else:
+            history.append({"role": "user", "content": message})
+            system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
         _trim_history(history)
         messages = [{"role": "system", "content": system_prompt}] + history
 
@@ -223,11 +240,17 @@ class Agent:
             if response.text:
                 logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                 history.append({"role": "assistant", "content": response.text})
+                if system_task_prompt:
+                    self.sessions.pop(session_id, None)
                 return response.text
 
             logger.warning("[%s] LLM returned empty response", sid)
             history.append({"role": "assistant", "content": ""})
+            if system_task_prompt:
+                self.sessions.pop(session_id, None)
             return "Error: LLM returned empty response."
 
         logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
+        if system_task_prompt:
+            self.sessions.pop(session_id, None)
         return "Iteration limit reached."
