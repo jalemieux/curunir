@@ -17,7 +17,7 @@ _SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill
 _TIMEOUT = 300
 
 
-async def exec_delegate(args: dict, config: AgentConfig) -> str:
+async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> str:
     """Spawn a sub-agent with a clean context window and return its response."""
     task = args.get("task", "")
     if not task:
@@ -41,7 +41,7 @@ async def exec_delegate(args: dict, config: AgentConfig) -> str:
     logger.info("Spawning sub-agent %s: %.80s", session_id[:8], task)
     try:
         result = await asyncio.wait_for(
-            sub_agent.handle(content, session_id),
+            sub_agent.handle(content, session_id, on_tool_call=on_tool_call),
             timeout=_TIMEOUT,
         )
         logger.info("Sub-agent %s completed", session_id[:8])
