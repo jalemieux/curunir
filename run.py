@@ -14,6 +14,7 @@ from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
 from src.memory_extractor import extract_learnings
+from src.scheduler import run_scheduler
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -51,6 +52,10 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
         case "attach":
             name = args.get("name") or args.get("path", "")
             return f"Attach {name}"
+        case "schedule":
+            action = args.get("action", "")
+            task_id = args.get("id", "")
+            return f"Schedule {action} {task_id}".strip()
         case _:
             return f"{name} {args_str}"
 
@@ -194,6 +199,7 @@ async def main():
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
         tg.create_task(periodic_extraction(agent, extraction_interval))
+        tg.create_task(run_scheduler(agent))
 
 
 if __name__ == "__main__":
