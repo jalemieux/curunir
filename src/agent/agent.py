@@ -83,25 +83,27 @@ def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> N
 
     Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
     Always removes from the front so the most recent context is preserved.
-    Keeps at least one user message (if any exist) to avoid empty-messages API errors.
-    For system-task sessions (no user messages), trims assistant+tool groups from the front.
+    Keeps at least one user message to avoid empty-messages API errors.
+    When only one user message exists (e.g. system-task sessions), trims
+    assistant+tool groups after it.
     """
     user_count = sum(1 for m in history if m["role"] == "user")
 
-    if user_count > 0:
-        # Normal session: trim by user message groups, keep at least one
+    if user_count > 1:
+        # Multi-user-message session: trim by user message groups, keep at least one
         while user_count > 1 and _estimate_chars(history) > max_chars:
             if history[0]["role"] == "user":
                 user_count -= 1
             history.pop(0)
             while history and history[0]["role"] != "user":
                 history.pop(0)
-    else:
-        # System-task session: trim assistant+tool groups from front
+    elif user_count == 1 and len(history) > 1:
+        # Single user message (e.g. system task): keep first message,
+        # trim assistant+tool groups after it
         while len(history) > 1 and _estimate_chars(history) > max_chars:
-            history.pop(0)
-            while history and history[0]["role"] == "tool":
-                history.pop(0)
+            del history[1]
+            while len(history) > 1 and history[1]["role"] == "tool":
+                del history[1]
 
 
 def _is_context_overflow(exc: Exception) -> bool:
@@ -154,12 +156,13 @@ class Agent:
         history = self.sessions.setdefault(session_id, [])
 
         if system_task_prompt:
-            # System-initiated task: no user message, task prompt goes in system prompt
+            # System-initiated task: inject task as a user message so all LLM
+            # providers accept the request (some reject system-only conversations).
             system_prompt = (
                 self.static_prompt
                 + f"\n\nCurrent time: {datetime.now().isoformat()}"
-                + f"\n\n## Scheduled Task\n{system_task_prompt}"
             )
+            history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
             system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
