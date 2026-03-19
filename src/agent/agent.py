@@ -197,6 +197,7 @@ class Agent:
                         json.loads(args_str),
                         self.config,
                         attachments=attachments,
+                        on_tool_call=on_tool_call,
                     )
 
                     # After load_skill, check for required tools in frontmatter
