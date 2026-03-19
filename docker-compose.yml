@@ -7,4 +7,5 @@ services:
     volumes:
       - ./secrets:/secrets:ro
       - ./workspace:/app/workspace
+      - ./context:/app/context
     restart: unless-stopped
