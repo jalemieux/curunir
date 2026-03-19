@@ -35,16 +35,23 @@ An optional `delivery` field is added to the schedule task schema:
   "last_run": 0,
   "delivery": {
     "channel": "email",
-    "address": "jalemieux@gmail.com"
+    "address": "jalemieux@gmail.com",
+    "subject": "Morning Market Brief"
   }
 }
 ```
 
 - `delivery` — optional object. If omitted or null, no system delivery occurs (skill-handles-it pattern).
   - `channel` — string, required. The channel type to route through (e.g., `"email"`).
-  - `address` — string, required. Channel-specific destination (e.g., an email address).
+  - `address` — string, required. Channel-specific destination. Semantics are channel-specific (email address for email, could be a channel ID for future integrations).
+  - `subject` — string, optional. Used as the email subject line. Defaults to `"Curunir: {task_id}"` if omitted.
 
-The schedule tool's `add` and `update` actions accept the optional `delivery` parameter and validate that `channel` is a known channel type.
+### Schedule Tool Changes
+
+- The `add` and `update` actions accept the optional `delivery` parameter.
+- Validation: `channel` must be a known channel type. Use a hardcoded allowlist (e.g., `{"email"}`) since the schedule tool runs at conversation time and doesn't have access to the runtime channel registry.
+- The `list` action displays the delivery config when present (channel and address).
+- The tool's JSON schema (used by the LLM to construct calls) must include the `delivery` object and its sub-fields.
 
 ### Scheduler Routing
 
@@ -58,25 +65,37 @@ result = await agent.handle(
 )
 
 delivery = task.get("delivery")
-if delivery and result:
+if delivery and result and not result.startswith(("Error:", "Sorry,")):
+    subject = delivery.get("subject", f"Curunir: {task_id}")
     msg = OutgoingMessage(
         content=result,
         channel=delivery["channel"],
         session_id=session_id,
-        reply_address={"to": delivery["address"]},
+        reply_address={
+            "to": delivery["address"],
+            "subject": subject,
+            "in_reply_to": None,
+        },
     )
     await out_queue.put(msg)
 ```
 
+Error responses (starting with `"Error:"` or `"Sorry,"`) are suppressed from delivery and logged instead. The agent's normal result text is delivered as-is.
+
 ### Wiring Changes
 
 - **`run.py`**: Pass `out_queue` to `run_scheduler()`.
-- **`src/scheduler.py`**: `run_scheduler()` accepts `out_queue` and passes it to `_run_task()`. `_run_task()` constructs and enqueues the `OutgoingMessage` when delivery is configured.
-- **No changes to router or channels.** The router already consumes `OutgoingMessage` from `out_queue` and routes by the `channel` field. The email channel's `send()` already uses `reply_address["to"]` for the recipient.
+- **`src/scheduler.py`**: `run_scheduler()` accepts `out_queue` and passes it to `_run_task()`. `_run_task()` receives both `out_queue` and the full task dict (including `delivery`), constructs and enqueues the `OutgoingMessage` when delivery is configured.
+- **`src/channels/email.py`**: `EmailChannel.send()` currently calls `gog.send_reply()`, which requires `subject` and `in_reply_to`. For scheduled task delivery, `in_reply_to` will be `None` (no existing thread). `send()` must handle this case — when `in_reply_to` is `None`, send a new email rather than a reply-in-thread. This may require a `gog.send_new()` method or branching within `send()` based on the presence of `in_reply_to`.
+- **Router**: No changes. Already consumes `OutgoingMessage` from `out_queue` and routes by `channel` field.
+
+### Channel Availability
+
+If a task's delivery channel is not enabled at runtime (e.g., `delivery.channel` is `"email"` but `EMAIL_ENABLED` is false), the router will log a warning and discard the message. This is acceptable — the task still executes and the result is logged. No validation at schedule-creation time since channel availability can change between restarts.
 
 ## Out of Scope
 
 - **Alert/active-channel delivery** — deferred; requires separate design for real-time push semantics and fallback strategies.
 - **Delivery retry/confirmation** — if send fails, it fails. Errors appear in logs. No retry queue or delivery tracking.
 - **New channel types** — works with existing channels only. Adding Slack, SMS, etc. is a separate effort.
-- **Subject line / formatting control** — the agent's response text becomes the email body as-is. No templating or subject customization.
+- **Advanced formatting** — the agent's response text becomes the email body as-is. No templating beyond the configurable subject line.
