@@ -3,7 +3,7 @@ FROM python:3.12-slim
 # Install system deps: ripgrep (grep tool), git, jq (web-search skill), curl,
 # pandoc (markdown→PDF/HTML conversion for report attachments)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ripgrep git jq curl pandoc texlive-latex-recommended lmodern nodejs npm && \
+    apt-get install -y --no-install-recommends ripgrep git openssh-client jq curl pandoc texlive-latex-recommended lmodern nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 # Install chub CLI (curated LLM-optimized API docs — used by skill-factory)
