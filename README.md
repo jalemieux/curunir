@@ -1,6 +1,6 @@
 # Curunir — *the man of skill*
 
-<img src="docs/curunir2.png" alt="Curunir" width="280" align="left" style="margin-right: 16px; margin-bottom: 8px; border-radius: 8px;" />
+<img src="docs/curunir2.png" alt="Curunir" style="border-radius: 8px;" />
 
 A configurable agent framework for building specialized digital assistants. Define an identity, add skills, connect channels — get a capable assistant tailored to your domain.
 
