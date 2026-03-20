@@ -6,7 +6,6 @@ services:
       - "8765:8765"
     volumes:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
-      - ~/.ssh:/root/.ssh:ro               # SSH keys for git push (context sync)
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory — or let entrypoint clone from CONTEXT_SYNC_REMOTE
     restart: unless-stopped
