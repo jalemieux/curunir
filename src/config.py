@@ -12,6 +12,8 @@ class AgentConfig:
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     skills_dir: Path = Path("./skills")
+    context_sync_remote: str | None = None
+    context_sync_branch: str = "main"
 
 
 @dataclass
