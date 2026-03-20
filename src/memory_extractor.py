@@ -1,10 +1,16 @@
 # src/memory_extractor.py
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from .config import AgentConfig
 from .llm import call_llm
+
+if TYPE_CHECKING:
+    from .context_sync import ContextSync
 
 log = logging.getLogger(__name__)
 
@@ -51,15 +57,23 @@ The `file` field is relative to the memory directory. Subdirectories are allowed
 """
 
 
-async def extract_learnings(config: AgentConfig, history: list[dict]) -> None:
+async def extract_learnings(
+    config: AgentConfig,
+    history: list[dict],
+    context_sync: ContextSync | None = None,
+) -> None:
     """Extract durable learnings from a conversation history and write to memory."""
     try:
-        await _extract(config, history)
+        await _extract(config, history, context_sync=context_sync)
     except Exception:
         log.exception("memory extraction failed")
 
 
-async def _extract(config: AgentConfig, history: list[dict]) -> None:
+async def _extract(
+    config: AgentConfig,
+    history: list[dict],
+    context_sync: ContextSync | None = None,
+) -> None:
     user_count = sum(1 for m in history if m.get("role") == "user")
     if user_count < 2:
         log.debug("skipping extraction: fewer than 2 user messages")
@@ -93,13 +107,23 @@ async def _extract(config: AgentConfig, history: list[dict]) -> None:
         return
 
     # Write facts
+    written_paths: list[Path] = []
     for fact in data.get("facts", []):
-        _write_fact(memory_dir, fact)
+        path = _write_fact(memory_dir, fact)
+        if path:
+            written_paths.append(path)
 
     # Write conversation summary
     summary = data.get("summary")
     if summary:
-        _write_summary(memory_dir, summary)
+        path = _write_summary(memory_dir, summary)
+        if path:
+            written_paths.append(path)
+
+    # Sync written files
+    if context_sync and written_paths:
+        for p in written_paths:
+            await context_sync.notify_write(p)
 
 
 def _format_history(history: list[dict]) -> str:
@@ -148,16 +172,16 @@ def _safe_path(memory_dir, file_path: str) -> "Path | None":
     return resolved
 
 
-def _write_fact(memory_dir, fact: dict) -> None:
+def _write_fact(memory_dir, fact: dict) -> "Path | None":
     try:
         file_rel = fact.get("file", "")
         content = fact.get("content", "")
         if not file_rel or not content:
-            return
+            return None
 
         target = _safe_path(memory_dir, file_rel)
         if target is None:
-            return
+            return None
 
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -168,16 +192,18 @@ def _write_fact(memory_dir, fact: dict) -> None:
             target.write_text(existing + "\n" + content + "\n")
         else:
             target.write_text(content + "\n")
+        return target
     except Exception:
         log.exception("failed to write fact to %s", fact.get("file"))
+        return None
 
 
-def _write_summary(memory_dir, summary: dict) -> None:
+def _write_summary(memory_dir, summary: dict) -> "Path | None":
     try:
         slug = summary.get("topic_slug", "misc")
         content = summary.get("content", "")
         if not content:
-            return
+            return None
 
         date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
         archive_dir = memory_dir / "archives" / "conversations"
@@ -186,8 +212,10 @@ def _write_summary(memory_dir, summary: dict) -> None:
         filename = f"{date_str}-{slug}.md"
         target = _safe_path(memory_dir, f"archives/conversations/{filename}")
         if target is None:
-            return
+            return None
 
         target.write_text(f"# {slug}\n\n{content}\n")
+        return target
     except Exception:
         log.exception("failed to write conversation summary")
+        return None
