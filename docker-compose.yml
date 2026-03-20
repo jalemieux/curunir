@@ -5,7 +5,10 @@ services:
     ports:
       - "8765:8765"
     volumes:
-      - ./secrets:/secrets:ro
-      - ./workspace:/app/workspace
-      - ./context:/app/context
+      - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
+      - ./workspace:/app/workspace         # Workspace persistence
+      - ./context:/app/context             # Context/memory — or let entrypoint clone from CONTEXT_SYNC_REMOTE
     restart: unless-stopped
+    # To enable context sync, set in .env:
+    #   CONTEXT_SYNC_REMOTE=git@github.com:you/curunir-context.git
+    #   CONTEXT_SYNC_BRANCH=main

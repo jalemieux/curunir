@@ -124,8 +124,9 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
 
 
 class Agent:
-    def __init__(self, config: AgentConfig, tools: list[str] | None = None):
+    def __init__(self, config: AgentConfig, tools: list[str] | None = None, context_sync=None):
         self.config = config
+        self.context_sync = context_sync
         self.sessions: dict[str, list[dict]] = {}
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
@@ -218,6 +219,7 @@ class Agent:
                         self.config,
                         attachments=attachments,
                         on_tool_call=on_tool_call,
+                        context_sync=self.context_sync,
                     )
 
                     # After load_skill, check for required tools in frontmatter

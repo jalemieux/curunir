@@ -29,5 +29,24 @@ else
     echo "gog: no token file at $GOG_TOKEN_FILE — email channel will not work"
 fi
 
+# --- Context repo sync ---
+# Clone or pull the context repo if CONTEXT_SYNC_REMOTE is set
+CONTEXT_DIR="${CONTEXT_DIR:-/app/context}"
+if [ -n "${CONTEXT_SYNC_REMOTE:-}" ]; then
+    CONTEXT_SYNC_BRANCH="${CONTEXT_SYNC_BRANCH:-main}"
+    if [ -d "$CONTEXT_DIR/.git" ]; then
+        echo "context-sync: pulling latest from $CONTEXT_SYNC_REMOTE ($CONTEXT_SYNC_BRANCH)"
+        git -C "$CONTEXT_DIR" pull --ff-only origin "$CONTEXT_SYNC_BRANCH" || echo "context-sync: pull failed, continuing with local state"
+    else
+        echo "context-sync: cloning $CONTEXT_SYNC_REMOTE into $CONTEXT_DIR"
+        git clone -b "$CONTEXT_SYNC_BRANCH" "$CONTEXT_SYNC_REMOTE" "$CONTEXT_DIR"
+    fi
+    # Configure git identity for runtime commits
+    git -C "$CONTEXT_DIR" config user.email "curunir@bot"
+    git -C "$CONTEXT_DIR" config user.name "curunir"
+else
+    echo "context-sync: CONTEXT_SYNC_REMOTE not set — local-only mode"
+fi
+
 # Hand off to CMD
 exec "$@"
