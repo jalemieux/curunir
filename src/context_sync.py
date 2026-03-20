@@ -81,4 +81,11 @@ class ContextSync:
     async def _push(self) -> None:
         result = await self._run_git("push", "origin", self._branch)
         if result.returncode != 0:
-            log.warning("git push failed: %s", result.stderr.strip())
+            log.info("push failed, attempting pull --rebase and retry")
+            rebase = await self._run_git("pull", "--rebase", "origin", self._branch)
+            if rebase.returncode != 0:
+                log.warning("git pull --rebase failed: %s", rebase.stderr.strip())
+                return
+            result = await self._run_git("push", "origin", self._branch)
+            if result.returncode != 0:
+                log.warning("git push failed after rebase: %s", result.stderr.strip())

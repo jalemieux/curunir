@@ -176,6 +176,34 @@ class TestContextSyncEnabled:
         await sync.notify_write(test_file)
 
 
+    async def test_push_recovers_when_remote_is_ahead(self, sync_env):
+        """Push should pull --rebase and retry when remote has diverged."""
+        config, context_dir, remote_url = sync_env
+        sync = ContextSync(config)
+
+        # Simulate remote getting ahead: clone, commit, push from another checkout
+        other = context_dir.parent / "other_checkout"
+        subprocess.run(["git", "clone", remote_url, str(other)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "other@test.com"], cwd=other, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Other"], cwd=other, check=True, capture_output=True)
+        (other / "from_other.md").write_text("from other")
+        subprocess.run(["git", "add", "."], cwd=other, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "other commit"], cwd=other, check=True, capture_output=True)
+        subprocess.run(["git", "push"], cwd=other, check=True, capture_output=True)
+
+        # Now local is behind remote. A push should fail then recover via rebase.
+        local_file = context_dir / "local_change.md"
+        local_file.write_text("local content")
+
+        await sync.push()
+
+        # Verify both files made it to remote
+        verify = context_dir.parent / "verify_clone"
+        subprocess.run(["git", "clone", remote_url, str(verify)], check=True, capture_output=True)
+        assert (verify / "from_other.md").read_text() == "from other"
+        assert (verify / "local_change.md").read_text() == "local content"
+
+
 class TestPeriodicPush:
     """Test the periodic_push background coroutine."""
 
