@@ -11,7 +11,7 @@ Post-conversation memory extraction that runs when a session ends, not per-messa
 | Event | Trigger |
 |-------|---------|
 | CLI quit | `EOFError` in `_input_loop` → enqueue `command="extract"` |
-| `/clear` | Extract before popping the session |
+| `/clear` or `/new` | Extract before popping the session |
 | Timer | Periodic task (configurable, default 1 hour) for sessions that have grown since last extraction |
 
 The timer handles channels without natural endings (Slack, email) and covers abrupt exits (e.g., `KeyboardInterrupt` kills the process before extraction can run — the next timer cycle catches it if the process restarts).

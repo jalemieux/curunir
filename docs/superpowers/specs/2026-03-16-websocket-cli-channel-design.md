@@ -68,7 +68,7 @@ New file at repo root. Entrypoint: `python cli.py [--host localhost] [--port 876
 - Reads from stdin via Rich `Console.input()`
 - Runs in executor to avoid blocking the async event loop
 - Sends JSON over WebSocket: `{"content": "...", "command": null}`
-- `/clear`: sends `{"content": "", "command": "clear"}`
+- `/clear` or `/new`: sends `{"content": "", "command": "clear"}`
 - `/verbose`: handled locally (toggles tool call display), not sent to server. Tool calls are hidden by default to reduce noise over the wire; `/verbose` enables them.
 - EOF (Ctrl-D): closes WebSocket connection cleanly, exits. The server detects the close and enqueues an `extract` command to trigger memory extraction.
 - Gated by an `asyncio.Event` — waits for `final: true` before accepting next input
