@@ -274,7 +274,7 @@ Rich feedback following the playbook pattern:
 - Spinner while the agent is thinking
 - Tool call summaries (collapsed by default)
 - Verbose mode toggle (`/verbose`) for full tool output
-- `/clear` to reset session
+- `/clear` or `/new` to reset session
 
 ## Identity
 
