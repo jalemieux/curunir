@@ -48,7 +48,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 
 Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 15 tool-calling rounds per turn. Replies are routed back to the originating channel.
 
-Dashed nodes are planned but not yet implemented. The memory extractor runs post-session (on `/clear`, EOF, or a periodic timer) to extract durable facts into `context/memory/`.
+Dashed nodes are planned but not yet implemented. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`.
 
 ## Project Structure
 

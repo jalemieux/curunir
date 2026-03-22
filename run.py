@@ -92,12 +92,20 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             history = agent.sessions.pop(msg.session_id, None)
             if history:
                 asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+            await out_queue.put(OutgoingMessage(
+                content="", channel=msg.channel, session_id=msg.session_id,
+                reply_address=msg.reply_address,
+            ))
             continue
 
         if msg.command == "extract":
             history = agent.sessions.get(msg.session_id)
             if history:
                 asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+            await out_queue.put(OutgoingMessage(
+                content="", channel=msg.channel, session_id=msg.session_id,
+                reply_address=msg.reply_address,
+            ))
             continue
 
         async def on_tool_call(name: str, args_str: str):

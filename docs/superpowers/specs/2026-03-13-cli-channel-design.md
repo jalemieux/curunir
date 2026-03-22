@@ -124,7 +124,7 @@ async def start(self):
 
 async def _input_loop(self):
     loop = asyncio.get_event_loop()
-    self._console.print("[bold]Valar CLI[/bold] — type /clear to reset, /verbose to toggle tool output\n")
+    self._console.print("[bold]Valar CLI[/bold] — type /clear or /new to reset, /verbose to toggle tool output\n")
 
     while True:
         try:
@@ -136,7 +136,7 @@ async def _input_loop(self):
         if not text:
             continue
 
-        if text == "/clear":
+        if text in ("/clear", "/new"):
             msg = IncomingMessage(content="", channel="cli", session_id="cli", reply_address={}, command="clear")
             await self.in_queue.put(msg)
             self._console.print("[dim]Session cleared.[/dim]")
@@ -155,7 +155,7 @@ async def _input_loop(self):
 
 - Uses `run_in_executor` to read stdin without blocking the event loop.
 - `Console.input()` for styled prompt.
-- `/clear` sends a command message to the queue so the agent loop can reset session state.
+- `/clear` (or `/new`) sends a command message to the queue so the agent loop can reset session state.
 - `/verbose` toggles local state only — no queue message needed.
 - Spinner starts after pushing a user message.
 

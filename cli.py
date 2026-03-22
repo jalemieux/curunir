@@ -43,7 +43,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     uri = f"ws://{host}:{port}"
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim]")
-    console.print("[dim]type /clear to reset, /verbose to toggle tool output[/dim]")
+    console.print("[dim]type /clear or /new to reset, /verbose to toggle tool output[/dim]")
 
     verbose = True
     ready = asyncio.Event()
@@ -173,7 +173,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         console.print(f"[dim]Verbose mode {state}.[/dim]")
                         continue
 
-                    if text == "/clear":
+                    if text in ("/clear", "/new"):
                         payload = {"content": "", "command": "clear"}
                     else:
                         payload = {"content": text, "command": None}
