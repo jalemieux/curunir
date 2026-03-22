@@ -204,6 +204,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
         stop_spinner()
         ready.set()
         console.print(f"[yellow]Disconnected from {uri}. Reconnecting…[/yellow]")
+        try:
+            await ws.close()
+        except Exception:
+            pass
 
         ws = await _connect_with_retry(uri, console)
 
