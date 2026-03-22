@@ -33,9 +33,13 @@ class WebSocketChannel:
 
     async def _handle_connection(self, websocket: websockets.ServerConnection) -> None:
         if self._connection is not None:
-            logger.warning("Rejecting second connection — already have an active client")
-            await websocket.close(1008, "Already connected")
-            return
+            old = self._connection
+            logger.info("Replacing stale connection with new client")
+            self._connection = None
+            try:
+                await old.close(1008, "Replaced by new connection")
+            except Exception:
+                pass
 
         self._connection = websocket
         remote = websocket.remote_address
@@ -65,7 +69,8 @@ class WebSocketChannel:
         except websockets.exceptions.ConnectionClosedError:
             pass
         finally:
-            self._connection = None
+            if self._connection is websocket:
+                self._connection = None
             logger.info("Client disconnected from %s", remote)
             extract_msg = IncomingMessage(
                 content="",
@@ -90,4 +95,5 @@ class WebSocketChannel:
         try:
             await self._connection.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
+            self._connection = None
             logger.warning("WebSocket connection closed while sending; message dropped")

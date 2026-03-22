@@ -107,22 +107,38 @@ async def test_send_drops_when_no_client(caplog):
 
 
 @pytest.mark.asyncio
-async def test_rejects_second_concurrent_connection():
-    """A second simultaneous connection is closed immediately."""
+async def test_replaces_stale_connection_with_new_client():
+    """A second connection replaces the first (last-connection-wins)."""
     q = asyncio.Queue()
     ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 3)
     task = await _start_channel(ch)
 
     try:
-        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}") as ws1:
-            await asyncio.sleep(0.05)  # ensure first connection is registered
+        ws1 = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}")
+        await asyncio.sleep(0.05)  # ensure first connection is registered
 
-            # Second connection should be rejected
-            with pytest.raises(websockets.exceptions.ConnectionClosedError):
-                async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}") as ws2:
-                    # Server closes it; recv() will raise
-                    await ws2.recv()
+        # Second connection replaces the first
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}") as ws2:
+            await asyncio.sleep(0.05)
+            # ws2 should be the active connection — verify by sending a message
+            await ws2.send(json.dumps({"content": "from-ws2", "command": None}))
+            await asyncio.sleep(0.05)
+
+        # ws1 should have been closed by the server
+        with pytest.raises(websockets.exceptions.ConnectionClosedError):
+            await ws1.recv()
+
+        await asyncio.sleep(0.1)
+        messages = []
+        while not q.empty():
+            messages.append(q.get_nowait())
+        contents = [m.content for m in messages]
+        assert "from-ws2" in contents
     finally:
+        try:
+            await ws1.close()
+        except Exception:
+            pass
         await _stop_channel(task)
 
 
