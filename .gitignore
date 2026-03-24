@@ -30,7 +30,16 @@ tmp/
 # Secrets (gog tokens, credentials)
 secrets/
 
+# Symlinked skills (from agent-skills repo)
+skills/gemini-search
+skills/linkedin-research
+skills/playwright
+skills/reddit-research
+skills/web-search
+skills/xai-search
+
 # Agent memory (instance-specific, keep README.md and .gitkeep)
 context/memory/*.md
 !context/memory/README.md
 workspace/
+landing_pages
