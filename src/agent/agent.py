@@ -143,6 +143,7 @@ class Agent:
         self, message: str | list, session_id: str,
         on_tool_call=None, attachments: list[dict] | None = None,
         system_task_prompt: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Process a message and return the agent's response.
 

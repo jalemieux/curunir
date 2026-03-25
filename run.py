@@ -158,10 +158,12 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
 
         content = _build_content(msg)
         attachments = []
+        metadata: dict = {}
         try:
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
+                metadata=metadata,
             )
         except Exception as e:
             logger.error("Agent error for session %s: %s", msg.session_id, e)
@@ -176,6 +178,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             session_id=msg.session_id,
             reply_address=msg.reply_address,
             attachments=attachments or None,
+            workflow=metadata.get("workflow"),
         ))
 
 
