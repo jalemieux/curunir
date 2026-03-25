@@ -21,6 +21,7 @@ class OutgoingMessage:
     tool_calls: list[str] | None = None
     final: bool = True
     attachments: list[dict] | None = None
+    workflow: dict | None = None
 
 
 class Channel(Protocol):
