@@ -117,6 +117,8 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         if "path" in att:
                             line.append(f" \u2192 {att['path']}", style="dim")
                         console.print(line)
+                        if att.get("content"):
+                            console.print(Markdown(att["content"]))
 
                 if final:
                     if verbose:
