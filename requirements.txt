@@ -7,3 +7,4 @@ websockets
 pytest
 pytest-asyncio
 croniter
+shot-scraper

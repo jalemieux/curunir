@@ -1,0 +1,5 @@
+name: reddit-research
+
+cli: [curl, jq]
+
+skills: [web-search]
