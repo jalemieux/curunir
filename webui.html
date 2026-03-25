@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Curunir</title>
+<script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; color: #ccc; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; height: 100vh; display: flex; flex-direction: column; }
+
+/* Bottom workflow bar */
+.workflow-bar {
+  display: flex; align-items: center; padding: 5px 16px; background: #06060a; border-top: 1px solid #1a1a22; gap: 6px; font-size: 11px; flex-shrink: 0;
+}
+.workflow-bar .step { color: #444; transition: color 0.2s; }
+.workflow-bar .step.completed { color: #4ade80; }
+.workflow-bar .step.active { color: #6366f1; font-weight: bold; border-bottom: 1px solid #6366f1; padding-bottom: 1px; }
+.workflow-bar .arrow { color: #222; font-size: 10px; }
+.workflow-bar .dot { font-size: 8px; }
+
+/* Main area */
+.main { display: flex; flex: 1; min-height: 0; }
+
+/* Left pane: chat */
+.chat-pane {
+  flex: 1; display: flex; flex-direction: column; border-right: 1px solid #1a1a22; min-width: 0;
+}
+.chat-header {
+  padding: 10px 14px; border-bottom: 1px solid #1a1a22; background: #08080e; font-size: 12px; color: #444;
+}
+.chat-header .title { color: #ccc; font-weight: bold; }
+.chat-header .meta { color: #333; font-size: 10px; margin-top: 2px; }
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.msg-user { color: #4ade80; }
+.msg-user .prompt { font-weight: bold; }
+.msg-tool { color: #555; font-size: 11px; }
+.msg-tool .connector { color: #333; }
+.msg-assistant { color: #e0e0e0; line-height: 1.6; font-size: 12px; }
+.msg-assistant code { background: #1a1a2e; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+.msg-assistant pre { background: #1a1a2e; border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 11px; line-height: 1.4; }
+.msg-assistant pre code { background: none; padding: 0; }
+.msg-assistant h3 { color: #fff; font-size: 13px; margin: 8px 0 4px; }
+.msg-assistant ul { padding-left: 18px; margin: 4px 0; }
+.msg-assistant li { margin: 2px 0; }
+.msg-attachment { display: inline-flex; align-items: center; gap: 4px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px; padding: 3px 8px; font-size: 10px; color: #6366f1; cursor: pointer; margin-top: 4px; }
+.msg-attachment:hover { border-color: #6366f1; }
+
+.chat-input {
+  padding: 10px 14px; border-top: 1px solid #1a1a22; background: #08080e; display: flex; align-items: center; gap: 6px;
+}
+.chat-input .prompt { color: #4ade80; font-weight: bold; font-size: 14px; }
+.chat-input input {
+  flex: 1; background: transparent; border: none; outline: none; color: #e0e0e0; font-family: inherit; font-size: 13px; caret-color: #4ade80;
+}
+
+/* Right pane: artifacts */
+.artifact-pane {
+  flex: 1; display: flex; flex-direction: column; min-width: 0; background: #0d0d14;
+}
+.artifact-tree {
+  padding: 8px 12px; border-bottom: 1px solid #1a1a22; background: #08080e; font-size: 11px; line-height: 1.9; flex-shrink: 0; cursor: default;
+}
+.artifact-tree .label { color: #444; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+.artifact-tree .folder { color: #e2b55a; cursor: pointer; }
+.artifact-tree .folder-toggle { color: #444; font-size: 10px; margin-right: 2px; }
+.artifact-tree .file { color: #666; cursor: pointer; padding-left: 18px; border-left: 2px solid transparent; margin-left: -12px; padding-left: 28px; }
+.artifact-tree .file:hover { color: #999; }
+.artifact-tree .file.active { color: #6366f1; font-weight: bold; border-left-color: #6366f1; background: rgba(99, 102, 241, 0.06); }
+
+.artifact-content {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+}
+.artifact-content .doc-title { font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.artifact-content .doc-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; color: #bbb; line-height: 1.7; }
+.artifact-content .doc-body h2 { color: #e0e0e0; font-size: 15px; margin: 16px 0 6px; }
+.artifact-content .doc-body p { margin: 6px 0; }
+.artifact-content .doc-body ul { padding-left: 20px; margin: 6px 0; }
+.artifact-content .doc-body li { margin: 3px 0; }
+.artifact-content .doc-body code { background: #1a1a2e; padding: 1px 5px; border-radius: 3px; font-family: 'SF Mono', monospace; font-size: 12px; }
+.artifact-content .doc-body pre { background: #1a1a2e; border-radius: 6px; padding: 12px; margin: 8px 0; overflow-x: auto; }
+.artifact-content .doc-body pre code { background: none; padding: 0; font-size: 11px; line-height: 1.5; color: #8be9fd; }
+.artifact-content .doc-body table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+.artifact-content .doc-body th, .artifact-content .doc-body td { border: 1px solid #222; padding: 6px 10px; text-align: left; font-size: 12px; }
+.artifact-content .doc-body th { background: #1a1a2e; color: #ccc; }
+.artifact-content .doc-body strong { color: #fff; }
+
+/* Spinner */
+.spinner { display: inline-block; color: #06b6d4; font-size: 11px; }
+.spinner::after { content: "Thinking…"; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+/* Resize handle */
+.resize-handle { width: 4px; background: #1a1a22; cursor: col-resize; flex-shrink: 0; }
+.resize-handle:hover { background: #6366f1; }
+</style>
+</head>
+<body>
+  <div class="main">
+    <div class="chat-pane">
+      <div class="chat-header">
+        <div class="title">Curunir</div>
+        <div class="meta"><span class="model-info"></span> <span class="connection-status"></span></div>
+      </div>
+      <div class="chat-messages"></div>
+      <div class="chat-input">
+        <span class="prompt">&gt;</span>
+        <input type="text" placeholder="Type a message..." autofocus>
+      </div>
+    </div>
+    <div class="resize-handle"></div>
+    <div class="artifact-pane">
+      <div class="artifact-tree">
+        <div class="label">workspace/</div>
+      </div>
+      <div class="artifact-content">
+        <div style="color:#555;text-align:center;padding:40px;">No artifacts yet</div>
+      </div>
+    </div>
+  </div>
+  <div class="workflow-bar" style="display:none"></div>
+</body>
+</html>
