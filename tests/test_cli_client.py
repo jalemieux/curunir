@@ -328,3 +328,33 @@ async def test_ready_event_resets_after_reconnect():
     contents = [m["content"] for m in all_received]
     assert "first" in contents
     assert "second" in contents
+
+
+@pytest.mark.asyncio
+async def test_output_renders_enriched_attachment_content():
+    """When an attachment includes 'content', the CLI renders the markdown inline."""
+    port = _BASE_PORT + 11
+
+    async def handler(ws: websockets.ServerConnection) -> None:
+        async for _ in ws:
+            await ws.send(json.dumps({
+                "content": "See the artifact",
+                "tool_calls": [],
+                "final": True,
+                "attachments": [{
+                    "filename": "analysis.md",
+                    "path": "workspace/analysis.md",
+                    "mime_type": "text/markdown",
+                    "size": 20,
+                    "content": "# Analysis\n\nKey findings here.",
+                }],
+            }))
+
+    console = _make_console_with_input(["hi"])
+
+    async with websockets.serve(handler, "127.0.0.1", port):
+        await cli.run("127.0.0.1", port, console=console)
+
+    output = console.file.getvalue()
+    assert "analysis.md" in output
+    assert "Key findings here" in output
