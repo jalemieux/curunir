@@ -91,6 +91,7 @@ class WebSocketChannel:
             "tool_calls": msg.tool_calls,
             "final": msg.final,
             "attachments": msg.attachments if msg.attachments else None,
+            "workflow": msg.workflow,
         }
         try:
             await self._connection.send(json.dumps(payload))
