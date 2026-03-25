@@ -1,0 +1,4 @@
+name: playwright
+
+pip:
+  - shot-scraper

@@ -16,6 +16,15 @@ Research a topic by decomposing it into sub-questions, selecting the right data 
 
 ## Usage
 
+### Tool selection rule
+
+Two tools for fetching, each with a distinct role:
+
+- **`curl + jq`** → API endpoints that return JSON (search APIs, Reddit `.json` endpoints). Requires headers, auth, or POST bodies.
+- **`WebFetch`** → web pages that return HTML (articles, blogs, docs, landing pages from search results). Converts to markdown, summarizes large content, and accepts a `prompt` to extract only what's relevant — keeping context lean.
+
+**The test:** if the URL returns JSON, use curl. If it returns a web page, use WebFetch with a targeted prompt. Never use curl to read web page content — it dumps raw HTML into context.
+
 ### Step 1 — Clarify and select sources
 
 If the request is vague, ask ONE question to narrow scope (timeframe, angle, depth). Then select data sources using the Source Selection Reference below. Load each selected skill.
@@ -33,8 +42,8 @@ Break the topic into 3-5 research sub-questions:
 
 For each sub-question:
 - Pick the best data source(s) for that specific sub-question
-- Run 1-2 targeted searches per source using the relevant skill
-- Use `web_fetch` to read full content of the most promising URLs
+- **Search** (curl): Run 1-2 targeted API searches per source using the relevant skill
+- **Read** (WebFetch): Fetch full content of the most promising URLs using `WebFetch` with a prompt focused on the sub-question — e.g., `"Extract key findings about [topic], pricing, and user sentiment"`
 - Take notes on key findings and source URLs
 
 ### Step 4 — Synthesize report
@@ -132,3 +141,4 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 - **Using all sources on every topic** — match sources to the topic. A technical deep-dive doesn't need LinkedIn; a company analysis doesn't need Reddit.
 - **Treating social opinions as facts** — Reddit/X posts are signal about sentiment, not authoritative sources. Cross-reference with web sources.
 - **Not loading prerequisite skills** — load each skill before using its API patterns. The agent needs the skill's instructions to call APIs correctly.
+- **Using curl to read web pages** — dumps raw HTML into context, causing context drift. Use `WebFetch` with a targeted prompt for page content. Reserve curl for JSON API endpoints only.

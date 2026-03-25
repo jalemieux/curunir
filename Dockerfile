@@ -20,6 +20,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Chromium for shot-scraper (playwright skill)
+RUN shot-scraper install
+
 COPY . .
 
 COPY entrypoint.sh /entrypoint.sh

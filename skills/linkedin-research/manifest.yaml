@@ -1,0 +1,5 @@
+name: linkedin-research
+
+cli: [curl, jq]
+
+skills: [gemini-search, xai-search, web-search]

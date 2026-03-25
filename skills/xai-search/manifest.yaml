@@ -1,0 +1,9 @@
+name: xai-search
+
+cli: [curl, jq]
+
+secrets:
+  - name: XAI_API_KEY
+    required: true
+    description: "xAI API key for web search and X/Twitter search via Grok"
+    url: "https://console.x.ai/"

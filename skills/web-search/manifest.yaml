@@ -1,0 +1,13 @@
+name: web-search
+
+cli: [curl, jq]
+
+tools: [web_fetch]
+
+skills: [playwright]
+
+secrets:
+  - name: BRAVE_API_KEY
+    required: true
+    description: "Brave Search API key for web search"
+    url: "https://brave.com/search/api/"

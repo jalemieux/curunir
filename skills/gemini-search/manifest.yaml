@@ -1,0 +1,9 @@
+name: gemini-search
+
+cli: [curl, jq]
+
+secrets:
+  - name: GEMINI_API_KEY
+    required: true
+    description: "Gemini API key for grounded web search and YouTube summarization"
+    url: "https://aistudio.google.com/apikey"
