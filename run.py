@@ -61,6 +61,44 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
             return f"{name} {args_str}"
 
 
+_MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
+
+
+def _enrich_attachments(attachments: list[dict], project_root: str) -> None:
+    """Add content and normalize paths for text-based attachments in-place."""
+    for att in attachments:
+        path = att["path"]
+        mime = att.get("mime_type", "")
+        is_text = mime.startswith("text/") or mime == "application/json"
+
+        # Normalize path to relative
+        if os.path.isabs(path):
+            try:
+                att["path"] = os.path.relpath(path, project_root)
+            except ValueError:
+                pass  # different drive on Windows, keep absolute
+
+        if not is_text:
+            att["content"] = None
+            continue
+
+        if not os.path.isfile(path):
+            att["content"] = None
+            att["error"] = "file not found"
+            continue
+
+        if os.path.getsize(path) > _MAX_ATTACHMENT_CONTENT_SIZE:
+            att["content"] = None
+            continue
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                att["content"] = f.read()
+        except OSError:
+            att["content"] = None
+            att["error"] = "file not found"
+
+
 def _build_content(msg) -> str:
     """Build LLM content from a message.
 
@@ -128,6 +166,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         except Exception as e:
             logger.error("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
+
+        if attachments:
+            _enrich_attachments(attachments, os.getcwd())
 
         await out_queue.put(OutgoingMessage(
             content=text,
