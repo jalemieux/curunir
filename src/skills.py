@@ -1,5 +1,8 @@
 # src/skills.py
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def build_skill_manifest(skills_dir: Path) -> str:
@@ -14,7 +17,10 @@ def build_skill_manifest(skills_dir: Path) -> str:
             skills.append((frontmatter["name"], frontmatter["description"]))
 
     if not skills:
+        logger.info("no skills found in %s", skills_dir)
         return ""
+
+    logger.info("discovered %d skills: %s", len(skills), ", ".join(n for n, _ in skills))
 
     lines = [
         "## Available Skills",
