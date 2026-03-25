@@ -88,3 +88,36 @@ def test_enrich_normalizes_path():
         assert not attachments[0]["path"].startswith("/")
     finally:
         os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_passes_workflow_to_outgoing():
+    """Workflow metadata from agent.handle() propagates to OutgoingMessage."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from src.channels.base import IncomingMessage
+
+    # Mock agent whose handle() populates metadata with workflow
+    agent = MagicMock()
+    agent.sessions = {}
+
+    async def fake_handle(content, session_id, on_tool_call=None, attachments=None, metadata=None):
+        if metadata is not None:
+            metadata["workflow"] = {"steps": ["plan", "build"], "current": "build"}
+        return "done"
+
+    agent.handle = AsyncMock(side_effect=fake_handle)
+
+    in_q = asyncio.Queue()
+    out_q = asyncio.Queue()
+
+    msg = IncomingMessage(content="go", channel="cli", session_id="test", reply_address={})
+    await in_q.put(msg)
+
+    # Import and run one iteration of agent_worker
+    from run import agent_worker
+    task = asyncio.create_task(agent_worker(agent, in_q, out_q))
+    result = await asyncio.wait_for(out_q.get(), timeout=2.0)
+    task.cancel()
+
+    assert result.workflow == {"steps": ["plan", "build"], "current": "build"}
