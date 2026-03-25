@@ -226,3 +226,54 @@ async def test_disconnect_enqueues_extract_command():
         assert msg.session_id == SESSION_ID
     finally:
         await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_send_includes_workflow_field():
+    """workflow field from OutgoingMessage is included in the JSON payload."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 7)
+    task = await _start_channel(ch)
+
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 7}") as ws:
+            await asyncio.sleep(0.05)
+            outgoing = OutgoingMessage(
+                content="design phase",
+                channel="cli",
+                session_id=SESSION_ID,
+                reply_address={},
+                workflow={"steps": ["plan", "design", "implement"], "current": "design"},
+            )
+            await ch.send(outgoing)
+
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["workflow"] == {"steps": ["plan", "design", "implement"], "current": "design"}
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_send_workflow_null_when_not_set():
+    """workflow field is null when not set on OutgoingMessage."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 8)
+    task = await _start_channel(ch)
+
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 8}") as ws:
+            await asyncio.sleep(0.05)
+            outgoing = OutgoingMessage(
+                content="no workflow",
+                channel="cli",
+                session_id=SESSION_ID,
+                reply_address={},
+            )
+            await ch.send(outgoing)
+
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["workflow"] is None
+    finally:
+        await _stop_channel(task)
