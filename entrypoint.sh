@@ -41,6 +41,11 @@ if [ -n "${CONTEXT_SYNC_REMOTE:-}" ]; then
     # Configure git identity early (needed for init+commit path)
     git config --global user.email "curunir@bot"
     git config --global user.name "curunir"
+    # Remove stale submodule .git pointer (file, not dir) left over from COPY
+    if [ -f "$CONTEXT_DIR/.git" ]; then
+        echo "context-sync: removing stale submodule .git pointer"
+        rm "$CONTEXT_DIR/.git"
+    fi
     if [ -d "$CONTEXT_DIR/.git" ]; then
         echo "context-sync: pulling latest from $CONTEXT_SYNC_REMOTE ($CONTEXT_SYNC_BRANCH)"
         git -C "$CONTEXT_DIR" pull --ff-only origin "$CONTEXT_SYNC_BRANCH" || echo "context-sync: pull failed, continuing with local state"
