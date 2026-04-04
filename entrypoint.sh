@@ -48,7 +48,7 @@ if [ -n "${CONTEXT_SYNC_REMOTE:-}" ]; then
     fi
     if [ -d "$CONTEXT_DIR/.git" ]; then
         echo "context-sync: pulling latest from $CONTEXT_SYNC_REMOTE ($CONTEXT_SYNC_BRANCH)"
-        git -C "$CONTEXT_DIR" pull --ff-only origin "$CONTEXT_SYNC_BRANCH" || echo "context-sync: pull failed, continuing with local state"
+        git -C "$CONTEXT_DIR" pull --rebase origin "$CONTEXT_SYNC_BRANCH" || echo "context-sync: pull failed, continuing with local state"
     elif [ "$(ls -A "$CONTEXT_DIR" 2>/dev/null)" ]; then
         # Directory exists with files but no .git — init and pull
         echo "context-sync: existing files in $CONTEXT_DIR, initializing repo"
