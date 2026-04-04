@@ -22,6 +22,7 @@ class OutgoingMessage:
     final: bool = True
     attachments: list[dict] | None = None
     workflow: dict | None = None
+    stats: dict | None = None
 
 
 class Channel(Protocol):
