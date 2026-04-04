@@ -5,6 +5,7 @@ import json
 import logging
 import os
 
+import httpx
 from dotenv import load_dotenv
 
 from src.agent.agent import Agent
@@ -59,6 +60,44 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
             return f"Schedule {action} {task_id}".strip()
         case _:
             return f"{name} {args_str}"
+
+
+async def _fetch_llamacpp_stats(api_base: str) -> dict | None:
+    """Query llama.cpp /slots endpoint for KV cache and slot stats."""
+    url = api_base.rstrip("/") + "/slots"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            slots = resp.json()
+            if not slots:
+                return None
+            # Aggregate across all slots
+            result: dict = {"slots": []}
+            for slot in slots:
+                s: dict = {
+                    "id": slot.get("id"),
+                    "state": slot.get("state"),
+                    "n_ctx": slot.get("n_ctx"),
+                    "n_predict": slot.get("n_predict"),
+                    "n_past": slot.get("n_past"),
+                }
+                # Prompt eval and generation timing from the slot
+                prompt_ms = slot.get("t_prompt_processing")
+                gen_ms = slot.get("t_token_generation")
+                n_prompt = slot.get("n_prompt_tokens_processed")
+                n_gen = slot.get("n_tokens_predicted")
+                if prompt_ms and n_prompt:
+                    s["prompt_tps"] = round(n_prompt / (prompt_ms / 1000), 1)
+                    s["prompt_tokens_processed"] = n_prompt
+                if gen_ms and n_gen:
+                    s["generation_tps"] = round(n_gen / (gen_ms / 1000), 1)
+                    s["tokens_predicted"] = n_gen
+                result["slots"].append(s)
+            return result
+    except Exception as e:
+        logger.debug("Failed to fetch llama.cpp stats: %s", e)
+        return None
 
 
 _MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
@@ -126,9 +165,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
-        if msg.command == "clear":
+        if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
-            if history:
+            if history and msg.command == "clear":
                 asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
@@ -172,6 +211,12 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if attachments:
             _enrich_attachments(attachments, os.getcwd())
 
+        # Fetch llama.cpp server stats if using a local API base
+        if agent.config.api_base and metadata.get("stats"):
+            llama_stats = await _fetch_llamacpp_stats(agent.config.api_base)
+            if llama_stats:
+                metadata["stats"]["server"] = llama_stats
+
         await out_queue.put(OutgoingMessage(
             content=text,
             channel=msg.channel,
@@ -179,6 +224,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             reply_address=msg.reply_address,
             attachments=attachments or None,
             workflow=metadata.get("workflow"),
+            stats=metadata.get("stats"),
         ))
 
 
@@ -212,12 +258,14 @@ async def main():
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     context_sync_remote = os.environ.get("CONTEXT_SYNC_REMOTE")
     context_sync_branch = os.environ.get("CONTEXT_SYNC_BRANCH", "main")
+    max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"context_sync_remote": context_sync_remote} if context_sync_remote else {}),
         **({"context_sync_branch": context_sync_branch} if context_sync_branch != "main" else {}),
+        **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
 
     context_sync = ContextSync(config)
