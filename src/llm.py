@@ -1,13 +1,35 @@
 # src/llm.py
-from dataclasses import dataclass
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
 
 import litellm
+
+log = logging.getLogger(__name__)
+
+MAX_RETRIES = 5
+RETRY_BASE_DELAY = 2  # seconds
+
+
+@dataclass
+class LLMUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    elapsed_sec: float = 0.0
+
+    @property
+    def completion_tps(self) -> float:
+        """Completion tokens per second."""
+        return self.completion_tokens / self.elapsed_sec if self.elapsed_sec > 0 else 0.0
 
 
 @dataclass
 class LLMResponse:
     text: str | None
     tool_calls: list[dict] | None
+    usage: LLMUsage = field(default_factory=LLMUsage)
 
 
 async def call_llm(
@@ -30,8 +52,30 @@ async def call_llm(
     if tools:
         kwargs["tools"] = tools
 
-    response = await litellm.acompletion(**kwargs)
+    t0 = time.monotonic()
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = await litellm.acompletion(**kwargs)
+            break
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                log.warning("LLM returned %s, retrying in %ss (attempt %d/%d)",
+                            status, delay, attempt + 1, MAX_RETRIES)
+                await asyncio.sleep(delay)
+            else:
+                raise
+    elapsed = time.monotonic() - t0
+
     choice = response.choices[0].message
+
+    # Extract usage stats
+    usage = LLMUsage(elapsed_sec=elapsed)
+    if response.usage:
+        usage.prompt_tokens = response.usage.prompt_tokens or 0
+        usage.completion_tokens = response.usage.completion_tokens or 0
+        usage.total_tokens = response.usage.total_tokens or 0
 
     text = choice.content if choice.content else None
 
@@ -49,4 +93,4 @@ async def call_llm(
             for tc in choice.tool_calls
         ]
 
-    return LLMResponse(text=text, tool_calls=tool_calls)
+    return LLMResponse(text=text, tool_calls=tool_calls, usage=usage)

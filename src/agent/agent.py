@@ -1,6 +1,7 @@
 # src/agent/agent.py
 import json
 import logging
+import time
 from datetime import datetime
 
 import litellm
@@ -15,7 +16,7 @@ from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
 
 
-_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
+_DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
 
 # Map tool names to their key argument(s) for log display
 _TOOL_KEY_ARGS: dict[str, list[str]] = {
@@ -78,7 +79,7 @@ def _estimate_chars(messages: list[dict]) -> int:
     return total
 
 
-def _trim_history(history: list[dict], max_chars: int = _MAX_HISTORY_CHARS) -> None:
+def _trim_history(history: list[dict], max_chars: int = _DEFAULT_MAX_HISTORY_CHARS) -> None:
     """Remove oldest messages in coherent groups until under the char limit.
 
     Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
@@ -168,7 +169,7 @@ class Agent:
         else:
             history.append({"role": "user", "content": message})
             system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
-        _trim_history(history)
+        _trim_history(history, max_chars=self.config.max_history_chars)
         messages = [{"role": "system", "content": system_prompt}] + history
 
         sid = session_id[:8]
@@ -177,6 +178,30 @@ class Agent:
 
         tool_schemas = self._get_tool_schemas(session_id)
 
+        # Accumulate LLM usage stats across iterations
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_llm_elapsed = 0.0
+        llm_calls = 0
+        t_start = time.monotonic()
+
+        def _finalize_stats() -> None:
+            """Write accumulated LLM stats into metadata dict."""
+            if metadata is None:
+                return
+            wall = time.monotonic() - t_start
+            tps = total_completion_tokens / total_llm_elapsed if total_llm_elapsed > 0 else 0.0
+            metadata["stats"] = {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens,
+                "llm_calls": llm_calls,
+                "llm_elapsed_sec": round(total_llm_elapsed, 2),
+                "wall_elapsed_sec": round(wall, 2),
+                "completion_tps": round(tps, 1),
+                "iterations": 0,  # filled at return site
+            }
+
         for iteration in range(self.config.max_iterations):
             logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
             try:
@@ -184,8 +209,9 @@ class Agent:
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
                     raise
-                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, _MAX_HISTORY_CHARS // 2000)
-                _trim_history(history, max_chars=_MAX_HISTORY_CHARS // 2)
+                half = self.config.max_history_chars // 2
+                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
+                _trim_history(history, max_chars=half)
                 if not history:
                     return "Sorry, the message was too long for me to process."
                 messages = [{"role": "system", "content": system_prompt}] + history
@@ -196,6 +222,12 @@ class Agent:
                         raise
                     logger.error("[%s] context window still exceeded after trim, aborting", sid)
                     return "Sorry, the conversation is too long. Please start a new thread."
+
+            # Accumulate usage
+            total_prompt_tokens += response.usage.prompt_tokens
+            total_completion_tokens += response.usage.completion_tokens
+            total_llm_elapsed += response.usage.elapsed_sec
+            llm_calls += 1
 
             if response.tool_calls:
                 assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -239,24 +271,33 @@ class Agent:
                         "content": result,
                     })
 
-                _trim_history(history)
+                _trim_history(history, max_chars=self.config.max_history_chars)
                 messages = [{"role": "system", "content": system_prompt}] + history
                 continue
 
             if response.text:
                 logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                 history.append({"role": "assistant", "content": response.text})
+                _finalize_stats()
+                if metadata and "stats" in metadata:
+                    metadata["stats"]["iterations"] = iteration + 1
                 if system_task_prompt:
                     self.sessions.pop(session_id, None)
                 return response.text
 
             logger.warning("[%s] LLM returned empty response", sid)
             history.append({"role": "assistant", "content": ""})
+            _finalize_stats()
+            if metadata and "stats" in metadata:
+                metadata["stats"]["iterations"] = iteration + 1
             if system_task_prompt:
                 self.sessions.pop(session_id, None)
             return "Error: LLM returned empty response."
 
         logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
+        _finalize_stats()
+        if metadata and "stats" in metadata:
+            metadata["stats"]["iterations"] = self.config.max_iterations
         if system_task_prompt:
             self.sessions.pop(session_id, None)
         return "Iteration limit reached."

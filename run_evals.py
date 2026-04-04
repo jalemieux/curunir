@@ -54,7 +54,7 @@ def get_version() -> str:
 async def send_prompt(ws, prompt: str) -> dict:
     """Send a prompt, stream output to terminal, return collected result."""
     # Clear session first
-    await ws.send(json.dumps({"content": "", "command": "clear"}))
+    await ws.send(json.dumps({"content": "", "command": "reset"}))
     # Drain any clear response
     async for raw in ws:
         data = json.loads(raw)
@@ -65,6 +65,7 @@ async def send_prompt(ws, prompt: str) -> dict:
 
     tool_calls = []
     content_parts = []
+    stats = None
 
     async for raw in ws:
         data = json.loads(raw)
@@ -78,12 +79,30 @@ async def send_prompt(ws, prompt: str) -> dict:
             content_parts.append(text)
             print(text)
 
+        if data.get("stats"):
+            stats = data["stats"]
+
         if data.get("final"):
             break
+
+    # Print stats summary
+    if stats:
+        parts = []
+        if stats.get("prompt_tokens"):
+            parts.append(f"prompt: {stats['prompt_tokens']} tok")
+        if stats.get("completion_tokens"):
+            parts.append(f"completion: {stats['completion_tokens']} tok")
+        if stats.get("completion_tps"):
+            parts.append(f"{stats['completion_tps']} tok/s")
+        if stats.get("wall_elapsed_sec"):
+            parts.append(f"{stats['wall_elapsed_sec']}s")
+        if parts:
+            print(f"  [{' | '.join(parts)}]")
 
     return {
         "tool_calls": tool_calls,
         "response": "\n".join(content_parts),
+        "stats": stats,
     }
 
 
@@ -126,8 +145,84 @@ async def run(host: str, port: int, evals_file: Path) -> None:
     RESULTS_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_model = re.sub(r"[^\w\-]", "_", model)
-    out_path = RESULTS_DIR / f"eval-{ts}-{safe_model}.json"
-    out_path.write_text(json.dumps(results, indent=2))
+
+    # Markdown output
+    md_lines = [
+        f"# Eval Results: {model}",
+        "",
+        f"- **Version:** {version}",
+        f"- **Model:** {model}",
+        f"- **Timestamp:** {results['timestamp']}",
+        "",
+        "---",
+        "",
+    ]
+    current_category = ""
+    prompt_num = 0
+    for entry in results["results"]:
+        if entry["category"] != current_category:
+            current_category = entry["category"]
+            md_lines.append(f"## {current_category}")
+            md_lines.append("")
+        prompt_num += 1
+        md_lines.append(f"### {prompt_num}. {entry['prompt']}")
+        md_lines.append("")
+
+        # Stats table
+        stats = entry.get("stats")
+        if stats:
+            md_lines.append("**Stats:**")
+            md_lines.append("")
+            md_lines.append("| Metric | Value |")
+            md_lines.append("|--------|-------|")
+            if stats.get("prompt_tokens"):
+                md_lines.append(f"| Prompt tokens | {stats['prompt_tokens']} |")
+            if stats.get("completion_tokens"):
+                md_lines.append(f"| Completion tokens | {stats['completion_tokens']} |")
+            if stats.get("total_tokens"):
+                md_lines.append(f"| Total tokens | {stats['total_tokens']} |")
+            if stats.get("completion_tps"):
+                md_lines.append(f"| Completion tok/s | {stats['completion_tps']} |")
+            if stats.get("iterations"):
+                md_lines.append(f"| Iterations | {stats['iterations']} |")
+            if stats.get("llm_calls"):
+                md_lines.append(f"| LLM calls | {stats['llm_calls']} |")
+            if stats.get("llm_elapsed_sec"):
+                md_lines.append(f"| LLM time (s) | {stats['llm_elapsed_sec']} |")
+            if stats.get("wall_elapsed_sec"):
+                md_lines.append(f"| Wall time (s) | {stats['wall_elapsed_sec']} |")
+            # llama.cpp server stats
+            server = stats.get("server")
+            if server:
+                for slot in server.get("slots", []):
+                    sid = slot.get("id", "?")
+                    if slot.get("n_ctx"):
+                        md_lines.append(f"| Slot {sid} n_ctx | {slot['n_ctx']} |")
+                    if slot.get("n_past") is not None:
+                        md_lines.append(f"| Slot {sid} n_past | {slot['n_past']} |")
+                    if slot.get("prompt_tps"):
+                        md_lines.append(f"| Slot {sid} prompt tok/s | {slot['prompt_tps']} |")
+                    if slot.get("generation_tps"):
+                        md_lines.append(f"| Slot {sid} gen tok/s | {slot['generation_tps']} |")
+            md_lines.append("")
+
+        if entry["tool_calls"]:
+            md_lines.append("**Tool Calls:**")
+            for tc in entry["tool_calls"]:
+                md_lines.append(f"- `{tc}`")
+            md_lines.append("")
+        else:
+            md_lines.append("**Tool Calls:** *(none)*")
+            md_lines.append("")
+        md_lines.append("**Response:**")
+        md_lines.append("")
+        md_lines.append(entry["response"])
+        md_lines.append("")
+        md_lines.append("---")
+        md_lines.append("")
+
+    out_path = RESULTS_DIR / f"eval-{ts}-{safe_model}.md"
+    out_path.write_text("\n".join(md_lines))
     print(f"\nResults saved to {out_path}")
 
 

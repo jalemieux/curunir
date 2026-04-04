@@ -43,7 +43,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     uri = f"ws://{host}:{port}"
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim]")
-    console.print("[dim]type /clear or /new to reset, /verbose to toggle tool output[/dim]")
+    console.print("[dim]type /clear or /new to reset, /reset to reset without extracting, /verbose to toggle tool output[/dim]")
 
     verbose = True
     ready = asyncio.Event()
@@ -120,6 +120,46 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         if att.get("content"):
                             console.print(Markdown(att["content"]))
 
+                # Display stats in verbose mode
+                stats = data.get("stats")
+                if verbose and stats and final:
+                    stat_line = Text()
+                    stat_line.append("\n  ", style="dim")
+                    parts = []
+                    if stats.get("prompt_tokens"):
+                        parts.append(f"prompt: {stats['prompt_tokens']} tok")
+                    if stats.get("completion_tokens"):
+                        parts.append(f"completion: {stats['completion_tokens']} tok")
+                    if stats.get("completion_tps"):
+                        parts.append(f"{stats['completion_tps']} tok/s")
+                    if stats.get("iterations"):
+                        parts.append(f"{stats['iterations']} iter")
+                    if stats.get("wall_elapsed_sec"):
+                        parts.append(f"{stats['wall_elapsed_sec']}s wall")
+                    if parts:
+                        stat_line.append(" | ".join(parts), style="dim cyan")
+                        console.print(stat_line)
+
+                    # llama.cpp server stats
+                    server = stats.get("server")
+                    if server:
+                        for slot in server.get("slots", []):
+                            srv_parts = []
+                            if slot.get("n_ctx"):
+                                srv_parts.append(f"n_ctx: {slot['n_ctx']}")
+                            if slot.get("n_past") is not None:
+                                srv_parts.append(f"n_past: {slot['n_past']}")
+                            if slot.get("prompt_tps"):
+                                srv_parts.append(f"prompt: {slot['prompt_tps']} tok/s")
+                            if slot.get("generation_tps"):
+                                srv_parts.append(f"gen: {slot['generation_tps']} tok/s")
+                            if srv_parts:
+                                srv_line = Text()
+                                srv_line.append("  ", style="dim")
+                                srv_line.append(f"slot {slot.get('id', '?')}: ", style="dim")
+                                srv_line.append(" | ".join(srv_parts), style="dim yellow")
+                                console.print(srv_line)
+
                 if final:
                     if verbose:
                         flush_tool_calls()
@@ -177,6 +217,8 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                     if text in ("/clear", "/new"):
                         payload = {"content": "", "command": "clear"}
+                    elif text == "/reset":
+                        payload = {"content": "", "command": "reset"}
                     else:
                         payload = {"content": text, "command": None}
 
