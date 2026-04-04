@@ -93,29 +93,51 @@ docker compose up --build
 
 #### Email Channel (Gmail)
 
-The email channel requires Google OAuth credentials and a token. To set up:
+The email channel uses [gog](https://github.com/steipete/gogcli) to access Gmail via OAuth. Setup has two parts: a one-time credential setup and a token that needs periodic renewal.
+
+##### One-Time Setup: OAuth Credentials
 
 1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
 2. **Create Credentials → OAuth client ID → Desktop app** → Download the JSON file
-3. Authenticate locally with `gog` and export your token:
+3. Install the [gog CLI](https://github.com/steipete/gogcli) and register the credentials:
    ```bash
-   gog auth credentials <downloaded-credentials.json>
-   gog auth login --email you@gmail.com
-   gog auth tokens export > gog-token.json
+   gog auth credentials set <downloaded-credentials.json>
    ```
-4. Place both files in the `secrets/` directory:
+4. Authorize the bot's Gmail account (opens a browser for OAuth consent):
+   ```bash
+   gog auth add <bot-email@gmail.com>
+   ```
+5. Place the credentials and token in `secrets/`:
    ```bash
    mkdir -p secrets
    cp <downloaded-credentials.json> secrets/gog-credentials.json
-   cp gog-token.json secrets/gog-token.json
+   gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
    ```
-
-5. Enable the email channel in your `.env`:
+6. Enable the email channel in your `.env`:
    ```bash
    EMAIL_ENABLED=true
-   GOG_ACCOUNT=you@gmail.com
-   EMAIL_ALLOWED_SENDERS=boss@example.com,colleague@example.com
+   GOG_ACCOUNT=<bot-email@gmail.com>
+   EMAIL_ALLOWED_SENDERS=allowed-sender@example.com
    ```
+
+> **Note:** The email used in all `gog` commands must match — it's the Gmail account the bot sends and receives from, not your personal email.
+
+##### Renewing the Token
+
+OAuth tokens expire periodically. When the email channel stops working, re-export:
+
+```bash
+gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
+docker compose restart
+```
+
+If the refresh token itself has expired (`gog` gives a "Secret not found in keyring" error), re-authorize first:
+
+```bash
+gog auth add <bot-email@gmail.com>
+gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
+docker compose restart
+```
 
 The `secrets/` directory is mounted read-only into the container at `/secrets`. The entrypoint script automatically imports both files into the `gog` CLI configuration on startup.
 
