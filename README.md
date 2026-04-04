@@ -194,6 +194,26 @@ When the agent loads this skill via `load_skill`, the listed tools are added to 
 |------|-------------|
 | `attach` | Attach a file to the agent's response. Delivered as an email attachment, CLI file path, etc. depending on channel. |
 
+## Evals
+
+Simple eval harness that sends prompts to Curunir over WebSocket and records results.
+
+```bash
+# Run basic evals (tool use, planning, memory, instruction following)
+python run_evals.py
+
+# Run advanced evals (web search, deep research, delegation, cross-skill orchestration)
+python run_evals.py --file advanced_evals.md
+
+# Against a remote instance
+python run_evals.py --host myserver.example.com --port 8765
+```
+
+Results are saved to `eval_results/` as timestamped JSON files including the model name, all prompts, responses, and tool calls.
+
+- `simple_evals.md` — 18 prompts testing core capabilities (no API keys needed)
+- `advanced_evals.md` — 30 prompts testing skills like web-search, deep-research, and delegation (requires `BRAVE_API_KEY` and network access)
+
 ## Configuration
 
 Configuration is handled via `src/config.py`:
