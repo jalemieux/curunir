@@ -68,20 +68,20 @@ async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
         if data.get("final"):
             break
 
-    msg = {"content": prompt, "command": None}
-    if max_loops is not None:
-        msg["max_loops"] = max_loops
-    await ws.send(json.dumps(msg))
+    await ws.send(json.dumps({"content": prompt, "command": None}))
 
     tool_calls = []
     content_parts = []
     stats = None
+    tool_call_count = 0
+    hit_limit = False
 
     async for raw in ws:
         data = json.loads(raw)
 
         for tc in data.get("tool_calls") or []:
             tool_calls.append(tc)
+            tool_call_count += 1
             print(f"  ├─ {tc}")
 
         text = data.get("content") or ""
@@ -93,6 +93,18 @@ async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
             stats = data["stats"]
 
         if data.get("final"):
+            break
+
+        # Abort if we've exceeded the tool-call budget for this prompt
+        if max_loops is not None and tool_call_count >= max_loops:
+            hit_limit = True
+            print(f"  ⚠ eval limit reached ({tool_call_count}/{max_loops} tool calls) — resetting")
+            await ws.send(json.dumps({"content": "", "command": "reset"}))
+            # Drain the reset response
+            async for reset_raw in ws:
+                reset_data = json.loads(reset_raw)
+                if reset_data.get("final"):
+                    break
             break
 
     # Print stats summary
@@ -113,6 +125,7 @@ async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
         "tool_calls": tool_calls,
         "response": "\n".join(content_parts),
         "stats": stats,
+        "hit_limit": hit_limit,
     }
 
 
@@ -182,7 +195,8 @@ async def run(host: str, port: int, evals_file: Path) -> None:
         md_lines.append("")
 
         if entry.get("max_loops"):
-            md_lines.append(f"**Max loops:** {entry['max_loops']}")
+            status = " — **LIMIT HIT**" if entry.get("hit_limit") else ""
+            md_lines.append(f"**Max tool calls:** {entry['max_loops']}{status}")
             md_lines.append("")
 
         # Stats table
