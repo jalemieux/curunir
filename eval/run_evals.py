@@ -2,7 +2,7 @@
 time, shows real-time output, and saves results to a timestamped file.
 
 Usage:
-    python run_evals.py [--host localhost] [--port 8765]
+    python eval/run_evals.py [--host localhost] [--port 8765]
 """
 
 import argparse
@@ -37,8 +37,15 @@ def parse_prompts(path: Path) -> list[dict]:
         lines = section.strip().splitlines()
         category = lines[0].strip()
         body = "\n".join(lines[1:])
-        for match in re.finditer(r"```\n(.*?)\n```", body, re.DOTALL):
-            prompts.append({"category": category, "prompt": match.group(1).strip()})
+        for match in re.finditer(
+            r"```(?:max_loops=(\d+))?\n(.*?)\n```", body, re.DOTALL
+        ):
+            max_loops = int(match.group(1)) if match.group(1) else None
+            prompts.append({
+                "category": category,
+                "prompt": match.group(2).strip(),
+                "max_loops": max_loops,
+            })
     return prompts
 
 
@@ -51,7 +58,7 @@ def get_version() -> str:
         return "unknown"
 
 
-async def send_prompt(ws, prompt: str) -> dict:
+async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
     """Send a prompt, stream output to terminal, return collected result."""
     # Clear session first
     await ws.send(json.dumps({"content": "", "command": "reset"}))
@@ -61,7 +68,10 @@ async def send_prompt(ws, prompt: str) -> dict:
         if data.get("final"):
             break
 
-    await ws.send(json.dumps({"content": prompt, "command": None}))
+    msg = {"content": prompt, "command": None}
+    if max_loops is not None:
+        msg["max_loops"] = max_loops
+    await ws.send(json.dumps(msg))
 
     tool_calls = []
     content_parts = []
@@ -128,16 +138,19 @@ async def run(host: str, port: int, evals_file: Path) -> None:
         }
 
         for i, item in enumerate(prompts, 1):
-            header = f"[{i}/{len(prompts)}] {item['category']}"
+            max_loops = item.get("max_loops")
+            loops_label = f" (max_loops={max_loops})" if max_loops else ""
+            header = f"[{i}/{len(prompts)}] {item['category']}{loops_label}"
             print(f"\n{'='*60}")
             print(header)
             print(f"{'='*60}")
             print(f"> {item['prompt']}\n")
 
-            result = await send_prompt(ws, item["prompt"])
+            result = await send_prompt(ws, item["prompt"], max_loops=max_loops)
             results["results"].append({
                 "category": item["category"],
                 "prompt": item["prompt"],
+                "max_loops": max_loops,
                 **result,
             })
 
@@ -167,6 +180,10 @@ async def run(host: str, port: int, evals_file: Path) -> None:
         prompt_num += 1
         md_lines.append(f"### {prompt_num}. {entry['prompt']}")
         md_lines.append("")
+
+        if entry.get("max_loops"):
+            md_lines.append(f"**Max loops:** {entry['max_loops']}")
+            md_lines.append("")
 
         # Stats table
         stats = entry.get("stats")
