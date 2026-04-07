@@ -20,7 +20,8 @@ class AgentConfig:
 @dataclass
 class EmailChannelConfig:
     enabled: bool = False
-    account: str = ""
+    service_account_file: str = ""
+    delegated_user: str = ""
     poll_interval_sec: int = 60
     allowed_senders: list[str] = field(default_factory=list)
     processed_label: str = "agent/processed"

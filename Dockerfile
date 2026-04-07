@@ -9,12 +9,6 @@ RUN apt-get update && \
 # Install chub CLI (curated LLM-optimized API docs — used by skill-factory)
 RUN npm install -g @aisuite/chub
 
-# Install gog CLI (Google Workspace — Gmail, Calendar, Drive, etc.)
-ARG GOG_VERSION=0.12.0
-RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin gog && \
-    chmod +x /usr/local/bin/gog
-
 WORKDIR /app
 
 COPY requirements.txt .

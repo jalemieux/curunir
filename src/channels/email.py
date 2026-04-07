@@ -1,11 +1,11 @@
-"""Email channel — polls Gmail via gog CLI, processes inbound messages, sends replies."""
+"""Email channel — polls Gmail via service account, processes inbound messages, sends replies."""
 
 import asyncio
 import logging
 import os
 import re
 
-from src.channels import gog
+from src.channels import gmail
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import EmailChannelConfig
 
@@ -24,7 +24,7 @@ class EmailChannel:
     def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
         self.in_queue = in_queue
         self.config = config
-        self.account = config.account
+        self.service = gmail.build_service(config.service_account_file, config.delegated_user)
         self.poll_interval = config.poll_interval_sec
         self.allowed_senders = config.allowed_senders
         self.processed_label = config.processed_label
@@ -33,14 +33,12 @@ class EmailChannel:
 
     async def _ensure_label(self) -> None:
         """Ensure the processed label exists in Gmail, creating it if missing."""
-        labels = await asyncio.to_thread(gog.labels_list, self.account)
+        labels = await asyncio.to_thread(gmail.labels_list, self.service)
         if not any(label.get("name") == self.processed_label for label in labels):
-            await asyncio.to_thread(gog.labels_create, self.processed_label, self.account)
+            await asyncio.to_thread(gmail.labels_create, self.processed_label, self.service)
 
     async def start(self) -> None:
-        """Verify gog, bootstrap label, enter polling loop."""
-        await asyncio.to_thread(gog.check_installed)
-        logger.info("gog CLI verified")
+        """Bootstrap label, enter polling loop."""
         await self._ensure_label()
         logger.info("Email channel started, polling every %ds", self.poll_interval)
         await self._poll_loop()
@@ -55,23 +53,23 @@ class EmailChannel:
                      len(attachment_paths) if attachment_paths else 0)
         try:
             await asyncio.to_thread(
-                gog.send_reply,
+                gmail.send_reply,
                 to=msg.reply_address["to"],
                 subject=msg.reply_address["subject"],
                 body=msg.content,
                 reply_to_message_id=msg.reply_address["in_reply_to"],
-                account=self.account,
+                service=self.service,
                 attachments=attachment_paths,
             )
-        except gog.GogError:
+        except gmail.GmailError:
             logger.exception("Failed to send reply for thread %s", msg.session_id)
             return
         try:
             await asyncio.to_thread(
-                gog.thread_modify, msg.session_id,
-                add_label=self.processed_label, account=self.account,
+                gmail.thread_modify, msg.session_id,
+                add_label=self.processed_label, service=self.service,
             )
-        except gog.GogError:
+        except gmail.GmailError:
             logger.exception("Failed to label thread %s after send", msg.session_id)
 
     async def _poll_loop(self) -> None:
@@ -86,14 +84,14 @@ class EmailChannel:
     async def _poll_once(self) -> None:
         """Run one poll cycle: search for unprocessed threads and process new messages."""
         query = f"in:inbox -label:{self.processed_label}"
-        threads = await asyncio.to_thread(gog.search, query, self.account)
+        threads = await asyncio.to_thread(gmail.search, query, self.service)
 
         for thread_summary in threads:
             thread_id = thread_summary["id"]
 
             try:
-                thread = await asyncio.to_thread(gog.thread_get, thread_id, self.account)
-            except gog.GogError:
+                thread = await asyncio.to_thread(gmail.thread_get, thread_id, self.service)
+            except gmail.GmailError:
                 logger.exception("Failed to fetch thread %s", thread_id)
                 continue
 
@@ -168,8 +166,10 @@ class EmailChannel:
         os.makedirs(out_dir, exist_ok=True)
 
         try:
-            await asyncio.to_thread(gog.thread_download_attachments, thread_id, out_dir, self.account)
-        except gog.GogError:
+            await asyncio.to_thread(
+                gmail.download_attachments, thread_id, message, out_dir, self.service,
+            )
+        except gmail.GmailError:
             logger.exception("Failed to download attachments for thread %s", thread_id)
             return None
 
@@ -178,22 +178,17 @@ class EmailChannel:
         # when generating tool calls, causing file-not-found errors.
         self._normalize_filenames(out_dir)
 
-        # gog saves files with an attachment-ID prefix (e.g. "19d00de1_ANGj_orig.png").
-        # Match downloaded files to expected attachments by suffix.
+        # Files are saved with their original filename (no prefix).
         downloaded = os.listdir(out_dir)
         logger.debug("Attachment dir %s: %d file(s) %s", out_dir, len(downloaded), downloaded)
 
         manifest = []
         for att in raw_attachments:
             fname = _normalize_unicode_whitespace(att["filename"])
-            # Try exact match first, then suffix match for prefixed filenames
-            actual = fname if fname in downloaded else next(
-                (f for f in downloaded if f.endswith("_" + fname)), None
-            )
-            if actual is None:
+            if fname not in downloaded:
                 logger.warning("Attachment not found on disk: %s (dir contains: %s)", fname, downloaded)
                 continue
-            full_path = os.path.join(out_dir, actual)
+            full_path = os.path.join(out_dir, fname)
             if not os.path.isfile(full_path):
                 logger.warning("Attachment matched but not a file: %s", full_path)
                 continue
