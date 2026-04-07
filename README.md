@@ -93,61 +93,16 @@ docker compose up --build
 
 #### Email Channel (Gmail)
 
-The email channel uses [gog](https://github.com/steipete/gogcli) to access Gmail via OAuth. Setup has two parts: a one-time credential setup and a token that needs periodic renewal.
-
-##### One-Time Setup: OAuth Credentials
-
-1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
-2. **Create Credentials → OAuth client ID → Desktop app** → Download the JSON file
-3. Install the [gog CLI](https://github.com/steipete/gogcli) and register the credentials:
-   ```bash
-   gog auth credentials set <downloaded-credentials.json>
-   ```
-4. Authorize the bot's Gmail account (opens a browser for OAuth consent):
-   ```bash
-   gog auth add <bot-email@gmail.com>
-   ```
-5. Place the credentials and token in `secrets/`:
-   ```bash
-   mkdir -p secrets
-   cp <downloaded-credentials.json> secrets/gog-credentials.json
-   gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
-   ```
-6. Enable the email channel in your `.env`:
-   ```bash
-   EMAIL_ENABLED=true
-   GOG_ACCOUNT=<bot-email@gmail.com>
-   EMAIL_ALLOWED_SENDERS=allowed-sender@example.com
-   ```
-
-> **Note:** The email used in all `gog` commands must match — it's the Gmail account the bot sends and receives from, not your personal email.
-
-##### Renewing the Token
-
-OAuth tokens expire periodically. When the email channel stops working, re-export:
+The email channel connects to Gmail via a Google Workspace service account with domain-wide delegation. No OAuth token management or external CLI tools — just a JSON key file.
 
 ```bash
-gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
-docker compose restart
+EMAIL_ENABLED=true
+GOOGLE_SERVICE_ACCOUNT_FILE=./secrets/service-account.json
+GOOGLE_DELEGATED_USER=bot@yourdomain.com
+EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
-If the refresh token itself has expired (`gog` gives a "Secret not found in keyring" error), re-authorize first:
-
-```bash
-gog auth add <bot-email@gmail.com>
-gog auth tokens export <bot-email@gmail.com> --out secrets/gog-token.json
-docker compose restart
-```
-
-The `secrets/` directory is mounted read-only into the container at `/secrets`. The entrypoint script automatically imports both files into the `gog` CLI configuration on startup.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `EMAIL_ENABLED` | `false` | Enable the email channel |
-| `GOG_ACCOUNT` | — | Gmail address to poll and send from |
-| `EMAIL_ALLOWED_SENDERS` | — | Comma-separated list of allowed sender addresses (empty = allow all) |
-| `EMAIL_POLL_INTERVAL` | `60` | Seconds between inbox polls |
-| `EMAIL_PROCESSED_LABEL` | `agent/processed` | Gmail label applied to processed threads |
+See **[docs/gmail-setup.md](docs/gmail-setup.md)** for the full GCP and Workspace Admin setup walkthrough.
 
 ## Adding Skills
 
