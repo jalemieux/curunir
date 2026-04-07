@@ -22,11 +22,11 @@ What is the current working directory? List all top-level folders.
 
 ## Multi-Step Planning
 
-```max_loops=10
+```max_loops=15
 I want to add a new tool called "summarize" that takes a file path and returns a summary. Walk me through every file I'd need to change and in what order, but don't make any changes.
 ```
 
-```max_loops=10
+```max_loops=15
 Find every skill that uses the "attach" tool, then for each one tell me what it does and why it needs attach.
 ```
 
@@ -54,7 +54,7 @@ Who are the people you remember? Check context/memory/ for any information about
 
 ## Instruction Following
 
-```max_loops=3
+```max_loops=5
 What is your name and what are you? Answer only from your identity file, don't make anything up.
 ```
 
@@ -78,7 +78,7 @@ Load the web-search skill and search for "asyncio best practices 2025". Summariz
 Load the deep-research skill and tell me what sub-skills it depends on before running anything.
 ```
 
-```max_loops=10
+```max_loops=15
 I want to research what people on Reddit think about LLM eval frameworks. Use the appropriate skill.
 ```
 
@@ -102,7 +102,7 @@ Search for the pattern "zzz_no_match_zzz" across the entire codebase. What do yo
 
 ## Output Quality
 
-```max_loops=5
+```max_loops=8
 Explain how Curunir's context overflow handling works. Be concise — under 100 words.
 ```
 
@@ -110,7 +110,7 @@ Explain how Curunir's context overflow handling works. Be concise — under 100 
 Compare the delegate tool to a simple function call. When would you use one vs the other?
 ```
 
-```max_loops=8
+```max_loops=12
 What are the three most important design decisions in this codebase? Justify each briefly.
 ```
 
@@ -118,7 +118,7 @@ What are the three most important design decisions in this codebase? Justify eac
 
 ## Efficiency
 
-```max_loops=3
+```max_loops=5
 What model am I configured to use? Find the answer with as few tool calls as possible.
 ```
 
@@ -126,6 +126,6 @@ What model am I configured to use? Find the answer with as few tool calls as pos
 Does this project have any scheduled tasks? Check and report.
 ```
 
-```max_loops=3
+```max_loops=5
 How many tests does this project have? Just give me the number.
 ```
