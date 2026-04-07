@@ -3,6 +3,7 @@ time, shows real-time output, and saves results to a timestamped file.
 
 Usage:
     python eval/run_evals.py [--host localhost] [--port 8765]
+    python eval/run_evals.py --resume eval/eval_results/eval-20260406-141719-openai_gemma-4-E4B-it.json --from 14
 """
 
 import argparse
@@ -121,18 +122,59 @@ async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
         if parts:
             print(f"  [{' | '.join(parts)}]")
 
+    response = "\n".join(content_parts)
+    if hit_limit and not response.strip():
+        response = (
+            f"*Model did not produce a response within the tool-call budget "
+            f"({tool_call_count}/{max_loops} calls used).*"
+        )
+
     return {
         "tool_calls": tool_calls,
-        "response": "\n".join(content_parts),
+        "response": response,
         "stats": stats,
         "hit_limit": hit_limit,
     }
 
 
-async def run(host: str, port: int, evals_file: Path) -> None:
+def save_checkpoint(results: dict, checkpoint_path: Path) -> None:
+    """Save current results to a JSON checkpoint file."""
+    checkpoint_path.write_text(json.dumps(results, indent=2, default=str))
+
+
+def load_checkpoint(checkpoint_path: Path) -> dict:
+    """Load results from a JSON checkpoint file."""
+    return json.loads(checkpoint_path.read_text())
+
+
+async def run(
+    host: str,
+    port: int,
+    evals_file: Path,
+    resume_path: Path | None = None,
+    start_from: int | None = None,
+) -> None:
     uri = f"ws://{host}:{port}"
     prompts = parse_prompts(evals_file)
     print(f"Loaded {len(prompts)} eval prompts from {evals_file.name}")
+
+    # Resume: load prior results and determine start index
+    prior_results = []
+    if resume_path:
+        checkpoint = load_checkpoint(resume_path)
+        prior_results = checkpoint.get("results", [])
+        if start_from is None:
+            start_from = len(prior_results) + 1
+        # Keep only results before the start point
+        prior_results = prior_results[: start_from - 1]
+        print(f"Resuming from question {start_from} (keeping {len(prior_results)} prior results)")
+
+    start_idx = (start_from or 1) - 1  # 0-based
+
+    if start_idx >= len(prompts):
+        print(f"Nothing to run: start_from={start_from} but only {len(prompts)} prompts")
+        return
+
     print(f"Connecting to {uri}...")
 
     async with websockets.connect(uri) as ws:
@@ -147,10 +189,19 @@ async def run(host: str, port: int, evals_file: Path) -> None:
             "version": version,
             "model": model,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "results": [],
+            "results": list(prior_results),
         }
 
+        # Set up checkpoint path early so we can save incrementally
+        RESULTS_DIR.mkdir(exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe_model = re.sub(r"[^\w\-]", "_", model)
+        checkpoint_path = RESULTS_DIR / f"eval-{ts}-{safe_model}.json"
+
         for i, item in enumerate(prompts, 1):
+            if i < (start_from or 1):
+                continue
+
             max_loops = item.get("max_loops")
             loops_label = f" (max_loops={max_loops})" if max_loops else ""
             header = f"[{i}/{len(prompts)}] {item['category']}{loops_label}"
@@ -167,12 +218,10 @@ async def run(host: str, port: int, evals_file: Path) -> None:
                 **result,
             })
 
-    # Save results
-    RESULTS_DIR.mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    safe_model = re.sub(r"[^\w\-]", "_", model)
+            # Save checkpoint after each prompt
+            save_checkpoint(results, checkpoint_path)
 
-    # Markdown output
+    # Build markdown output
     md_lines = [
         f"# Eval Results: {model}",
         "",
@@ -255,6 +304,7 @@ async def run(host: str, port: int, evals_file: Path) -> None:
     out_path = RESULTS_DIR / f"eval-{ts}-{safe_model}.md"
     out_path.write_text("\n".join(md_lines))
     print(f"\nResults saved to {out_path}")
+    print(f"Checkpoint: {checkpoint_path}  (use with --resume to continue)")
 
 
 def main() -> None:
@@ -267,8 +317,23 @@ def main() -> None:
         default=DEFAULT_EVALS_FILE,
         help="Eval markdown file (default: simple_evals.md)",
     )
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="Path to a checkpoint .json file from a previous run to resume from",
+    )
+    parser.add_argument(
+        "--from",
+        type=int,
+        dest="start_from",
+        default=None,
+        help="Question number to resume from (1-based). Requires --resume.",
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.host, args.port, args.file))
+    if args.start_from and not args.resume:
+        parser.error("--from requires --resume to specify which run to continue")
+    asyncio.run(run(args.host, args.port, args.file, args.resume, args.start_from))
 
 
 if __name__ == "__main__":
