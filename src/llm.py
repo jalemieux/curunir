@@ -44,6 +44,7 @@ async def call_llm(
         "model": model,
         "messages": messages,
         "max_tokens": 16000,
+        "num_retries": 0,  # disable LiteLLM's internal retries; we handle retries below
     }
     if api_base:
         kwargs["api_base"] = api_base

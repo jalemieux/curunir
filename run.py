@@ -64,7 +64,10 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
 
 async def _fetch_llamacpp_stats(api_base: str) -> dict | None:
     """Query llama.cpp /slots endpoint for KV cache and slot stats."""
-    url = api_base.rstrip("/") + "/slots"
+    # llama.cpp serves /slots at the root, not under /v1/
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(api_base)
+    url = urlunparse(parsed._replace(path="/slots"))
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
