@@ -101,7 +101,7 @@ async def test_agent_worker_passes_workflow_to_outgoing():
     agent = MagicMock()
     agent.sessions = {}
 
-    async def fake_handle(content, session_id, on_tool_call=None, attachments=None, metadata=None):
+    async def fake_handle(content, session_id, on_tool_call=None, attachments=None, metadata=None, stop_event=None):
         if metadata is not None:
             metadata["workflow"] = {"steps": ["plan", "build"], "current": "build"}
         return "done"

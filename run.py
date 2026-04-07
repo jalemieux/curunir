@@ -164,8 +164,13 @@ def _build_content(msg) -> str:
 
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue, context_sync: ContextSync | None = None):
     """Bridge between the message queues and the agent loop."""
+    pending: list = []  # messages received while handle() was running
+
     while True:
-        msg = await in_queue.get()
+        if pending:
+            msg = pending.pop(0)
+        else:
+            msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
         if msg.command in ("clear", "reset"):
@@ -188,6 +193,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
             continue
 
+        stop_event = asyncio.Event()
+
         async def on_tool_call(name: str, args_str: str):
             await out_queue.put(OutgoingMessage(
                 content="",
@@ -201,15 +208,56 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         content = _build_content(msg)
         attachments = []
         metadata: dict = {}
-        try:
-            text = await agent.handle(
+
+        handle_task = asyncio.create_task(
+            agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
-                metadata=metadata,
+                metadata=metadata, stop_event=stop_event,
             )
+        )
+
+        # Monitor queue for reset/clear while handle() runs
+        reset_msg = None
+        queue_task = asyncio.create_task(in_queue.get())
+        try:
+            while not handle_task.done():
+                done, _ = await asyncio.wait(
+                    {handle_task, queue_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if queue_task in done:
+                    next_msg = queue_task.result()
+                    if next_msg.command in ("clear", "reset") and next_msg.session_id == msg.session_id:
+                        stop_event.set()
+                        reset_msg = next_msg
+                        break
+                    pending.append(next_msg)
+                    queue_task = asyncio.create_task(in_queue.get())
+        finally:
+            if not queue_task.done():
+                queue_task.cancel()
+                try:
+                    await queue_task
+                except asyncio.CancelledError:
+                    pass
+
+        try:
+            text = await handle_task
         except Exception as e:
             logger.error("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
+
+        if reset_msg:
+            # handle() was interrupted — process the reset
+            history = agent.sessions.pop(msg.session_id, None)
+            if history and reset_msg.command == "clear":
+                asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+            await out_queue.put(OutgoingMessage(
+                content="", channel=reset_msg.channel, session_id=reset_msg.session_id,
+                reply_address=reset_msg.reply_address,
+            ))
+            continue
 
         if attachments:
             _enrich_attachments(attachments, os.getcwd())
