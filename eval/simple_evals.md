@@ -78,8 +78,8 @@ Load the web-search skill and search for "asyncio best practices 2025". Summariz
 Load the deep-research skill and tell me what sub-skills it depends on before running anything.
 ```
 
-```max_loops=15
-I want to research what people on Reddit think about LLM eval frameworks. Use the appropriate skill.
+```max_loops=5
+Which skill would you use to research a topic on Reddit? Load it and explain what it does.
 ```
 
 ---
