@@ -70,6 +70,8 @@ Channels implement a protocol: `async start()` to listen, `async send(msg)` to r
 - Sync executors wrapped in `asyncio.to_thread()`; async executors awaited directly
 - `delegate` spawns a sub-agent (sub-agents cannot delegate further)
 
+See [`src/tools/README.md`](src/tools/README.md) for detailed documentation on the tool registry, dispatch pipeline, executor implementations, and how to add new tools.
+
 ### Skills (`src/skills.py`, `skills/`)
 
 Each skill is a directory with a `SKILL.md` file using YAML frontmatter:
