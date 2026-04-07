@@ -6,6 +6,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 import pytest
 
 from src.channels.email import EmailChannel
+from src.channels.gmail import GmailError
 from src.config import EmailChannelConfig
 
 
@@ -13,7 +14,8 @@ from src.config import EmailChannelConfig
 def email_config():
     return EmailChannelConfig(
         enabled=True,
-        account="bot@example.com",
+        service_account_file="/fake/key.json",
+        delegated_user="bot@example.com",
         poll_interval_sec=1,
         allowed_senders=["alice@example.com"],
         processed_label="agent/processed",
@@ -26,11 +28,17 @@ def in_queue():
     return asyncio.Queue()
 
 
+def _make_channel(in_queue, config):
+    """Create an EmailChannel with build_service mocked out."""
+    with patch("src.channels.email.gmail.build_service", return_value=MagicMock()):
+        return EmailChannel(in_queue, config)
+
+
 def test_constructor(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
     assert ch.in_queue is in_queue
     assert ch.config is email_config
-    assert ch.account == "bot@example.com"
+    assert ch.service is not None
     assert ch.poll_interval == 1
     assert ch.allowed_senders == ["alice@example.com"]
     assert ch.processed_label == "agent/processed"
@@ -40,21 +48,21 @@ def test_constructor(email_config, in_queue):
 
 @pytest.mark.asyncio
 async def test_ensure_label_exists_already(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.labels_list.return_value = [{"name": "agent/processed"}]
+    ch = _make_channel(in_queue, email_config)
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.labels_list.return_value = [{"name": "agent/processed"}]
         await ch._ensure_label()
-    mock_gog.labels_list.assert_called_once_with("bot@example.com")
-    mock_gog.labels_create.assert_not_called()
+    mock_gmail.labels_list.assert_called_once_with(ch.service)
+    mock_gmail.labels_create.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_ensure_label_creates_missing(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.labels_list.return_value = [{"name": "INBOX"}]
+    ch = _make_channel(in_queue, email_config)
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.labels_list.return_value = [{"name": "INBOX"}]
         await ch._ensure_label()
-    mock_gog.labels_create.assert_called_once_with("agent/processed", "bot@example.com")
+    mock_gmail.labels_create.assert_called_once_with("agent/processed", ch.service)
 
 
 from src.channels.base import IncomingMessage
@@ -62,7 +70,7 @@ from src.channels.base import IncomingMessage
 
 @pytest.mark.asyncio
 async def test_poll_once_pushes_message(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     thread = {
         "id": "thread_1",
@@ -77,9 +85,9 @@ async def test_poll_once_pushes_message(email_config, in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.search.return_value = [{"id": "thread_1"}]
+        mock_gmail.thread_get.return_value = thread
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
@@ -97,7 +105,7 @@ async def test_poll_once_pushes_message(email_config, in_queue):
 
 @pytest.mark.asyncio
 async def test_poll_once_filters_disallowed_sender(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     thread = {
         "id": "thread_1",
@@ -112,9 +120,9 @@ async def test_poll_once_filters_disallowed_sender(email_config, in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.search.return_value = [{"id": "thread_1"}]
+        mock_gmail.thread_get.return_value = thread
         await ch._poll_once()
 
     assert in_queue.empty()
@@ -123,7 +131,7 @@ async def test_poll_once_filters_disallowed_sender(email_config, in_queue):
 
 @pytest.mark.asyncio
 async def test_poll_once_skips_already_seen_messages(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
     ch.last_seen["thread_1"] = "msg_1"
 
     thread = {
@@ -146,9 +154,9 @@ async def test_poll_once_skips_already_seen_messages(email_config, in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.search.return_value = [{"id": "thread_1"}]
+        mock_gmail.thread_get.return_value = thread
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
@@ -160,8 +168,11 @@ async def test_poll_once_skips_already_seen_messages(email_config, in_queue):
 
 @pytest.mark.asyncio
 async def test_poll_once_accepts_all_when_no_allowlist(in_queue):
-    config = EmailChannelConfig(enabled=True, account="bot@example.com", poll_interval_sec=1)
-    ch = EmailChannel(in_queue, config)
+    config = EmailChannelConfig(
+        enabled=True, service_account_file="/fake/key.json",
+        delegated_user="bot@example.com", poll_interval_sec=1,
+    )
+    ch = _make_channel(in_queue, config)
 
     thread = {
         "id": "thread_1",
@@ -176,9 +187,9 @@ async def test_poll_once_accepts_all_when_no_allowlist(in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.search.return_value = [{"id": "thread_1"}]
+        mock_gmail.thread_get.return_value = thread
         await ch._poll_once()
 
     assert not in_queue.empty()
@@ -186,7 +197,7 @@ async def test_poll_once_accepts_all_when_no_allowlist(in_queue):
 
 @pytest.mark.asyncio
 async def test_poll_once_no_double_re_prefix(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     thread = {
         "id": "thread_1",
@@ -201,9 +212,9 @@ async def test_poll_once_no_double_re_prefix(email_config, in_queue):
         ],
     }
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.search.return_value = [{"id": "thread_1"}]
-        mock_gog.thread_get.return_value = thread
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.search.return_value = [{"id": "thread_1"}]
+        mock_gmail.thread_get.return_value = thread
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
@@ -214,11 +225,12 @@ async def test_poll_once_no_double_re_prefix(email_config, in_queue):
 async def test_poll_once_with_attachments(in_queue):
     with tempfile.TemporaryDirectory() as tmpdir:
         config = EmailChannelConfig(
-            account="bot@example.com",
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
             allowed_senders=["alice@example.com"],
             attachment_dir=tmpdir,
         )
-        ch = EmailChannel(in_queue, config)
+        ch = _make_channel(in_queue, config)
 
         thread = {
             "id": "thread_1",
@@ -235,15 +247,15 @@ async def test_poll_once_with_attachments(in_queue):
             ],
         }
 
-        def fake_download(thread_id, out_dir, account):
+        def fake_download(thread_id, message, out_dir, service):
             os.makedirs(out_dir, exist_ok=True)
             with open(os.path.join(out_dir, "report.pdf"), "wb") as f:
                 f.write(b"fake pdf")
 
-        with patch("src.channels.email.gog") as mock_gog:
-            mock_gog.search.return_value = [{"id": "thread_1"}]
-            mock_gog.thread_get.return_value = thread
-            mock_gog.thread_download_attachments.side_effect = fake_download
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download
             await ch._poll_once()
 
         msg = in_queue.get_nowait()
@@ -255,69 +267,22 @@ async def test_poll_once_with_attachments(in_queue):
         assert msg.attachments[0]["size"] == 12288
         assert "report.pdf" in msg.content
         assert "12KB" in msg.content
-        # Verify the file is actually openable at the manifest path
         with open(msg.attachments[0]["path"], "rb") as f:
             assert f.read() == b"fake pdf"
 
 
 @pytest.mark.asyncio
-async def test_poll_once_with_prefixed_attachments(in_queue):
-    """gog saves files with an attachment-ID prefix; manifest should resolve them."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        config = EmailChannelConfig(
-            account="bot@example.com",
-            allowed_senders=["alice@example.com"],
-            attachment_dir=tmpdir,
-        )
-        ch = EmailChannel(in_queue, config)
-
-        thread = {
-            "id": "thread_1",
-            "messages": [
-                {
-                    "id": "msg_1",
-                    "from": "alice@example.com",
-                    "subject": "Screenshot",
-                    "body": "See attached.",
-                    "attachments": [
-                        {"filename": "screenshot.png", "mimeType": "image/png", "size": 4096},
-                    ],
-                }
-            ],
-        }
-
-        prefixed_name = "19d00de117c89d79_ANGjdJ9P_screenshot.png"
-        def fake_download(thread_id, out_dir, account):
-            os.makedirs(out_dir, exist_ok=True)
-            with open(os.path.join(out_dir, prefixed_name), "wb") as f:
-                f.write(b"fake png")
-
-        with patch("src.channels.email.gog") as mock_gog:
-            mock_gog.search.return_value = [{"id": "thread_1"}]
-            mock_gog.thread_get.return_value = thread
-            mock_gog.thread_download_attachments.side_effect = fake_download
-            await ch._poll_once()
-
-        msg = in_queue.get_nowait()
-        assert msg.attachments is not None
-        assert len(msg.attachments) == 1
-        assert msg.attachments[0]["filename"] == "screenshot.png"
-        assert prefixed_name in msg.attachments[0]["path"]
-        with open(msg.attachments[0]["path"], "rb") as f:
-            assert f.read() == b"fake png"
-
-
-@pytest.mark.asyncio
 async def test_attachment_manifest_uses_real_filesystem(in_queue):
-    """End-to-end test: gog creates prefixed files on disk, manifest resolves them,
+    """End-to-end test: download creates files on disk, manifest resolves them,
     and the file is actually openable at the manifest path."""
     with tempfile.TemporaryDirectory() as tmpdir:
         config = EmailChannelConfig(
-            account="bot@example.com",
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
             allowed_senders=["alice@example.com"],
             attachment_dir=tmpdir,
         )
-        ch = EmailChannel(in_queue, config)
+        ch = _make_channel(in_queue, config)
 
         thread = {
             "id": "thread_1",
@@ -335,18 +300,16 @@ async def test_attachment_manifest_uses_real_filesystem(in_queue):
             ],
         }
 
-        # Simulate what gog does: create the prefixed file on disk
-        prefixed_name = "19d011139876056b_ANGjdJ83_Screenshot 2026-03-18 at 5.13.10 AM.png"
-        def fake_download(thread_id, out_dir, account):
+        def fake_download(thread_id, message, out_dir, service):
             os.makedirs(out_dir, exist_ok=True)
-            filepath = os.path.join(out_dir, prefixed_name)
+            filepath = os.path.join(out_dir, "Screenshot 2026-03-18 at 5.13.10 AM.png")
             with open(filepath, "wb") as f:
                 f.write(b"\x89PNG fake image data")
 
-        with patch("src.channels.email.gog") as mock_gog:
-            mock_gog.search.return_value = [{"id": "thread_1"}]
-            mock_gog.thread_get.return_value = thread
-            mock_gog.thread_download_attachments.side_effect = fake_download
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download
             await ch._poll_once()
 
         msg = in_queue.get_nowait()
@@ -355,14 +318,11 @@ async def test_attachment_manifest_uses_real_filesystem(in_queue):
 
         att = msg.attachments[0]
         assert att["filename"] == "Screenshot 2026-03-18 at 5.13.10 AM.png"
-        assert prefixed_name in att["path"]
 
-        # THE CRITICAL CHECK: the file must actually be openable at this path
         with open(att["path"], "rb") as f:
             data = f.read()
         assert data == b"\x89PNG fake image data"
 
-        # Verify the path is in the message content (what the agent sees)
         assert att["path"] in msg.content
 
 
@@ -374,13 +334,13 @@ async def test_attachment_unicode_whitespace_normalized(in_queue):
     we normalize the filename on disk so the path always uses regular spaces."""
     with tempfile.TemporaryDirectory() as tmpdir:
         config = EmailChannelConfig(
-            account="bot@example.com",
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
             allowed_senders=["alice@example.com"],
             attachment_dir=tmpdir,
         )
-        ch = EmailChannel(in_queue, config)
+        ch = _make_channel(in_queue, config)
 
-        # Gmail API returns filename with \u202f (narrow no-break space)
         unicode_fname = "Screenshot 2026-03-18 at 5.13.10\u202fAM.png"
         normal_fname = "Screenshot 2026-03-18 at 5.13.10 AM.png"
         thread = {
@@ -398,29 +358,25 @@ async def test_attachment_unicode_whitespace_normalized(in_queue):
             ],
         }
 
-        # gog also saves the file with \u202f in the filename
-        prefixed_unicode = f"19d011139876056b_ANGjdJ83_{unicode_fname}"
-        def fake_download(thread_id, out_dir, account):
+        def fake_download(thread_id, message, out_dir, service):
             os.makedirs(out_dir, exist_ok=True)
-            filepath = os.path.join(out_dir, prefixed_unicode)
+            filepath = os.path.join(out_dir, unicode_fname)
             with open(filepath, "wb") as f:
                 f.write(b"\x89PNG fake image data")
 
-        with patch("src.channels.email.gog") as mock_gog:
-            mock_gog.search.return_value = [{"id": "thread_1"}]
-            mock_gog.thread_get.return_value = thread
-            mock_gog.thread_download_attachments.side_effect = fake_download
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download
             await ch._poll_once()
 
         msg = in_queue.get_nowait()
         assert msg.attachments is not None
 
         att = msg.attachments[0]
-        # Filename should be normalized to regular spaces
         assert att["filename"] == normal_fname
         assert "\u202f" not in att["path"]
 
-        # The file must be openable at the manifest path (with regular spaces)
         with open(att["path"], "rb") as f:
             data = f.read()
         assert data == b"\x89PNG fake image data"
@@ -428,14 +384,15 @@ async def test_attachment_unicode_whitespace_normalized(in_queue):
 
 @pytest.mark.asyncio
 async def test_attachment_missing_from_disk_is_excluded(in_queue):
-    """If gog doesn't download the file, it should NOT appear in the manifest."""
+    """If download doesn't write the file, it should NOT appear in the manifest."""
     with tempfile.TemporaryDirectory() as tmpdir:
         config = EmailChannelConfig(
-            account="bot@example.com",
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
             allowed_senders=["alice@example.com"],
             attachment_dir=tmpdir,
         )
-        ch = EmailChannel(in_queue, config)
+        ch = _make_channel(in_queue, config)
 
         thread = {
             "id": "thread_1",
@@ -452,18 +409,16 @@ async def test_attachment_missing_from_disk_is_excluded(in_queue):
             ],
         }
 
-        # gog "succeeds" but writes NO files (e.g. forwarded email attachment not downloadable)
-        def fake_download_noop(thread_id, out_dir, account):
-            pass  # directory created by our code, but gog downloads nothing
+        def fake_download_noop(thread_id, message, out_dir, service):
+            pass
 
-        with patch("src.channels.email.gog") as mock_gog:
-            mock_gog.search.return_value = [{"id": "thread_1"}]
-            mock_gog.thread_get.return_value = thread
-            mock_gog.thread_download_attachments.side_effect = fake_download_noop
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download_noop
             await ch._poll_once()
 
         msg = in_queue.get_nowait()
-        # Attachment should NOT be in the manifest since file doesn't exist
         assert msg.attachments is None
         assert "screenshot.png" not in msg.content
 
@@ -471,7 +426,7 @@ async def test_attachment_missing_from_disk_is_excluded(in_queue):
 @pytest.mark.asyncio
 async def test_poll_once_continues_on_thread_error(email_config, in_queue):
     """If one thread fails to fetch, other threads still get processed."""
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     good_thread = {
         "id": "thread_2",
@@ -480,12 +435,10 @@ async def test_poll_once_continues_on_thread_error(email_config, in_queue):
         ],
     }
 
-    from src.channels.gog import GogError
-
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.GogError = GogError
-        mock_gog.search.return_value = [{"id": "thread_1"}, {"id": "thread_2"}]
-        mock_gog.thread_get.side_effect = [GogError("network error"), good_thread]
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.GmailError = GmailError
+        mock_gmail.search.return_value = [{"id": "thread_1"}, {"id": "thread_2"}]
+        mock_gmail.thread_get.side_effect = [GmailError("network error"), good_thread]
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
@@ -497,7 +450,7 @@ from src.channels.base import OutgoingMessage
 
 @pytest.mark.asyncio
 async def test_send_reply_and_label(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     msg = OutgoingMessage(
         content="Got it, thanks!",
@@ -510,25 +463,25 @@ async def test_send_reply_and_label(email_config, in_queue):
         },
     )
 
-    with patch("src.channels.email.gog") as mock_gog:
+    with patch("src.channels.email.gmail") as mock_gmail:
         await ch.send(msg)
 
-    mock_gog.send_reply.assert_called_once_with(
+    mock_gmail.send_reply.assert_called_once_with(
         to="alice@example.com",
         subject="Re: Hello",
         body="Got it, thanks!",
         reply_to_message_id="msg_1",
-        account="bot@example.com",
+        service=ch.service,
         attachments=None,
     )
-    mock_gog.thread_modify.assert_called_once_with(
-        "thread_1", add_label="agent/processed", account="bot@example.com",
+    mock_gmail.thread_modify.assert_called_once_with(
+        "thread_1", add_label="agent/processed", service=ch.service,
     )
 
 
 @pytest.mark.asyncio
 async def test_send_failure_does_not_label(email_config, in_queue):
-    ch = EmailChannel(in_queue, email_config)
+    ch = _make_channel(in_queue, email_config)
 
     msg = OutgoingMessage(
         content="Reply text",
@@ -541,11 +494,9 @@ async def test_send_failure_does_not_label(email_config, in_queue):
         },
     )
 
-    from src.channels.gog import GogError
+    with patch("src.channels.email.gmail") as mock_gmail:
+        mock_gmail.GmailError = GmailError
+        mock_gmail.send_reply.side_effect = GmailError("send failed")
+        await ch.send(msg)
 
-    with patch("src.channels.email.gog") as mock_gog:
-        mock_gog.GogError = GogError
-        mock_gog.send_reply.side_effect = GogError("send failed")
-        await ch.send(msg)  # should not raise
-
-    mock_gog.thread_modify.assert_not_called()
+    mock_gmail.thread_modify.assert_not_called()

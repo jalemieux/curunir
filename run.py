@@ -337,7 +337,8 @@ async def main():
     # Email channel (conditional)
     email_config = EmailChannelConfig(
         enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
-        account=os.environ.get("GOG_ACCOUNT", ""),
+        service_account_file=os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
+        delegated_user=os.environ.get("GOOGLE_DELEGATED_USER", ""),
         poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
         processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
@@ -346,7 +347,7 @@ async def main():
     if email_config.enabled:
         email_channel = EmailChannel(in_queue, email_config)
         channels["email"] = email_channel
-        logger.info("Email channel enabled for %s (poll every %ds)", email_config.account, email_config.poll_interval_sec)
+        logger.info("Email channel enabled for %s (poll every %ds)", email_config.delegated_user, email_config.poll_interval_sec)
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
 
