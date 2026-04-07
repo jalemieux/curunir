@@ -54,7 +54,7 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 ### Channels (`src/channels/`)
 
 - **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`.
-- **Email** (`email.py`): Gmail via gog CLI. Session ID is sender email. Polls inbox every 60s.
+- **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
 
 Channels implement a protocol: `async start()` to listen, `async send(msg)` to respond.
@@ -108,6 +108,6 @@ Key test files map 1:1 to modules: `test_agent.py`, `test_channels.py`, `test_to
 See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
-- `EMAIL_ENABLED`, `GOG_ACCOUNT`, `EMAIL_ALLOWED_SENDERS` — for email channel
+- `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
 - `CONTEXT_SYNC_REMOTE` — enables auto-push of context changes
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing

@@ -21,7 +21,8 @@ def test_custom_config():
 def test_email_config_defaults():
     config = EmailChannelConfig()
     assert config.enabled is False
-    assert config.account == ""
+    assert config.service_account_file == ""
+    assert config.delegated_user == ""
     assert config.poll_interval_sec == 60
     assert config.allowed_senders == []
     assert config.processed_label == "agent/processed"
@@ -31,14 +32,16 @@ def test_email_config_defaults():
 def test_email_config_custom():
     config = EmailChannelConfig(
         enabled=True,
-        account="bot@example.com",
+        service_account_file="/secrets/key.json",
+        delegated_user="bot@example.com",
         poll_interval_sec=30,
         allowed_senders=["alice@example.com"],
         processed_label="custom/done",
         attachment_dir="/data/attachments",
     )
     assert config.enabled is True
-    assert config.account == "bot@example.com"
+    assert config.service_account_file == "/secrets/key.json"
+    assert config.delegated_user == "bot@example.com"
     assert config.poll_interval_sec == 30
     assert config.allowed_senders == ["alice@example.com"]
     assert config.processed_label == "custom/done"
