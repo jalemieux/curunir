@@ -24,6 +24,17 @@ class TestExecGlob:
         result = exec_glob({"pattern": "*.py"}, agent_config)
         assert isinstance(result, str)
 
+    def test_absolute_pattern_stripped(self, tmp_path, agent_config):
+        """Absolute patterns like /**/*.py must be made relative to root_dir."""
+        (tmp_path / "a.py").write_text("x")
+        result = exec_glob({"pattern": "/**/*.py", "path": str(tmp_path)}, agent_config)
+        # Should find the file relative to tmp_path, not scan from /
+        assert "a.py" in result
+
+    def test_slash_only_pattern(self, agent_config):
+        result = exec_glob({"pattern": "/"}, agent_config)
+        assert "error" in result.lower()
+
 
 class TestExecRead:
     def test_reads_file_with_line_numbers(self, tmp_path, agent_config):
