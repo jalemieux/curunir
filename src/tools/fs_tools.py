@@ -11,8 +11,15 @@ def exec_glob(args: dict, config: AgentConfig) -> str:
     try:
         pattern = args["pattern"]
         root = args.get("path", ".")
+        # Strip leading slashes so patterns are always relative to root_dir.
+        # An absolute pattern like "/**/*.py" would bypass root_dir and scan
+        # the entire filesystem, hanging the process.
+        pattern = pattern.lstrip("/")
+        if not pattern:
+            return "Error: empty glob pattern"
         matches = glob_module.glob(pattern, root_dir=root, recursive=True)
-        return "\n".join(sorted(matches))
+        matches = sorted(matches)[:1000]
+        return "\n".join(matches)
     except Exception as e:
         return f"Error: {e}"
 
