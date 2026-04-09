@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import asyncio
-from typing import TYPE_CHECKING
 
 from src.config import AgentConfig
 from src.tools.attach import exec_attach
@@ -10,9 +7,6 @@ from src.tools.fs_tools import exec_edit, exec_glob, exec_grep, exec_read, exec_
 from src.tools.skill_tool import exec_load_skill
 from src.tools.schedule_tool import exec_schedule
 from src.tools.web_fetch import exec_web_fetch
-
-if TYPE_CHECKING:
-    from src.context_sync import ContextSync
 
 # Sync executors — wrapped in asyncio.to_thread at call time
 _SYNC_EXECUTORS = {
@@ -41,7 +35,6 @@ async def execute_tool_call(
     name: str, args: dict, config: AgentConfig,
     attachments: list[dict] | None = None,
     on_tool_call=None,
-    context_sync: ContextSync | None = None,
 ) -> str:
     """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly."""
     key = name.lower()
@@ -59,11 +52,6 @@ async def execute_tool_call(
             result = await asyncio.to_thread(sync_executor, args, config, attachments)
         else:
             result = await asyncio.to_thread(sync_executor, args, config)
-
-        # Sync context after schedule mutations
-        if key == "schedule" and context_sync and args.get("action") in ("add", "update", "remove"):
-            from src.tools.schedule_tool import _schedule_path
-            await context_sync.notify_write(_schedule_path(config))
 
         return result
 
