@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 import litellm
 
+litellm.suppress_debug_info = True
+
 log = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
