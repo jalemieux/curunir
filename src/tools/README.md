@@ -46,8 +46,6 @@ _register(schema, opt_in=True)    # opt-in tool — only available when a skill 
 
 Special-case handling:
 - `attach` receives the mutable `attachments` list so it can append file metadata.
-- `schedule` mutations (`add`, `update`, `remove`) trigger `context_sync.notify_write()` to push changes upstream.
-
 Unknown tool names return an `"Unknown tool: {name}"` error string.
 
 ## How the Agent Uses Tools

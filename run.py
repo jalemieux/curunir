@@ -14,7 +14,6 @@ from src.channels.email import EmailChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
-from src.context_sync import ContextSync
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
 
@@ -162,7 +161,7 @@ def _build_content(msg) -> str:
     return "\n".join(parts)
 
 
-async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue, context_sync: ContextSync | None = None):
+async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
     pending: list = []  # messages received while handle() was running
 
@@ -176,7 +175,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
             if history and msg.command == "clear":
-                asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -186,7 +185,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.command == "extract":
             history = agent.sessions.get(msg.session_id)
             if history:
-                asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -252,7 +251,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             # handle() was interrupted — process the reset
             history = agent.sessions.pop(msg.session_id, None)
             if history and reset_msg.command == "clear":
-                asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
             await out_queue.put(OutgoingMessage(
                 content="", channel=reset_msg.channel, session_id=reset_msg.session_id,
                 reply_address=reset_msg.reply_address,
@@ -279,7 +278,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         ))
 
 
-async def periodic_extraction(agent: Agent, interval_sec: int, context_sync: ContextSync | None = None):
+async def periodic_extraction(agent: Agent, interval_sec: int):
     """Periodically extract learnings from sessions that have grown."""
     last_extracted_len: dict[str, int] = {}
     while True:
@@ -287,7 +286,7 @@ async def periodic_extraction(agent: Agent, interval_sec: int, context_sync: Con
         for session_id, history in agent.sessions.items():
             prev_len = last_extracted_len.get(session_id, 0)
             if len(history) > prev_len:
-                asyncio.create_task(extract_learnings(agent.config, list(history), context_sync=context_sync))
+                asyncio.create_task(extract_learnings(agent.config, list(history)))
                 last_extracted_len[session_id] = len(history)
 
 
@@ -307,23 +306,15 @@ async def main():
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
-    context_sync_remote = os.environ.get("CONTEXT_SYNC_REMOTE")
-    context_sync_branch = os.environ.get("CONTEXT_SYNC_BRANCH", "main")
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
-        **({"context_sync_remote": context_sync_remote} if context_sync_remote else {}),
-        **({"context_sync_branch": context_sync_branch} if context_sync_branch != "main" else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
 
-    context_sync = ContextSync(config)
-    if context_sync.enabled:
-        logger.info("Context sync enabled (remote: %s, branch: %s)", context_sync_remote, context_sync_branch)
-
-    agent = Agent(config, context_sync=context_sync)
+    agent = Agent(config)
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
 
@@ -353,18 +344,14 @@ async def main():
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
-    context_sync_interval = int(os.environ.get("CONTEXT_SYNC_INTERVAL_SEC", "300"))
-
     # Start all channels, the router, and the agent worker
     async with asyncio.TaskGroup() as tg:
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
-        tg.create_task(agent_worker(agent, in_queue, out_queue, context_sync=context_sync))
-        tg.create_task(periodic_extraction(agent, extraction_interval, context_sync=context_sync))
+        tg.create_task(agent_worker(agent, in_queue, out_queue))
+        tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(run_scheduler(agent))
-        if context_sync.enabled:
-            tg.create_task(context_sync.periodic_push(interval_sec=context_sync_interval))
 
 
 if __name__ == "__main__":

@@ -7,8 +7,5 @@ services:
     volumes:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence
-      - ./context:/app/context             # Context/memory — or let entrypoint clone from CONTEXT_SYNC_REMOTE
+      - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
     restart: unless-stopped
-    # To enable context sync, set in .env:
-    #   CONTEXT_SYNC_REMOTE=git@github.com:you/curunir-context.git
-    #   CONTEXT_SYNC_BRANCH=main

@@ -89,9 +89,9 @@ Manifest auto-built at startup from all `SKILL.md` files and included in the sys
 
 Post-session, `extract_learnings()` calls the LLM with conversation history to extract facts → appends to markdown files in `context/memory/` → stores conversation summary in `context/memory/archives/conversations/`.
 
-### Context Submodule (`context/`)
+### Context Directory (`context/`)
 
-Git submodule (curunir-context repo) containing `identity.md` (agent persona, required), `memory/` (persistent facts), and `schedules.json` (cron tasks). When `CONTEXT_SYNC_REMOTE` is set, changes are auto-pushed via `context_sync.py`.
+Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and `schedules.json` (cron tasks). Use `sync-context.sh` to rsync from a remote machine before starting.
 
 ### Scheduling (`src/scheduler.py`)
 
@@ -111,5 +111,4 @@ See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
-- `CONTEXT_SYNC_REMOTE` — enables auto-push of context changes
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing

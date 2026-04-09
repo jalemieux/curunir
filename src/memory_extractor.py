@@ -1,16 +1,10 @@
 # src/memory_extractor.py
-from __future__ import annotations
-
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 from .config import AgentConfig
 from .llm import call_llm
-
-if TYPE_CHECKING:
-    from .context_sync import ContextSync
 
 log = logging.getLogger(__name__)
 
@@ -60,11 +54,10 @@ The `file` field is relative to the memory directory. Subdirectories are allowed
 async def extract_learnings(
     config: AgentConfig,
     history: list[dict],
-    context_sync: ContextSync | None = None,
 ) -> None:
     """Extract durable learnings from a conversation history and write to memory."""
     try:
-        await _extract(config, history, context_sync=context_sync)
+        await _extract(config, history)
     except Exception:
         log.exception("memory extraction failed")
 
@@ -72,7 +65,6 @@ async def extract_learnings(
 async def _extract(
     config: AgentConfig,
     history: list[dict],
-    context_sync: ContextSync | None = None,
 ) -> None:
     user_count = sum(1 for m in history if m.get("role") == "user")
     if user_count < 2:
@@ -107,23 +99,13 @@ async def _extract(
         return
 
     # Write facts
-    written_paths: list[Path] = []
     for fact in data.get("facts", []):
-        path = _write_fact(memory_dir, fact)
-        if path:
-            written_paths.append(path)
+        _write_fact(memory_dir, fact)
 
     # Write conversation summary
     summary = data.get("summary")
     if summary:
-        path = _write_summary(memory_dir, summary)
-        if path:
-            written_paths.append(path)
-
-    # Sync written files
-    if context_sync and written_paths:
-        for p in written_paths:
-            await context_sync.notify_write(p)
+        _write_summary(memory_dir, summary)
 
 
 def _format_history(history: list[dict]) -> str:
