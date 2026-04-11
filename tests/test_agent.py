@@ -121,10 +121,11 @@ class TestDelegateToolExecution:
             result = await agent.handle("delegate this", "s1")
 
         assert result == "Done"
-        # Verify the tool result was recorded in history
+        # Verify the delegate exchange was compacted into a summary
         history = agent.sessions["s1"]
-        tool_msg = [m for m in history if m["role"] == "tool"][0]
-        assert tool_msg["content"] == "sub-agent result"
+        assert not any(m["role"] == "tool" for m in history), "Delegate tool messages should be compacted"
+        summary = next(m for m in history if m.get("is_summary"))
+        assert "sub-agent result" in summary["content"]
 
 
 class TestToolAllowlist:
@@ -278,6 +279,40 @@ class TestSystemTaskMode:
         history = agent.sessions["normal-session"]
         assert history[0]["role"] == "user"
         assert history[0]["content"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_delegate_exchanges_compacted_in_history(agent_config):
+    """After a delegate tool call, the tool_call + tool_result messages
+    should be replaced with a [summary] message to save context space."""
+    responses = [
+        # First response: call delegate
+        LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "tc1",
+                "type": "function",
+                "function": {
+                    "name": "delegate",
+                    "arguments": '{"agent": "system", "task": "run uptime"}',
+                },
+            }],
+        ),
+        # Second response: final answer after getting delegate result
+        LLMResponse(text="The system has been up for 5 days.", tool_calls=None),
+    ]
+    with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=responses):
+        with patch("src.tools.dispatcher.execute_tool_call", new_callable=AsyncMock, return_value="uptime: 5 days"):
+            agent = Agent(agent_config)
+            await agent.handle("how long has this machine been running?", "s1")
+
+    history = agent.sessions["s1"]
+    # Should contain: user, [summary], assistant
+    roles = [m["role"] for m in history]
+    assert "tool" not in roles, "Raw tool messages should be compacted away"
+    summaries = [m for m in history if m.get("role") == "assistant" and m.get("is_summary")]
+    assert len(summaries) == 1
+    assert "[system]" in summaries[0]["content"]
 
 
 class TestAgentInit:
