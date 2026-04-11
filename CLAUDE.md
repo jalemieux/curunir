@@ -16,7 +16,7 @@ python cli.py --host localhost # Connect CLI client
 docker compose up --build
 
 # Tests
-pytest tests/                          # All 202 tests (all async)
+pytest tests/                          # All tests (async, ~200)
 pytest tests/test_agent.py -v          # Single file
 pytest tests/ -k "test_session"        # Pattern match
 pytest tests/ --cov=src --cov-report=html  # Coverage (needs pytest-cov)
@@ -49,7 +49,7 @@ Channel.start() → IncomingMessage → in_queue → agent_worker → Agent.hand
 
 ### Entry Point (`run.py`)
 
-Wires everything together in a TaskGroup with concurrent coroutines: channel listeners, agent worker, outbound router, memory extraction (hourly), scheduler, and optional context sync.
+Wires everything together in a TaskGroup with concurrent coroutines: channel listeners, agent worker, outbound router, memory extraction (hourly), and scheduler.
 
 ### Channels (`src/channels/`)
 
@@ -93,6 +93,10 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 
 Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and `schedules.json` (cron tasks). Use `sync-context.sh` to rsync from a remote machine before starting.
 
+### Evals (`eval/`)
+
+`python eval/run_evals.py` runs LLM-graded eval suites defined in `simple_evals.md` and `advanced_evals.md`. Supports `--max-loops` per prompt. Results written to `eval/eval_results/`.
+
 ### Scheduling (`src/scheduler.py`)
 
 Cron tasks in `context/schedules.json` evaluated every second via croniter. When due, agent processes the task prompt via `handle()` in system-task mode.
@@ -111,4 +115,5 @@ See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
+- `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
