@@ -221,27 +221,24 @@ _SCHEMAS = [
             "function": {
                 "name": "delegate",
                 "description": (
-                    "Delegate a task to a sub-agent with a clean context window. "
-                    "Use this for tasks that involve processing large documents, "
-                    "analyzing images, or doing multi-step research. The sub-agent "
-                    "has access to all tools (read, write, bash, etc.) but runs in "
-                    "isolation — its intermediate work won't fill up your context. "
-                    "You get back only the final answer."
+                    "Delegate a task to a specialist agent. "
+                    "Each specialist has specific tools and expertise. "
+                    "Include all context the specialist needs in the task — "
+                    "they have no memory of this conversation."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Which specialist to delegate to.",
+                        },
                         "task": {
                             "type": "string",
-                            "description": "Clear description of what the sub-agent should do.",
-                        },
-                        "image_paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of image file paths to include for visual analysis.",
+                            "description": "Concise task description with all necessary context.",
                         },
                     },
-                    "required": ["task"],
+                    "required": ["agent", "task"],
                 },
             },
         },
