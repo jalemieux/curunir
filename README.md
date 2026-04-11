@@ -104,6 +104,19 @@ EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 
 See **[docs/gmail-setup.md](docs/gmail-setup.md)** for the full GCP and Workspace Admin setup walkthrough.
 
+#### Local Model (llama.cpp)
+
+Curunir can run entirely on local hardware using a quantized LLM served by llama.cpp. In this mode, it switches to an orchestrator architecture that delegates to specialized sub-agents, each running in a fresh, minimal context.
+
+```bash
+MODEL=openai/gemma-4-27b-it
+API_BASE=http://localhost:8080/v1
+ORCHESTRATOR_MODE=true
+MAX_HISTORY_CHARS=16000
+```
+
+See **[docs/local-model-setup.md](docs/local-model-setup.md)** for hardware requirements, llama.cpp setup, sub-agent configuration, and troubleshooting.
+
 ## Adding Skills
 
 Drop a directory into `skills/` with a `SKILL.md` file:
@@ -180,6 +193,9 @@ Configuration is handled via `src/config.py`:
 | `identity_file` | `./context/identity.md` | Path to persona file |
 | `context_dir` | `./context` | Path to context directory (memory, etc.) |
 | `skills_dir` | `./skills` | Path to skills directory |
+| `agents_file` | `./context/agents.yaml` | Sub-agent definitions for orchestrator mode |
+
+Set `ORCHESTRATOR_MODE=true` to enable the small-model orchestrator. See [docs/local-model-setup.md](docs/local-model-setup.md).
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
