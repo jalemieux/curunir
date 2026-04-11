@@ -13,11 +13,13 @@ SESSION_ID = "cli"
 
 
 class WebSocketChannel:
-    def __init__(self, in_queue: asyncio.Queue, host: str = "0.0.0.0", port: int = 8765, model: str = ""):
+    def __init__(self, in_queue: asyncio.Queue, host: str = "0.0.0.0", port: int = 8765,
+                 model: str = "", local_mode: bool = False):
         self.in_queue = in_queue
         self.host = host
         self.port = port
         self.model = model
+        self.local_mode = local_mode
         self._connection: websockets.ServerConnection | None = None
 
     async def start(self) -> None:
@@ -47,7 +49,10 @@ class WebSocketChannel:
 
         # Send welcome message with model info
         if self.model:
-            welcome = json.dumps({"content": "", "model": self.model, "final": False})
+            welcome = json.dumps({
+                "content": "", "model": self.model, "final": False,
+                "local_mode": self.local_mode,
+            })
             await websocket.send(welcome)
 
         try:
