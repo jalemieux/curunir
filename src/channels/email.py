@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 from src.channels import gmail
 from src.channels.base import IncomingMessage, OutgoingMessage
@@ -18,6 +19,19 @@ _UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
 def _normalize_unicode_whitespace(s: str) -> str:
     """Replace Unicode whitespace characters (e.g. \\u202f) with regular spaces."""
     return _UNICODE_WHITESPACE_RE.sub(' ', s)
+
+
+def _parse_retry_after(error_text: str) -> int | None:
+    """Extract seconds to wait from a Gmail 429 'Retry after <timestamp>' message."""
+    match = re.search(r'Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)', error_text)
+    if not match:
+        return None
+    try:
+        retry_at = datetime.fromisoformat(match.group(1).replace('Z', '+00:00'))
+        delta = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        return max(int(delta) + 1, 5)
+    except (ValueError, OverflowError):
+        return None
 
 
 class EmailChannel:
@@ -39,7 +53,25 @@ class EmailChannel:
 
     async def start(self) -> None:
         """Bootstrap label, enter polling loop."""
-        await self._ensure_label()
+        backoff = 30
+        while True:
+            try:
+                await self._ensure_label()
+                break
+            except gmail.GmailError as e:
+                cause = e.__cause__
+                if isinstance(cause, gmail.HttpError) and cause.resp.status == 429:
+                    retry_after = _parse_retry_after(str(cause))
+                    wait = retry_after if retry_after else backoff
+                    logger.warning("Gmail rate-limited, retrying email channel init in %ds", wait)
+                    await asyncio.sleep(wait)
+                    backoff = min(backoff * 2, 300)
+                else:
+                    logger.error("Email channel failed to start: %s", e)
+                    return
+            except Exception:
+                logger.exception("Email channel failed to start")
+                return
         logger.info("Email channel started, polling every %ds", self.poll_interval)
         await self._poll_loop()
 
