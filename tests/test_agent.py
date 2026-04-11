@@ -327,3 +327,27 @@ class TestAgentInit:
         )
         with pytest.raises(FileNotFoundError):
             Agent(config)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_injects_agent_enum(tmp_path):
+    """When tools=["delegate"], the delegate schema's agent param should
+    have an enum populated from agents.yaml."""
+    identity = tmp_path / "identity.md"
+    identity.write_text("You are a test assistant.")
+    agents_file = tmp_path / "agents.yaml"
+    agents_file.write_text("files:\n  description: 'File ops'\n  tools: [read]\n  system_prompt: 'Do it.'\nsystem:\n  description: 'Shell'\n  tools: [bash]\n  system_prompt: 'Do it.'\n")
+
+    from src.config import AgentConfig
+    config = AgentConfig(
+        identity_file=identity,
+        context_dir=tmp_path,
+        agents_file=agents_file,
+    )
+    agent = Agent(config, tools=["delegate"])
+    schemas = agent._get_tool_schemas()
+
+    delegate_schema = next(s for s in schemas if s["function"]["name"] == "delegate")
+    agent_prop = delegate_schema["function"]["parameters"]["properties"]["agent"]
+    assert "enum" in agent_prop
+    assert sorted(agent_prop["enum"]) == ["files", "system"]
