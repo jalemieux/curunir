@@ -1,74 +1,65 @@
 # src/tools/delegate.py
+"""Delegate tool — spawn a named sub-agent with restricted tools and context."""
+
 import asyncio
-import base64
 import logging
-import mimetypes
+from dataclasses import replace
 from uuid import uuid4
 
 from src.agent.agent import Agent
+from src.agent.agents_config import load_agents_config
 from src.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
-# Tools available to sub-agents (everything except delegate — no recursive spawning)
-_SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch"]
-
-# Sub-agent timeout in seconds
 _TIMEOUT = 300
+_MAX_RESULT_CHARS = 2048  # ~500 tokens safety net
 
 
 async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> str:
-    """Spawn a sub-agent with a clean context window and return its response."""
+    """Spawn a named sub-agent and return its response."""
+    agent_name = args.get("agent", "")
     task = args.get("task", "")
+    if not agent_name:
+        return "Error: 'agent' is required"
     if not task:
         return "Error: 'task' is required"
 
-    image_paths = args.get("image_paths", [])
-    # Guard against LLM sending a string instead of a list
-    if isinstance(image_paths, str):
-        image_paths = [image_paths]
+    agents = load_agents_config(config.agents_file)
+    if not agents:
+        return "Error: no agents configured (agents.yaml not found)"
 
-    # Build the sub-agent's input: text, or multimodal blocks if images
-    if image_paths:
-        logger.info("Delegate image_paths: %s", image_paths)
-        content = _build_multimodal_content(task, image_paths)
-    else:
-        content = task
+    defn = agents.get(agent_name)
+    if not defn:
+        available = ", ".join(sorted(agents.keys()))
+        return f"Error: unknown agent '{agent_name}'. Available: {available}"
 
-    sub_agent = Agent(config, tools=_SUB_AGENT_TOOLS)
+    # Build a sub-agent config with the agent's iteration cap
+    sub_config = replace(config, max_iterations=defn.max_iterations)
+
+    sub_agent = Agent(
+        sub_config,
+        tools=defn.tools,
+        system_prompt_override=defn.system_prompt,
+    )
     session_id = str(uuid4())
 
-    logger.info("Spawning sub-agent %s: %.80s", session_id[:8], task)
+    logger.info("Delegating to [%s] agent %s: %.80s", session_id[:8], agent_name, task)
     try:
         result = await asyncio.wait_for(
-            sub_agent.handle(content, session_id, on_tool_call=on_tool_call),
+            sub_agent.handle(task, session_id, on_tool_call=on_tool_call),
             timeout=_TIMEOUT,
         )
-        logger.info("Sub-agent %s completed", session_id[:8])
-        return result
+        logger.info("Agent [%s] %s completed", session_id[:8], agent_name)
     except asyncio.TimeoutError:
-        logger.warning("Sub-agent %s timed out after %ds", session_id[:8], _TIMEOUT)
-        return f"Sub-agent timed out after {_TIMEOUT}s"
+        logger.warning("Agent [%s] %s timed out after %ds", session_id[:8], agent_name, _TIMEOUT)
+        return f"Sub-agent '{agent_name}' timed out after {_TIMEOUT}s"
     except Exception as e:
-        logger.error("Sub-agent %s failed: %s", session_id[:8], e)
-        return f"Sub-agent error: {e}"
+        logger.error("Agent [%s] %s failed: %s", session_id[:8], agent_name, e)
+        return f"Sub-agent '{agent_name}' error: {e}"
 
+    # Truncate long results as a safety net
+    if len(result) > _MAX_RESULT_CHARS:
+        result = result[:_MAX_RESULT_CHARS] + "... (truncated)"
 
-def _build_multimodal_content(task: str, image_paths: list[str]) -> list[dict]:
-    """Build multimodal content blocks with base64-encoded images."""
-    blocks: list[dict] = [{"type": "text", "text": task}]
-
-    for path in image_paths:
-        try:
-            with open(path, "rb") as f:
-                data = base64.b64encode(f.read()).decode("ascii")
-            mime = mimetypes.guess_type(path)[0] or "image/png"
-            blocks.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{data}"},
-            })
-        except Exception as e:
-            logger.warning("Failed to read image %s: %s", path, e)
-            blocks.append({"type": "text", "text": f"(Could not read image: {path})"})
-
-    return blocks
+    return result

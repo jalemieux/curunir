@@ -1,94 +1,129 @@
-import json
-from unittest.mock import AsyncMock, patch
+# tests/test_delegate.py
+"""Tests for delegate tool — named agent delegation with result truncation."""
 
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+from pathlib import Path
 
-from src.llm import LLMResponse
+from src.config import AgentConfig
+from src.tools.delegate import exec_delegate
+
+_AGENTS_YAML = """\
+files:
+  description: "File operations"
+  tools: [glob, grep, read]
+  system_prompt: "You are a file specialist. Do the task."
+  max_iterations: 5
+
+system:
+  description: "Shell commands"
+  tools: [bash]
+  system_prompt: "You are a system specialist. Do the task."
+  max_iterations: 3
+"""
 
 
-class TestDelegate:
-    async def test_returns_sub_agent_response(self, agent_config):
-        from src.tools.delegate import exec_delegate
+@pytest.fixture
+def config_with_agents(tmp_path):
+    identity = tmp_path / "identity.md"
+    identity.write_text("Test assistant.")
+    agents_file = tmp_path / "agents.yaml"
+    agents_file.write_text(_AGENTS_YAML)
+    return AgentConfig(
+        identity_file=identity,
+        context_dir=tmp_path,
+        agents_file=agents_file,
+    )
 
-        mock_response = LLMResponse(text="Summary: doc is about X", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
-            result = await exec_delegate(
-                {"task": "Summarize the document"},
-                agent_config,
-            )
-        assert "Summary" in result
 
-    async def test_sub_agent_cannot_delegate(self, agent_config):
-        """Sub-agents must not have the delegate tool available."""
-        from src.tools.delegate import exec_delegate
+@pytest.mark.asyncio
+async def test_delegate_to_named_agent(config_with_agents):
+    with patch("src.tools.delegate.Agent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.handle = AsyncMock(return_value="Found 3 files.")
+        MockAgent.return_value = mock_agent
 
-        mock_response = LLMResponse(text="Done", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await exec_delegate({"task": "do something"}, agent_config)
-
-        # Check schemas passed to call_llm don't include delegate
-        schemas = mock_llm.call_args[0][2]
-        tool_names = [s["function"]["name"] for s in schemas]
-        assert "delegate" not in tool_names
-
-    async def test_image_paths_inlined_as_base64(self, agent_config, tmp_path):
-        from src.tools.delegate import exec_delegate
-
-        # Create a tiny 1x1 PNG
-        import base64
-        png_bytes = base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        result = await exec_delegate(
+            {"agent": "files", "task": "List all .py files"},
+            config_with_agents,
         )
-        img_path = tmp_path / "test.png"
-        img_path.write_bytes(png_bytes)
 
-        mock_response = LLMResponse(text="It's a white pixel", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await exec_delegate(
-                {"task": "Describe the image", "image_paths": [str(img_path)]},
-                agent_config,
-            )
+        assert result == "Found 3 files."
+        # Verify sub-agent was created with the right tools
+        call_kwargs = MockAgent.call_args
+        assert call_kwargs[1]["tools"] == ["glob", "grep", "read"]
 
-        # The first message should have multimodal content blocks
-        messages = mock_llm.call_args[0][1]
-        user_msg = [m for m in messages if m["role"] == "user"][0]
-        assert isinstance(user_msg["content"], list)
-        assert any(b.get("type") == "image_url" for b in user_msg["content"])
 
-    async def test_max_iterations_respected(self, agent_config):
-        from src.tools.delegate import exec_delegate
+@pytest.mark.asyncio
+async def test_delegate_unknown_agent(config_with_agents):
+    result = await exec_delegate(
+        {"agent": "nonexistent", "task": "do something"},
+        config_with_agents,
+    )
+    assert "unknown agent" in result.lower()
 
-        agent_config.max_iterations = 2
-        tool_response = LLMResponse(
-            text=None,
-            tool_calls=[{
-                "id": "call_loop",
-                "type": "function",
-                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
-            }],
+
+@pytest.mark.asyncio
+async def test_delegate_no_agents_file(tmp_path):
+    identity = tmp_path / "identity.md"
+    identity.write_text("Test assistant.")
+    config = AgentConfig(
+        identity_file=identity,
+        context_dir=tmp_path,
+        agents_file=tmp_path / "nonexistent.yaml",
+    )
+    result = await exec_delegate(
+        {"agent": "files", "task": "do something"},
+        config,
+    )
+    assert "no agents" in result.lower() or "not configured" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_delegate_truncates_long_result(config_with_agents):
+    long_result = "x" * 5000
+    with patch("src.tools.delegate.Agent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.handle = AsyncMock(return_value=long_result)
+        MockAgent.return_value = mock_agent
+
+        result = await exec_delegate(
+            {"agent": "files", "task": "read a huge file"},
+            config_with_agents,
         )
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response):
-            result = await exec_delegate({"task": "loop"}, agent_config)
-        assert "iteration limit" in result.lower()
 
-    async def test_empty_task_returns_error(self, agent_config):
-        from src.tools.delegate import exec_delegate
-        result = await exec_delegate({"task": ""}, agent_config)
-        assert "error" in result.lower()
+        assert len(result) <= 2048 + 50  # ~500 tokens ≈ 2000 chars, with margin
+        assert result.endswith("... (truncated)")
 
-    async def test_invalid_image_paths_type_handled(self, agent_config):
-        """If LLM sends image_paths as a string instead of list, handle gracefully."""
-        from src.tools.delegate import exec_delegate
 
-        mock_response = LLMResponse(text="Done", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            result = await exec_delegate(
-                {"task": "describe", "image_paths": "/tmp/img.png"},
-                agent_config,
-            )
-        assert isinstance(result, str)
-        # Verify the string was coerced to a list and treated as an image path
-        messages = mock_llm.call_args[0][1]
-        user_msg = [m for m in messages if m["role"] == "user"][0]
-        # Content should be a list (multimodal) since image_paths was provided
-        assert isinstance(user_msg["content"], list)
+@pytest.mark.asyncio
+async def test_delegate_uses_agent_max_iterations(config_with_agents):
+    with patch("src.tools.delegate.Agent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.handle = AsyncMock(return_value="done")
+        MockAgent.return_value = mock_agent
+
+        await exec_delegate(
+            {"agent": "system", "task": "run uptime"},
+            config_with_agents,
+        )
+
+        call_kwargs = MockAgent.call_args
+        config_arg = call_kwargs[0][0]  # first positional arg is config
+        assert config_arg.max_iterations == 3
+
+
+@pytest.mark.asyncio
+async def test_delegate_uses_agent_system_prompt(config_with_agents):
+    with patch("src.tools.delegate.Agent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.handle = AsyncMock(return_value="done")
+        MockAgent.return_value = mock_agent
+
+        await exec_delegate(
+            {"agent": "system", "task": "run uptime"},
+            config_with_agents,
+        )
+
+        call_kwargs = MockAgent.call_args
+        assert call_kwargs[1]["system_prompt_override"] == "You are a system specialist. Do the task."

@@ -126,10 +126,14 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
 
 
 class Agent:
-    def __init__(self, config: AgentConfig, tools: list[str] | None = None):
+    def __init__(self, config: AgentConfig, tools: list[str] | None = None,
+                 system_prompt_override: str | None = None):
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
-        self.static_prompt = build_static_prompt(config)
+        if system_prompt_override:
+            self.static_prompt = system_prompt_override
+        else:
+            self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
 
