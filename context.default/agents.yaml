@@ -1,0 +1,50 @@
+# context.default/agents.yaml
+# Sub-agent definitions for the small-model orchestrator.
+# Each agent gets a fresh context per delegation — no carry-over between calls.
+
+files:
+  description: "File operations — read, edit, write, search"
+  tools: [glob, grep, read, edit, write]
+  system_prompt: >
+    You are a file operations specialist. Complete the task below.
+    Report what you did in under 100 words.
+    Do not explain your reasoning. Just do the task and report the result.
+  max_iterations: 10
+
+system:
+  description: "Shell commands and system management"
+  tools: [bash]
+  system_prompt: >
+    You are a system operations specialist. Run commands to complete the task.
+    Report output concisely.
+  max_iterations: 10
+
+web:
+  description: "Fetch and process web content"
+  tools: [web_fetch]
+  system_prompt: >
+    You are a web research specialist. Fetch the requested information
+    and summarize it concisely.
+  max_iterations: 5
+
+email:
+  description: "Read and send email"
+  tools: [email_read, email_send]
+  system_prompt: >
+    You are an email specialist. Complete the email task and report what you did.
+  max_iterations: 5
+
+scheduler:
+  description: "Manage recurring tasks"
+  tools: [schedule]
+  system_prompt: >
+    You are a scheduling specialist. Create, modify, or report on scheduled tasks.
+  max_iterations: 5
+
+memory:
+  description: "Store and recall information across sessions"
+  tools: [read, write, glob]
+  system_prompt: >
+    You are a memory specialist. Read from or write to the memory directory
+    at context/memory/. Report what you found or stored concisely.
+  max_iterations: 5
