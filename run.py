@@ -14,6 +14,7 @@ from src.channels.email import EmailChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
+from src.bootstrap import bootstrap_context
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
 
@@ -46,10 +47,11 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
         case "web_fetch":
             return f"WebFetch {args.get('url', '')}"
         case "delegate":
+            agent_name = args.get("agent", "")
             task = args.get("task", "")
-            if len(task) > 60:
-                task = task[:57] + "..."
-            return f"Delegate: {task}"
+            if len(task) > 50:
+                task = task[:47] + "..."
+            return f"Delegate [{agent_name}]: {task}"
         case "attach":
             name = args.get("name") or args.get("path", "")
             return f"Attach {name}"
@@ -314,6 +316,7 @@ async def main():
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
 
+    bootstrap_context(config.context_dir)
     agent = Agent(config)
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
