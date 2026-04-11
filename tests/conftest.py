@@ -11,6 +11,8 @@ def tmp_context(tmp_path):
     """Create a temporary context directory with a minimal identity file."""
     identity = tmp_path / "identity.md"
     identity.write_text("You are a test assistant.")
+    agents = tmp_path / "agents.yaml"
+    agents.write_text("files:\n  description: 'File ops'\n  tools: [read]\n  system_prompt: 'Do the task.'\n  max_iterations: 3\n")
     return tmp_path
 
 
