@@ -330,7 +330,7 @@ async def main():
         enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
         service_account_file=os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
         delegated_user=os.environ.get("GOOGLE_DELEGATED_USER", ""),
-        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
+        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "300")),
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
         processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
         attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
