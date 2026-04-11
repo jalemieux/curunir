@@ -38,6 +38,20 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
             delay = min(delay * 2, _BACKOFF_MAX)
 
 
+def _context_bar(usage: float | None) -> str:
+    """Render a 5-block context usage bar, e.g. [ctx: ██░░░]."""
+    if usage is None:
+        return ""
+    blocks = 5
+    filled = round(usage * blocks)
+    bar = "\u2588" * filled + "\u2591" * (blocks - filled)
+    if filled >= 4:
+        color = "yellow"
+    else:
+        color = "dim"
+    return f"[{color}]\\[ctx: {bar}][/{color}] "
+
+
 async def run(host: str, port: int, console: Console | None = None) -> None:
     console = console or Console()
     uri = f"ws://{host}:{port}"
@@ -47,6 +61,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
     verbose = True
     ready = asyncio.Event()
+    ctx_state: dict = {"usage": None}
 
     # Spinner handle
     spinner: object = None  # Rich Live/status object
@@ -164,6 +179,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                                 srv_line.append(" | ".join(srv_parts), style="dim yellow")
                                 console.print(srv_line)
 
+                ctx = data.get("context_usage")
+                if ctx is not None:
+                    ctx_state["usage"] = ctx
+
                 if final:
                     if verbose:
                         flush_tool_calls()
@@ -199,9 +218,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                     # Read from stdin without blocking the event loop
                     try:
+                        ctx_prefix = _context_bar(ctx_state["usage"])
                         line = await loop.run_in_executor(
                             None,
-                            lambda: console.input("[bold green]> [/bold green]"),
+                            lambda p=ctx_prefix: console.input(f"{p}[bold green]> [/bold green]"),
                         )
                     except EOFError:
                         # Ctrl-D: close cleanly and exit

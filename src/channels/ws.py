@@ -98,6 +98,7 @@ class WebSocketChannel:
             "attachments": msg.attachments if msg.attachments else None,
             "workflow": msg.workflow,
             "stats": msg.stats,
+            "context_usage": msg.context_usage,
         }
         try:
             await self._connection.send(json.dumps(payload))

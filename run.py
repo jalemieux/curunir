@@ -269,6 +269,14 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
+        # Compute context usage ratio for CLI indicator
+        ctx_usage = None
+        session_history = agent.sessions.get(msg.session_id, [])
+        if session_history:
+            from src.agent.agent import _estimate_chars
+            used = _estimate_chars(session_history)
+            ctx_usage = min(used / agent.config.max_history_chars, 1.0)
+
         await out_queue.put(OutgoingMessage(
             content=text,
             channel=msg.channel,
@@ -277,6 +285,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             attachments=attachments or None,
             workflow=metadata.get("workflow"),
             stats=metadata.get("stats"),
+            context_usage=ctx_usage,
         ))
 
 
