@@ -71,6 +71,54 @@ def thread_get(thread_id: str, service) -> dict:
     return thread
 
 
+def send_email(
+    to: str, subject: str, body: str, service,
+    cc: str | None = None, bcc: str | None = None,
+    body_html: str | None = None,
+    attachments: list[str] | None = None,
+) -> None:
+    """Send a new email, optionally with HTML body and/or file attachments."""
+    try:
+        # Build body part
+        if body_html:
+            body_part = MIMEMultipart("alternative")
+            body_part.attach(MIMEText(body, "plain"))
+            body_part.attach(MIMEText(body_html, "html"))
+        else:
+            body_part = MIMEText(body, "plain")
+
+        # Wrap with attachments if needed
+        if attachments:
+            msg = MIMEMultipart("mixed")
+            msg.attach(body_part)
+            for path in attachments:
+                part = MIMEBase("application", "octet-stream")
+                with open(path, "rb") as f:
+                    part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition", "attachment",
+                    filename=os.path.basename(path),
+                )
+                msg.attach(part)
+        else:
+            msg = body_part
+
+        msg["To"] = to
+        msg["Subject"] = subject
+        if cc:
+            msg["Cc"] = cc
+        if bcc:
+            msg["Bcc"] = bcc
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        service.users().messages().send(
+            userId="me", body={"raw": raw}
+        ).execute()
+    except HttpError as e:
+        raise GmailError(f"Failed to send email: {e}") from e
+
+
 def send_reply(
     to: str, subject: str, body: str, reply_to_message_id: str, service,
     attachments: list[str] | None = None,

@@ -1,91 +1,121 @@
 ---
 name: email-send
-description: "Send an email using gog CLI via bash — supports plain text, HTML, attachments"
+description: "Send an email using the Gmail API via bash — supports plain text, HTML, attachments, and replies"
 ---
 
 # Sending Email
 
-Use the `gog` CLI to send emails via the bash tool.
-The sending account is configured in the `GOG_ACCOUNT` environment variable.
+Send emails via the Gmail API using `src.channels.gmail` through bash.
+The sender address is `$GOOGLE_DELEGATED_USER`, configured at the environment level.
 
 ## Basic Send
 
 ```bash
-gog gmail send \
-  --to "recipient@example.com" \
-  --subject "Subject line" \
-  --body "Plain text body here" \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_email
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+send_email(to='recipient@example.com', subject='Subject line', body='Plain text body here', service=service)
+print('Sent.')
+"
 ```
 
 ## HTML Body
 
-Use `--body-html` for rich formatting. You can provide both plain text and HTML —
-the recipient's client will choose which to display:
+Provide both plain text and HTML — the recipient's client chooses which to display:
 
 ```bash
-gog gmail send \
-  --to "recipient@example.com" \
-  --subject "Subject line" \
-  --body "Plain text fallback" \
-  --body-html "<h1>Hello</h1><p>Rich content here</p>" \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_email
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+send_email(
+    to='recipient@example.com',
+    subject='Subject line',
+    body='Plain text fallback',
+    body_html='<h1>Hello</h1><p>Rich content here</p>',
+    service=service,
+)
+print('Sent.')
+"
 ```
 
 ## Long Body from File
 
-For long content, write to a temp file first, then use `--body-file`:
+For long content, write to a temp file first, then read it in:
 
 ```bash
-gog gmail send \
-  --to "recipient@example.com" \
-  --subject "Subject line" \
-  --body-file /tmp/email-body.txt \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_email
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+with open('/tmp/email-body.txt') as f:
+    body = f.read()
+send_email(to='recipient@example.com', subject='Subject line', body=body, service=service)
+print('Sent.')
+"
 ```
 
 ## Multiple Recipients, CC, BCC
 
 ```bash
-gog gmail send \
-  --to "one@example.com,two@example.com" \
-  --cc "cc@example.com" \
-  --bcc "bcc@example.com" \
-  --subject "Subject line" \
-  --body "Content" \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_email
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+send_email(
+    to='one@example.com,two@example.com',
+    cc='cc@example.com',
+    bcc='bcc@example.com',
+    subject='Subject line',
+    body='Content',
+    service=service,
+)
+print('Sent.')
+"
 ```
 
 ## Attachments
 
-Use `--attach` for each file:
-
 ```bash
-gog gmail send \
-  --to "recipient@example.com" \
-  --subject "Report attached" \
-  --body "See attached." \
-  --attach /path/to/report.pdf \
-  --attach /path/to/data.csv \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_email
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+send_email(
+    to='recipient@example.com',
+    subject='Report attached',
+    body='See attached.',
+    attachments=['/path/to/report.pdf', '/path/to/data.csv'],
+    service=service,
+)
+print('Sent.')
+"
 ```
 
 ## Replying to a Thread
 
-When replying to an existing email thread, use `--reply-to-message-id`:
+When replying to an existing email thread, use `send_reply` with the original message ID:
 
 ```bash
-gog gmail send \
-  --reply-to-message-id "MESSAGE_ID" \
-  --to "recipient@example.com" \
-  --subject "Re: Original subject" \
-  --body "Reply content" \
-  --account "$GOG_ACCOUNT"
+python3 -c "
+from src.channels.gmail import build_service, send_reply
+import os
+service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
+send_reply(
+    to='recipient@example.com',
+    subject='Re: Original subject',
+    body='Reply content',
+    reply_to_message_id='MESSAGE_ID',
+    service=service,
+)
+print('Sent.')
+"
 ```
 
 ## Tips
 
-- Always use `$GOG_ACCOUNT` for the `--account` flag — never hardcode the address.
-- For reports or long-form content, write the body to a temp file and use `--body-file`
+- Always let the script read env vars at runtime — never hardcode credentials or addresses.
+- For reports or long-form content, write the body to a temp file and read it in
   to avoid shell quoting issues.
-- Quote the `--body` and `--subject` values to handle special characters.
+- Quote string arguments carefully when embedding in `python3 -c`.

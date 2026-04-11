@@ -6,7 +6,8 @@ from googleapiclient.errors import HttpError
 
 from src.channels.gmail import (
     GmailError, build_service, labels_list, labels_create,
-    search, thread_get, send_reply, thread_modify, download_attachments,
+    search, thread_get, send_email, send_reply, thread_modify,
+    download_attachments,
     _extract_attachments, _normalize_message, _decode_body,
 )
 
@@ -115,6 +116,72 @@ def test_thread_get_api_error(mock_service):
     mock_service.users().threads().get().execute.side_effect = _http_error()
     with pytest.raises(GmailError, match="Failed to get thread"):
         thread_get("thread_1", mock_service)
+
+
+def test_send_email_plain(mock_service):
+    send_email(
+        to="alice@example.com",
+        subject="Hello",
+        body="Plain text body",
+        service=mock_service,
+    )
+    mock_service.users().messages().send.assert_called_once()
+    send_args = mock_service.users().messages().send.call_args
+    assert send_args[1]["userId"] == "me"
+    body = send_args[1]["body"]
+    assert "raw" in body
+    assert "threadId" not in body
+
+
+def test_send_email_with_cc_bcc(mock_service):
+    send_email(
+        to="alice@example.com",
+        subject="Hello",
+        body="Body",
+        cc="bob@example.com",
+        bcc="charlie@example.com",
+        service=mock_service,
+    )
+    send_args = mock_service.users().messages().send.call_args
+    raw = base64.urlsafe_b64decode(send_args[1]["body"]["raw"])
+    assert b"Cc: bob@example.com" in raw
+    assert b"Bcc: charlie@example.com" in raw
+
+
+def test_send_email_html(mock_service):
+    send_email(
+        to="alice@example.com",
+        subject="Hello",
+        body="Plain fallback",
+        body_html="<p>Rich content</p>",
+        service=mock_service,
+    )
+    send_args = mock_service.users().messages().send.call_args
+    raw = base64.urlsafe_b64decode(send_args[1]["body"]["raw"])
+    assert b"Plain fallback" in raw
+    assert b"Rich content" in raw
+
+
+def test_send_email_with_attachments(mock_service, tmp_path):
+    att_file = tmp_path / "report.pdf"
+    att_file.write_bytes(b"fake pdf content")
+    send_email(
+        to="alice@example.com",
+        subject="Report",
+        body="See attached.",
+        attachments=[str(att_file)],
+        service=mock_service,
+    )
+    send_args = mock_service.users().messages().send.call_args
+    raw = base64.urlsafe_b64decode(send_args[1]["body"]["raw"])
+    assert b"report.pdf" in raw
+    assert b"See attached." in raw
+
+
+def test_send_email_api_error(mock_service):
+    mock_service.users().messages().send().execute.side_effect = _http_error()
+    with pytest.raises(GmailError, match="Failed to send email"):
+        send_email("to@x.com", "subj", "body", mock_service)
 
 
 def test_send_reply(mock_service):
