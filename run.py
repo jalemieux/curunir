@@ -317,7 +317,20 @@ async def main():
     )
 
     bootstrap_context(config.context_dir)
-    agent = Agent(config)
+
+    orchestrator_mode = os.environ.get("ORCHESTRATOR_MODE", "false").lower() == "true"
+
+    if orchestrator_mode:
+        from src.agent.system_prompt import build_orchestrator_prompt
+        # Read agent name from identity file (first line, stripped of markdown)
+        name_line = config.identity_file.read_text().splitlines()[0] if config.identity_file.exists() else "Assistant"
+        agent_name = name_line.lstrip("#").strip()
+        orchestrator_prompt = build_orchestrator_prompt(agent_name, config.agents_file)
+        agent = Agent(config, tools=["delegate"], system_prompt_override=orchestrator_prompt)
+        logger.info("Orchestrator mode: routing to agents defined in %s", config.agents_file)
+    else:
+        agent = Agent(config)
+
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
 
@@ -325,7 +338,8 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "0.0.0.0")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model)
+    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model,
+                          local_mode=orchestrator_mode)
     channels["cli"] = ws
 
     # Email channel (conditional)
@@ -353,7 +367,8 @@ async def main():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
-        tg.create_task(periodic_extraction(agent, extraction_interval))
+        if not orchestrator_mode:
+            tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(run_scheduler(agent))
 
 

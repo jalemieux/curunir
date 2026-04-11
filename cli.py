@@ -87,7 +87,11 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                 # Welcome message with model info
                 if "model" in data:
-                    console.print(f"[dim]model: {data['model']}[/dim]\n")
+                    if data.get("local_mode"):
+                        console.print(f"[bold]Curunir[/bold] [dim](local mode)[/dim]")
+                        console.print("[dim]Tip: I work best with focused requests. Ask me to do something specific.[/dim]\n")
+                    else:
+                        console.print(f"[dim]model: {data['model']}[/dim]\n")
                     ready.set()
                     continue
 
