@@ -31,3 +31,13 @@ def test_filter_ignores_unknown_names():
     schemas = get_tool_schemas(names=["read", "nonexistent"])
     names = {s["function"]["name"] for s in schemas}
     assert names == {"read"}
+
+
+def test_delegate_schema_has_agent_param():
+    from src.tools.schemas import ALL_TOOL_SCHEMAS
+    delegate = ALL_TOOL_SCHEMAS["delegate"]
+    props = delegate["function"]["parameters"]["properties"]
+    assert "agent" in props
+    assert props["agent"]["type"] == "string"
+    assert "required" in delegate["function"]["parameters"]
+    assert "agent" in delegate["function"]["parameters"]["required"]
