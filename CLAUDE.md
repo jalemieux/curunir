@@ -101,6 +101,10 @@ Local directory containing `identity.md` (agent persona, required), `memory/` (p
 
 Cron tasks in `context/schedules.json` evaluated every second via croniter. When due, agent processes the task prompt via `handle()` in system-task mode.
 
+### Orchestrator Mode (Small-Model)
+
+Set `ORCHESTRATOR_MODE=true` for constrained local hardware. The agent becomes an orchestrator that delegates to specialized sub-agents defined in `context/agents.yaml`. Each sub-agent runs in a fresh context with minimal overhead. Skills and automatic memory extraction are disabled. See the design spec at `docs/superpowers/specs/2026-04-09-small-model-orchestrator-design.md`.
+
 ## Testing Patterns
 
 All tests are async (pytest-asyncio). Key fixtures in `tests/conftest.py`: `tmp_context`, `tmp_skills`, `agent_config`.
@@ -117,3 +121,4 @@ See `.env.example` for full list. Critical ones:
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
+- `ORCHESTRATOR_MODE` — set to `true` for small-model orchestrator mode (delegates to sub-agents)
