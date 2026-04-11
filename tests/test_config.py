@@ -12,6 +12,13 @@ def test_default_config():
     assert config.skills_dir == Path("./skills")
 
 
+def test_agents_file_default():
+    from src.config import AgentConfig
+    from pathlib import Path
+    config = AgentConfig()
+    assert config.agents_file == Path("./context/agents.yaml")
+
+
 def test_custom_config():
     config = AgentConfig(model="openai/gpt-4o", max_iterations=5)
     assert config.model == "openai/gpt-4o"
