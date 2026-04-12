@@ -331,10 +331,7 @@ async def main():
 
     if orchestrator_mode:
         from src.agent.system_prompt import build_orchestrator_prompt
-        # Read agent name from identity file (first line, stripped of markdown)
-        name_line = config.identity_file.read_text().splitlines()[0] if config.identity_file.exists() else "Assistant"
-        agent_name = name_line.lstrip("#").strip()
-        orchestrator_prompt = build_orchestrator_prompt(agent_name, config.agents_file)
+        orchestrator_prompt = build_orchestrator_prompt(config)
         agent = Agent(config, tools=["delegate"], system_prompt_override=orchestrator_prompt)
         logger.info("Orchestrator mode: routing to agents defined in %s", config.agents_file)
     else:

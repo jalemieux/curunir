@@ -25,7 +25,6 @@ def orchestrator(tmp_path):
     agents_file.write_text(_AGENTS_YAML)
 
     from src.agent.system_prompt import build_orchestrator_prompt
-    prompt = build_orchestrator_prompt("TestBot", agents_file)
 
     config = AgentConfig(
         identity_file=identity,
@@ -33,6 +32,7 @@ def orchestrator(tmp_path):
         agents_file=agents_file,
         max_history_chars=16_000,
     )
+    prompt = build_orchestrator_prompt(config)
     return Agent(config, tools=["delegate"], system_prompt_override=prompt)
 
 
