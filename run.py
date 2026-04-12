@@ -14,7 +14,6 @@ from src.channels.email import EmailChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
-from src.bootstrap import bootstrap_context
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
 
@@ -324,8 +323,6 @@ async def main():
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
-
-    bootstrap_context(config.context_dir)
 
     orchestrator_mode = os.environ.get("ORCHESTRATOR_MODE", "false").lower() == "true"
 
