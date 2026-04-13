@@ -14,9 +14,9 @@ def test_default_config():
 
 def test_agent_config_defaults():
     cfg = AgentConfig()
-    assert cfg.max_history_chars is None
     assert cfg.max_tokens == 16_000
     assert cfg.n_ctx is None
+    assert not hasattr(cfg, "max_history_chars")
 
 
 def test_agents_file_default():
