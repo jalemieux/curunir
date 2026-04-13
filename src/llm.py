@@ -38,6 +38,7 @@ async def call_llm(
     model: str,
     messages: list[dict],
     tools: list[dict],
+    max_tokens: int = 16_000,
     api_base: str | None = None,
     openrouter_provider: str | None = None,
 ) -> LLMResponse:
@@ -45,7 +46,7 @@ async def call_llm(
     kwargs = {
         "model": model,
         "messages": messages,
-        "max_tokens": 16000,
+        "max_tokens": max_tokens,
         "num_retries": 0,  # disable LiteLLM's internal retries; we handle retries below
     }
     if api_base:

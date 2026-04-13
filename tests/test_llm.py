@@ -68,3 +68,24 @@ async def test_both_text_and_tool_calls():
 
     assert result.text == "Let me check that file"
     assert len(result.tool_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_call_llm_passes_max_tokens(monkeypatch):
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        class _Msg:
+            content = "ok"
+            tool_calls = None
+        class _Choice:
+            message = _Msg()
+        class _Resp:
+            choices = [_Choice()]
+            usage = None
+        return _Resp()
+
+    monkeypatch.setattr("src.llm.litellm.acompletion", fake_acompletion)
+    await call_llm("m", [{"role": "user", "content": "hi"}], [], max_tokens=4096)
+    assert captured["max_tokens"] == 4096
