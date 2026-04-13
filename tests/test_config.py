@@ -12,6 +12,13 @@ def test_default_config():
     assert config.skills_dir == Path("./skills")
 
 
+def test_agent_config_defaults():
+    cfg = AgentConfig()
+    assert cfg.max_history_chars is None
+    assert cfg.max_tokens == 16_000
+    assert cfg.n_ctx is None
+
+
 def test_agents_file_default():
     from src.config import AgentConfig
     from pathlib import Path
