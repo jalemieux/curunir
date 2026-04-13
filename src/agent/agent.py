@@ -182,7 +182,6 @@ class Agent:
         tool_schemas = self._get_tool_schemas(session_id)
 
         # Accumulate LLM usage stats across iterations
-        total_prompt_tokens = 0
         total_completion_tokens = 0
         total_llm_elapsed = 0.0
         last_prompt_tokens = 0
@@ -196,13 +195,13 @@ class Agent:
             wall = time.monotonic() - t_start
             tps = total_completion_tokens / total_llm_elapsed if total_llm_elapsed > 0 else 0.0
             metadata["stats"] = {
-                "prompt_tokens": total_prompt_tokens,
+                "context_tokens": last_prompt_tokens + total_completion_tokens,
+                "last_prompt_tokens": last_prompt_tokens,
                 "completion_tokens": total_completion_tokens,
-                "total_tokens": total_prompt_tokens + total_completion_tokens,
+                "completion_tps": round(tps, 1),
                 "llm_calls": llm_calls,
                 "llm_elapsed_sec": round(total_llm_elapsed, 2),
                 "wall_elapsed_sec": round(wall, 2),
-                "completion_tps": round(tps, 1),
                 "iterations": 0,  # filled at return site
             }
 
@@ -260,7 +259,6 @@ class Agent:
                     return "Sorry, the conversation is too long. Please start a new thread."
 
             # Accumulate usage
-            total_prompt_tokens += response.usage.prompt_tokens
             total_completion_tokens += response.usage.completion_tokens
             total_llm_elapsed += response.usage.elapsed_sec
             last_prompt_tokens = response.usage.prompt_tokens or 0
