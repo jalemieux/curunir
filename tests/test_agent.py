@@ -209,6 +209,21 @@ class TestTrimHistory:
         assert history[0]["role"] == "user"
 
 
+@pytest.mark.asyncio
+async def test_system_prompt_has_no_current_time(agent_config):
+    captured = {}
+
+    async def fake_call(model, messages, tools, **kwargs):
+        captured["system"] = messages[0]["content"]
+        return LLMResponse(text="ok", tool_calls=None, usage=LLMUsage())
+
+    with patch("src.agent.agent.call_llm", new=fake_call):
+        agent = Agent(agent_config)
+        await agent.handle("hi", session_id="t-current-time")
+
+    assert "Current time:" not in captured["system"]
+
+
 class TestProactiveTrim:
     """Token-threshold proactive trim driven by last_prompt_tokens / n_ctx."""
 
