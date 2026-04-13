@@ -30,7 +30,6 @@ def orchestrator(tmp_path):
         identity_file=identity,
         context_dir=tmp_path,
         agents_file=agents_file,
-        max_history_chars=16_000,
     )
     prompt = build_orchestrator_prompt(config)
     return Agent(config, tools=["delegate"], system_prompt_override=prompt)

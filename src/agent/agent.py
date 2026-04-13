@@ -17,8 +17,6 @@ from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
 
 
-_DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
-
 # Map tool names to their key argument(s) for log display
 _TOOL_KEY_ARGS: dict[str, list[str]] = {
     "web_fetch": ["url"],
@@ -67,42 +65,28 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
     return result
 
 
-def _estimate_chars(messages: list[dict]) -> int:
-    """Rough character count across all message contents."""
-    total = 0
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            total += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                total += len(str(block))
-    return total
+def _trim_history(history: list[dict], target_messages: int) -> None:
+    """Drop oldest user-grouped sequences until len(history) <= target_messages.
 
-
-def _trim_history(history: list[dict], max_chars: int = _DEFAULT_MAX_HISTORY_CHARS) -> None:
-    """Remove oldest messages in coherent groups until under the char limit.
-
-    Groups: user+assistant pairs, or assistant(tool_calls)+tool+...+tool sequences.
-    Always removes from the front so the most recent context is preserved.
-    Keeps at least one user message to avoid empty-messages API errors.
-    When only one user message exists (e.g. system-task sessions), trims
-    assistant+tool groups after it.
+    Groups: a user message plus everything up to (but not including) the next
+    user message. Always preserves at least one user message so the API call
+    has content. For single-user-message sessions (system tasks), drops
+    assistant+tool groups after the user message instead.
     """
+    if target_messages < 1:
+        target_messages = 1
+
     user_count = sum(1 for m in history if m["role"] == "user")
 
     if user_count > 1:
-        # Multi-user-message session: trim by user message groups, keep at least one
-        while user_count > 1 and _estimate_chars(history) > max_chars:
+        while user_count > 1 and len(history) > target_messages:
             if history[0]["role"] == "user":
                 user_count -= 1
             history.pop(0)
             while history and history[0]["role"] != "user":
                 history.pop(0)
     elif user_count == 1 and len(history) > 1:
-        # Single user message (e.g. system task): keep first message,
-        # trim assistant+tool groups after it
-        while len(history) > 1 and _estimate_chars(history) > max_chars:
+        while len(history) > 1 and len(history) > target_messages:
             del history[1]
             while len(history) > 1 and history[1]["role"] == "tool":
                 del history[1]
@@ -192,12 +176,10 @@ class Agent:
         else:
             history.append({"role": "user", "content": message})
             system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
-        _trim_history(history, max_chars=self.config.max_history_chars)
         messages = [{"role": "system", "content": system_prompt}] + history
 
         sid = session_id[:8]
-        msg_chars = _estimate_chars(history)
-        logger.info("[%s] agent loop start — %d messages, ~%dk chars", sid, len(history), msg_chars // 1000)
+        logger.info("[%s] agent loop start — %d messages", sid, len(history))
 
         tool_schemas = self._get_tool_schemas(session_id)
 
@@ -244,9 +226,9 @@ class Agent:
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
                     raise
-                half = self.config.max_history_chars // 2
-                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
-                _trim_history(history, max_chars=half)
+                target = max(1, len(history) // 2)
+                logger.warning("[%s] context window exceeded, trimming %d → %d messages", sid, len(history), target)
+                _trim_history(history, target_messages=target)
                 if not history:
                     return "Sorry, the message was too long for me to process."
                 messages = [{"role": "system", "content": system_prompt}] + history
@@ -315,7 +297,6 @@ class Agent:
                         "content": result,
                     })
 
-                _trim_history(history, max_chars=self.config.max_history_chars)
                 messages = [{"role": "system", "content": system_prompt}] + history
                 continue
 

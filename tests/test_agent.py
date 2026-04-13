@@ -152,82 +152,60 @@ class TestToolAllowlist:
         assert len(schemas) == 10  # all tools including delegate, web_fetch, and schedule
 
 
-class TestHistoryTruncation:
-    async def test_trims_old_messages_when_over_limit(self, agent_config):
-        agent = Agent(agent_config)
-        session_id = "s-trunc"
-        history = agent.sessions.setdefault(session_id, [])
-        for i in range(100):
-            history.append({"role": "user", "content": "x" * 10_000})
-            history.append({"role": "assistant", "content": "y" * 10_000})
+class TestTrimHistory:
+    """Unit tests for _trim_history — message-count-based trimming."""
 
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("new message", "s-trunc")
+    def test_keeps_target_message_count(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+        _trim_history(history, target_messages=2)
+        assert len(history) <= 2
+        # Most recent user message must survive.
+        assert any(m["role"] == "user" and m["content"] == "u3" for m in history)
 
-        messages = mock_llm.call_args[0][1]
-        # Should be trimmed (system + trimmed history + new user msg)
-        assert len(messages) < 202
+    def test_keeps_at_least_one_user_message(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        _trim_history(history, target_messages=0)
+        assert any(m["role"] == "user" for m in history)
 
-    async def test_no_trim_when_single_user_message(self, agent_config):
-        """Sub-agents have one user message — trimming must not remove it."""
-        agent = Agent(agent_config)
-        session_id = "s-single"
-        history = agent.sessions.setdefault(session_id, [])
-        # Simulate sub-agent: one user msg, then a huge tool result
-        history.append({"role": "user", "content": "analyze this"})
-        history.append({"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "read", "arguments": "{}"}}]})
-        history.append({"role": "tool", "tool_call_id": "c1", "content": "x" * 1_000_000})
+    def test_single_user_session_trims_tail_groups(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "bash", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "out1"},
+            {"role": "assistant", "tool_calls": [{"id": "c2", "function": {"name": "bash", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c2", "content": "out2"},
+        ]
+        _trim_history(history, target_messages=1)
+        # User message must survive
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "task"
 
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("continue", session_id)
-
-        messages = mock_llm.call_args[0][1]
-        non_system = [m for m in messages if m["role"] != "system"]
-        # Must still have at least one user message
-        assert any(m["role"] == "user" for m in non_system)
-
-    async def test_truncation_preserves_message_pairs(self, agent_config):
-        """Truncation should not leave orphaned tool results or split pairs."""
-        agent = Agent(agent_config)
-        session_id = "s-pairs"
-        history = agent.sessions.setdefault(session_id, [])
-        for i in range(50):
-            history.append({"role": "user", "content": "x" * 20_000})
-            history.append({"role": "assistant", "content": "y" * 20_000})
-
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("new message", "s-pairs")
-
-        messages = mock_llm.call_args[0][1]
-        # After system prompt, first message should be "user" (not orphaned assistant/tool)
-        non_system = [m for m in messages if m["role"] != "system"]
-        assert non_system[0]["role"] == "user"
-
-    async def test_system_task_trims_tool_groups_after_user_prompt(self, agent_config):
-        """System tasks (single user message) should trim old tool groups, not the task prompt."""
-        agent = Agent(agent_config)
-        session_id = "sched:trim:1"
-        history = agent.sessions.setdefault(session_id, [])
-        # Simulate: task prompt + many large tool call rounds
-        history.append({"role": "user", "content": "## Scheduled Task\nDo something."})
-        for i in range(20):
-            history.append({"role": "assistant", "tool_calls": [{"id": f"c{i}", "function": {"name": "bash", "arguments": "{}"}}]})
-            history.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 100_000})
-
-        mock_response = LLMResponse(text="done", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            result = await agent.handle("", session_id, system_task_prompt="Do something.")
-
-        messages = mock_llm.call_args[0][1]
-        non_system = [m for m in messages if m["role"] != "system"]
-        # Task prompt must survive trimming
-        assert non_system[0]["role"] == "user"
-        assert "Scheduled Task" in non_system[0]["content"]
-        # History should have been trimmed (less than original 41 messages)
-        assert len(non_system) < 41
+    def test_preserves_pair_boundaries(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+        _trim_history(history, target_messages=3)
+        # First non-trimmed message should be a user (no orphaned assistant/tool)
+        assert history[0]["role"] == "user"
 
 
 class TestSystemTaskMode:
