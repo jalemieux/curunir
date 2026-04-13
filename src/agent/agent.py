@@ -108,71 +108,6 @@ def _trim_history(history: list[dict], max_chars: int = _DEFAULT_MAX_HISTORY_CHA
                 del history[1]
 
 
-def _compact_delegate_exchange(history: list[dict]) -> None:
-    """Replace the most recent delegate tool_call + tool result with a summary.
-
-    Looks for the pattern: assistant(tool_calls containing 'delegate') + tool result.
-    Replaces both with a single summary message to save context.
-    """
-    if len(history) < 2:
-        return
-
-    # Find the last assistant message with tool_calls
-    for i in range(len(history) - 1, -1, -1):
-        msg = history[i]
-        if msg["role"] != "assistant" or "tool_calls" not in msg:
-            continue
-
-        tool_calls = msg["tool_calls"]
-        delegate_calls = [
-            tc for tc in tool_calls
-            if tc.get("function", {}).get("name") == "delegate"
-        ]
-        if not delegate_calls:
-            continue
-
-        # Collect the tool result messages that follow
-        j = i + 1
-        while j < len(history) and history[j]["role"] == "tool":
-            j += 1
-
-        # Extract agent name and result for the summary
-        for tc in delegate_calls:
-            args_str = tc.get("function", {}).get("arguments", "{}")
-            try:
-                args = json.loads(args_str)
-            except json.JSONDecodeError:
-                args = {}
-            agent_name = args.get("agent", "delegate")
-
-            # Find the matching tool result
-            tc_id = tc.get("id")
-            result_text = ""
-            for k in range(i + 1, j):
-                if history[k].get("tool_call_id") == tc_id:
-                    result_text = history[k].get("content", "")
-                    break
-
-            # Truncate result for summary
-            summary_text = result_text[:200]
-            if len(result_text) > 200:
-                summary_text += "..."
-
-            summary = f"[delegate:{agent_name} result] {summary_text}"
-
-            # Replace the assistant+tool block with a user-role summary.
-            # Using "assistant" here caused thinking-mode providers (e.g. GLM)
-            # to reject the next call with "prefill incompatible with enable_thinking",
-            # since a trailing assistant-content turn looks like a prefill request.
-            del history[i:j]
-            history.insert(i, {
-                "role": "user",
-                "content": summary,
-                "is_summary": True,
-            })
-            return
-
-
 def _is_context_overflow(exc: Exception) -> bool:
     """Check if an exception is a context window / input length overflow."""
     if isinstance(exc, litellm.ContextWindowExceededError):
@@ -371,8 +306,6 @@ class Agent:
                     })
 
                 _trim_history(history, max_chars=self.config.max_history_chars)
-                # Compact delegate exchanges into summaries
-                _compact_delegate_exchange(history)
                 messages = [{"role": "system", "content": system_prompt}] + history
                 continue
 

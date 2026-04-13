@@ -76,8 +76,10 @@ class TestAgentHandle:
             result = await agent.handle("check", "s1")
 
         assert result == "All done"
-        # The combined response should have content preserved
-        assert agent.sessions["s1"][1].get("content") == "Let me check"
+        # Content is dropped when tool_calls are present: some thinking-mode
+        # providers (GLM via DeepInfra) reject an assistant message carrying
+        # both content and tool_calls as an incompatible "prefill".
+        assert "content" not in agent.sessions["s1"][1]
         assert agent.sessions["s1"][1].get("tool_calls") is not None
 
     async def test_empty_response_returns_error(self, agent):
@@ -121,11 +123,14 @@ class TestDelegateToolExecution:
             result = await agent.handle("delegate this", "s1")
 
         assert result == "Done"
-        # Verify the delegate exchange was compacted into a summary
+        # Verify the delegate exchange is preserved as a proper tool_call + tool_result pair
         history = agent.sessions["s1"]
-        assert not any(m["role"] == "tool" for m in history), "Delegate tool messages should be compacted"
-        summary = next(m for m in history if m.get("is_summary"))
-        assert "sub-agent result" in summary["content"]
+        tool_msgs = [m for m in history if m["role"] == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["content"] == "sub-agent result"
+        assert tool_msgs[0]["tool_call_id"] == "call_delegate"
+        assistant_with_calls = [m for m in history if m["role"] == "assistant" and "tool_calls" in m]
+        assert len(assistant_with_calls) == 1
 
 
 class TestToolAllowlist:
@@ -282,11 +287,10 @@ class TestSystemTaskMode:
 
 
 @pytest.mark.asyncio
-async def test_delegate_exchanges_compacted_in_history(agent_config):
-    """After a delegate tool call, the tool_call + tool_result messages
-    should be replaced with a [summary] message to save context space."""
+async def test_delegate_exchanges_preserved_in_history(agent_config):
+    """Delegate tool_call + tool_result messages stay intact in history so
+    the orchestrator can use the sub-agent's output."""
     responses = [
-        # First response: call delegate
         LLMResponse(
             text=None,
             tool_calls=[{
@@ -298,21 +302,19 @@ async def test_delegate_exchanges_compacted_in_history(agent_config):
                 },
             }],
         ),
-        # Second response: final answer after getting delegate result
         LLMResponse(text="The system has been up for 5 days.", tool_calls=None),
     ]
     with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=responses):
-        with patch("src.tools.dispatcher.execute_tool_call", new_callable=AsyncMock, return_value="uptime: 5 days"):
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="uptime: 5 days"):
             agent = Agent(agent_config)
             await agent.handle("how long has this machine been running?", "s1")
 
     history = agent.sessions["s1"]
-    # Should contain: user, [summary], assistant
     roles = [m["role"] for m in history]
-    assert "tool" not in roles, "Raw tool messages should be compacted away"
-    summaries = [m for m in history if m.get("role") == "assistant" and m.get("is_summary")]
-    assert len(summaries) == 1
-    assert "[system]" in summaries[0]["content"]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    tool_msg = history[2]
+    assert tool_msg["tool_call_id"] == "tc1"
+    assert tool_msg["content"] == "uptime: 5 days"
 
 
 class TestAgentInit:
