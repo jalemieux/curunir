@@ -119,6 +119,7 @@ See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
-- `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
 - `ORCHESTRATOR_MODE` — set to `true` for small-model orchestrator mode (delegates to sub-agents)
+
+When `API_BASE` is set, Curunir reads the model's `n_ctx` from llama.cpp's `/slots` endpoint at startup and drives all trim decisions off real `prompt_tokens` reported on each call. For hosted models there is no proactive trim — overflow falls back to halving the message count and retrying.
