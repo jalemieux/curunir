@@ -142,20 +142,26 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 # Display stats in verbose mode
                 stats = data.get("stats")
                 if verbose and stats and final:
-                    stat_line = Text()
-                    stat_line.append("\n  ", style="dim")
                     parts = []
-                    if stats.get("prompt_tokens"):
-                        parts.append(f"prompt: {stats['prompt_tokens']} tok")
+                    ctx_tok = stats.get("context_tokens")
+                    n_ctx = stats.get("n_ctx")
+                    if ctx_tok is not None:
+                        if n_ctx:
+                            pct = round(100 * ctx_tok / n_ctx)
+                            parts.append(f"ctx: {ctx_tok} tok ({pct}% of {n_ctx})")
+                        else:
+                            parts.append(f"ctx: {ctx_tok} tok")
                     if stats.get("completion_tokens"):
-                        parts.append(f"completion: {stats['completion_tokens']} tok")
+                        parts.append(f"{stats['completion_tokens']} completion tok")
                     if stats.get("completion_tps"):
                         parts.append(f"{stats['completion_tps']} tok/s")
                     if stats.get("iterations"):
-                        parts.append(f"{stats['iterations']} iter")
+                        parts.append(f"{stats['iterations']} steps")
                     if stats.get("wall_elapsed_sec"):
-                        parts.append(f"{stats['wall_elapsed_sec']}s wall")
+                        parts.append(f"{stats['wall_elapsed_sec']}s")
                     if parts:
+                        stat_line = Text()
+                        stat_line.append("\n  ", style="dim")
                         stat_line.append(" | ".join(parts), style="dim cyan")
                         console.print(stat_line)
 
