@@ -268,13 +268,17 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
-        # Compute context usage ratio for CLI indicator
+        # Compute context usage ratio for CLI indicator (only when n_ctx is known
+        # — i.e. we're talking to a llama.cpp server that reported it via /slots).
         ctx_usage = None
-        session_history = agent.sessions.get(msg.session_id, [])
-        if session_history:
-            from src.agent.agent import _estimate_chars
-            used = _estimate_chars(session_history)
-            ctx_usage = min(used / agent.config.max_history_chars, 1.0)
+        if agent.config.n_ctx and metadata.get("stats"):
+            last_prompt_tokens = metadata["stats"].get("last_prompt_tokens")
+            if last_prompt_tokens:
+                ctx_usage = min(last_prompt_tokens / agent.config.n_ctx, 1.0)
+
+        # Surface n_ctx for CLI stats-line rendering.
+        if agent.config.n_ctx is not None and metadata.get("stats"):
+            metadata["stats"]["n_ctx"] = agent.config.n_ctx
 
         await out_queue.put(OutgoingMessage(
             content=text,
@@ -316,15 +320,17 @@ async def main():
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
-    max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
-        **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
 
     orchestrator_mode = os.environ.get("ORCHESTRATOR_MODE", "false").lower() == "true"
+
+    if config.api_base:
+        from src.agent.context_budget import resolve_llamacpp_budget
+        await resolve_llamacpp_budget(config)
 
     if orchestrator_mode:
         from src.agent.system_prompt import build_orchestrator_prompt
