@@ -55,6 +55,15 @@ async def call_llm(
     if tools:
         kwargs["tools"] = tools
 
+    import json as _json
+    log.info("LLM_REQUEST_DEBUG model=%s n_msgs=%d", model, len(messages))
+    for idx, m in enumerate(messages):
+        role = m.get("role")
+        has_tool_calls = "tool_calls" in m
+        content = m.get("content")
+        content_preview = (content[:300] if isinstance(content, str) else _json.dumps(content)[:300]) if content is not None else "<none>"
+        log.info("  [%d] role=%s tool_calls=%s content=%r", idx, role, has_tool_calls, content_preview)
+
     t0 = time.monotonic()
     for attempt in range(MAX_RETRIES):
         try:
@@ -68,6 +77,8 @@ async def call_llm(
                             status, delay, attempt + 1, MAX_RETRIES)
                 await asyncio.sleep(delay)
             else:
+                log.error("LLM_REQUEST_FAILED model=%s err=%s", model, exc)
+                log.error("LLM_REQUEST_FAILED full_messages=%s", _json.dumps(messages, default=str)[:4000])
                 raise
     elapsed = time.monotonic() - t0
 
