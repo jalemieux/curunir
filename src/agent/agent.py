@@ -3,7 +3,6 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
 
 import litellm
 
@@ -171,14 +170,10 @@ class Agent:
         if system_task_prompt:
             # System-initiated task: inject task as a user message so all LLM
             # providers accept the request (some reject system-only conversations).
-            system_prompt = (
-                self.static_prompt
-                + f"\n\nCurrent time: {datetime.now().isoformat()}"
-            )
             history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
-            system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
+        system_prompt = self.static_prompt
         messages = [{"role": "system", "content": system_prompt}] + history
 
         sid = session_id[:8]
