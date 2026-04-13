@@ -210,6 +210,29 @@ class TestTrimHistory:
 
 
 @pytest.mark.asyncio
+async def test_stats_emits_context_tokens(agent_config):
+    """After a turn, stats.context_tokens reflects last prompt_tokens + total completion."""
+    async def fake_call(model, messages, tools, **kwargs):
+        return LLMResponse(
+            text="done",
+            tool_calls=None,
+            usage=LLMUsage(prompt_tokens=1000, completion_tokens=50, elapsed_sec=1.0),
+        )
+
+    with patch("src.agent.agent.call_llm", new=fake_call):
+        agent = Agent(agent_config)
+        metadata = {"stats": {}}
+        await agent.handle("hi", session_id="t-stats", metadata=metadata)
+
+    stats = metadata["stats"]
+    assert stats["context_tokens"] == 1050  # 1000 prompt + 50 completion
+    assert stats["completion_tokens"] == 50
+    assert stats["last_prompt_tokens"] == 1000
+    assert "prompt_tokens" not in stats
+    assert "total_tokens" not in stats
+
+
+@pytest.mark.asyncio
 async def test_system_prompt_has_no_current_time(agent_config):
     captured = {}
 
