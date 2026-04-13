@@ -38,6 +38,7 @@ class AgentConfig:
     api_base: str | None = None
     max_history_chars: int | None = None     # None = no proactive trim
     max_tokens: int = 16_000                 # per LLM call; may be clamped to n_ctx//2
+    n_ctx: int | None = None                 # llama.cpp window, known only when api_base is set
     # ... existing fields
 ```
 
@@ -74,6 +75,7 @@ async def resolve_llamacpp_budget(config: AgentConfig, orchestrator_mode: bool) 
 
     config.max_history_chars = budget
     config.max_tokens = min(config.max_tokens, n_ctx // 2)
+    config.n_ctx = n_ctx
     logger.info(
         "llama.cpp context: n_ctx=%d, history_budget=%d chars, max_tokens=%d",
         n_ctx, budget, config.max_tokens,
@@ -159,6 +161,105 @@ if agent.config.max_history_chars is not None:
 
 `cli.py:_context_bar` already returns `""` when `usage is None`, so the bar disappears entirely for hosted models. No CLI code change needed.
 
+## Stats line redesign
+
+The current stats line is confusing because `prompt: X tok` sums `prompt_tokens` across every iteration, double-counting the history prefix. Rewrite to report actual context usage plus this-turn work.
+
+### Current (problematic)
+
+```
+prompt: 2226 tok | completion: 762 tok | 9.2 tok/s | 3 iter | 130.89s wall
+```
+
+- `prompt` sums every iteration's prompt → misleading (prefix counted N times).
+- `iter` label is cryptic.
+- No indication of real context occupancy.
+
+### New format
+
+llama.cpp (we know `n_ctx`):
+```
+ctx: 4821 tok (14% of 32768) | 762 completion tok | 9.2 tok/s | 3 steps | 130.9s
+```
+
+Hosted (no `n_ctx`):
+```
+ctx: 4821 tok | 762 completion tok | 9.2 tok/s | 3 steps | 130.9s
+```
+
+### Agent changes (`src/agent/agent.py`)
+
+Track the **last** iteration's `prompt_tokens` separately, not just the sum:
+
+```python
+last_prompt_tokens = 0   # new accumulator
+
+# inside the loop, after each response:
+total_prompt_tokens += response.usage.prompt_tokens
+last_prompt_tokens = response.usage.prompt_tokens   # overwrite
+```
+
+In `_finalize_stats`, replace `prompt_tokens: total_prompt_tokens` with:
+
+```python
+metadata["stats"] = {
+    "context_tokens": last_prompt_tokens + total_completion_tokens,  # KV footprint after last call
+    "completion_tokens": total_completion_tokens,
+    "completion_tps": round(tps, 1),
+    "llm_calls": llm_calls,
+    "llm_elapsed_sec": round(total_llm_elapsed, 2),
+    "wall_elapsed_sec": round(wall, 2),
+    "iterations": 0,   # filled at return site
+}
+```
+
+(`total_prompt_tokens` is no longer surfaced — it was misleading. If anyone needs prefix accounting they can log-dive.)
+
+### n_ctx in stats (`run.py`)
+
+When `api_base` is set, the resolved `n_ctx` is known at startup. Store it on the `AgentConfig` (add `n_ctx: int | None = None`) and include it in the `stats` dict surfaced to the CLI:
+
+```python
+if agent.config.n_ctx is not None:
+    metadata["stats"]["n_ctx"] = agent.config.n_ctx
+```
+
+### CLI changes (`cli.py:143-160`)
+
+Replace the existing stats rendering with:
+
+```python
+if verbose and stats and final:
+    parts = []
+    ctx_tok = stats.get("context_tokens")
+    n_ctx = stats.get("n_ctx")
+    if ctx_tok is not None:
+        if n_ctx:
+            pct = round(100 * ctx_tok / n_ctx)
+            parts.append(f"ctx: {ctx_tok} tok ({pct}% of {n_ctx})")
+        else:
+            parts.append(f"ctx: {ctx_tok} tok")
+    if stats.get("completion_tokens"):
+        parts.append(f"{stats['completion_tokens']} completion tok")
+    if stats.get("completion_tps"):
+        parts.append(f"{stats['completion_tps']} tok/s")
+    if stats.get("iterations"):
+        parts.append(f"{stats['iterations']} steps")
+    if stats.get("wall_elapsed_sec"):
+        parts.append(f"{stats['wall_elapsed_sec']}s")
+    if parts:
+        stat_line = Text()
+        stat_line.append("\n  ", style="dim")
+        stat_line.append(" | ".join(parts), style="dim cyan")
+        console.print(stat_line)
+```
+
+### Relationship to the context bar
+
+The bar remains char-based (`used_chars / max_history_chars`) for the **steady-state between turns** — it's what the user sees at the prompt. The stats line is token-based and shows the **last LLM call's** context occupancy. The two numbers are consistent in direction but not identical (chars are estimated; tokens are exact, reported by the model). That's fine: the bar is a persistent glance, the stats line is a post-turn summary.
+
+For llama.cpp users the stats-line percentage will often feel more trustworthy than the bar, which is another argument for using both — the bar tells you "am I trending toward a trim," the stats line tells you "what did the last call actually cost."
+
 ## Tests
 
 New: `tests/test_context_budget.py`
@@ -190,13 +291,14 @@ Add to `CLAUDE.md` under "Key Environment Variables" (in place of the removed `M
 
 ## Files touched
 
-- `src/config.py` — add `max_tokens`, change `max_history_chars` default to `None`.
+- `src/config.py` — add `max_tokens` and `n_ctx`; change `max_history_chars` default to `None`.
 - `src/llm.py` — accept `max_tokens` parameter.
-- `src/agent/agent.py` — remove `Current time:` appends; conditional trim calls; reactive-trim fallback; thread `max_tokens` into `call_llm`.
-- `run.py` — call `resolve_llamacpp_budget` after loading config and before constructing `Agent`; make `ctx_usage` computation conditional.
+- `src/agent/agent.py` — remove `Current time:` appends; conditional trim calls; reactive-trim fallback; thread `max_tokens` into `call_llm`; track `last_prompt_tokens`; restructure `_finalize_stats` to emit `context_tokens` instead of `prompt_tokens`.
+- `run.py` — call `resolve_llamacpp_budget` after loading config and before constructing `Agent`; make `ctx_usage` computation conditional; inject `n_ctx` into the stats dict when known.
 - `src/agent/context_budget.py` — **new**, holds `resolve_llamacpp_budget`, `_fetch_n_ctx`, `_compute_history_budget`.
+- `cli.py` — rewrite stats line rendering (see Stats line redesign § CLI changes).
 - `tests/test_context_budget.py` — **new**.
-- `tests/test_agent.py` — update assertions.
+- `tests/test_agent.py` — update assertions (stats fields renamed; `Current time:` gone).
 - `tests/conftest.py` — update fixtures if needed.
 - `.env.example`, `README.md`, `CLAUDE.md`, `docs/local-model-setup.md` — doc updates.
 
