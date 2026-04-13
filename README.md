@@ -114,7 +114,7 @@ API_BASE=http://localhost:8080/v1
 ORCHESTRATOR_MODE=true
 ```
 
-See **[docs/local-model-setup.md](docs/local-model-setup.md)** for hardware requirements, llama.cpp setup, sub-agent configuration, and troubleshooting.
+See **[docs/running-local-models.md](docs/running-local-models.md)** for hardware requirements, llama.cpp setup, and troubleshooting; **[docs/orchestrator-architecture.md](docs/orchestrator-architecture.md)** for the orchestrator design rationale.
 
 ## Adding Skills
 
@@ -194,7 +194,7 @@ Configuration is handled via `src/config.py`:
 | `skills_dir` | `./skills` | Path to skills directory |
 | `agents_file` | `./context/agents.yaml` | Sub-agent definitions for orchestrator mode |
 
-Set `ORCHESTRATOR_MODE=true` to enable the small-model orchestrator. See [docs/local-model-setup.md](docs/local-model-setup.md).
+Set `ORCHESTRATOR_MODE=true` to enable the small-model orchestrator. See the [architecture overview](docs/orchestrator-architecture.md) and [setup guide](docs/running-local-models.md).
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
