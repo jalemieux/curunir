@@ -17,6 +17,9 @@ from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
 
 
+TRIM_THRESHOLD = 0.85  # proactive trim when last_prompt_tokens > THRESHOLD * n_ctx
+TRIM_FRACTION = 0.5    # keep this fraction of messages when trimming
+
 # Map tool names to their key argument(s) for log display
 _TOOL_KEY_ARGS: dict[str, list[str]] = {
     "web_fetch": ["url"],
@@ -187,6 +190,7 @@ class Agent:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         total_llm_elapsed = 0.0
+        last_prompt_tokens = 0
         llm_calls = 0
         t_start = time.monotonic()
 
@@ -214,6 +218,21 @@ class Agent:
                 if metadata and "stats" in metadata:
                     metadata["stats"]["iterations"] = iteration
                 return "Session reset."
+
+            # Proactive trim: if the previous call's prompt is past 85% of n_ctx,
+            # drop the oldest half of the messages before sending the next request.
+            if (
+                self.config.n_ctx
+                and last_prompt_tokens > TRIM_THRESHOLD * self.config.n_ctx
+            ):
+                target = max(1, int(len(history) * TRIM_FRACTION))
+                logger.warning(
+                    "[%s] proactive trim: prompt_tokens=%d > %.0f%% of n_ctx=%d, %d → %d msgs",
+                    sid, last_prompt_tokens, TRIM_THRESHOLD * 100,
+                    self.config.n_ctx, len(history), target,
+                )
+                _trim_history(history, target_messages=target)
+                messages = [{"role": "system", "content": system_prompt}] + history
 
             logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
             try:
@@ -249,6 +268,7 @@ class Agent:
             total_prompt_tokens += response.usage.prompt_tokens
             total_completion_tokens += response.usage.completion_tokens
             total_llm_elapsed += response.usage.elapsed_sec
+            last_prompt_tokens = response.usage.prompt_tokens or 0
             llm_calls += 1
 
             if response.tool_calls:

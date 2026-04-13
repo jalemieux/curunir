@@ -2,10 +2,11 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import litellm
 import pytest
 
 from src.agent.agent import Agent
-from src.llm import LLMResponse
+from src.llm import LLMResponse, LLMUsage
 
 
 @pytest.fixture
@@ -206,6 +207,80 @@ class TestTrimHistory:
         _trim_history(history, target_messages=3)
         # First non-trimmed message should be a user (no orphaned assistant/tool)
         assert history[0]["role"] == "user"
+
+
+class TestProactiveTrim:
+    """Token-threshold proactive trim driven by last_prompt_tokens / n_ctx."""
+
+    async def test_trims_when_prompt_tokens_near_n_ctx(self, agent_config):
+        """When last_prompt_tokens > 85% of n_ctx, message count is reduced before next call."""
+        agent_config.n_ctx = 1000
+        captured_msg_counts = []
+
+        async def fake_call(model, messages, tools, **kwargs):
+            captured_msg_counts.append(len(messages))
+            if len(captured_msg_counts) == 1:
+                # First call: simulate near-full window via tool call to force a 2nd iter.
+                return LLMResponse(
+                    text=None,
+                    tool_calls=[{
+                        "id": "1", "type": "function",
+                        "function": {"name": "bash", "arguments": '{"command": "echo hi"}'},
+                    }],
+                    usage=LLMUsage(prompt_tokens=900),  # > 850 = 85% of 1000
+                )
+            return LLMResponse(text="done", tool_calls=None, usage=LLMUsage(prompt_tokens=100))
+
+        with patch("src.agent.agent.call_llm", new=fake_call), \
+             patch("src.agent.agent.execute_tool_call", new=AsyncMock(return_value="ok")):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [
+                {"role": "user", "content": f"old-{i}"} for i in range(10)
+            ]
+            await agent.handle("hi", session_id="t1")
+
+        # Second call must have fewer messages than the first (trim happened).
+        assert captured_msg_counts[1] < captured_msg_counts[0]
+
+    async def test_no_proactive_trim_when_n_ctx_is_none(self, agent_config):
+        """Hosted-model path: no n_ctx → no proactive trim."""
+        agent_config.n_ctx = None
+
+        async def fake_call(model, messages, tools, **kwargs):
+            return LLMResponse(
+                text="done", tool_calls=None,
+                usage=LLMUsage(prompt_tokens=10_000_000),
+            )
+
+        with patch("src.agent.agent.call_llm", new=fake_call):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [{"role": "user", "content": "x" * 100}]
+            result = await agent.handle("hi", session_id="t1")
+
+        assert result == "done"
+
+    async def test_reactive_trim_halves_messages_on_overflow(self, agent_config):
+        """On ContextWindowExceededError, message count is halved and retried."""
+        call_count = {"n": 0}
+
+        async def fake_call(model, messages, tools, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise litellm.ContextWindowExceededError(
+                    "too long", model="m", llm_provider="p"
+                )
+            return LLMResponse(
+                text="recovered", tool_calls=None,
+                usage=LLMUsage(prompt_tokens=100),
+            )
+
+        with patch("src.agent.agent.call_llm", new=fake_call):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [
+                {"role": "user", "content": f"u{i}"} for i in range(10)
+            ]
+            result = await agent.handle("hi", session_id="t1")
+        assert result == "recovered"
 
 
 class TestSystemTaskMode:
