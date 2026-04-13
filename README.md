@@ -112,7 +112,6 @@ Curunir can run entirely on local hardware using a quantized LLM served by llama
 MODEL=openai/gemma-4-27b-it
 API_BASE=http://localhost:8080/v1
 ORCHESTRATOR_MODE=true
-MAX_HISTORY_CHARS=16000
 ```
 
 See **[docs/local-model-setup.md](docs/local-model-setup.md)** for hardware requirements, llama.cpp setup, sub-agent configuration, and troubleshooting.
