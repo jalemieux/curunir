@@ -275,19 +275,49 @@ Updates to existing tests:
 
 ## Documentation updates
 
-Remove all references to `MAX_HISTORY_CHARS`:
+### Remove `MAX_HISTORY_CHARS` references
+
 - `.env.example` — delete the line.
 - `README.md:115` — delete the example `MAX_HISTORY_CHARS=16000`.
 - `CLAUDE.md:122` — delete the bullet.
-- `docs/local-model-setup.md:62, 219` — delete the env example and the troubleshooting tip.
 
-Add a short note in `docs/local-model-setup.md` under setup:
-
-> Curunir queries llama.cpp's `/props` endpoint at startup to read the model's `n_ctx`, then derives a history budget that leaves room for the system prompt, tool schemas, and response. There is no `MAX_HISTORY_CHARS` setting — the budget is always computed.
-
-Add to `CLAUDE.md` under "Key Environment Variables" (in place of the removed `MAX_HISTORY_CHARS` line):
+Replacement note in `CLAUDE.md` under "Key Environment Variables":
 
 > History budget is auto-derived from the model's `n_ctx` when `api_base` is set (llama.cpp). For hosted models, history is not proactively trimmed; the agent falls back to halving the current history on `ContextWindowExceededError`.
+
+### Split `docs/local-model-setup.md` into two documents
+
+The current file mixes two concerns: *why* the orchestrator design works the way it does, and *how* to run it. Split so each document has one audience:
+
+**New: `docs/orchestrator-architecture.md`** — the "why" doc. Reader is someone wanting to understand the design before or after using it.
+
+Contents (carved from current file):
+- Opening framing (current §1 paragraph).
+- "How It Works" (current §"How It Works") — orchestrator architecture diagram, sub-agent model, summary compaction, what's disabled.
+- "Context Budget" table, updated to reflect that the budget is now auto-derived from `n_ctx` rather than a fixed `MAX_HISTORY_CHARS` value. Add one sentence pointing the reader at `src/agent/context_budget.py` for the formula.
+- "Customizing Sub-Agents" (current §) — conceptual, belongs with architecture.
+
+**New: `docs/running-local-models.md`** — the "how" doc. Reader is someone who wants to get it running on their machine.
+
+Contents:
+- Hardware requirements + benchmarked performance (current §"Hardware Requirements").
+- **Setup with llama.cpp alone** — the current §"Setup" with these edits:
+  - Delete the `MAX_HISTORY_CHARS=16000` line from the `.env` block.
+  - Delete the "Match your llama.cpp context window" comment.
+  - Add one sentence: "Curunir reads `n_ctx` from llama.cpp's `/slots` at startup; no manual sizing required."
+- **New section: Setup with llama-swap** — for users who want to swap between several local models without restarting Curunir.
+  - One-paragraph intro: llama-swap is a proxy that fronts multiple llama.cpp instances and routes by model name in the OpenAI-compatible request (https://github.com/mostlygeek/llama-swap).
+  - Minimal `config.yaml` example showing two models.
+  - The Curunir `.env` change is just `API_BASE=http://localhost:<swap-port>/v1` and `MODEL=<one of the model names defined in llama-swap>`.
+  - Note: Curunir reads `n_ctx` once at startup, so if llama-swap switches you to a model with a different `n_ctx` mid-session the budget will be wrong. For now, restart Curunir after changing the active model. (Mark as a known limitation; does not need solving in this spec.)
+- "CLI Features" (current §) — the ctx bar description updated to match new behavior (bar char-based persistent, stats line token-based post-turn).
+- "Troubleshooting" (current §) — drop the `MAX_HISTORY_CHARS` bullet. Add:
+  - "llama.cpp unreachable at startup" — Curunir fails fast when `/slots` can't be reached; check that `llama-server` or llama-swap is running at `API_BASE`.
+  - "Budget error at startup" — the computed budget was ≤ 0; the model's `n_ctx` is too small for the orchestrator's prompt + tool schemas. Increase `-c` on `llama-server` or pick a model with a larger window.
+
+**Delete: `docs/local-model-setup.md`** after the split is done. Update links:
+- `README.md:198` currently says `[docs/local-model-setup.md](docs/local-model-setup.md)` — repoint to both new docs: `[architecture](docs/orchestrator-architecture.md) and [setup guide](docs/running-local-models.md)`.
+- Any other cross-links (`grep -rn 'local-model-setup'`) — update in the same pass.
 
 ## Files touched
 
@@ -300,7 +330,10 @@ Add to `CLAUDE.md` under "Key Environment Variables" (in place of the removed `M
 - `tests/test_context_budget.py` — **new**.
 - `tests/test_agent.py` — update assertions (stats fields renamed; `Current time:` gone).
 - `tests/conftest.py` — update fixtures if needed.
-- `.env.example`, `README.md`, `CLAUDE.md`, `docs/local-model-setup.md` — doc updates.
+- `.env.example`, `README.md`, `CLAUDE.md` — remove `MAX_HISTORY_CHARS`, update cross-links.
+- `docs/local-model-setup.md` — **delete** after split.
+- `docs/orchestrator-architecture.md` — **new**, carved from current doc.
+- `docs/running-local-models.md` — **new**, carved from current doc + new llama-swap section.
 
 ## Open questions
 
