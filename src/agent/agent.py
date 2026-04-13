@@ -158,12 +158,15 @@ def _compact_delegate_exchange(history: list[dict]) -> None:
             if len(result_text) > 200:
                 summary_text += "..."
 
-            summary = f"[{agent_name}] {summary_text}"
+            summary = f"[delegate:{agent_name} result] {summary_text}"
 
-            # Replace the assistant+tool block with a summary
+            # Replace the assistant+tool block with a user-role summary.
+            # Using "assistant" here caused thinking-mode providers (e.g. GLM)
+            # to reject the next call with "prefill incompatible with enable_thinking",
+            # since a trailing assistant-content turn looks like a prefill request.
             del history[i:j]
             history.insert(i, {
-                "role": "assistant",
+                "role": "user",
                 "content": summary,
                 "is_summary": True,
             })
@@ -322,9 +325,10 @@ class Agent:
             llm_calls += 1
 
             if response.tool_calls:
+                # Omit content when tool_calls are present: some thinking-mode
+                # providers (e.g. GLM via DeepInfra) reject a trailing assistant
+                # message with content as an incompatible "prefill".
                 assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
-                if response.text:
-                    assistant_msg["content"] = response.text
                 history.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
