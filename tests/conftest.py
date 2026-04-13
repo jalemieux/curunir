@@ -31,4 +31,5 @@ def agent_config(tmp_context, tmp_skills):
         identity_file=tmp_context / "identity.md",
         context_dir=tmp_context,
         skills_dir=tmp_skills,
+        max_history_chars=16_000,
     )
