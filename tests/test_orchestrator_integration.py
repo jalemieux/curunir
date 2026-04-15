@@ -1,4 +1,4 @@
-"""Integration test: orchestrator delegates to a named sub-agent and compacts history."""
+"""Integration test: orchestrator delegates to a named sub-agent and preserves the tool exchange in history."""
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -37,8 +37,9 @@ def orchestrator(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_delegates_and_compacts(orchestrator):
-    """Full flow: user asks -> orchestrator delegates -> result compacted -> final answer."""
+async def test_orchestrator_delegates_and_preserves_tool_exchange(orchestrator):
+    """Full flow: user asks -> orchestrator delegates -> sub-agent result is kept
+    as a real tool message (per provider protocol) -> final answer."""
     # The orchestrator will make two LLM calls:
     # 1. Decides to delegate to files agent
     # 2. After getting the result, responds to user
@@ -50,7 +51,7 @@ async def test_orchestrator_delegates_and_compacts(orchestrator):
                 "type": "function",
                 "function": {
                     "name": "delegate",
-                    "arguments": '{"agent": "files", "task": "Read /etc/hostname"}',
+                    "arguments": '{"agent": "files", "task": "Read /etc/hostname", "intent": "report the hostname value"}',
                 },
             }],
         ),
@@ -80,7 +81,10 @@ async def test_orchestrator_delegates_and_compacts(orchestrator):
 
     assert result == "The hostname is 'devbox'."
 
-    # History should be compacted: no raw tool messages
+    # Per refactor 7b63fe4, the assistant(tool_calls) + tool(result) pair is
+    # preserved (not compacted into a synthetic user-role summary), since
+    # rewriting the role broke the orchestrator loop on small models.
     history = orchestrator.sessions["sess1"]
     roles = [m["role"] for m in history]
-    assert "tool" not in roles
+    assert "tool" in roles
+    assert any(m["role"] == "assistant" and "tool_calls" in m for m in history)

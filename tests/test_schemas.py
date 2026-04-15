@@ -37,7 +37,9 @@ def test_delegate_schema_has_agent_param():
     from src.tools.schemas import ALL_TOOL_SCHEMAS
     delegate = ALL_TOOL_SCHEMAS["delegate"]
     props = delegate["function"]["parameters"]["properties"]
+    required = delegate["function"]["parameters"]["required"]
     assert "agent" in props
     assert props["agent"]["type"] == "string"
-    assert "required" in delegate["function"]["parameters"]
-    assert "agent" in delegate["function"]["parameters"]["required"]
+    assert "agent" in required
+    assert "task" in props and "task" in required
+    assert "intent" in props and "intent" in required

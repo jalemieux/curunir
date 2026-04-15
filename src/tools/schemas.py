@@ -223,8 +223,8 @@ _SCHEMAS = [
                 "description": (
                     "Delegate a task to a specialist agent. "
                     "Each specialist has specific tools and expertise. "
-                    "Include all context the specialist needs in the task — "
-                    "they have no memory of this conversation."
+                    "Specialists have no memory of this conversation — you must provide "
+                    "both the action (`task`) and what you need back (`intent`)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -235,10 +235,23 @@ _SCHEMAS = [
                         },
                         "task": {
                             "type": "string",
-                            "description": "Concise task description with all necessary context.",
+                            "description": (
+                                "The action to perform. E.g. 'read context/identity.md', "
+                                "'grep for WebSocket under src/', 'edit line 42 of foo.py'."
+                            ),
+                        },
+                        "intent": {
+                            "type": "string",
+                            "description": (
+                                "What you need back — the user's goal, not a restatement "
+                                "of the task. E.g. 'summarize in one sentence', "
+                                "'find the most important design decision', 'count of matches', "
+                                "'confirm the edit applied'. The specialist returns exactly "
+                                "this; if you omit the user's goal here, it is lost."
+                            ),
                         },
                     },
-                    "required": ["agent", "task"],
+                    "required": ["agent", "task", "intent"],
                 },
             },
         },

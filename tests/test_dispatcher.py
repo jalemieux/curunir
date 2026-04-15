@@ -44,5 +44,9 @@ class TestExecuteToolCall:
 
         mock_response = LLMResponse(text="sub-agent result", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
-            result = await execute_tool_call("delegate", {"task": "say hello"}, agent_config)
+            result = await execute_tool_call(
+                "delegate",
+                {"agent": "files", "task": "say hello", "intent": "confirm greeting"},
+                agent_config,
+            )
         assert result == "sub-agent result"
