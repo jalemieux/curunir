@@ -1,12 +1,24 @@
 ---
 name: email-send
-description: "Send an email using the Gmail API via bash — supports plain text, HTML, attachments, and replies"
+description: "Send a NEW outbound email to a recipient who is not already in the active email thread. Do NOT use to reply on an inbound email thread — the email channel replies automatically with your final assistant message."
 ---
 
 # Sending Email
 
 Send emails via the Gmail API using `src.channels.gmail` through bash.
 The sender address is `$GOOGLE_DELEGATED_USER`, configured at the environment level.
+
+## When NOT to use this skill
+
+If the current conversation arrived over the email channel (the user message
+begins with `[channel: email, ...]`), the email channel will automatically send
+your final assistant message as a reply in that thread. Do **not** also call
+`send_reply` from this skill — you will send two emails. Just write your reply
+as your normal final response; the channel delivers it.
+
+Use this skill only for:
+- Sending a new email to a different recipient (not the inbound sender)
+- Sending outbound email from a non-email session (CLI, scheduled task)
 
 ## Basic Send
 
