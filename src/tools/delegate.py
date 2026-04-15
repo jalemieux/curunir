@@ -20,10 +20,17 @@ async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> s
     """Spawn a named sub-agent and return its response."""
     agent_name = args.get("agent", "")
     task = args.get("task", "")
+    intent = args.get("intent", "")
     if not agent_name:
         return "Error: 'agent' is required"
     if not task:
         return "Error: 'task' is required"
+    if not intent:
+        return (
+            "Error: 'intent' is required — state what the caller needs back "
+            "(e.g. 'summarize in one sentence', 'find the design decision', "
+            "'confirm the edit applied')."
+        )
 
     agents = load_agents_config(config.agents_file)
     if not agents:
@@ -44,10 +51,15 @@ async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> s
     )
     session_id = str(uuid4())
 
-    logger.info("Delegating to [%s] agent %s: %.80s", session_id[:8], agent_name, task)
+    sub_agent_message = f"Task: {task}\nIntent: {intent}"
+
+    logger.info(
+        "Delegating to [%s] agent %s: task=%.60s intent=%.60s",
+        session_id[:8], agent_name, task, intent,
+    )
     try:
         result = await asyncio.wait_for(
-            sub_agent.handle(task, session_id, on_tool_call=on_tool_call),
+            sub_agent.handle(sub_agent_message, session_id, on_tool_call=on_tool_call),
             timeout=_TIMEOUT,
         )
         logger.info("Agent [%s] %s completed", session_id[:8], agent_name)

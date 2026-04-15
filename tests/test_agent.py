@@ -113,7 +113,7 @@ class TestDelegateToolExecution:
             tool_calls=[{
                 "id": "call_delegate",
                 "type": "function",
-                "function": {"name": "delegate", "arguments": json.dumps({"task": "say hello"})},
+                "function": {"name": "delegate", "arguments": json.dumps({"agent": "files", "task": "say hello", "intent": "confirm greeting"})},
             }],
         )
         text_response = LLMResponse(text="Done", tool_calls=None)
@@ -298,7 +298,7 @@ async def test_delegate_exchanges_preserved_in_history(agent_config):
                 "type": "function",
                 "function": {
                     "name": "delegate",
-                    "arguments": '{"agent": "system", "task": "run uptime"}',
+                    "arguments": '{"agent": "system", "task": "run uptime", "intent": "report uptime"}',
                 },
             }],
         ),
