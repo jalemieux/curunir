@@ -132,8 +132,12 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 attachments = data.get("attachments") or []
 
                 # Flush any accumulated stream first; render it as Markdown.
+                # Convert the trailing tool-call ├─ line to ╯─ before printing
+                # the answer, so the marker sits above the response.
                 streamed_text = flush_stream()
                 if streamed_text.strip():
+                    if verbose:
+                        flush_tool_calls()
                     console.print(Markdown(streamed_text))
 
                 if verbose and tool_calls:
