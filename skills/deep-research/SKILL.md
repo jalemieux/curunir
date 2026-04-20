@@ -1,7 +1,9 @@
 ---
 name: deep-research
 description: "Use when asked to research a topic in depth, produce a research report, or investigate something requiring multiple sources. Trigger: user asks for deep research, comprehensive analysis, or a written report on a topic."
-tools: attach
+tools: [web_fetch, read, write, bash, attach]
+max_iterations: 25
+max_output_tokens: 4000
 ---
 
 # Deep Research
