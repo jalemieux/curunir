@@ -105,10 +105,12 @@ def _is_context_overflow(exc: Exception) -> bool:
 def _parse_skill_tools(skill_content: str) -> list[str]:
     """Extract required tool names from a skill's frontmatter."""
     fm = parse_frontmatter(skill_content)
-    tools_str = fm.get("tools", "")
-    if not tools_str:
+    tools = fm.get("tools")
+    if not tools:
         return []
-    return [t.strip() for t in tools_str.split(",") if t.strip()]
+    if isinstance(tools, list):
+        return [str(t).strip() for t in tools if str(t).strip()]
+    return [t.strip() for t in str(tools).split(",") if t.strip()]
 
 
 class Agent:
