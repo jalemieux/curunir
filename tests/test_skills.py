@@ -1,7 +1,7 @@
 # tests/test_skills.py
 from pathlib import Path
 
-from src.skills import build_skill_manifest, load_skill, parse_frontmatter
+from src.skills import SkillDef, build_skill_manifest, load_skill, load_skill_def, parse_frontmatter
 
 
 class TestParseFrontmatter:
@@ -85,3 +85,49 @@ class TestLoadSkill:
     def test_missing_skill(self, tmp_path):
         result = load_skill("nonexistent", tmp_path)
         assert "not found" in result.lower()
+
+
+class TestLoadSkillDef:
+    def test_loads_all_fields(self, tmp_path):
+        d = tmp_path / "my-skill"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "description: Does a thing\n"
+            "tools: [read, edit]\n"
+            "max_iterations: 7\n"
+            "max_output_tokens: 3000\n"
+            "---\n\n"
+            "# Body text here"
+        )
+        defn = load_skill_def("my-skill", tmp_path)
+        assert defn.name == "my-skill"
+        assert defn.description == "Does a thing"
+        assert defn.tools == ["read", "edit"]
+        assert defn.max_iterations == 7
+        assert defn.max_output_tokens == 3000
+        assert "# Body text here" in defn.body
+
+    def test_defaults_when_optional_missing(self, tmp_path):
+        d = tmp_path / "my-skill"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "description: Does a thing\n"
+            "tools: [read]\n"
+            "max_iterations: 5\n"
+            "---\n"
+        )
+        defn = load_skill_def("my-skill", tmp_path)
+        assert defn.max_output_tokens == 2000  # default
+
+    def test_missing_skill(self, tmp_path):
+        assert load_skill_def("nope", tmp_path) is None
+
+    def test_missing_required_fields_returns_none(self, tmp_path):
+        d = tmp_path / "bad-skill"
+        d.mkdir()
+        (d / "SKILL.md").write_text("---\nname: bad-skill\n---\n# No description, tools, or max_iterations")
+        assert load_skill_def("bad-skill", tmp_path) is None
