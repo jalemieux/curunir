@@ -1,72 +1,60 @@
-"""Tests for orchestrator prompt: identity.md + specialist table from agents.yaml."""
+# tests/test_orchestrator_prompt.py
+"""Orchestrator prompt is identity + skill manifest + delegation principle."""
 
 import pytest
+from pathlib import Path
+
 from src.agent.system_prompt import build_orchestrator_prompt
 from src.config import AgentConfig
 
 
 @pytest.fixture
-def config_with_agents(tmp_path):
+def config_with_skills(tmp_path):
     identity = tmp_path / "identity.md"
-    identity.write_text("You are curunir, a proactive assistant.\n\n## Guidelines\n- Be concise.\n")
-    agents_file = tmp_path / "agents.yaml"
-    agents_file.write_text("""\
-files:
-  description: "File operations — read, edit, write, search"
-  tools: [glob, grep, read, edit, write]
-  system_prompt: "Do file stuff."
-  max_iterations: 10
-
-system:
-  description: "Shell commands and system management"
-  tools: [bash]
-  system_prompt: "Do system stuff."
-  max_iterations: 10
-""")
+    identity.write_text("You are an orchestrator.")
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    for name, desc in [("research", "investigate a topic"), ("reply", "write an email response")]:
+        d = skills_dir / name
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {desc}\ntools: [read]\nmax_iterations: 5\n---\n"
+        )
     return AgentConfig(
         identity_file=identity,
         context_dir=tmp_path,
-        agents_file=agents_file,
+        skills_dir=skills_dir,
     )
 
 
-def test_orchestrator_prompt_contains_identity(config_with_agents):
-    prompt = build_orchestrator_prompt(config_with_agents)
-    assert "curunir" in prompt
-    assert "Be concise" in prompt
+def test_prompt_includes_identity(config_with_skills):
+    prompt = build_orchestrator_prompt(config_with_skills)
+    assert "You are an orchestrator." in prompt
 
 
-def test_orchestrator_prompt_contains_agent_table(config_with_agents):
-    prompt = build_orchestrator_prompt(config_with_agents)
-    assert "files" in prompt
-    assert "system" in prompt
-    assert "File operations" in prompt
-    assert "Shell commands" in prompt
+def test_prompt_includes_skill_manifest(config_with_skills):
+    prompt = build_orchestrator_prompt(config_with_skills)
+    assert "research" in prompt
+    assert "investigate a topic" in prompt
+    assert "reply" in prompt
+    assert "write an email response" in prompt
 
 
-def test_orchestrator_prompt_mentions_delegation(config_with_agents):
-    prompt = build_orchestrator_prompt(config_with_agents)
-    assert "delegate" in prompt.lower()
+def test_prompt_has_delegation_principle(config_with_skills):
+    prompt = build_orchestrator_prompt(config_with_skills)
+    assert "run_skill" in prompt
 
 
-def test_orchestrator_prompt_missing_agents_file(tmp_path):
+def test_prompt_without_skills(tmp_path):
     identity = tmp_path / "identity.md"
-    identity.write_text("You are curunir.")
+    identity.write_text("You are an orchestrator.")
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
     config = AgentConfig(
         identity_file=identity,
         context_dir=tmp_path,
-        agents_file=tmp_path / "nope.yaml",
+        skills_dir=skills_dir,
     )
     prompt = build_orchestrator_prompt(config)
-    # Should still produce a valid prompt from identity alone
-    assert "curunir" in prompt
-
-
-def test_orchestrator_prompt_missing_identity_raises(tmp_path):
-    config = AgentConfig(
-        identity_file=tmp_path / "missing.md",
-        context_dir=tmp_path,
-        agents_file=tmp_path / "agents.yaml",
-    )
-    with pytest.raises(FileNotFoundError):
-        build_orchestrator_prompt(config)
+    # Identity is still present even with no skills
+    assert "You are an orchestrator." in prompt

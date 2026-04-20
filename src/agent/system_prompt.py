@@ -1,14 +1,22 @@
 # src/agent/system_prompt.py
-from src.agent.agents_config import load_agents_config
 from src.config import AgentConfig
 from src.skills import build_skill_manifest
 
 
-def build_static_prompt(config: AgentConfig) -> str:
-    """Build the static portion of the system prompt (identity + skill manifest).
+_DELEGATION_PRINCIPLE = (
+    "## Delegating work\n\n"
+    "You have direct tools for quick, unstructured tasks, and skills for "
+    "procedural or heavy work. Prefer `run_skill` when a task matches a "
+    "skill's description, is likely to produce large output, or would require "
+    "more than ~3 tool calls. Use direct tools only for quick one-offs.\n\n"
+    "Every `run_skill` call spawns a fresh sub-agent with no memory of this "
+    "conversation, so pass both `task` (the action) and `intent` (what you "
+    "need back — the user's goal, not a restatement of the task)."
+)
 
-    Timestamp is appended per-call in Agent.handle().
-    """
+
+def build_static_prompt(config: AgentConfig) -> str:
+    """Build the static system prompt for big-model mode (identity + manifest)."""
     if not config.identity_file.exists():
         raise FileNotFoundError(
             f"Identity file not found: {config.identity_file}. "
@@ -23,41 +31,16 @@ def build_static_prompt(config: AgentConfig) -> str:
 
 
 def build_orchestrator_prompt(config: AgentConfig) -> str:
-    """Build the orchestrator system prompt: identity.md + dynamic specialist table.
-
-    The identity file defines the assistant's persona and general guidelines.
-    The specialist table is generated from agents.yaml at startup so the
-    orchestrator knows which agents are available for delegation.
-    """
+    """Build the small-model orchestrator prompt: identity + delegation principle + skill manifest."""
     if not config.identity_file.exists():
         raise FileNotFoundError(
             f"Identity file not found: {config.identity_file}. "
             "Curunir requires an identity file to start."
         )
     identity = config.identity_file.read_text()
+    manifest = build_skill_manifest(config.skills_dir)
 
-    agents = load_agents_config(config.agents_file)
-    if not agents:
-        return identity
-
-    rows = [f"| {name} | {defn.description} |" for name, defn in agents.items()]
-    specialists = (
-        "## Specialists\n\n"
-        "For tasks requiring tools, delegate to a specialist using the `delegate` tool. "
-        "Specialists have no memory of this conversation, so every `delegate` call must "
-        "supply two fields:\n\n"
-        "- **`task`** — the action to perform (read/search/edit/etc.).\n"
-        "- **`intent`** — what you need back. This is the user's goal, not a restatement "
-        "of the task. If the user asked *'summarize X in one sentence'*, the task is "
-        "*'read X'* and the intent is *'summarize in one sentence'*. If you omit the "
-        "user's goal from intent, it is lost and the specialist will return something "
-        "useless.\n\n"
-        "The specialist returns exactly what the intent asks for — a summary, an answer, "
-        "a count, a confirmation — never raw content. After a delegation, pass that "
-        "answer to the user in 1-2 sentences.\n\n"
-        "| Agent | Use for |\n"
-        "|-------|--------|\n"
-        + "\n".join(rows)
-    )
-
-    return identity.rstrip() + "\n\n" + specialists
+    parts = [identity.rstrip(), _DELEGATION_PRINCIPLE]
+    if manifest:
+        parts.append(manifest)
+    return "\n\n".join(parts)
