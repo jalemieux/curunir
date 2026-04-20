@@ -335,8 +335,16 @@ async def main():
     if orchestrator_mode:
         from src.agent.system_prompt import build_orchestrator_prompt
         orchestrator_prompt = build_orchestrator_prompt(config)
-        agent = Agent(config, tools=["delegate"], system_prompt_override=orchestrator_prompt)
-        logger.info("Orchestrator mode: routing to agents defined in %s", config.agents_file)
+        orchestrator_tools = [
+            "read", "edit", "write", "bash", "grep", "glob",
+            "web_fetch", "schedule", "run_skill",
+        ]
+        agent = Agent(
+            config,
+            tools=orchestrator_tools,
+            system_prompt_override=orchestrator_prompt,
+        )
+        logger.info("Orchestrator mode: skills dir = %s", config.skills_dir)
     else:
         agent = Agent(config)
 
