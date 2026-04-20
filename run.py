@@ -204,6 +204,16 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
+        async def on_text_delta(chunk: str):
+            await out_queue.put(OutgoingMessage(
+                content=chunk,
+                channel=msg.channel,
+                session_id=msg.session_id,
+                reply_address=msg.reply_address,
+                delta=True,
+                final=False,
+            ))
+
         content = _build_content(msg)
         attachments = []
         metadata: dict = {}
@@ -213,6 +223,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
                 metadata=metadata, stop_event=stop_event,
+                on_text_delta=on_text_delta,
             )
         )
 
