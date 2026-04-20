@@ -20,9 +20,28 @@ class TestParseFrontmatter:
         assert result == {"name": "quoted-skill", "description": "single quoted"}
 
     def test_colon_in_value(self):
-        text = "---\nname: my-skill\ndescription: Use when: user asks\n---\n"
+        text = '---\nname: my-skill\ndescription: "Use when: user asks"\n---\n'
         result = parse_frontmatter(text)
         assert result["description"] == "Use when: user asks"
+
+    def test_list_value(self):
+        text = "---\nname: x\ntools: [read, edit, write]\n---\n"
+        result = parse_frontmatter(text)
+        assert result["tools"] == ["read", "edit", "write"]
+
+    def test_int_value(self):
+        text = "---\nname: x\nmax_iterations: 15\n---\n"
+        result = parse_frontmatter(text)
+        assert result["max_iterations"] == 15
+
+    def test_mixed_types(self):
+        text = "---\nname: x\ndescription: Do a thing\ntools: [bash]\nmax_iterations: 5\nmax_output_tokens: 2000\n---\n"
+        result = parse_frontmatter(text)
+        assert result["name"] == "x"
+        assert result["description"] == "Do a thing"
+        assert result["tools"] == ["bash"]
+        assert result["max_iterations"] == 5
+        assert result["max_output_tokens"] == 2000
 
 
 class TestBuildSkillManifest:
