@@ -90,6 +90,7 @@ class WebSocketChannel:
             "content": msg.content,
             "tool_calls": msg.tool_calls,
             "final": msg.final,
+            "delta": msg.delta,
             "attachments": msg.attachments if msg.attachments else None,
             "workflow": msg.workflow,
             "stats": msg.stats,
