@@ -14,7 +14,6 @@ class AgentConfig:
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     skills_dir: Path = Path("./skills")
-    agents_file: Path = Path("./context/agents.yaml")
 
 
 @dataclass
