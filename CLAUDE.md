@@ -103,7 +103,7 @@ Cron tasks in `context/schedules.json` evaluated every second via croniter. When
 
 ### Orchestrator Mode (Small-Model)
 
-Set `ORCHESTRATOR_MODE=true` for constrained local hardware. The agent becomes an orchestrator that delegates to specialized sub-agents defined in `context/agents.yaml`. Each sub-agent runs in a fresh context with minimal overhead. Skills and automatic memory extraction are disabled. See the design spec at `docs/superpowers/specs/2026-04-09-small-model-orchestrator-design.md`.
+Set `ORCHESTRATOR_MODE=true` for constrained local hardware. The agent becomes an orchestrator that has direct core tools (read, edit, write, bash, grep, glob, web_fetch, schedule) for unstructured work and `run_skill` for delegating procedural or heavy tasks to skill-backed sub-agents. Each skill in `skills/` defines a sub-agent type via its frontmatter: `tools`, `max_iterations`, optional `max_output_tokens`. Specialists and `agents.yaml` no longer exist in this mode. See the design spec at `docs/superpowers/specs/2026-04-19-skills-as-sub-agents-design.md`.
 
 ## Testing Patterns
 
