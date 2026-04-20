@@ -20,6 +20,7 @@ class OutgoingMessage:
     reply_address: dict
     tool_calls: list[str] | None = None
     final: bool = True
+    delta: bool = False
     attachments: list[dict] | None = None
     workflow: dict | None = None
     stats: dict | None = None
