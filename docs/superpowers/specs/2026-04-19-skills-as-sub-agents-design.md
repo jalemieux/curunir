@@ -48,6 +48,10 @@ Required fields:
 - `tools` — allowlist of tool names the sub-agent can call
 - `max_iterations` — sub-agent iteration cap
 
+Optional fields:
+
+- `max_output_tokens` — ceiling for the sub-agent's returned response. Skills that produce long outputs (research reports, code reviews, summaries) declare a higher value here. Defaults to 2000 tokens if omitted. Truncation is a runaway-safety net, not a shape constraint — pick a number that fits the longest legitimate output the skill produces.
+
 The body below the frontmatter becomes the sub-agent's system prompt. For small-model mode, target 500-1500 tokens of body.
 
 ### Orchestrator
@@ -100,7 +104,7 @@ Dispatcher behavior on call:
    - Iteration cap = skill's `max_iterations`
 3. Feed task + intent as the first user message.
 4. Run to completion or iteration cap.
-5. Return sub-agent's final response to the orchestrator. Truncated to ~500 tokens as a hard safety net if the sub-agent over-produces (matches the truncation rule in the existing orchestrator spec).
+5. Return sub-agent's final response to the orchestrator. If the response exceeds the skill's `max_output_tokens` (or the 2000-token default), truncate with an explicit marker (`... [truncated: N tokens omitted]`) so the orchestrator can see it was cut. Truncation exists only to prevent runaway outputs — the normal case is that the sub-agent's full response is returned intact.
 
 ### No freeform fallback
 
