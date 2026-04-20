@@ -9,7 +9,8 @@ class AgentConfig:
     api_base: str | None = None
     openrouter_provider: str | None = None
     max_iterations: int = 75
-    max_history_chars: int = 250_000
+    max_tokens: int = 16_000
+    n_ctx: int | None = None
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     skills_dir: Path = Path("./skills")

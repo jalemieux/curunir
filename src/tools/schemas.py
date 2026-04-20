@@ -219,29 +219,40 @@ _SCHEMAS = [
         {
             "type": "function",
             "function": {
-                "name": "delegate",
+                "name": "run_skill",
                 "description": (
-                    "Delegate a task to a sub-agent with a clean context window. "
-                    "Use this for tasks that involve processing large documents, "
-                    "analyzing images, or doing multi-step research. The sub-agent "
-                    "has access to all tools (read, write, bash, etc.) but runs in "
-                    "isolation — its intermediate work won't fill up your context. "
-                    "You get back only the final answer."
+                    "Run a skill in a fresh sub-agent context. The sub-agent sees "
+                    "only the skill's system prompt, its declared tools, and your "
+                    "task+intent. Prefer this over direct tools for anything "
+                    "procedural, recurring, or likely to produce large output."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "skill": {
+                            "type": "string",
+                            "description": "Name of the skill to run (must match the skill manifest).",
+                        },
                         "task": {
                             "type": "string",
-                            "description": "Clear description of what the sub-agent should do.",
+                            "description": (
+                                "The concrete action the sub-agent should perform. "
+                                "E.g. 'research the state of small-LLM inference on Mac', "
+                                "'send a reply to the email in thread X', "
+                                "'submit a fix PR for issue #42'."
+                            ),
                         },
-                        "image_paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of image file paths to include for visual analysis.",
+                        "intent": {
+                            "type": "string",
+                            "description": (
+                                "What you need back — the user's goal, not a restatement "
+                                "of the task. E.g. 'a written report', 'confirmation the "
+                                "email was sent', 'the PR URL'. The sub-agent returns "
+                                "exactly this; if you omit the user's goal, it is lost."
+                            ),
                         },
                     },
-                    "required": ["task"],
+                    "required": ["skill", "task", "intent"],
                 },
             },
         },

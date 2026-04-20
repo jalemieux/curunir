@@ -25,9 +25,9 @@ _SYNC_EXECUTORS = {
 
 def _get_native_async_executor(name: str):
     """Lazily import native async executors to avoid circular dependencies."""
-    if name == "delegate":
-        from src.tools.delegate import exec_delegate
-        return exec_delegate
+    if name == "run_skill":
+        from src.tools.run_skill import exec_run_skill
+        return exec_run_skill
     return None
 
 
@@ -39,7 +39,7 @@ async def execute_tool_call(
     """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly."""
     key = name.lower()
 
-    # Check native async executors first (e.g. delegate)
+    # Check native async executors first (e.g. run_skill)
     async_executor = _get_native_async_executor(key)
     if async_executor:
         return await async_executor(args, config, on_tool_call=on_tool_call)

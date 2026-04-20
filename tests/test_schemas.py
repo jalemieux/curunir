@@ -18,7 +18,23 @@ def test_schema_format():
 
 def test_expected_tool_names():
     names = {s["function"]["name"] for s in get_tool_schemas()}
-    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch", "delegate", "schedule"}
+    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch", "schedule", "run_skill"}
+
+
+def test_run_skill_schema_registered():
+    from src.tools.schemas import ALL_TOOL_SCHEMAS
+    assert "run_skill" in ALL_TOOL_SCHEMAS
+    schema = ALL_TOOL_SCHEMAS["run_skill"]["function"]
+    required = schema["parameters"]["required"]
+    assert set(required) == {"skill", "task", "intent"}
+    props = schema["parameters"]["properties"]
+    assert "skill" in props and "task" in props and "intent" in props
+
+
+def test_run_skill_is_default_tool():
+    from src.tools.schemas import get_tool_schemas
+    default_names = {s["function"]["name"] for s in get_tool_schemas()}
+    assert "run_skill" in default_names
 
 
 def test_filter_by_names():
@@ -31,3 +47,5 @@ def test_filter_ignores_unknown_names():
     schemas = get_tool_schemas(names=["read", "nonexistent"])
     names = {s["function"]["name"] for s in schemas}
     assert names == {"read"}
+
+

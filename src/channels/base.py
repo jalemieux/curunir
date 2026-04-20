@@ -23,6 +23,7 @@ class OutgoingMessage:
     attachments: list[dict] | None = None
     workflow: dict | None = None
     stats: dict | None = None
+    context_usage: float | None = None  # 0.0 to 1.0
 
 
 class Channel(Protocol):

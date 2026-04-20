@@ -37,12 +37,22 @@ class TestExecuteToolCall:
         )
         assert "no scheduled tasks" in result.lower()
 
-    async def test_dispatches_delegate_async(self, agent_config):
-        """Delegate is a native async executor, dispatched without to_thread."""
+    async def test_dispatches_run_skill_async(self, agent_config):
+        """run_skill is a native async executor, dispatched without to_thread."""
         from unittest.mock import AsyncMock, patch
         from src.llm import LLMResponse
 
+        skill = agent_config.skills_dir / "greeter"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(
+            '---\nname: greeter\ndescription: "greet"\ntools: [read]\nmax_iterations: 3\n---\nGreet the user.'
+        )
+
         mock_response = LLMResponse(text="sub-agent result", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
-            result = await execute_tool_call("delegate", {"task": "say hello"}, agent_config)
+            result = await execute_tool_call(
+                "run_skill",
+                {"skill": "greeter", "task": "say hello", "intent": "confirm greeting"},
+                agent_config,
+            )
         assert result == "sub-agent result"

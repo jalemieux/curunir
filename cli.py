@@ -38,6 +38,20 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
             delay = min(delay * 2, _BACKOFF_MAX)
 
 
+def _context_bar(usage: float | None) -> str:
+    """Render a 5-block context usage bar, e.g. [ctx: ██░░░]."""
+    if usage is None:
+        return ""
+    blocks = 5
+    filled = round(usage * blocks)
+    bar = "\u2588" * filled + "\u2591" * (blocks - filled)
+    if filled >= 4:
+        color = "yellow"
+    else:
+        color = "dim"
+    return f"[{color}]\\[ctx: {bar}][/{color}] "
+
+
 async def run(host: str, port: int, console: Console | None = None) -> None:
     console = console or Console()
     uri = f"ws://{host}:{port}"
@@ -47,6 +61,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
     verbose = True
     ready = asyncio.Event()
+    ctx_state: dict = {"usage": None}
 
     # Spinner handle
     spinner: object = None  # Rich Live/status object
@@ -87,7 +102,11 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                 # Welcome message with model info
                 if "model" in data:
-                    console.print(f"[dim]model: {data['model']}[/dim]\n")
+                    if data.get("local_mode"):
+                        console.print(f"[bold]Curunir[/bold] [dim](local mode)[/dim]")
+                        console.print("[dim]Tip: I work best with focused requests. Ask me to do something specific.[/dim]\n")
+                    else:
+                        console.print(f"[dim]model: {data['model']}[/dim]\n")
                     ready.set()
                     continue
 
@@ -123,20 +142,26 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 # Display stats in verbose mode
                 stats = data.get("stats")
                 if verbose and stats and final:
-                    stat_line = Text()
-                    stat_line.append("\n  ", style="dim")
                     parts = []
-                    if stats.get("prompt_tokens"):
-                        parts.append(f"prompt: {stats['prompt_tokens']} tok")
+                    ctx_tok = stats.get("context_tokens")
+                    n_ctx = stats.get("n_ctx")
+                    if ctx_tok is not None:
+                        if n_ctx:
+                            pct = round(100 * ctx_tok / n_ctx)
+                            parts.append(f"ctx: {ctx_tok} tok ({pct}% of {n_ctx})")
+                        else:
+                            parts.append(f"ctx: {ctx_tok} tok")
                     if stats.get("completion_tokens"):
-                        parts.append(f"completion: {stats['completion_tokens']} tok")
+                        parts.append(f"{stats['completion_tokens']} completion tok")
                     if stats.get("completion_tps"):
                         parts.append(f"{stats['completion_tps']} tok/s")
                     if stats.get("iterations"):
-                        parts.append(f"{stats['iterations']} iter")
+                        parts.append(f"{stats['iterations']} steps")
                     if stats.get("wall_elapsed_sec"):
-                        parts.append(f"{stats['wall_elapsed_sec']}s wall")
+                        parts.append(f"{stats['wall_elapsed_sec']}s")
                     if parts:
+                        stat_line = Text()
+                        stat_line.append("\n  ", style="dim")
                         stat_line.append(" | ".join(parts), style="dim cyan")
                         console.print(stat_line)
 
@@ -159,6 +184,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                                 srv_line.append(f"slot {slot.get('id', '?')}: ", style="dim")
                                 srv_line.append(" | ".join(srv_parts), style="dim yellow")
                                 console.print(srv_line)
+
+                ctx = data.get("context_usage")
+                if ctx is not None:
+                    ctx_state["usage"] = ctx
 
                 if final:
                     if verbose:
@@ -195,9 +224,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                     # Read from stdin without blocking the event loop
                     try:
+                        ctx_prefix = _context_bar(ctx_state["usage"])
                         line = await loop.run_in_executor(
                             None,
-                            lambda: console.input("[bold green]> [/bold green]"),
+                            lambda p=ctx_prefix: console.input(f"{p}[bold green]> [/bold green]"),
                         )
                     except EOFError:
                         # Ctrl-D: close cleanly and exit

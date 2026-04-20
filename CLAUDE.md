@@ -101,6 +101,10 @@ Local directory containing `identity.md` (agent persona, required), `memory/` (p
 
 Cron tasks in `context/schedules.json` evaluated every second via croniter. When due, agent processes the task prompt via `handle()` in system-task mode.
 
+### Orchestrator Mode (Small-Model)
+
+Set `ORCHESTRATOR_MODE=true` for constrained local hardware. The agent becomes an orchestrator that has direct core tools (read, edit, write, bash, grep, glob, web_fetch, schedule) for unstructured work and `run_skill` for delegating procedural or heavy tasks to skill-backed sub-agents. Each skill in `skills/` defines a sub-agent type via its frontmatter: `tools`, `max_iterations`, optional `max_output_tokens`. Specialists and `agents.yaml` no longer exist in this mode. See the design spec at `docs/superpowers/specs/2026-04-19-skills-as-sub-agents-design.md`.
+
 ## Testing Patterns
 
 All tests are async (pytest-asyncio). Key fixtures in `tests/conftest.py`: `tmp_context`, `tmp_skills`, `agent_config`.
@@ -115,5 +119,7 @@ See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
-- `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
+- `ORCHESTRATOR_MODE` — set to `true` for small-model orchestrator mode (delegates to sub-agents)
+
+When `API_BASE` is set, Curunir reads the model's `n_ctx` from llama.cpp's `/slots` endpoint at startup and drives all trim decisions off real `prompt_tokens` reported on each call. For hosted models there is no proactive trim — overflow falls back to halving the message count and retrying.

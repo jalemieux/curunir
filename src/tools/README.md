@@ -1,6 +1,6 @@
 # Tools
 
-The tools subsystem gives the agent the ability to interact with the filesystem, run commands, fetch web content, delegate work, and more. Tools are defined as JSON schemas, registered at import time, and dispatched to executor functions at runtime.
+The tools subsystem gives the agent the ability to interact with the filesystem, run commands, fetch web content, spawn skill sub-agents, and more. Tools are defined as JSON schemas, registered at import time, and dispatched to executor functions at runtime.
 
 ## File Layout
 
@@ -12,7 +12,7 @@ The tools subsystem gives the agent the ability to interact with the filesystem,
 | `bash_tool.py` | `bash` — shell command execution |
 | `web_fetch.py` | `web_fetch` — URL content extraction |
 | `skill_tool.py` | `load_skill` — loads a skill's SKILL.md |
-| `delegate.py` | `delegate` — spawns a sub-agent |
+| `run_skill.py` | `run_skill` — spawns a sub-agent from a skill definition |
 | `schedule_tool.py` | `schedule` — CRUD for cron tasks |
 | `attach.py` | `attach` — attaches a file to the response (opt-in) |
 
@@ -31,7 +31,7 @@ _register(schema, opt_in=True)    # opt-in tool — only available when a skill 
 
 ### Default Tools
 
-`glob`, `grep`, `read`, `edit`, `write`, `bash`, `load_skill`, `web_fetch`, `delegate`, `schedule`
+`glob`, `grep`, `read`, `edit`, `write`, `bash`, `load_skill`, `web_fetch`, `run_skill`, `schedule`
 
 ### Opt-in Tools
 
@@ -41,7 +41,7 @@ _register(schema, opt_in=True)    # opt-in tool — only available when a skill 
 
 `execute_tool_call()` is the single async entry point called by the agent loop. It resolves the tool name and routes to the correct executor:
 
-1. **Async executors** (e.g. `delegate`): looked up via `_get_native_async_executor()` and awaited directly. This uses lazy imports to avoid circular dependencies since `delegate` imports `Agent`.
+1. **Async executors** (e.g. `run_skill`): looked up via `_get_native_async_executor()` and awaited directly. This uses lazy imports to avoid circular dependencies since `run_skill` imports `Agent`.
 2. **Sync executors** (everything else): looked up from the `_SYNC_EXECUTORS` dict and run via `asyncio.to_thread()` to avoid blocking the event loop.
 
 Special-case handling:
@@ -52,7 +52,7 @@ Unknown tool names return an `"Unknown tool: {name}"` error string.
 
 ### Initialization
 
-`Agent.__init__` accepts an optional `tools` parameter (a list of tool names). When `None`, all default tools are provided. Sub-agents get an explicit subset (everything except `delegate` to prevent recursive spawning).
+`Agent.__init__` accepts an optional `tools` parameter (a list of tool names). When `None`, all default tools are provided. Sub-agents get the exact tool list declared in their skill's frontmatter, which conventionally excludes `run_skill` to prevent recursive spawning.
 
 ### Schema Selection
 
@@ -103,9 +103,9 @@ Fetches a URL with `httpx`, then extracts readable text via `trafilatura`. Outpu
 
 Thin wrapper around `src.skills.load_skill()` — reads `skills/{name}/SKILL.md` and returns its full content.
 
-### Delegate (`delegate.py`)
+### Run Skill (`run_skill.py`)
 
-Spawns a sub-agent (`Agent` instance) with a clean context window and a restricted tool set (no `delegate`). Supports multimodal input — `image_paths` are base64-encoded and sent as content blocks. Sub-agent timeout is 300 seconds.
+Spawns a sub-agent (`Agent` instance) from a skill definition. The sub-agent is constructed with a clean context window, the skill body as its system prompt, and exactly the tools declared in the skill frontmatter. Callers pass `skill`, `task`, and `intent`; the sub-agent's response is truncated to `max_output_tokens` (default 2000). Sub-agent timeout is 300 seconds.
 
 ### Schedule (`schedule_tool.py`)
 

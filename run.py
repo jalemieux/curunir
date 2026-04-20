@@ -46,10 +46,11 @@ def _summarize_tool_call(name: str, args_str: str) -> str:
         case "web_fetch":
             return f"WebFetch {args.get('url', '')}"
         case "delegate":
+            agent_name = args.get("agent", "")
             task = args.get("task", "")
-            if len(task) > 60:
-                task = task[:57] + "..."
-            return f"Delegate: {task}"
+            if len(task) > 50:
+                task = task[:47] + "..."
+            return f"Delegate [{agent_name}]: {task}"
         case "attach":
             name = args.get("name") or args.get("path", "")
             return f"Attach {name}"
@@ -267,6 +268,18 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
+        # Compute context usage ratio for CLI indicator (only when n_ctx is known
+        # — i.e. we're talking to a llama.cpp server that reported it via /slots).
+        ctx_usage = None
+        if agent.config.n_ctx and metadata.get("stats"):
+            last_prompt_tokens = metadata["stats"].get("last_prompt_tokens")
+            if last_prompt_tokens:
+                ctx_usage = min(last_prompt_tokens / agent.config.n_ctx, 1.0)
+
+        # Surface n_ctx for CLI stats-line rendering.
+        if agent.config.n_ctx is not None and metadata.get("stats"):
+            metadata["stats"]["n_ctx"] = agent.config.n_ctx
+
         await out_queue.put(OutgoingMessage(
             content=text,
             channel=msg.channel,
@@ -275,6 +288,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             attachments=attachments or None,
             workflow=metadata.get("workflow"),
             stats=metadata.get("stats"),
+            context_usage=ctx_usage,
         ))
 
 
@@ -306,15 +320,34 @@ async def main():
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
-    max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
-        **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
     )
 
-    agent = Agent(config)
+    orchestrator_mode = os.environ.get("ORCHESTRATOR_MODE", "false").lower() == "true"
+
+    if config.api_base:
+        from src.agent.context_budget import resolve_llamacpp_budget
+        await resolve_llamacpp_budget(config)
+
+    if orchestrator_mode:
+        from src.agent.system_prompt import build_orchestrator_prompt
+        orchestrator_prompt = build_orchestrator_prompt(config)
+        orchestrator_tools = [
+            "read", "edit", "write", "bash", "grep", "glob",
+            "web_fetch", "schedule", "run_skill",
+        ]
+        agent = Agent(
+            config,
+            tools=orchestrator_tools,
+            system_prompt_override=orchestrator_prompt,
+        )
+        logger.info("Orchestrator mode: skills dir = %s", config.skills_dir)
+    else:
+        agent = Agent(config)
+
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
 
@@ -322,7 +355,8 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "0.0.0.0")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model)
+    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model,
+                          local_mode=orchestrator_mode)
     channels["cli"] = ws
 
     # Email channel (conditional)
@@ -350,7 +384,8 @@ async def main():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
-        tg.create_task(periodic_extraction(agent, extraction_interval))
+        if not orchestrator_mode:
+            tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(run_scheduler(agent))
 
 

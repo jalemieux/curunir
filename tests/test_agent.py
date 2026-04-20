@@ -2,10 +2,11 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import litellm
 import pytest
 
 from src.agent.agent import Agent
-from src.llm import LLMResponse
+from src.llm import LLMResponse, LLMUsage
 
 
 @pytest.fixture
@@ -76,8 +77,10 @@ class TestAgentHandle:
             result = await agent.handle("check", "s1")
 
         assert result == "All done"
-        # The combined response should have content preserved
-        assert agent.sessions["s1"][1].get("content") == "Let me check"
+        # Content is dropped when tool_calls are present: some thinking-mode
+        # providers (GLM via DeepInfra) reject an assistant message carrying
+        # both content and tool_calls as an incompatible "prefill".
+        assert "content" not in agent.sessions["s1"][1]
         assert agent.sessions["s1"][1].get("tool_calls") is not None
 
     async def test_empty_response_returns_error(self, agent):
@@ -103,28 +106,32 @@ class TestAgentHandle:
         assert "iteration limit" in result.lower()
 
 
-class TestDelegateToolExecution:
-    async def test_delegate_via_agent_handle(self, agent):
-        """Delegate tool calls go through the unified execute_tool_call."""
+class TestRunSkillToolExecution:
+    async def test_run_skill_via_agent_handle(self, agent):
+        """run_skill tool calls go through the unified execute_tool_call."""
         tool_response = LLMResponse(
             text=None,
             tool_calls=[{
-                "id": "call_delegate",
+                "id": "call_run_skill",
                 "type": "function",
-                "function": {"name": "delegate", "arguments": json.dumps({"task": "say hello"})},
+                "function": {"name": "run_skill", "arguments": json.dumps({"skill": "files", "task": "say hello", "intent": "confirm greeting"})},
             }],
         )
         text_response = LLMResponse(text="Done", tool_calls=None)
 
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]), \
              patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="sub-agent result"):
-            result = await agent.handle("delegate this", "s1")
+            result = await agent.handle("run this skill", "s1")
 
         assert result == "Done"
-        # Verify the tool result was recorded in history
+        # Verify the run_skill exchange is preserved as a proper tool_call + tool_result pair
         history = agent.sessions["s1"]
-        tool_msg = [m for m in history if m["role"] == "tool"][0]
-        assert tool_msg["content"] == "sub-agent result"
+        tool_msgs = [m for m in history if m["role"] == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["content"] == "sub-agent result"
+        assert tool_msgs[0]["tool_call_id"] == "call_run_skill"
+        assistant_with_calls = [m for m in history if m["role"] == "assistant" and "tool_calls" in m]
+        assert len(assistant_with_calls) == 1
 
 
 class TestToolAllowlist:
@@ -143,85 +150,175 @@ class TestToolAllowlist:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hello", "s1")
         schemas = mock_llm.call_args[0][2]
-        assert len(schemas) == 10  # all tools including delegate, web_fetch, and schedule
+        assert len(schemas) == 10  # all tools including web_fetch, schedule, run_skill
 
 
-class TestHistoryTruncation:
-    async def test_trims_old_messages_when_over_limit(self, agent_config):
+class TestTrimHistory:
+    """Unit tests for _trim_history — message-count-based trimming."""
+
+    def test_keeps_target_message_count(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+        _trim_history(history, target_messages=2)
+        assert len(history) <= 2
+        # Most recent user message must survive.
+        assert any(m["role"] == "user" and m["content"] == "u3" for m in history)
+
+    def test_keeps_at_least_one_user_message(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        _trim_history(history, target_messages=0)
+        assert any(m["role"] == "user" for m in history)
+
+    def test_single_user_session_trims_tail_groups(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "bash", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "out1"},
+            {"role": "assistant", "tool_calls": [{"id": "c2", "function": {"name": "bash", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c2", "content": "out2"},
+        ]
+        _trim_history(history, target_messages=1)
+        # User message must survive
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "task"
+
+    def test_preserves_pair_boundaries(self):
+        from src.agent.agent import _trim_history
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+        _trim_history(history, target_messages=3)
+        # First non-trimmed message should be a user (no orphaned assistant/tool)
+        assert history[0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_stats_emits_context_tokens(agent_config):
+    """After a turn, stats.context_tokens reflects last prompt_tokens + total completion."""
+    async def fake_call(model, messages, tools, **kwargs):
+        return LLMResponse(
+            text="done",
+            tool_calls=None,
+            usage=LLMUsage(prompt_tokens=1000, completion_tokens=50, elapsed_sec=1.0),
+        )
+
+    with patch("src.agent.agent.call_llm", new=fake_call):
         agent = Agent(agent_config)
-        session_id = "s-trunc"
-        history = agent.sessions.setdefault(session_id, [])
-        for i in range(100):
-            history.append({"role": "user", "content": "x" * 10_000})
-            history.append({"role": "assistant", "content": "y" * 10_000})
+        metadata = {"stats": {}}
+        await agent.handle("hi", session_id="t-stats", metadata=metadata)
 
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("new message", "s-trunc")
+    stats = metadata["stats"]
+    assert stats["context_tokens"] == 1050  # 1000 prompt + 50 completion
+    assert stats["completion_tokens"] == 50
+    assert stats["last_prompt_tokens"] == 1000
+    assert "prompt_tokens" not in stats
+    assert "total_tokens" not in stats
 
-        messages = mock_llm.call_args[0][1]
-        # Should be trimmed (system + trimmed history + new user msg)
-        assert len(messages) < 202
 
-    async def test_no_trim_when_single_user_message(self, agent_config):
-        """Sub-agents have one user message — trimming must not remove it."""
+@pytest.mark.asyncio
+async def test_system_prompt_has_no_current_time(agent_config):
+    captured = {}
+
+    async def fake_call(model, messages, tools, **kwargs):
+        captured["system"] = messages[0]["content"]
+        return LLMResponse(text="ok", tool_calls=None, usage=LLMUsage())
+
+    with patch("src.agent.agent.call_llm", new=fake_call):
         agent = Agent(agent_config)
-        session_id = "s-single"
-        history = agent.sessions.setdefault(session_id, [])
-        # Simulate sub-agent: one user msg, then a huge tool result
-        history.append({"role": "user", "content": "analyze this"})
-        history.append({"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "read", "arguments": "{}"}}]})
-        history.append({"role": "tool", "tool_call_id": "c1", "content": "x" * 1_000_000})
+        await agent.handle("hi", session_id="t-current-time")
 
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("continue", session_id)
+    assert "Current time:" not in captured["system"]
 
-        messages = mock_llm.call_args[0][1]
-        non_system = [m for m in messages if m["role"] != "system"]
-        # Must still have at least one user message
-        assert any(m["role"] == "user" for m in non_system)
 
-    async def test_truncation_preserves_message_pairs(self, agent_config):
-        """Truncation should not leave orphaned tool results or split pairs."""
-        agent = Agent(agent_config)
-        session_id = "s-pairs"
-        history = agent.sessions.setdefault(session_id, [])
-        for i in range(50):
-            history.append({"role": "user", "content": "x" * 20_000})
-            history.append({"role": "assistant", "content": "y" * 20_000})
+class TestProactiveTrim:
+    """Token-threshold proactive trim driven by last_prompt_tokens / n_ctx."""
 
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            await agent.handle("new message", "s-pairs")
+    async def test_trims_when_prompt_tokens_near_n_ctx(self, agent_config):
+        """When last_prompt_tokens > 85% of n_ctx, message count is reduced before next call."""
+        agent_config.n_ctx = 1000
+        captured_msg_counts = []
 
-        messages = mock_llm.call_args[0][1]
-        # After system prompt, first message should be "user" (not orphaned assistant/tool)
-        non_system = [m for m in messages if m["role"] != "system"]
-        assert non_system[0]["role"] == "user"
+        async def fake_call(model, messages, tools, **kwargs):
+            captured_msg_counts.append(len(messages))
+            if len(captured_msg_counts) == 1:
+                # First call: simulate near-full window via tool call to force a 2nd iter.
+                return LLMResponse(
+                    text=None,
+                    tool_calls=[{
+                        "id": "1", "type": "function",
+                        "function": {"name": "bash", "arguments": '{"command": "echo hi"}'},
+                    }],
+                    usage=LLMUsage(prompt_tokens=900),  # > 850 = 85% of 1000
+                )
+            return LLMResponse(text="done", tool_calls=None, usage=LLMUsage(prompt_tokens=100))
 
-    async def test_system_task_trims_tool_groups_after_user_prompt(self, agent_config):
-        """System tasks (single user message) should trim old tool groups, not the task prompt."""
-        agent = Agent(agent_config)
-        session_id = "sched:trim:1"
-        history = agent.sessions.setdefault(session_id, [])
-        # Simulate: task prompt + many large tool call rounds
-        history.append({"role": "user", "content": "## Scheduled Task\nDo something."})
-        for i in range(20):
-            history.append({"role": "assistant", "tool_calls": [{"id": f"c{i}", "function": {"name": "bash", "arguments": "{}"}}]})
-            history.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 100_000})
+        with patch("src.agent.agent.call_llm", new=fake_call), \
+             patch("src.agent.agent.execute_tool_call", new=AsyncMock(return_value="ok")):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [
+                {"role": "user", "content": f"old-{i}"} for i in range(10)
+            ]
+            await agent.handle("hi", session_id="t1")
 
-        mock_response = LLMResponse(text="done", tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            result = await agent.handle("", session_id, system_task_prompt="Do something.")
+        # Second call must have fewer messages than the first (trim happened).
+        assert captured_msg_counts[1] < captured_msg_counts[0]
 
-        messages = mock_llm.call_args[0][1]
-        non_system = [m for m in messages if m["role"] != "system"]
-        # Task prompt must survive trimming
-        assert non_system[0]["role"] == "user"
-        assert "Scheduled Task" in non_system[0]["content"]
-        # History should have been trimmed (less than original 41 messages)
-        assert len(non_system) < 41
+    async def test_no_proactive_trim_when_n_ctx_is_none(self, agent_config):
+        """Hosted-model path: no n_ctx → no proactive trim."""
+        agent_config.n_ctx = None
+
+        async def fake_call(model, messages, tools, **kwargs):
+            return LLMResponse(
+                text="done", tool_calls=None,
+                usage=LLMUsage(prompt_tokens=10_000_000),
+            )
+
+        with patch("src.agent.agent.call_llm", new=fake_call):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [{"role": "user", "content": "x" * 100}]
+            result = await agent.handle("hi", session_id="t1")
+
+        assert result == "done"
+
+    async def test_reactive_trim_halves_messages_on_overflow(self, agent_config):
+        """On ContextWindowExceededError, message count is halved and retried."""
+        call_count = {"n": 0}
+
+        async def fake_call(model, messages, tools, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise litellm.ContextWindowExceededError(
+                    "too long", model="m", llm_provider="p"
+                )
+            return LLMResponse(
+                text="recovered", tool_calls=None,
+                usage=LLMUsage(prompt_tokens=100),
+            )
+
+        with patch("src.agent.agent.call_llm", new=fake_call):
+            agent = Agent(agent_config)
+            agent.sessions["t1"] = [
+                {"role": "user", "content": f"u{i}"} for i in range(10)
+            ]
+            result = await agent.handle("hi", session_id="t1")
+        assert result == "recovered"
 
 
 class TestSystemTaskMode:
@@ -280,6 +377,37 @@ class TestSystemTaskMode:
         assert history[0]["content"] == "hi"
 
 
+@pytest.mark.asyncio
+async def test_run_skill_exchanges_preserved_in_history(agent_config):
+    """run_skill tool_call + tool_result messages stay intact in history so
+    the orchestrator can use the sub-agent's output."""
+    responses = [
+        LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "tc1",
+                "type": "function",
+                "function": {
+                    "name": "run_skill",
+                    "arguments": '{"skill": "system", "task": "run uptime", "intent": "report uptime"}',
+                },
+            }],
+        ),
+        LLMResponse(text="The system has been up for 5 days.", tool_calls=None),
+    ]
+    with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=responses):
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="uptime: 5 days"):
+            agent = Agent(agent_config)
+            await agent.handle("how long has this machine been running?", "s1")
+
+    history = agent.sessions["s1"]
+    roles = [m["role"] for m in history]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    tool_msg = history[2]
+    assert tool_msg["tool_call_id"] == "tc1"
+    assert tool_msg["content"] == "uptime: 5 days"
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
@@ -292,3 +420,5 @@ class TestAgentInit:
         )
         with pytest.raises(FileNotFoundError):
             Agent(config)
+
+

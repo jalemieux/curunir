@@ -1,5 +1,7 @@
 # Small-Model Orchestrator — Design Spec
 
+> **Note:** The specialist/skill split described below is superseded by `2026-04-19-skills-as-sub-agents-design.md`. Skills now define sub-agent types directly; `agents.yaml` is removed. The orchestrator model otherwise remains as described here.
+
 ## Overview
 
 Adapt Curunir to run on extremely constrained local hardware using a small quantized LLM (Gemma 4 26B MoE, Q4_K_M) with limited context window and slow token generation. The core idea: replace the single-agent architecture with an orchestrator that delegates to specialized sub-agents, each running in a fresh, minimal context.

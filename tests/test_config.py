@@ -12,6 +12,13 @@ def test_default_config():
     assert config.skills_dir == Path("./skills")
 
 
+def test_agent_config_defaults():
+    cfg = AgentConfig()
+    assert cfg.max_tokens == 16_000
+    assert cfg.n_ctx is None
+    assert not hasattr(cfg, "max_history_chars")
+
+
 def test_custom_config():
     config = AgentConfig(model="openai/gpt-4o", max_iterations=5)
     assert config.model == "openai/gpt-4o"
