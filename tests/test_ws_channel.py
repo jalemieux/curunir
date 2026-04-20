@@ -277,3 +277,57 @@ async def test_send_workflow_null_when_not_set():
             assert data["workflow"] is None
     finally:
         await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_send_includes_delta_field():
+    """delta field from OutgoingMessage is included in the JSON payload."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 9)
+    task = await _start_channel(ch)
+
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 9}") as ws:
+            await asyncio.sleep(0.05)
+            outgoing = OutgoingMessage(
+                content="chunk",
+                channel="cli",
+                session_id=SESSION_ID,
+                reply_address={},
+                delta=True,
+                final=False,
+            )
+            await ch.send(outgoing)
+
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["delta"] is True
+            assert data["content"] == "chunk"
+            assert data["final"] is False
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_send_delta_defaults_false_in_payload():
+    """delta key in JSON payload defaults to False when not set on OutgoingMessage."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 10)
+    task = await _start_channel(ch)
+
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 10}") as ws:
+            await asyncio.sleep(0.05)
+            outgoing = OutgoingMessage(
+                content="full",
+                channel="cli",
+                session_id=SESSION_ID,
+                reply_address={},
+            )
+            await ch.send(outgoing)
+
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["delta"] is False
+    finally:
+        await _stop_channel(task)
