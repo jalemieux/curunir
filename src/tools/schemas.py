@@ -258,6 +258,46 @@ _SCHEMAS = [
         {
             "type": "function",
             "function": {
+                "name": "run_skill",
+                "description": (
+                    "Run a skill in a fresh sub-agent context. The sub-agent sees "
+                    "only the skill's system prompt, its declared tools, and your "
+                    "task+intent. Prefer this over direct tools for anything "
+                    "procedural, recurring, or likely to produce large output."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill": {
+                            "type": "string",
+                            "description": "Name of the skill to run (must match the skill manifest).",
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": (
+                                "The concrete action the sub-agent should perform. "
+                                "E.g. 'research the state of small-LLM inference on Mac', "
+                                "'send a reply to the email in thread X', "
+                                "'submit a fix PR for issue #42'."
+                            ),
+                        },
+                        "intent": {
+                            "type": "string",
+                            "description": (
+                                "What you need back — the user's goal, not a restatement "
+                                "of the task. E.g. 'a written report', 'confirmation the "
+                                "email was sent', 'the PR URL'. The sub-agent returns "
+                                "exactly this; if you omit the user's goal, it is lost."
+                            ),
+                        },
+                    },
+                    "required": ["skill", "task", "intent"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "schedule",
                 "description": (
                     "Manage scheduled tasks that run autonomously on a cron schedule. "

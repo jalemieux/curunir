@@ -28,6 +28,9 @@ def _get_native_async_executor(name: str):
     if name == "delegate":
         from src.tools.delegate import exec_delegate
         return exec_delegate
+    if name == "run_skill":
+        from src.tools.run_skill import exec_run_skill
+        return exec_run_skill
     return None
 
 
