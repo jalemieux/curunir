@@ -102,6 +102,40 @@ class TestAgentHandle:
             result = await agent.handle("loop forever", "s1")
         assert "iteration limit" in result.lower()
 
+    async def test_forwards_on_text_delta_to_call_llm(self, agent):
+        mock_response = LLMResponse(text="streamed", tool_calls=None)
+
+        async def cb(text: str):
+            pass
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_call:
+            await agent.handle("hi", "test-session", on_text_delta=cb)
+
+        assert mock_call.call_count == 1
+        kwargs = mock_call.call_args.kwargs
+        assert kwargs.get("on_text_delta") is cb
+
+    async def test_forwards_on_text_delta_across_iterations(self, agent):
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo hi"})},
+            }],
+        )
+        text_response = LLMResponse(text="Done!", tool_calls=None)
+
+        async def cb(text: str):
+            pass
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]) as mock_call:
+            await agent.handle("run", "s1", on_text_delta=cb)
+
+        assert mock_call.call_count == 2
+        for call in mock_call.call_args_list:
+            assert call.kwargs.get("on_text_delta") is cb
+
 
 class TestDelegateToolExecution:
     async def test_delegate_via_agent_handle(self, agent):

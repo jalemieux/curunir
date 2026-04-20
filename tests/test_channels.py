@@ -44,6 +44,27 @@ def test_outgoing_message_with_tool_calls():
     assert msg.tool_calls == ["read file"]
 
 
+def test_outgoing_message_delta_defaults_false():
+    msg = OutgoingMessage(
+        content="hi",
+        channel="cli",
+        session_id="s1",
+        reply_address={},
+    )
+    assert msg.delta is False
+
+
+def test_outgoing_message_delta_can_be_set():
+    msg = OutgoingMessage(
+        content="chunk",
+        channel="cli",
+        session_id="s1",
+        reply_address={},
+        delta=True,
+    )
+    assert msg.delta is True
+
+
 # --- Router tests ---
 
 
