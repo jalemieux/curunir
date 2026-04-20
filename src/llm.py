@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import litellm
@@ -34,14 +35,66 @@ class LLMResponse:
     usage: LLMUsage = field(default_factory=LLMUsage)
 
 
+async def _consume_stream(
+    response_iter,
+    on_text_delta: Callable[[str], Awaitable[None]],
+) -> tuple[str, dict[int, dict], LLMUsage]:
+    """Drain a LiteLLM streaming response.
+
+    Returns (full_text, tool_calls_by_index, usage). tool_calls_by_index maps
+    the delta `index` to a dict with keys: id, name, arguments (concatenated).
+    """
+    text_parts: list[str] = []
+    tc_by_index: dict[int, dict] = {}
+    usage = LLMUsage()
+
+    async for chunk in response_iter:
+        if getattr(chunk, "usage", None):
+            usage.prompt_tokens = chunk.usage.prompt_tokens or 0
+            usage.completion_tokens = chunk.usage.completion_tokens or 0
+            usage.total_tokens = chunk.usage.total_tokens or 0
+
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+
+        text_piece = getattr(delta, "content", None)
+        if text_piece:
+            text_parts.append(text_piece)
+            await on_text_delta(text_piece)
+
+        delta_tcs = getattr(delta, "tool_calls", None) or []
+        for tc in delta_tcs:
+            idx = tc.index
+            entry = tc_by_index.setdefault(
+                idx, {"id": None, "name": None, "arguments": ""}
+            )
+            if getattr(tc, "id", None):
+                entry["id"] = tc.id
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    entry["name"] = fn.name
+                if getattr(fn, "arguments", None):
+                    entry["arguments"] += fn.arguments
+
+    return "".join(text_parts), tc_by_index, usage
+
+
 async def call_llm(
     model: str,
     messages: list[dict],
     tools: list[dict],
     api_base: str | None = None,
     openrouter_provider: str | None = None,
+    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> LLMResponse:
-    """Call LLM via LiteLLM, return normalized response."""
+    """Call LLM via LiteLLM, return normalized response.
+
+    When ``on_text_delta`` is provided, switches to streaming mode and fires
+    the callback for each text chunk. Tool calls and usage are still returned
+    as a complete ``LLMResponse``.
+    """
     kwargs = {
         "model": model,
         "messages": messages,
@@ -54,6 +107,11 @@ async def call_llm(
         kwargs["extra_body"] = {"provider": {"order": [openrouter_provider]}}
     if tools:
         kwargs["tools"] = tools
+
+    streaming = on_text_delta is not None
+    if streaming:
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
 
     t0 = time.monotonic()
     for attempt in range(MAX_RETRIES):
@@ -69,11 +127,30 @@ async def call_llm(
                 await asyncio.sleep(delay)
             else:
                 raise
-    elapsed = time.monotonic() - t0
 
+    if streaming:
+        text, tc_by_index, usage = await _consume_stream(response, on_text_delta)
+        usage.elapsed_sec = time.monotonic() - t0
+
+        tool_calls: list[dict] | None = None
+        if tc_by_index:
+            tool_calls = [
+                {
+                    "id": entry["id"],
+                    "type": "function",
+                    "function": {
+                        "name": entry["name"],
+                        "arguments": entry["arguments"],
+                    },
+                }
+                for _, entry in sorted(tc_by_index.items())
+            ]
+
+        return LLMResponse(text=text or None, tool_calls=tool_calls, usage=usage)
+
+    elapsed = time.monotonic() - t0
     choice = response.choices[0].message
 
-    # Extract usage stats
     usage = LLMUsage(elapsed_sec=elapsed)
     if response.usage:
         usage.prompt_tokens = response.usage.prompt_tokens or 0
