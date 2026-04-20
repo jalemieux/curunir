@@ -106,30 +106,30 @@ class TestAgentHandle:
         assert "iteration limit" in result.lower()
 
 
-class TestDelegateToolExecution:
-    async def test_delegate_via_agent_handle(self, agent):
-        """Delegate tool calls go through the unified execute_tool_call."""
+class TestRunSkillToolExecution:
+    async def test_run_skill_via_agent_handle(self, agent):
+        """run_skill tool calls go through the unified execute_tool_call."""
         tool_response = LLMResponse(
             text=None,
             tool_calls=[{
-                "id": "call_delegate",
+                "id": "call_run_skill",
                 "type": "function",
-                "function": {"name": "delegate", "arguments": json.dumps({"agent": "files", "task": "say hello", "intent": "confirm greeting"})},
+                "function": {"name": "run_skill", "arguments": json.dumps({"skill": "files", "task": "say hello", "intent": "confirm greeting"})},
             }],
         )
         text_response = LLMResponse(text="Done", tool_calls=None)
 
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]), \
              patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="sub-agent result"):
-            result = await agent.handle("delegate this", "s1")
+            result = await agent.handle("run this skill", "s1")
 
         assert result == "Done"
-        # Verify the delegate exchange is preserved as a proper tool_call + tool_result pair
+        # Verify the run_skill exchange is preserved as a proper tool_call + tool_result pair
         history = agent.sessions["s1"]
         tool_msgs = [m for m in history if m["role"] == "tool"]
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["content"] == "sub-agent result"
-        assert tool_msgs[0]["tool_call_id"] == "call_delegate"
+        assert tool_msgs[0]["tool_call_id"] == "call_run_skill"
         assistant_with_calls = [m for m in history if m["role"] == "assistant" and "tool_calls" in m]
         assert len(assistant_with_calls) == 1
 
@@ -150,7 +150,7 @@ class TestToolAllowlist:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hello", "s1")
         schemas = mock_llm.call_args[0][2]
-        assert len(schemas) == 11  # all tools including delegate, web_fetch, schedule, run_skill
+        assert len(schemas) == 10  # all tools including web_fetch, schedule, run_skill
 
 
 class TestTrimHistory:
@@ -378,8 +378,8 @@ class TestSystemTaskMode:
 
 
 @pytest.mark.asyncio
-async def test_delegate_exchanges_preserved_in_history(agent_config):
-    """Delegate tool_call + tool_result messages stay intact in history so
+async def test_run_skill_exchanges_preserved_in_history(agent_config):
+    """run_skill tool_call + tool_result messages stay intact in history so
     the orchestrator can use the sub-agent's output."""
     responses = [
         LLMResponse(
@@ -388,8 +388,8 @@ async def test_delegate_exchanges_preserved_in_history(agent_config):
                 "id": "tc1",
                 "type": "function",
                 "function": {
-                    "name": "delegate",
-                    "arguments": '{"agent": "system", "task": "run uptime", "intent": "report uptime"}',
+                    "name": "run_skill",
+                    "arguments": '{"skill": "system", "task": "run uptime", "intent": "report uptime"}',
                 },
             }],
         ),
@@ -422,25 +422,3 @@ class TestAgentInit:
             Agent(config)
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_injects_agent_enum(tmp_path):
-    """When tools=["delegate"], the delegate schema's agent param should
-    have an enum populated from agents.yaml."""
-    identity = tmp_path / "identity.md"
-    identity.write_text("You are a test assistant.")
-    agents_file = tmp_path / "agents.yaml"
-    agents_file.write_text("files:\n  description: 'File ops'\n  tools: [read]\n  system_prompt: 'Do it.'\nsystem:\n  description: 'Shell'\n  tools: [bash]\n  system_prompt: 'Do it.'\n")
-
-    from src.config import AgentConfig
-    config = AgentConfig(
-        identity_file=identity,
-        context_dir=tmp_path,
-        agents_file=agents_file,
-    )
-    agent = Agent(config, tools=["delegate"])
-    schemas = agent._get_tool_schemas()
-
-    delegate_schema = next(s for s in schemas if s["function"]["name"] == "delegate")
-    agent_prop = delegate_schema["function"]["parameters"]["properties"]["agent"]
-    assert "enum" in agent_prop
-    assert sorted(agent_prop["enum"]) == ["files", "system"]

@@ -29,8 +29,8 @@ _TOOL_KEY_ARGS: dict[str, list[str]] = {
     "glob": ["pattern"],
     "grep": ["pattern"],
     "load_skill": ["name"],
-    "delegate": ["task"],
     "attach": ["path"],
+    "run_skill": ["skill"],
 }
 
 _MAX_ARG_LEN = 120
@@ -134,14 +134,6 @@ class Agent:
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
 
-        # If this agent uses delegate, load agent names for schema enum
-        self._agent_names: list[str] | None = None
-        if tools and "delegate" in tools:
-            from src.agent.agents_config import load_agents_config
-            agents = load_agents_config(config.agents_file)
-            if agents:
-                self._agent_names = sorted(agents.keys())
-
         # If this agent exposes run_skill, discover skill names for the schema enum
         self._skill_names: list[str] | None = None
         if tools and "run_skill" in tools:
@@ -153,14 +145,6 @@ class Agent:
         if session_id and session_id in self._session_tools:
             extra = get_tool_schemas(list(self._session_tools[session_id]))
             base = base + extra
-
-        # Inject agent enum into delegate schema
-        if self._agent_names:
-            base = copy.deepcopy(base)
-            for schema in base:
-                if schema["function"]["name"] == "delegate":
-                    schema["function"]["parameters"]["properties"]["agent"]["enum"] = self._agent_names
-                    break
 
         # Inject skill-name enum into run_skill schema
         if self._skill_names:

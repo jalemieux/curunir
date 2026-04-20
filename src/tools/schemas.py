@@ -219,45 +219,6 @@ _SCHEMAS = [
         {
             "type": "function",
             "function": {
-                "name": "delegate",
-                "description": (
-                    "Delegate a task to a specialist agent. "
-                    "Each specialist has specific tools and expertise. "
-                    "Specialists have no memory of this conversation — you must provide "
-                    "both the action (`task`) and what you need back (`intent`)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "agent": {
-                            "type": "string",
-                            "description": "Which specialist to delegate to.",
-                        },
-                        "task": {
-                            "type": "string",
-                            "description": (
-                                "The action to perform. E.g. 'read context/identity.md', "
-                                "'grep for WebSocket under src/', 'edit line 42 of foo.py'."
-                            ),
-                        },
-                        "intent": {
-                            "type": "string",
-                            "description": (
-                                "What you need back — the user's goal, not a restatement "
-                                "of the task. E.g. 'summarize in one sentence', "
-                                "'find the most important design decision', 'count of matches', "
-                                "'confirm the edit applied'. The specialist returns exactly "
-                                "this; if you omit the user's goal here, it is lost."
-                            ),
-                        },
-                    },
-                    "required": ["agent", "task", "intent"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "run_skill",
                 "description": (
                     "Run a skill in a fresh sub-agent context. The sub-agent sees "

@@ -1,9 +1,9 @@
 from src.tools.schemas import get_tool_schemas
 
 
-def test_returns_eleven_schemas():
+def test_returns_ten_schemas():
     schemas = get_tool_schemas()
-    assert len(schemas) == 11
+    assert len(schemas) == 10
 
 
 def test_schema_format():
@@ -18,7 +18,7 @@ def test_schema_format():
 
 def test_expected_tool_names():
     names = {s["function"]["name"] for s in get_tool_schemas()}
-    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch", "delegate", "schedule", "run_skill"}
+    assert names == {"glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch", "schedule", "run_skill"}
 
 
 def test_run_skill_schema_registered():
@@ -49,13 +49,3 @@ def test_filter_ignores_unknown_names():
     assert names == {"read"}
 
 
-def test_delegate_schema_has_agent_param():
-    from src.tools.schemas import ALL_TOOL_SCHEMAS
-    delegate = ALL_TOOL_SCHEMAS["delegate"]
-    props = delegate["function"]["parameters"]["properties"]
-    required = delegate["function"]["parameters"]["required"]
-    assert "agent" in props
-    assert props["agent"]["type"] == "string"
-    assert "agent" in required
-    assert "task" in props and "task" in required
-    assert "intent" in props and "intent" in required
