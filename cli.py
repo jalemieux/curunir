@@ -10,6 +10,7 @@ import json
 import websockets
 import websockets.exceptions
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
 
@@ -67,6 +68,24 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     # Output loop: receives messages from the server and renders them.    #
     # ------------------------------------------------------------------ #
     async def output_loop(ws: websockets.ClientConnection) -> None:
+        # Streaming state: when the server sends delta messages, we accumulate
+        # them in `stream_buffer` and display them in a transient Live region.
+        # On the next non-delta message, we close the Live (which erases the
+        # plain-text region) and re-print the buffer as Markdown.
+        stream_buffer: list[str] = []
+        stream_live: Live | None = None
+
+        def flush_stream() -> str:
+            """Stop the Live region and return the accumulated text."""
+            nonlocal stream_live
+            if stream_live is None:
+                return ""
+            stream_live.stop()
+            stream_live = None
+            text = "".join(stream_buffer)
+            stream_buffer.clear()
+            return text
+
         pending_tool_calls: list[str] = []
 
         def flush_tool_calls() -> None:
@@ -85,6 +104,22 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
 
                 stop_spinner()
 
+                # Streaming delta — append to buffer and update Live region
+                if data.get("delta"):
+                    chunk = data.get("content") or ""
+                    if stream_live is None:
+                        stream_buffer.clear()
+                        stream_live = Live(
+                            Text(""),
+                            console=console,
+                            transient=True,
+                            refresh_per_second=20,
+                        )
+                        stream_live.start()
+                    stream_buffer.append(chunk)
+                    stream_live.update(Text("".join(stream_buffer)))
+                    continue
+
                 # Welcome message with model info
                 if "model" in data:
                     console.print(f"[dim]model: {data['model']}[/dim]\n")
@@ -96,6 +131,11 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 final = data.get("final", False)
                 attachments = data.get("attachments") or []
 
+                # Flush any accumulated stream first; render it as Markdown.
+                streamed_text = flush_stream()
+                if streamed_text.strip():
+                    console.print(Markdown(streamed_text))
+
                 if verbose and tool_calls:
                     for tc in tool_calls:
                         pending_tool_calls.append(tc)
@@ -104,7 +144,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         line.append(tc)
                         console.print(line)
 
-                if content:
+                if content and not streamed_text:
                     if verbose:
                         flush_tool_calls()
                     console.print(Markdown(content))
@@ -165,6 +205,12 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         flush_tool_calls()
                     ready.set()
         finally:
+            # Stop any in-flight Live region so the terminal isn't left
+            # in a partial render state if the connection drops.
+            if stream_live is not None:
+                stream_live.stop()
+                stream_live = None
+                stream_buffer.clear()
             # Unblock the input loop if the connection dropped before final:true
             ready.set()
 
