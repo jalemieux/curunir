@@ -102,6 +102,15 @@ def _is_context_overflow(exc: Exception) -> bool:
     return "context limit" in msg or "prompt is too long" in msg or "exceed" in msg and "token" in msg
 
 
+def _discover_skill_names(skills_dir) -> list[str]:
+    """Return sorted skill directory names that contain a SKILL.md."""
+    if not skills_dir.exists():
+        return []
+    return sorted(
+        p.parent.name for p in skills_dir.glob("*/SKILL.md")
+    )
+
+
 def _parse_skill_tools(skill_content: str) -> list[str]:
     """Extract required tool names from a skill's frontmatter."""
     fm = parse_frontmatter(skill_content)
@@ -133,6 +142,11 @@ class Agent:
             if agents:
                 self._agent_names = sorted(agents.keys())
 
+        # If this agent exposes run_skill, discover skill names for the schema enum
+        self._skill_names: list[str] | None = None
+        if tools and "run_skill" in tools:
+            self._skill_names = _discover_skill_names(config.skills_dir)
+
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         import copy
         base = get_tool_schemas(self.tools)
@@ -146,6 +160,14 @@ class Agent:
             for schema in base:
                 if schema["function"]["name"] == "delegate":
                     schema["function"]["parameters"]["properties"]["agent"]["enum"] = self._agent_names
+                    break
+
+        # Inject skill-name enum into run_skill schema
+        if self._skill_names:
+            base = copy.deepcopy(base)
+            for schema in base:
+                if schema["function"]["name"] == "run_skill":
+                    schema["function"]["parameters"]["properties"]["skill"]["enum"] = self._skill_names
                     break
 
         return base

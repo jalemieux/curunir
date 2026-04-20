@@ -150,7 +150,7 @@ class TestToolAllowlist:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hello", "s1")
         schemas = mock_llm.call_args[0][2]
-        assert len(schemas) == 10  # all tools including delegate, web_fetch, and schedule
+        assert len(schemas) == 11  # all tools including delegate, web_fetch, schedule, run_skill
 
 
 class TestTrimHistory:
