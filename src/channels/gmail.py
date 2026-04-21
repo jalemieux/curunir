@@ -232,19 +232,26 @@ def _get_header(headers: list[dict], name: str) -> str:
 
 
 def _decode_body(payload: dict) -> str:
-    """Extract plain-text body from a Gmail message payload."""
-    if not payload.get("parts"):
+    """Extract plain-text body from a Gmail message payload (recursive)."""
+    parts = payload.get("parts")
+    if not parts:
         data = payload.get("body", {}).get("data", "")
         if data:
             return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
         return ""
 
     for preferred in ("text/plain", "text/html"):
-        for part in payload["parts"]:
+        for part in parts:
             if part.get("mimeType") == preferred:
                 data = part.get("body", {}).get("data", "")
                 if data:
                     return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+    for part in parts:
+        if part.get("mimeType", "").startswith("multipart/"):
+            body = _decode_body(part)
+            if body:
+                return body
     return ""
 
 
@@ -265,7 +272,12 @@ def _extract_attachments(payload: dict) -> list[dict]:
 
 
 def _normalize_message(raw: dict) -> dict:
-    """Convert a raw Gmail API message into flat format expected by EmailChannel."""
+    """Convert a raw Gmail API message into flat format expected by EmailChannel.
+
+    `payload` is kept so download_attachments can still walk the MIME tree to
+    resolve attachmentIds — without it, nested multipart messages silently
+    download nothing.
+    """
     payload = raw.get("payload", {})
     headers = payload.get("headers", [])
     attachments = _extract_attachments(payload)
@@ -277,4 +289,5 @@ def _normalize_message(raw: dict) -> dict:
         "subject": _get_header(headers, "Subject"),
         "body": _decode_body(payload),
         "attachments": attachments if attachments else [],
+        "payload": payload,
     }

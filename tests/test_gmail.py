@@ -357,3 +357,66 @@ def test_decode_body_html_fallback():
 def test_decode_body_empty():
     payload = {"body": {"data": ""}}
     assert _decode_body(payload) == ""
+
+
+def test_decode_body_nested_multipart_alternative():
+    """Forwarded Gmail emails nest text/plain inside multipart/alternative
+    alongside an attachment at the top level. _decode_body must recurse."""
+    plain_data = base64.urlsafe_b64encode(b"forwarded body").decode()
+    html_data = base64.urlsafe_b64encode(b"<p>forwarded body</p>").decode()
+    payload = {
+        "mimeType": "multipart/mixed",
+        "parts": [
+            {
+                "mimeType": "multipart/alternative",
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain_data}},
+                    {"mimeType": "text/html", "body": {"data": html_data}},
+                ],
+            },
+            {
+                "mimeType": "application/pdf",
+                "filename": "capital_call.pdf",
+                "body": {"attachmentId": "att_1", "size": 500},
+            },
+        ],
+    }
+    assert _decode_body(payload) == "forwarded body"
+
+
+def test_download_attachments_from_normalized_message(mock_service, tmp_path):
+    """Regression: the runtime call path passes a normalized message (not a raw
+    payload) to download_attachments. The two must stay compatible."""
+    att_data = base64.urlsafe_b64encode(b"pdf bytes").decode()
+    mock_service.users().messages().attachments().get().execute.return_value = {
+        "data": att_data,
+    }
+    body_data = base64.urlsafe_b64encode(b"body text").decode()
+    raw = {
+        "id": "msg_1",
+        "threadId": "thread_1",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [{"name": "From", "value": "a@b.c"}],
+            "parts": [
+                {
+                    "mimeType": "multipart/alternative",
+                    "parts": [
+                        {"mimeType": "text/plain", "body": {"data": body_data}},
+                    ],
+                },
+                {
+                    "mimeType": "application/pdf",
+                    "filename": "report.pdf",
+                    "body": {"attachmentId": "att_1", "size": 500},
+                },
+            ],
+        },
+    }
+    normalized = _normalize_message(raw)
+    assert normalized["body"] == "body text"
+    assert len(normalized["attachments"]) == 1
+
+    download_attachments("thread_1", normalized, str(tmp_path), mock_service)
+    assert (tmp_path / "report.pdf").exists()
+    assert (tmp_path / "report.pdf").read_bytes() == b"pdf bytes"
