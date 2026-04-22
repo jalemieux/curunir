@@ -500,3 +500,39 @@ async def test_send_failure_does_not_label(email_config, in_queue):
         await ch.send(msg)
 
     mock_gmail.thread_modify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_skips_streaming_deltas(email_config, in_queue):
+    """Streaming deltas (final=False) must NOT trigger an email — otherwise
+    every token of the agent's reply becomes a separate email."""
+    ch = _make_channel(in_queue, email_config)
+
+    reply_address = {
+        "to": "alice@example.com",
+        "subject": "Re: Hello",
+        "in_reply_to": "msg_1",
+    }
+    delta = OutgoingMessage(
+        content="word",
+        channel="email",
+        session_id="thread_1",
+        reply_address=reply_address,
+        delta=True,
+        final=False,
+    )
+    tool_marker = OutgoingMessage(
+        content="",
+        channel="email",
+        session_id="thread_1",
+        reply_address=reply_address,
+        tool_calls=["Bash echo"],
+        final=False,
+    )
+
+    with patch("src.channels.email.gmail") as mock_gmail:
+        await ch.send(delta)
+        await ch.send(tool_marker)
+
+    mock_gmail.send_reply.assert_not_called()
+    mock_gmail.thread_modify.assert_not_called()
