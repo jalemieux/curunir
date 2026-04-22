@@ -77,7 +77,9 @@ class EmailChannel:
 
     async def send(self, msg: OutgoingMessage) -> None:
         """Send a reply in the original thread, with optional attachments."""
-        if not msg.content:
+        # Skip streaming deltas and tool-call markers — email is not a
+        # streaming medium; only the final composed reply should be sent.
+        if not msg.final or not msg.content:
             return
         attachment_paths = [att["path"] for att in msg.attachments] if msg.attachments else None
         logger.info("Sending reply to %s (thread %s, %d attachment(s))",
