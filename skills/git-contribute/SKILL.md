@@ -1,6 +1,6 @@
 ---
 name: git-contribute
-description: "Autonomous bug fix and feature implementation lifecycle for GitHub codebases — picks up open issues, proposes an implementation plan via draft PR for human review, incorporates feedback, implements the fix or feature using TDD, and shepherds the PR through code review to merge. Covers the full issue-to-merge lifecycle: claim → plan → review → implement → verify → merge. Trigger: user asks to contribute to a repo, fix bugs, implement features, or invoked on a loop to pick up work from a GitHub issue tracker."
+description: "Autonomous bug fix and feature implementation lifecycle for GitHub codebases — picks up open issues, proposes an implementation plan via draft PR for human review, incorporates feedback, implements the fix or feature using TDD, and shepherds the PR through code review to merge. Covers the full issue-to-merge lifecycle: claim → plan → review → implement → verify → merge. Trigger: user asks to pick up and implement an existing GitHub issue end-to-end (plan → PR → review → merge), or is invoked on a loop to work through an issue tracker. For filing issues, listing issues/PRs, or other ad-hoc GitHub ops, use the `github` skill instead."
 ---
 
 # Git Contribute
