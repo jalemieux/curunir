@@ -325,9 +325,6 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     session: PromptSession = PromptSession()
     prompt_text = ANSI("\x1b[1;32m> \x1b[0m")
     ws = await _connect_with_retry(uri, console)
-    # First prompt doesn't wait for a prior turn; welcome/final events will
-    # re-arm subsequent waits.
-    ready.set()
 
     staging = Staging()
 
@@ -338,6 +335,15 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     while True:
         # Launch output reader for the current connection
         out_task = asyncio.create_task(output_loop(ws))
+
+        # Give the server a brief window to send its welcome before we show
+        # the prompt, so "model: …" renders above the input line. If no
+        # welcome arrives (e.g. server has no MODEL set, or a bare test
+        # server), proceed after a short timeout so we don't deadlock.
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=0.25)
+        except asyncio.TimeoutError:
+            ready.set()
 
         # Input loop
         try:
