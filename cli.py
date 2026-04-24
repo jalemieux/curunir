@@ -174,9 +174,11 @@ class Staging:
         ]
 
 
-# Matches an absolute POSIX path: `/` followed by one or more non-whitespace
-# chars or backslash-escaped chars (shell-style drag-drop uses `\<space>`).
-_PATH_RE = re.compile(r'/(?:[^\s\\]|\\.)+')
+# Matches an absolute POSIX path: `/` followed by one or more non-ASCII-whitespace
+# chars or backslash-escaped chars. Only breaks on ASCII whitespace so filenames
+# containing Unicode spaces (e.g. macOS's ` ` in "10.58.12 PM") match
+# through. Shell-style drag-drop uses `\<space>` for literal spaces in the path.
+_PATH_RE = re.compile(r'/(?:[^ \t\r\n\\]|\\.)+')
 
 
 def _format_size(size: int) -> str:
