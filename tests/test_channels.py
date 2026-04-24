@@ -100,6 +100,36 @@ async def test_router_discards_unknown_channel(caplog):
 
 
 @pytest.mark.asyncio
+async def test_agent_worker_passes_workflow_to_outgoing():
+    """Workflow metadata from agent.handle() propagates to OutgoingMessage."""
+    from unittest.mock import MagicMock
+
+    agent = MagicMock()
+    agent.sessions = {}
+
+    async def fake_handle(content, session_id, **kwargs):
+        metadata = kwargs.get("metadata")
+        if metadata is not None:
+            metadata["workflow"] = {"steps": ["plan", "build"], "current": "build"}
+        return "done"
+
+    agent.handle = AsyncMock(side_effect=fake_handle)
+
+    in_q = asyncio.Queue()
+    out_q = asyncio.Queue()
+
+    msg = IncomingMessage(content="go", channel="cli", session_id="test", reply_address={})
+    await in_q.put(msg)
+
+    from run import agent_worker
+    task = asyncio.create_task(agent_worker(agent, in_q, out_q))
+    result = await asyncio.wait_for(out_q.get(), timeout=2.0)
+    task.cancel()
+
+    assert result.workflow == {"steps": ["plan", "build"], "current": "build"}
+
+
+@pytest.mark.asyncio
 async def test_router_dispatches_multiple_messages():
     out_queue = asyncio.Queue()
     cli_channel = AsyncMock()

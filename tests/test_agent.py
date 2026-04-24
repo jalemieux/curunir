@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agent.agent import Agent
+from src.agent.agent import Agent, _estimate_chars, _trim_history
 from src.llm import LLMResponse
 
 
@@ -135,6 +135,56 @@ class TestAgentHandle:
         assert mock_call.call_count == 2
         for call in mock_call.call_args_list:
             assert call.kwargs.get("on_text_delta") is cb
+
+    async def test_accepts_list_content_and_forwards_to_llm(self, agent):
+        captured: dict = {}
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured["messages"] = messages
+            return LLMResponse(text="ack", tool_calls=None)
+
+        content_blocks = [
+            {"type": "text", "text": "describe this"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            result = await agent.handle(content_blocks, "s1")
+
+        assert result == "ack"
+        assert agent.sessions["s1"][0]["content"] == content_blocks
+        user_msg = [m for m in captured["messages"] if m["role"] == "user"][-1]
+        assert user_msg["content"] == content_blocks
+
+
+class TestTrimHistoryMultimodal:
+    def test_image_block_costs_fixed_amount(self):
+        big_url = "data:image/png;base64," + ("A" * 500_000)
+        msg = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "hi"},
+                {"type": "image_url", "image_url": {"url": big_url}},
+            ],
+        }
+        # text "hi" = 2 chars, image = 2000 chars, total = 2002
+        assert _estimate_chars([msg]) == 2 + 2000
+
+    def test_trim_keeps_recent_multimodal_messages(self):
+        big_url = "data:image/png;base64," + ("A" * 10)
+        history = [
+            {"role": "user", "content": "old message " * 1000},
+            {"role": "assistant", "content": "old reply " * 1000},
+            {"role": "user", "content": [
+                {"type": "text", "text": "recent"},
+                {"type": "image_url", "image_url": {"url": big_url}},
+            ]},
+            {"role": "assistant", "content": "recent reply"},
+        ]
+        _trim_history(history, max_chars=5_000)
+        assert len(history) == 2
+        assert history[0]["content"][0]["text"] == "recent"
 
 
 class TestDelegateToolExecution:
