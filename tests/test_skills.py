@@ -1,5 +1,5 @@
 # tests/test_skills.py
-from pathlib import Path
+import logging
 
 from src.skills import build_skill_manifest, load_registry, load_skill, parse_frontmatter
 
@@ -25,72 +25,128 @@ class TestParseFrontmatter:
         assert result["description"] == "Use when: user asks"
 
 
+def _write_skill(parent, name, description, disabled=False):
+    d = parent / name
+    d.mkdir()
+    extra = "disabled: true\n" if disabled else ""
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n{extra}---\n# {name}\n"
+    )
+    return d / "SKILL.md"
+
+
 class TestBuildSkillManifest:
     def test_no_skills(self, tmp_path):
-        assert build_skill_manifest(tmp_path) == ""
+        assert build_skill_manifest([tmp_path]) == ""
 
     def test_one_skill(self, tmp_path):
-        skill_dir = tmp_path / "research"
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: research\ndescription: When user asks to investigate\n---\n\n# Research"
-        )
-        result = build_skill_manifest(tmp_path)
+        _write_skill(tmp_path, "research", "When user asks to investigate")
+        result = build_skill_manifest([tmp_path])
         assert "| research | When user asks to investigate |" in result
         assert "## Available Skills" in result
 
     def test_multiple_skills_sorted(self, tmp_path):
-        for name in ["zebra", "alpha"]:
-            d = tmp_path / name
-            d.mkdir()
-            (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name} desc\n---\n")
-        result = build_skill_manifest(tmp_path)
-        lines = result.splitlines()
-        skill_lines = [l for l in lines if l.startswith("| ") and "Skill" not in l]
+        _write_skill(tmp_path, "zebra", "zebra desc")
+        _write_skill(tmp_path, "alpha", "alpha desc")
+        result = build_skill_manifest([tmp_path])
+        skill_lines = [l for l in result.splitlines() if l.startswith("| ") and "Skill" not in l]
         assert "alpha" in skill_lines[0]
         assert "zebra" in skill_lines[1]
 
     def test_nonexistent_dir(self, tmp_path):
-        result = build_skill_manifest(tmp_path / "nonexistent")
-        assert result == ""
+        assert build_skill_manifest([tmp_path / "nonexistent"]) == ""
 
 
 class TestLoadSkill:
     def test_existing_skill(self, tmp_path):
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
-        body = "---\nname: my-skill\ndescription: test\n---\n\n# My Skill\nInstructions here."
+        body = "---\nname: my-skill\ndescription: test\n---\n\n# My Skill\nInstructions."
         (skill_dir / "SKILL.md").write_text(body)
-        result = load_skill("my-skill", tmp_path)
-        assert result == body
+        assert load_skill("my-skill", [tmp_path]) == body
 
     def test_missing_skill(self, tmp_path):
-        result = load_skill("nonexistent", tmp_path)
-        assert "not found" in result.lower()
+        assert "not found" in load_skill("nonexistent", [tmp_path]).lower()
 
     def test_disabled_skill_not_loadable(self, tmp_path):
-        skill_dir = tmp_path / "retired"
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: retired\ndescription: old\ndisabled: true\n---\n# body"
-        )
-        result = load_skill("retired", tmp_path)
-        assert "not found" in result.lower()
+        _write_skill(tmp_path, "retired", "old", disabled=True)
+        assert "not found" in load_skill("retired", [tmp_path]).lower()
 
 
 class TestDisabledFlag:
     def test_disabled_excluded_from_manifest(self, tmp_path):
-        for name, disabled in [("alpha", False), ("beta", True)]:
-            d = tmp_path / name
-            d.mkdir()
-            extra = "disabled: true\n" if disabled else ""
-            (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name} desc\n{extra}---\n")
-        manifest = build_skill_manifest(tmp_path)
+        _write_skill(tmp_path, "alpha", "alpha desc")
+        _write_skill(tmp_path, "beta", "beta desc", disabled=True)
+        manifest = build_skill_manifest([tmp_path])
         assert "alpha" in manifest
         assert "beta" not in manifest
 
     def test_disabled_excluded_from_registry(self, tmp_path):
-        d = tmp_path / "gone"
-        d.mkdir()
-        (d / "SKILL.md").write_text("---\nname: gone\ndescription: x\ndisabled: yes\n---\n")
-        assert load_registry(tmp_path) == {}
+        _write_skill(tmp_path, "gone", "x", disabled=True)
+        assert load_registry([tmp_path]) == {}
+
+
+class TestMultipleDirs:
+    def test_merges_from_both_dirs(self, tmp_path):
+        sys_dir = tmp_path / "system"
+        user_dir = tmp_path / "user"
+        sys_dir.mkdir()
+        user_dir.mkdir()
+        _write_skill(sys_dir, "web-search", "system: web search")
+        _write_skill(user_dir, "journal", "user: journaling")
+
+        manifest = build_skill_manifest([sys_dir, user_dir])
+        assert "web-search" in manifest
+        assert "journal" in manifest
+
+    def test_missing_user_dir_is_silent(self, tmp_path, caplog):
+        sys_dir = tmp_path / "system"
+        sys_dir.mkdir()
+        _write_skill(sys_dir, "web-search", "system: web search")
+
+        with caplog.at_level(logging.WARNING):
+            manifest = build_skill_manifest([sys_dir, tmp_path / "nonexistent"])
+        assert "web-search" in manifest
+        # No warning should fire for missing dir.
+        assert not any("nonexistent" in r.message for r in caplog.records)
+
+    def test_system_wins_on_collision(self, tmp_path, caplog):
+        sys_dir = tmp_path / "system"
+        user_dir = tmp_path / "user"
+        sys_dir.mkdir()
+        user_dir.mkdir()
+        _write_skill(sys_dir, "clash", "system version")
+        _write_skill(user_dir, "clash", "user version")
+
+        with caplog.at_level(logging.WARNING):
+            manifest = build_skill_manifest([sys_dir, user_dir])
+        assert "system version" in manifest
+        assert "user version" not in manifest
+        assert any(
+            "clash" in r.message and "shadowed" in r.message for r in caplog.records
+        )
+
+    def test_load_skill_respects_order(self, tmp_path):
+        sys_dir = tmp_path / "system"
+        user_dir = tmp_path / "user"
+        sys_dir.mkdir()
+        user_dir.mkdir()
+        sys_path = _write_skill(sys_dir, "clash", "system version")
+        _write_skill(user_dir, "clash", "user version")
+
+        assert load_skill("clash", [sys_dir, user_dir]) == sys_path.read_text()
+
+    def test_load_user_skill_when_no_collision(self, tmp_path):
+        sys_dir = tmp_path / "system"
+        user_dir = tmp_path / "user"
+        sys_dir.mkdir()
+        user_dir.mkdir()
+        user_path = _write_skill(user_dir, "journal", "user: journaling")
+
+        assert load_skill("journal", [sys_dir, user_dir]) == user_path.read_text()
+
+    def test_load_unknown_returns_not_found(self, tmp_path):
+        sys_dir = tmp_path / "system"
+        sys_dir.mkdir()
+        result = load_skill("nope", [sys_dir, tmp_path / "missing"])
+        assert "not found" in result.lower()

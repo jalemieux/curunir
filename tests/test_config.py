@@ -9,7 +9,7 @@ def test_default_config():
     assert config.model == "anthropic/claude-sonnet-4-20250514"
     assert config.max_iterations == 75
     assert config.identity_file == Path("./context/identity.md")
-    assert config.skills_dir == Path("./skills")
+    assert config.skill_dirs == [Path("./skills"), Path("./context/skills")]
 
 
 def test_custom_config():
