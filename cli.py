@@ -1,12 +1,13 @@
 """Standalone WebSocket CLI client for Curunir.
 
 Usage:
-    python cli.py [--host localhost] [--port 8765]
+    python cli.py [--host localhost] [--port 8765] [--download-dir DIR]
 """
 import argparse
 import asyncio
 import base64
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -19,9 +20,60 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
 
+logger = logging.getLogger(__name__)
+
 # Reconnection settings
 _BACKOFF_BASE = 1.0
 _BACKOFF_MAX = 30.0
+
+_DEFAULT_DOWNLOAD_DIR = os.path.expanduser("~/Downloads/curunir")
+
+
+def _detect_version() -> str:
+    """Return a short git SHA + dirty marker, or 'dev' if unavailable.
+
+    Run at CLI startup so a visible banner makes it obvious whether the
+    running process matches the checkout on disk.
+    """
+    try:
+        import subprocess
+        repo = os.path.dirname(os.path.abspath(__file__))
+        sha = subprocess.check_output(
+            ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        dirty = subprocess.check_output(
+            ["git", "-C", repo, "status", "--porcelain"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return f"{sha}{'+' if dirty else ''}"
+    except Exception:
+        return "dev"
+
+
+def _save_attachment(att: dict, download_dir: str) -> str | None:
+    """Decode base64 *data* and write it under *download_dir*.
+
+    Returns the saved local path, or None on failure. Adds a numeric suffix
+    (`name-1.pdf`, `name-2.pdf`, ...) when the target name already exists.
+    """
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        filename = att.get("filename") or "attachment"
+        # Strip path components so a malicious server can't escape download_dir
+        filename = os.path.basename(filename)
+        base, ext = os.path.splitext(filename)
+        target = os.path.join(download_dir, filename)
+        counter = 1
+        while os.path.exists(target):
+            target = os.path.join(download_dir, f"{base}-{counter}{ext}")
+            counter += 1
+        with open(target, "wb") as f:
+            f.write(base64.b64decode(att["data"]))
+        return target
+    except (OSError, ValueError) as exc:
+        logger.warning("Failed to save attachment %s: %s", att.get("filename"), exc)
+        return None
 
 # Size caps mirrored from src/channels/ws.py
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
@@ -189,11 +241,12 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
             delay = min(delay * 2, _BACKOFF_MAX)
 
 
-async def run(host: str, port: int, console: Console | None = None) -> None:
+async def run(host: str, port: int, console: Console | None = None,
+              download_dir: str = _DEFAULT_DOWNLOAD_DIR) -> None:
     console = console or Console()
     uri = f"ws://{host}:{port}"
 
-    console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim]")
+    console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim] [dim]rev {_detect_version()}[/dim]")
     console.print("[dim]type /clear or /new to reset, /reset to reset without extracting, /verbose to toggle tool output[/dim]")
 
     verbose = True
@@ -308,11 +361,23 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         line = Text()
                         line.append("  \U0001f4ce ", style="dim")
                         line.append(att.get("filename", ""), style="bold")
-                        if "path" in att:
+                        if att.get("path"):
                             line.append(f" \u2192 {att['path']}", style="dim")
+                        if att.get("error"):
+                            line.append(f" [{att['error']}]", style="red")
                         console.print(line)
                         if att.get("content"):
                             console.print(Markdown(att["content"]))
+                        elif att.get("data"):
+                            saved = _save_attachment(att, download_dir)
+                            saved_line = Text()
+                            saved_line.append("     \u21f3 ", style="dim")
+                            if saved:
+                                saved_line.append("saved to ", style="dim")
+                                saved_line.append(saved, style="green")
+                            else:
+                                saved_line.append("save failed", style="red")
+                            console.print(saved_line)
 
                 # Display stats in verbose mode
                 stats = data.get("stats")
