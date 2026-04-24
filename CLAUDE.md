@@ -95,9 +95,9 @@ Local directory containing `identity.md` (agent persona, required), `memory/` (p
 
 ### Onboarding (`onboarding/`)
 
-First-run scaffolding. New users fill `onboarding/questions.md`, run `python onboarding/render.py` to generate `context.default/identity.md`, then `bootstrap.py` copies it into `context/` on first launch (never overwriting existing files).
+First-run scaffolding. New users fill `onboarding/questions.md`, then ask an LLM (curunir itself, Claude Code, etc.) to generate `context.default/identity.md` from those answers — `onboarding/README.md` has the prompt. `bootstrap.py` copies that file into `context/` on first launch (never overwriting existing files).
 
-See [`onboarding/README.md`](onboarding/README.md) for the user-facing flow, the questionnaire structure, persona expansions, and re-rendering behavior.
+See [`onboarding/README.md`](onboarding/README.md) for the user-facing flow and the LLM generation prompt.
 
 ### Evals (`eval/`)
 
