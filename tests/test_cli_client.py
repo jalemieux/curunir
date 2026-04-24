@@ -358,3 +358,100 @@ async def test_output_renders_enriched_attachment_content():
     output = console.file.getvalue()
     assert "analysis.md" in output
     assert "Key findings here" in output
+
+
+# ---------------------------------------------------------------------------
+# Tests: CLI Staging helper
+# ---------------------------------------------------------------------------
+import base64 as _b64
+import mimetypes
+
+from cli import Staging
+
+
+class TestStaging:
+    def test_add_image_succeeds(self, tmp_path):
+        img = tmp_path / "x.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        s = Staging()
+        err = s.add(str(img))
+        assert err is None
+        payload = s.to_payload()
+        assert len(payload) == 1
+        assert payload[0]["filename"] == "x.png"
+        assert payload[0]["mime_type"] == "image/png"
+        assert _b64.b64decode(payload[0]["data"]).startswith(b"\x89PNG")
+
+    def test_add_text_succeeds(self, tmp_path):
+        p = tmp_path / "notes.txt"
+        p.write_text("hello")
+        s = Staging()
+        assert s.add(str(p)) is None
+        assert s.to_payload()[0]["mime_type"].startswith("text/")
+
+    def test_add_missing_file_rejected(self, tmp_path):
+        s = Staging()
+        err = s.add(str(tmp_path / "nope.txt"))
+        assert err and "not found" in err.lower()
+
+    def test_add_oversized_image_rejected(self, tmp_path):
+        p = tmp_path / "huge.png"
+        p.write_bytes(b"\x00" * (5 * 1024 * 1024 + 1))
+        s = Staging()
+        err = s.add(str(p))
+        assert err and "5" in err and "MB" in err
+
+    def test_add_oversized_text_rejected(self, tmp_path):
+        p = tmp_path / "huge.txt"
+        p.write_bytes(b"x" * (256 * 1024 + 1))
+        s = Staging()
+        err = s.add(str(p))
+        assert err and "256" in err and "KB" in err
+
+    def test_total_cap_enforced(self, tmp_path):
+        s = Staging()
+        for i in range(4):
+            p = tmp_path / f"a{i}.png"
+            p.write_bytes(b"\x00" * (4 * 1024 * 1024))
+            assert s.add(str(p)) is None
+        p = tmp_path / "last.png"
+        p.write_bytes(b"\x00" * (4 * 1024 * 1024 + 1))
+        err = s.add(str(p))
+        assert err and "20 MB" in err
+
+    def test_binary_non_image_rejected(self, tmp_path):
+        p = tmp_path / "weird.bin"
+        p.write_bytes(b"\xff\xfe\xfa")
+        s = Staging()
+        err = s.add(str(p))
+        assert err and ("UTF-8" in err or "recognized" in err.lower())
+
+    def test_unknown_mime_but_utf8_accepted_as_text(self, tmp_path):
+        p = tmp_path / "notes.weird"
+        p.write_text("just text")
+        assert mimetypes.guess_type(str(p))[0] is None
+        s = Staging()
+        assert s.add(str(p)) is None
+        assert s.to_payload()[0]["mime_type"] == "text/plain"
+
+    def test_remove_and_clear(self, tmp_path):
+        p1 = tmp_path / "a.txt"
+        p2 = tmp_path / "b.txt"
+        p1.write_text("1")
+        p2.write_text("2")
+        s = Staging()
+        s.add(str(p1))
+        s.add(str(p2))
+        assert len(s.to_payload()) == 2
+        s.remove(1)
+        assert [item["filename"] for item in s.to_payload()] == ["b.txt"]
+        s.clear()
+        assert s.to_payload() == []
+
+    def test_remove_out_of_range_returns_error(self, tmp_path):
+        p = tmp_path / "a.txt"
+        p.write_text("1")
+        s = Staging()
+        s.add(str(p))
+        assert s.remove(0) and "index" in s.remove(0).lower()
+        assert s.remove(5) and "index" in s.remove(5).lower()
