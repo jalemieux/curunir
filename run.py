@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import os
+import shutil
 
 import httpx
 from dotenv import load_dotenv
@@ -198,6 +199,12 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     return blocks
 
 
+def _purge_session_uploads(session_id: str) -> None:
+    """Remove context/uploads/<session_id>/ if it exists. Best-effort."""
+    path = os.path.join(os.getcwd(), "context", "uploads", session_id)
+    shutil.rmtree(path, ignore_errors=True)
+
+
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
     pending: list = []  # messages received while handle() was running
@@ -213,6 +220,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             history = agent.sessions.pop(msg.session_id, None)
             if history and msg.command == "clear":
                 asyncio.create_task(extract_learnings(agent.config, list(history)))
+            if msg.channel == "cli":
+                _purge_session_uploads(msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -251,7 +260,10 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
-        content = _build_content(msg)
+        if msg.channel == "cli":
+            content = build_multimodal_content(msg.content, msg.attachments)
+        else:
+            content = _build_content(msg)
         attachments = []
         metadata: dict = {}
 
@@ -300,6 +312,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             history = agent.sessions.pop(msg.session_id, None)
             if history and reset_msg.command == "clear":
                 asyncio.create_task(extract_learnings(agent.config, list(history)))
+            if reset_msg.channel == "cli":
+                _purge_session_uploads(reset_msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=reset_msg.channel, session_id=reset_msg.session_id,
                 reply_address=reset_msg.reply_address,
