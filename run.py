@@ -1,9 +1,11 @@
 """Curunir runtime — configures channels, wires queues, starts the agent loop."""
 
 import asyncio
+import base64
 import json
 import logging
 import os
+import shutil
 
 import httpx
 from dotenv import load_dotenv
@@ -161,6 +163,48 @@ def _build_content(msg) -> str:
     return "\n".join(parts)
 
 
+def build_multimodal_content(text: str, attachments: list[dict] | None) -> str | list:
+    """Build LiteLLM content from text + a staged-attachment manifest.
+
+    Returns a plain `str` when there are no attachments (backward-compatible
+    with the existing flow) or a list of content blocks otherwise.
+    Images become `image_url` data-URI blocks; UTF-8 text files become
+    fenced text blocks tagged with the filename.
+    """
+    if not attachments:
+        return text
+
+    blocks: list[dict] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    for att in attachments:
+        mime = att["mime_type"]
+        path = att["path"]
+        if mime.startswith("image/"):
+            with open(path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            })
+        else:
+            with open(path, "rb") as f:
+                content = f.read().decode("utf-8")
+            blocks.append({
+                "type": "text",
+                "text": f"[Attachment: {att['filename']}]\n```\n{content}\n```",
+            })
+
+    return blocks
+
+
+def _purge_session_uploads(session_id: str) -> None:
+    """Remove context/uploads/<session_id>/ if it exists. Best-effort."""
+    path = os.path.join(os.getcwd(), "context", "uploads", session_id)
+    shutil.rmtree(path, ignore_errors=True)
+
+
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
     pending: list = []  # messages received while handle() was running
@@ -176,6 +220,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             history = agent.sessions.pop(msg.session_id, None)
             if history and msg.command == "clear":
                 asyncio.create_task(extract_learnings(agent.config, list(history)))
+            if msg.channel == "cli":
+                _purge_session_uploads(msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -214,7 +260,10 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
-        content = _build_content(msg)
+        if msg.channel == "cli":
+            content = build_multimodal_content(msg.content, msg.attachments)
+        else:
+            content = _build_content(msg)
         attachments = []
         metadata: dict = {}
 
@@ -263,6 +312,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             history = agent.sessions.pop(msg.session_id, None)
             if history and reset_msg.command == "clear":
                 asyncio.create_task(extract_learnings(agent.config, list(history)))
+            if reset_msg.channel == "cli":
+                _purge_session_uploads(reset_msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=reset_msg.channel, session_id=reset_msg.session_id,
                 reply_address=reset_msg.reply_address,
