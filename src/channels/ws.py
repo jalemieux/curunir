@@ -23,6 +23,61 @@ _ALLOWED_IMAGE_MIMES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
 })
 
+# Outbound binary attachments: per-file cap. Sized so that a single attachment
+# stays comfortably under the 32 MB websocket frame limit (20 MB raw → ~27 MB
+# base64-expanded), while leaving headroom for the JSON envelope.
+_MAX_OUTBOUND_BINARY_BYTES = 20 * 1024 * 1024
+
+
+def _serialize_attachment(att: dict, project_root: str) -> dict:
+    """Read the on-disk file and return a wire-form attachment dict.
+
+    Text/JSON files are inlined as a UTF-8 `content` string; binaries are
+    base64-encoded into `data`. Missing files get an `error` field; files
+    larger than the per-type cap are returned with metadata only (no content
+    or data) so the CLI still shows the filename + path.
+    """
+    out = {
+        "filename": att.get("filename", ""),
+        "path": att.get("path", ""),
+        "mime_type": att.get("mime_type", ""),
+        "size": att.get("size", 0),
+    }
+    path = att.get("path", "")
+
+    if path and os.path.isabs(path):
+        try:
+            out["path"] = os.path.relpath(path, project_root)
+        except ValueError:
+            pass  # different drive on Windows; keep absolute
+
+    if not path or not os.path.isfile(path):
+        out["error"] = "file not found"
+        return out
+
+    mime = att.get("mime_type", "")
+    is_text = mime.startswith("text/") or mime == "application/json"
+    file_size = os.path.getsize(path)
+
+    if is_text:
+        if file_size > _MAX_TEXT_BYTES:
+            return out
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                out["content"] = f.read()
+        except OSError:
+            out["error"] = "file not found"
+    else:
+        if file_size > _MAX_OUTBOUND_BINARY_BYTES:
+            return out
+        try:
+            with open(path, "rb") as f:
+                out["data"] = base64.b64encode(f.read()).decode("ascii")
+        except OSError:
+            out["error"] = "file not found"
+
+    return out
+
 
 def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None]:
     """Validate and base64-decode inbound attachment payloads.
@@ -238,12 +293,17 @@ class WebSocketChannel:
             logger.warning("No WebSocket client connected; dropping outgoing message")
             return
 
+        attachments = None
+        if msg.attachments:
+            cwd = os.getcwd()
+            attachments = [_serialize_attachment(a, cwd) for a in msg.attachments]
+
         payload: dict = {
             "content": msg.content,
             "tool_calls": msg.tool_calls,
             "final": msg.final,
             "delta": msg.delta,
-            "attachments": msg.attachments if msg.attachments else None,
+            "attachments": attachments,
             "workflow": msg.workflow,
             "stats": msg.stats,
         }

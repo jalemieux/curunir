@@ -591,10 +591,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Curunir WebSocket CLI client")
     parser.add_argument("--host", default="localhost", help="Server host (default: localhost)")
     parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
+    parser.add_argument(
+        "--download-dir",
+        default=os.environ.get("CURUNIR_DOWNLOAD_DIR") or _DEFAULT_DOWNLOAD_DIR,
+        help=f"Local directory for binary attachments from the server "
+             f"(default: $CURUNIR_DOWNLOAD_DIR or {_DEFAULT_DOWNLOAD_DIR})",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(run(args.host, args.port))
+        asyncio.run(run(args.host, args.port, download_dir=args.download_dir))
     except KeyboardInterrupt:
         pass
 

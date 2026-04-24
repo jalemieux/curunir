@@ -1,13 +1,16 @@
 """Tests for WebSocketChannel using real websockets connections (in-process)."""
 import asyncio
+import base64
 import json
+import os
+import tempfile
 
 import pytest
 import websockets
 import websockets.exceptions
 
 from src.channels.base import OutgoingMessage
-from src.channels.ws import SESSION_ID, WebSocketChannel
+from src.channels.ws import SESSION_ID, WebSocketChannel, _serialize_attachment
 
 # Use a fixed test port — pick something unlikely to clash
 TEST_PORT = 18765
@@ -562,3 +565,146 @@ class TestWsAttachmentsE2E:
             assert msg.attachments is None
         finally:
             await _stop_channel(task)
+
+
+# ---------------------------------------------------------------------------
+# Outbound _serialize_attachment unit tests
+# ---------------------------------------------------------------------------
+
+_MAX_TEXT = 256 * 1024
+_MAX_BIN = 20 * 1024 * 1024
+
+
+def test_serialize_inlines_text_content():
+    """text/* attachments get UTF-8 content into `content`."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir="/tmp") as f:
+        f.write("# Hello\n\nWorld")
+        path = f.name
+    try:
+        att = {"filename": "hello.md", "path": path, "mime_type": "text/markdown", "size": 15}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert out["content"] == "# Hello\n\nWorld"
+        assert out["path"] == os.path.basename(path)  # normalized to relative
+        assert "data" not in out
+    finally:
+        os.unlink(path)
+
+
+def test_serialize_inlines_json_content():
+    """application/json attachments get inlined as text."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, dir="/tmp") as f:
+        f.write('{"key": "value"}')
+        path = f.name
+    try:
+        att = {"filename": "data.json", "path": path, "mime_type": "application/json", "size": 16}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert out["content"] == '{"key": "value"}'
+    finally:
+        os.unlink(path)
+
+
+def test_serialize_base64_encodes_binary():
+    """Binary attachments get base64-encoded into `data`."""
+    raw = b"\x89PNG\r\n\x1a\n\x00\x01\x02"
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as f:
+        f.write(raw)
+        path = f.name
+    try:
+        att = {"filename": "image.png", "path": path, "mime_type": "image/png", "size": len(raw)}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert "content" not in out
+        assert base64.b64decode(out["data"]) == raw
+    finally:
+        os.unlink(path)
+
+
+def test_serialize_skips_oversized_text():
+    """Text larger than the inline cap omits content (no error — just an omission)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir="/tmp") as f:
+        f.write("x" * (_MAX_TEXT + 1))
+        path = f.name
+    try:
+        att = {"filename": "big.md", "path": path, "mime_type": "text/markdown", "size": _MAX_TEXT + 1}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert "content" not in out
+        assert "data" not in out
+        assert "error" not in out
+    finally:
+        os.unlink(path)
+
+
+def test_serialize_skips_oversized_binary():
+    """Binary larger than the per-file cap omits data."""
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False, dir="/tmp") as f:
+        # Sparse file — fast and cheap
+        f.seek(_MAX_BIN + 1)
+        f.write(b"\0")
+        path = f.name
+    try:
+        att = {"filename": "big.bin", "path": path, "mime_type": "application/octet-stream", "size": _MAX_BIN + 1}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert "data" not in out
+        assert "content" not in out
+    finally:
+        os.unlink(path)
+
+
+def test_serialize_handles_missing_file():
+    """Missing file gets an error field and no content/data."""
+    att = {"filename": "gone.pdf", "path": "/tmp/nonexistent-xyz-curunir.pdf",
+           "mime_type": "application/pdf", "size": 100}
+    out = _serialize_attachment(att, project_root="/tmp")
+    assert out["error"] == "file not found"
+    assert "data" not in out
+    assert "content" not in out
+
+
+def test_serialize_normalizes_absolute_path():
+    """Absolute paths are made relative to project_root."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir="/tmp") as f:
+        f.write("hi")
+        path = f.name
+    try:
+        att = {"filename": "test.md", "path": path, "mime_type": "text/markdown", "size": 2}
+        out = _serialize_attachment(att, project_root="/tmp")
+        assert not out["path"].startswith("/")
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_send_serializes_binary_attachment_to_data_field():
+    """Binary attachments arrive on the wire base64-encoded in `data`."""
+    raw = b"%PDF-1.4 fake pdf body"
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir="/tmp") as f:
+        f.write(raw)
+        path = f.name
+
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 30)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 30}") as ws:
+            await asyncio.sleep(0.05)
+            outgoing = OutgoingMessage(
+                content="here you go",
+                channel="cli",
+                session_id=SESSION_ID,
+                reply_address={},
+                attachments=[{
+                    "filename": "report.pdf",
+                    "path": path,
+                    "mime_type": "application/pdf",
+                    "size": len(raw),
+                }],
+            )
+            await ch.send(outgoing)
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+            assert len(data["attachments"]) == 1
+            att = data["attachments"][0]
+            assert att["filename"] == "report.pdf"
+            assert base64.b64decode(att["data"]) == raw
+            assert att.get("content") is None
+    finally:
+        await _stop_channel(task)
+        os.unlink(path)
