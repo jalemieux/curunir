@@ -179,7 +179,7 @@ Configuration is handled via `src/config.py`:
 | `max_iterations` | `15` | Max tool-calling rounds per turn |
 | `identity_file` | `./context/identity.md` | Path to persona file |
 | `context_dir` | `./context` | Path to context directory (memory, etc.) |
-| `skills_dir` | `./skills` | Path to skills directory |
+| `skill_dirs` | `[./skills, ./context/skills]` | Directories scanned for skills in priority order (first-seen wins on name collision) |
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 

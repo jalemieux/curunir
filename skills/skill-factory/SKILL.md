@@ -1,81 +1,111 @@
 ---
 name: skill-factory
-description: "Use when asked to create, write, or build a new skill — gathers requirements, finds docs, generates SKILL.md, and smoke tests it"
+description: "Use when the user asks to create, write, or build a new user-defined skill — produces a SKILL.md in context/skills/ matching Curunir conventions"
 ---
 
 # Skill Factory
 
-Create a new skill from scratch. Walks you through: requirements → research → generate → smoke test.
+## What you're creating
 
-**CLI dependencies (available in Docker container):**
-- `chub` — Context Hub CLI for fetching curated API docs. Optional; skill falls back to web search if unavailable.
+User-defined skills live in `context/skills/<kebab-name>/SKILL.md` and are
+loaded alongside system skills at startup. System skills in `skills/` are
+maintainer-authored and committed with the repo — **do not write there**. On
+a name collision between `skills/` and `context/skills/`, the system version
+wins and a warning is logged.
 
 ## Workflow
 
-### Phase 1 — Requirements
+1. **Clarify.** Ask 1–2 questions to pin down:
+   - The skill name (kebab-case, letters/numbers/hyphens only — the directory
+     name IS the skill name).
+   - The trigger condition: what should the user say or what state should the
+     agent be in for this skill to load?
+   - Any opt-in tools it needs (see §5).
+2. **Conflict check.** `context/skills/<name>/` must not already exist. If
+   `skills/<name>/` exists, pick a different name — system wins on collision.
+3. **Generate.** Copy `references/template.md`, fill in the frontmatter and
+   body. Add `references/`, `scripts/`, or `templates/` subdirectories only
+   if SKILL.md would otherwise exceed ~200 lines (see §6).
+4. **Smoke test.** Three checks, all required:
+   - Frontmatter parses (no YAML errors) and `name` matches the directory.
+   - `load_skill` on the new name returns content, not `"Skill not found"`.
+   - Dry-run the trigger scenario mentally: if the user said the phrase
+     you put in `description`, would the manifest naturally route the agent
+     to this skill? If not, rewrite the description.
 
-1. User describes the skill they want.
-2. Identify the **skill category** (see Category Heuristic below) to shape template emphasis.
-3. Validate the skill name: lowercase-kebab-case, letters/numbers/hyphens only. The directory name IS the skill name.
-4. Ask 1-2 clarifying questions: scope, which operations, any gotchas.
-5. **Installation destination** — ask where to save the skill. Offer:
-   - **Project-local** (`./skills/`) — committed with the repo, available to collaborators. Default if the project already has a `skills/` directory.
-   - **User-global** (`~/.claude/skills/`) — available across all projects for this user.
-   - **Custom path** — user specifies.
-   Use the chosen path as `{skills_dir}` for the rest of the workflow.
-6. Propose a **success criteria / test scenario** the skill can be verified against. User can override.
+## Frontmatter reference
 
-### Phase 2 — Research
+| Field         | Required | Notes                                                         |
+|---------------|----------|---------------------------------------------------------------|
+| `name`        | yes      | kebab-case, must match parent directory                       |
+| `description` | yes      | trigger phrasing — "Use when …"                               |
+| `tools`       | no       | comma-separated opt-in tools (currently only `attach`)        |
+| `disabled`    | no       | `true` to hide from manifest and block `load_skill`           |
 
-Research priority: user-provided docs > context hub (`chub`) > web search > agent knowledge.
+## Writing good descriptions
 
-7. Gather docs using the priority order above. If `chub` is available (`which chub`), use it — see `references/chub.md` for the search → get → annotate workflow. Do not install tools that aren't available.
-8. Read 1-2 existing skills from the project's skills directory as style reference. If none exist, use the template as sole reference.
+The `description` is the sole signal the agent uses to decide whether to load
+a skill. Describe **when to trigger**, not what the skill contains.
 
-### Phase 3 — Generate
+- Good: `"Use when the user pastes meeting notes or a Slack catch-up and
+  asks for durable takeaways"`
+- Bad: `"A skill that extracts learnings from text"`
 
-9. **Conflict check** — verify `{skills_dir}/{skill-name}/` doesn't already exist. If it does, ask the user whether to overwrite or choose a different name.
-10. Assess whether the skill needs supporting files (see Directory Structure below).
-11. **Credential check** — if the skill uses APIs that require keys or tokens, generate an interactive setup script in `scripts/` that helps the user obtain and configure them. The script should: check if already set, tell the user where to sign up, prompt for the key, validate it against the API, and offer a choice of where to persist it (shell config, project `.env`, custom path, or session-only). Reference the script from SKILL.md's prerequisites.
-12. Generate SKILL.md using the template. Read `references/template.md` for the full template and category heuristic.
-13. Generate any supporting files (scripts, references, templates, examples).
-14. Write to `{skills_dir}/{skill-name}/`.
+Include the kinds of phrases a user is likely to say — "fact-check this",
+"research X", "draft an email to Y" — so the agent recognizes them.
 
-### Phase 4 — Smoke Test
+## Opt-in tools
 
-15. **Structural validation** — frontmatter parses correctly, `name` and `description` present, file at correct path.
-16. **Load test** — use the skill loading tool available in your environment to load the new skill by name. Verify it returns the skill content, not a "not found" error.
-17. **Dry-run against success criteria** — walk through the skill's instructions for the test scenario. Execute read-only steps. For skills that call external APIs, compose the commands but do not execute them. Stop before any mutating side effects.
-18. Report pass/fail. If fail, fix and re-test.
+Opt-in tools are extra tools a skill unlocks when loaded. Declare them in
+frontmatter:
 
-## Template & Category Heuristic
+```yaml
+---
+name: my-skill
+description: Use when ...
+tools: attach
+---
+```
 
-Read `references/template.md` for the full SKILL.md template and the 9-category heuristic table. The template has sections: frontmatter, title, Usage, Examples, Parameters/Reference, Tips, Common Mistakes. Scale each section to complexity.
+Currently only `attach` is available (delivers a file as an email
+attachment / CLI file path). New opt-in tools are registered in
+`src/tools/schemas.py` — see `src/tools/README.md` for the mechanics. Don't
+declare a tool that isn't registered; it won't do anything.
 
-## Directory Structure
+## Supporting files
 
-A skill can be more than SKILL.md. Add supporting directories only when complexity warrants it:
+A skill is SKILL.md by default. Add subdirectories only when the skill is
+big enough to warrant them:
 
-- `scripts/` — reusable scripts the agent runs, not reconstructs
-- `references/` — large reference docs, schemas, param tables
-- `templates/` — boilerplate the agent copies/adapts
-- `examples/` — sample inputs/outputs clarifying expected formats
+- `references/` — large reference material the agent reads on demand (API
+  reference tables, schemas, long how-tos).
+- `scripts/` — executable helpers the agent invokes rather than
+  reimplementing inline (e.g. a credential-setup script).
+- `templates/` — boilerplate the agent copies and fills in.
 
-SKILL.md references supporting files explicitly. Simple skills are SKILL.md only.
+If SKILL.md stays under ~200 lines and doesn't repeat itself, you don't
+need any of these.
 
-## Writing Good Descriptions
+## Restart caveat
 
-The `description` determines skill discovery. Describe the **trigger condition**, not the contents.
+The skill manifest is built once at startup. A newly-written SKILL.md **will
+not appear in the current session's manifest** until Curunir restarts.
+However, `load_skill <name>` reads from disk at call time — so if the user
+names the new skill directly, it will load in the current session. Full
+discovery (the agent picking it up on its own from trigger phrases) requires
+a restart.
 
-- Good: `"Use when processing Slack catch-ups or incident summaries to extract durable knowledge"`
-- Bad: `"A skill for extracting learnings from text"`
+## Common mistakes
 
-## Common Mistakes
-
-- **Describing contents instead of triggers** — the `description` field must say WHEN to load the skill, not summarize what it does. If the description reads like a summary, rewrite it.
-- **Stating the obvious** — the agent knows how to code. Don't explain curl, jq, or basic patterns. Focus on API quirks, org-specific knowledge, and things that change default behavior.
-- **Skipping the conflict check** — always verify the skill directory doesn't already exist before writing. Overwriting an existing skill without asking is destructive.
-- **Not reading existing skills** — always read 1-2 existing skills for style calibration before generating. Match the project's conventions.
-- **Supporting files by default** — only add scripts/, references/, etc. when complexity warrants it. Most skills are SKILL.md only.
-- **Skipping the smoke test** — always validate: frontmatter parses, skill loads by name, dry-run against the test scenario passes.
-- **Hardcoding environment-specific tool names** — use whatever skill loading / searching tools are available in the current environment. Don't assume specific tool names.
+- **Describing contents instead of triggers** in `description`. If it reads
+  like a summary, rewrite it.
+- **Writing to `skills/` instead of `context/skills/`.** System skills are
+  maintainer-authored.
+- **Directory name doesn't match frontmatter `name`.** The loader keys on
+  `name`, but humans browse by directory — mismatches cause confusion.
+- **Declaring tools that aren't registered.** Only `attach` is currently
+  available as opt-in.
+- **Assuming the new skill auto-appears.** The manifest is built at startup;
+  a restart is needed for the agent to discover the skill on its own.
+- **Skipping the smoke test.** A skill with broken frontmatter silently
+  disappears from the manifest — verify it loads before calling the job done.
