@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 
+# attachments: list of {"filename": str, "path": str, "mime_type": str, "size": int}
+#   — produced by ws.py (CLI uploads) and email.py (email attachments), same shape.
 @dataclass
 class IncomingMessage:
     content: str

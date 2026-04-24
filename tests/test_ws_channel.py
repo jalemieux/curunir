@@ -474,3 +474,91 @@ class TestStageAttachments:
 
     def test_empty_items_returns_empty_manifest(self, tmp_uploads):
         assert _stage_attachments([], "sid", str(tmp_uploads)) == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-to-end inbound attachments through WebSocketChannel
+# ---------------------------------------------------------------------------
+import os as _os_e2e
+
+
+class TestWsAttachmentsE2E:
+    @pytest.mark.asyncio
+    async def test_valid_batch_produces_incoming_message_with_manifest(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 20,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 20}") as ws:
+                await ws.send(json.dumps({
+                    "content": "compare these",
+                    "command": None,
+                    "attachments": [
+                        {"filename": "a.png", "mime_type": "image/png",
+                         "data": base64.b64encode(b"PNGDATA").decode()},
+                        {"filename": "b.txt", "mime_type": "text/plain",
+                         "data": base64.b64encode(b"hello").decode()},
+                    ],
+                }))
+                await asyncio.sleep(0.1)
+
+            msg = q.get_nowait()
+            assert msg.content == "compare these"
+            assert msg.attachments is not None
+            assert len(msg.attachments) == 2
+            for m in msg.attachments:
+                assert set(m.keys()) == {"filename", "path", "mime_type", "size"}
+                assert _os_e2e.path.isfile(m["path"])
+            parents = {_os_e2e.path.dirname(m["path"]) for m in msg.attachments}
+            assert len(parents) == 1
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_invalid_payload_emits_error_and_drops_message(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 21,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 21}") as ws:
+                await ws.send(json.dumps({
+                    "content": "oversized image",
+                    "command": None,
+                    "attachments": [{
+                        "filename": "huge.png",
+                        "mime_type": "image/png",
+                        "data": base64.b64encode(b"\x00" * (5 * 1024 * 1024 + 1)).decode(),
+                    }],
+                }))
+                raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                data = json.loads(raw)
+                assert data["final"] is True
+                assert "5 MB" in data["content"] or "exceeds" in data["content"]
+
+            # Drain any messages; only 'extract' from disconnect should appear, no payload.
+            messages = []
+            await asyncio.sleep(0.1)
+            while not q.empty():
+                messages.append(q.get_nowait())
+            # The bad-payload message must NOT have been enqueued.
+            assert all(m.command == "extract" for m in messages)
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_no_attachments_key_still_queues_plain_message(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 22,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 22}") as ws:
+                await ws.send(json.dumps({"content": "no files", "command": None}))
+                await asyncio.sleep(0.1)
+            msg = q.get_nowait()
+            assert msg.content == "no files"
+            assert msg.attachments is None
+        finally:
+            await _stop_channel(task)
