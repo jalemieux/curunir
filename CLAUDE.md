@@ -93,6 +93,12 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 
 Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and `schedules.json` (cron tasks). Use `sync-context.sh` to rsync from a remote machine before starting.
 
+### Onboarding (`onboarding/`)
+
+First-run scaffolding. New users fill `onboarding/questions.md`, run `python onboarding/render.py` to generate `context.default/identity.md`, then `bootstrap.py` copies it into `context/` on first launch (never overwriting existing files).
+
+See [`onboarding/README.md`](onboarding/README.md) for the user-facing flow, the questionnaire structure, persona expansions, and re-rendering behavior.
+
 ### Evals (`eval/`)
 
 `python eval/run_evals.py` runs LLM-graded eval suites defined in `simple_evals.md` and `advanced_evals.md`. Supports `--max-loops` per prompt. Results written to `eval/eval_results/`.
