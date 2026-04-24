@@ -30,3 +30,11 @@ def agent_config(tmp_context, tmp_skills):
         context_dir=tmp_context,
         skill_dirs=[tmp_skills],
     )
+
+
+@pytest.fixture
+def tmp_uploads(tmp_path):
+    """Temporary uploads root for WebSocket channel tests."""
+    d = tmp_path / "uploads"
+    d.mkdir()
+    return d
