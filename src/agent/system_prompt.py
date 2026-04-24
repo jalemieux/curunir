@@ -14,7 +14,7 @@ def build_static_prompt(config: AgentConfig) -> str:
             "Curunir requires an identity file to start."
         )
     identity = config.identity_file.read_text()
-    manifest = build_skill_manifest(config.skills_dir)
+    manifest = build_skill_manifest(config.skill_dirs)
     parts = [identity]
     if manifest:
         parts.append(manifest)

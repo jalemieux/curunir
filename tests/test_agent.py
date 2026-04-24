@@ -322,7 +322,7 @@ class TestAgentInit:
         from src.config import AgentConfig
         config = AgentConfig(
             identity_file=tmp_path / "nonexistent.md",
-            skills_dir=tmp_skills,
+            skill_dirs=[tmp_skills],
         )
         with pytest.raises(FileNotFoundError):
             Agent(config)

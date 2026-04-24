@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from .config import AgentConfig
 from .llm import call_llm
+from .skills import load_skill
 
 log = logging.getLogger(__name__)
 
@@ -72,10 +73,11 @@ async def _extract(
         return
 
     memory_dir = config.context_dir / "memory"
-    skill_path = config.skills_dir / "extract-learnings" / "SKILL.md"
     taxonomy_path = memory_dir / "README.md"
 
-    skill_content = skill_path.read_text() if skill_path.exists() else ""
+    skill_content = load_skill("extract-learnings", config.skill_dirs)
+    if skill_content.startswith("Skill not found"):
+        skill_content = ""
     memory_taxonomy = taxonomy_path.read_text() if taxonomy_path.exists() else ""
 
     prompt = EXTRACTION_PROMPT.format(
