@@ -9,6 +9,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 
 import websockets
 import websockets.exceptions
@@ -118,6 +119,54 @@ class Staging:
             {"filename": it["filename"], "mime_type": it["mime_type"], "data": it["data"]}
             for it in self._items
         ]
+
+
+# Matches an absolute POSIX path: `/` followed by one or more non-whitespace
+# chars or backslash-escaped chars (shell-style drag-drop uses `\<space>`).
+_PATH_RE = re.compile(r'/(?:[^\s\\]|\\.)+')
+
+
+def _format_size(size: int) -> str:
+    return f"{size / 1024 / 1024:.1f} MB" if size >= 1024 * 1024 else f"{size / 1024:.0f} KB"
+
+
+def _extract_and_stage_paths(text: str, staging: Staging, console: Console) -> str:
+    """Auto-stage absolute paths to existing local files from *text*.
+
+    Returns the text with successfully-staged paths removed. Paths that don't
+    resolve to an existing file, or that fail Staging validation, stay in place.
+    Makes drag-drop "just work": a dragged file's path becomes an attachment,
+    not a literal string the remote agent can't resolve.
+    """
+    kept: list[tuple[int, int]] = []  # spans to remove (start, end) if staged
+    for m in _PATH_RE.finditer(text):
+        escaped = m.group(0)
+        path = re.sub(r"\\(.)", r"\1", escaped)  # unescape shell backslashes
+        if not os.path.isfile(path):
+            continue
+        err = staging.add(path)
+        if err is None:
+            item = staging._items[-1]
+            console.print(
+                f"[dim]\U0001f4ce staged: {item['filename']} ({_format_size(item['size'])})[/dim]"
+            )
+            kept.append((m.start(), m.end()))
+        else:
+            console.print(f"[red]❌ rejected: {err}[/red]")
+
+    if not kept:
+        return text
+
+    out = []
+    last = 0
+    for start, end in kept:
+        out.append(text[last:start])
+        last = end
+    out.append(text[last:])
+    cleaned = "".join(out)
+    # Collapse whitespace left behind when paths are removed.
+    cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+    return cleaned
 
 
 async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientConnection:
@@ -428,6 +477,9 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         staging.clear()
                         payload = {"content": "", "command": "reset"}
                     else:
+                        # Auto-stage any absolute file paths in the message
+                        # (e.g. from drag-drop onto the terminal).
+                        text = _extract_and_stage_paths(text, staging, console)
                         payload = {
                             "content": text,
                             "command": None,

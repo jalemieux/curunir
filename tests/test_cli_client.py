@@ -686,3 +686,107 @@ async def test_empty_text_with_staged_file_sends():
         assert received[0]["attachments"]
     finally:
         os.unlink(tmp.name)
+
+
+# ---------------------------------------------------------------------------
+# Tests: drag-drop / auto-stage path detection
+# ---------------------------------------------------------------------------
+from cli import _extract_and_stage_paths
+
+
+class _NullConsole:
+    """Discard all console.print() output."""
+    def print(self, *args, **kwargs):
+        pass
+
+
+class TestExtractAndStagePaths:
+    def test_no_paths_returns_text_unchanged(self):
+        s = Staging()
+        assert _extract_and_stage_paths("hello world", s, _NullConsole()) == "hello world"
+        assert s.to_payload() == []
+
+    def test_path_to_nonexistent_file_preserved_in_text(self):
+        s = Staging()
+        txt = "look at /does/not/exist.png please"
+        assert _extract_and_stage_paths(txt, s, _NullConsole()) == txt
+        assert s.to_payload() == []
+
+    def test_existing_path_is_staged_and_removed(self, tmp_path):
+        p = tmp_path / "foo.txt"
+        p.write_text("data")
+        s = Staging()
+        txt = f"read this: {p}"
+        out = _extract_and_stage_paths(txt, s, _NullConsole())
+        assert out == "read this:"
+        assert len(s.to_payload()) == 1
+        assert s.to_payload()[0]["filename"] == "foo.txt"
+
+    def test_shell_escaped_spaces_in_path(self, tmp_path):
+        p = tmp_path / "my file.txt"
+        p.write_text("x")
+        s = Staging()
+        escaped = str(p).replace(" ", "\\ ")
+        txt = f"open {escaped} now"
+        out = _extract_and_stage_paths(txt, s, _NullConsole())
+        assert out == "open now"
+        assert len(s.to_payload()) == 1
+
+    def test_multiple_paths_staged(self, tmp_path):
+        a = tmp_path / "a.txt"
+        b = tmp_path / "b.txt"
+        a.write_text("a")
+        b.write_text("b")
+        s = Staging()
+        txt = f"compare {a} and {b}"
+        out = _extract_and_stage_paths(txt, s, _NullConsole())
+        assert out == "compare and"
+        assert {it["filename"] for it in s.to_payload()} == {"a.txt", "b.txt"}
+
+    def test_path_only_message_becomes_empty_string(self, tmp_path):
+        p = tmp_path / "x.txt"
+        p.write_text("x")
+        s = Staging()
+        assert _extract_and_stage_paths(str(p), s, _NullConsole()) == ""
+        assert len(s.to_payload()) == 1
+
+    def test_rejected_file_stays_in_text(self, tmp_path):
+        # File exists but exceeds 256 KB text cap → Staging.add returns error,
+        # so we don't strip the path.
+        big = tmp_path / "huge.txt"
+        big.write_bytes(b"x" * (256 * 1024 + 1))
+        s = Staging()
+        txt = f"read {big}"
+        out = _extract_and_stage_paths(txt, s, _NullConsole())
+        assert str(big) in out
+        assert s.to_payload() == []
+
+
+@pytest.mark.asyncio
+async def test_drag_drop_path_autostaged_in_send(tmp_path):
+    port = _BASE_PORT + 27
+    received: list[dict] = []
+
+    async def handler(ws):
+        async for raw in ws:
+            received.append(json.loads(raw))
+            await ws.send(json.dumps({
+                "content": "ok", "tool_calls": [], "final": True, "attachments": None,
+            }))
+
+    img = tmp_path / "screenshot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    console = _make_console_with_input([
+        f"can you read this? {img}",
+    ])
+
+    async with websockets.serve(handler, "127.0.0.1", port):
+        await cli.run("127.0.0.1", port, console=console)
+
+    assert len(received) == 1
+    payload = received[0]
+    assert payload["content"] == "can you read this?"
+    assert payload["attachments"] and len(payload["attachments"]) == 1
+    assert payload["attachments"][0]["filename"] == "screenshot.png"
+    assert payload["attachments"][0]["mime_type"] == "image/png"
