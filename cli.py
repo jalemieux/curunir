@@ -9,6 +9,7 @@ import json
 
 import websockets
 import websockets.exceptions
+from prompt_toolkit import ANSI, PromptSession
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -221,7 +222,8 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     # ------------------------------------------------------------------ #
     # Main loop: manages connection lifetime and the input loop.          #
     # ------------------------------------------------------------------ #
-    loop = asyncio.get_running_loop()
+    session: PromptSession = PromptSession()
+    prompt_text = ANSI("\x1b[1;32m> \x1b[0m")
     ws = await _connect_with_retry(uri, console)
 
     # A payload that failed to send (due to connection drop) and should be
@@ -243,12 +245,10 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                 else:
                     await ready.wait()
 
-                    # Read from stdin without blocking the event loop
+                    # Native async prompt: bracketed paste keeps multi-line
+                    # pastes as one input, and Ctrl-C raises cleanly.
                     try:
-                        line = await loop.run_in_executor(
-                            None,
-                            lambda: console.input("[bold green]> [/bold green]"),
-                        )
+                        line = await session.prompt_async(prompt_text)
                     except EOFError:
                         # Ctrl-D: close cleanly and exit
                         out_task.cancel()
