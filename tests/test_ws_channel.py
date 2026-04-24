@@ -422,3 +422,55 @@ class TestDecodeAttachments:
         items, err = _decode_attachments({"filename": "a.png"})
         assert items is None
         assert "list" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests: _stage_attachments — staging decoded items to disk
+# ---------------------------------------------------------------------------
+import os as _os_stage
+
+from src.channels.ws import _stage_attachments
+
+
+class TestStageAttachments:
+    def test_writes_files_under_session_uuid(self, tmp_uploads):
+        items = [
+            {"filename": "a.png", "mime_type": "image/png", "bytes": b"PNG"},
+            {"filename": "notes.txt", "mime_type": "text/plain", "bytes": b"hi"},
+        ]
+        manifest = _stage_attachments(items, "sid1", str(tmp_uploads))
+        assert len(manifest) == 2
+        # Both files share one uuid subdirectory.
+        uuids = {_os_stage.path.basename(_os_stage.path.dirname(m["path"])) for m in manifest}
+        assert len(uuids) == 1
+        # Shape matches email channel.
+        assert set(manifest[0].keys()) == {"filename", "path", "mime_type", "size"}
+        # Bytes landed on disk.
+        for m, src in zip(manifest, items):
+            with open(m["path"], "rb") as f:
+                assert f.read() == src["bytes"]
+            assert m["size"] == len(src["bytes"])
+
+    def test_normalizes_unicode_whitespace_in_filename(self, tmp_uploads):
+        # U+202F (narrow no-break space) in filename should become a regular space.
+        items = [{"filename": "weird name.txt",
+                  "mime_type": "text/plain", "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest[0]["filename"] == "weird name.txt"
+        assert _os_stage.path.isfile(manifest[0]["path"])
+
+    def test_collision_suffix(self, tmp_uploads):
+        items = [
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"1"},
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"2"},
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"3"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        names = [m["filename"] for m in manifest]
+        assert names == ["same.txt", "same_1.txt", "same_2.txt"]
+        for m, src in zip(manifest, items):
+            with open(m["path"], "rb") as f:
+                assert f.read() == src["bytes"]
+
+    def test_empty_items_returns_empty_manifest(self, tmp_uploads):
+        assert _stage_attachments([], "sid", str(tmp_uploads)) == []
