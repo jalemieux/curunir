@@ -113,6 +113,27 @@ async def call_llm(
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
 
+    # Debug: dump message shape (with base64 data URIs truncated) to help
+    # diagnose multimodal handling. Only fires when LOG_LEVEL=DEBUG.
+    if log.isEnabledFor(logging.DEBUG):
+        def _summarize(msg):
+            content = msg.get("content")
+            if isinstance(content, list):
+                parts = []
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "image_url":
+                        url = (b.get("image_url") or {}).get("url", "")
+                        parts.append(f"<image_url len={len(url)} prefix={url[:40]!r}>")
+                    elif isinstance(b, dict) and b.get("type") == "text":
+                        parts.append(f"<text {len(b.get('text', ''))} chars>")
+                    else:
+                        parts.append(str(type(b).__name__))
+                return f"{{role: {msg.get('role')}, blocks: [{', '.join(parts)}]}}"
+            return f"{{role: {msg.get('role')}, content: <{type(content).__name__} {len(content) if content else 0} chars>}}"
+        log.debug("LLM call to %s with %d messages:", model, len(messages))
+        for m in messages[-3:]:
+            log.debug("  %s", _summarize(m))
+
     t0 = time.monotonic()
     for attempt in range(MAX_RETRIES):
         try:
