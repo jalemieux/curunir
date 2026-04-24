@@ -54,11 +54,16 @@ def test_single_text_file_becomes_text_block(text_file):
     assert "hello world" in blocks[1]["text"]
 
 
-def test_empty_prompt_with_image_skips_leading_text_block(image_file):
+def test_empty_prompt_with_image_uses_placeholder_text(image_file):
+    """Anthropic rejects empty text blocks, so we seed a placeholder referencing
+    the attachment filenames when the user provides no message."""
     from run import build_multimodal_content
     blocks = build_multimodal_content("", [_att(image_file, "image/png")])
-    assert len(blocks) == 1
-    assert blocks[0]["type"] == "image_url"
+    assert len(blocks) == 2
+    assert blocks[0]["type"] == "text"
+    assert blocks[0]["text"]  # non-empty
+    assert "img.png" in blocks[0]["text"]
+    assert blocks[1]["type"] == "image_url"
 
 
 def test_mixed_ordering_preserved(image_file, text_file):
