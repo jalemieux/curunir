@@ -18,10 +18,54 @@ SESSION_ID = "cli"
 # Size caps (mirrored in cli.py)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
 _MAX_TEXT_BYTES = 256 * 1024                # 256 KB
+_MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDFs)
 _MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
 _ALLOWED_IMAGE_MIMES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
 })
+_ALLOWED_DOC_MIMES = frozenset({"application/pdf"})
+
+_MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
+
+
+def _enrich_attachments(attachments: list[dict], project_root: str) -> None:
+    """Inline content and normalize paths for outbound attachments in-place.
+
+    Text/JSON files under the size cap are read into `att["content"]` so the
+    UI can render them without a second fetch. Non-text or oversized files
+    get `content=None`; missing files additionally get `error="file not found"`.
+    Absolute paths are rewritten relative to `project_root` for display.
+    """
+    for att in attachments:
+        path = att["path"]
+        mime = att.get("mime_type", "")
+        is_text = mime.startswith("text/") or mime == "application/json"
+
+        if os.path.isabs(path):
+            try:
+                att["path"] = os.path.relpath(path, project_root)
+            except ValueError:
+                pass  # different drive on Windows, keep absolute
+
+        if not is_text:
+            att["content"] = None
+            continue
+
+        if not os.path.isfile(path):
+            att["content"] = None
+            att["error"] = "file not found"
+            continue
+
+        if os.path.getsize(path) > _MAX_ATTACHMENT_CONTENT_SIZE:
+            att["content"] = None
+            continue
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                att["content"] = f.read()
+        except OSError:
+            att["content"] = None
+            att["error"] = "file not found"
 
 
 def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None]:
@@ -64,6 +108,12 @@ def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None
                 return None, (
                     f"attachment[{i}] '{filename}': "
                     f"{size} bytes exceeds 5 MB image cap"
+                )
+        elif mime in _ALLOWED_DOC_MIMES:
+            if size > _MAX_DOC_BYTES:
+                return None, (
+                    f"attachment[{i}] '{filename}': "
+                    f"{size} bytes exceeds 10 MB document cap"
                 )
         else:
             if size > _MAX_TEXT_BYTES:
@@ -237,6 +287,9 @@ class WebSocketChannel:
         if self._connection is None:
             logger.warning("No WebSocket client connected; dropping outgoing message")
             return
+
+        if msg.attachments:
+            _enrich_attachments(msg.attachments, os.getcwd())
 
         payload: dict = {
             "content": msg.content,

@@ -4,8 +4,7 @@ import tempfile
 
 import pytest
 
-# Import the enrichment function we'll create
-from run import _enrich_attachments
+from src.channels.ws import _enrich_attachments
 
 _MAX_CONTENT_SIZE = 512 * 1024  # 512KB
 
