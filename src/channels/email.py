@@ -153,7 +153,8 @@ class EmailChannel:
                             message["id"],
                             [a["path"] for a in attachments] if attachments else None)
 
-                content = message.get("body", "")
+                body = message.get("body", "")
+                content = f"[channel: email, from: {sender}]\n{body}" if sender else body
                 if attachments:
                     content += "\n\nAttachments:\n"
                     for att in attachments:

@@ -91,7 +91,7 @@ async def test_poll_once_pushes_message(email_config, in_queue):
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
-    assert msg.content == "Hi there!"
+    assert msg.content == "[channel: email, from: alice@example.com]\nHi there!"
     assert msg.channel == "email"
     assert msg.session_id == "thread_1"
     assert msg.reply_address == {
@@ -160,7 +160,7 @@ async def test_poll_once_skips_already_seen_messages(email_config, in_queue):
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
-    assert msg.content == "Follow up!"
+    assert msg.content == "[channel: email, from: alice@example.com]\nFollow up!"
     assert msg.reply_address["in_reply_to"] == "msg_2"
     assert in_queue.empty()
     assert ch.last_seen["thread_1"] == "msg_2"
@@ -442,7 +442,7 @@ async def test_poll_once_continues_on_thread_error(email_config, in_queue):
         await ch._poll_once()
 
     msg = in_queue.get_nowait()
-    assert msg.content == "Works!"
+    assert msg.content == "[channel: email, from: alice@example.com]\nWorks!"
 
 
 from src.channels.base import OutgoingMessage
