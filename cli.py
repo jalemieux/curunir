@@ -42,10 +42,11 @@ def _detect_version() -> str:
             ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL, text=True,
         ).strip()
-        dirty = subprocess.check_output(
-            ["git", "-C", repo, "status", "--porcelain"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
+        # Only flag dirty for modified tracked files — ignore untracked cruft.
+        dirty = subprocess.call(
+            ["git", "-C", repo, "diff", "--quiet", "HEAD"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ) != 0
         return f"{sha}{'+' if dirty else ''}"
     except Exception:
         return "dev"
