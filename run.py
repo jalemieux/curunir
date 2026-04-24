@@ -1,6 +1,7 @@
 """Curunir runtime — configures channels, wires queues, starts the agent loop."""
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -159,6 +160,42 @@ def _build_content(msg) -> str:
         parts.append(meta)
     parts.append(msg.content)
     return "\n".join(parts)
+
+
+def build_multimodal_content(text: str, attachments: list[dict] | None) -> str | list:
+    """Build LiteLLM content from text + a staged-attachment manifest.
+
+    Returns a plain `str` when there are no attachments (backward-compatible
+    with the existing flow) or a list of content blocks otherwise.
+    Images become `image_url` data-URI blocks; UTF-8 text files become
+    fenced text blocks tagged with the filename.
+    """
+    if not attachments:
+        return text
+
+    blocks: list[dict] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    for att in attachments:
+        mime = att["mime_type"]
+        path = att["path"]
+        if mime.startswith("image/"):
+            with open(path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            })
+        else:
+            with open(path, "rb") as f:
+                content = f.read().decode("utf-8")
+            blocks.append({
+                "type": "text",
+                "text": f"[Attachment: {att['filename']}]\n```\n{content}\n```",
+            })
+
+    return blocks
 
 
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
