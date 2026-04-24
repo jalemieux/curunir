@@ -1,6 +1,7 @@
 ---
 name: email-send
 description: "Send a NEW outbound email to a recipient who is not already in the active email thread. Do NOT use to reply on an inbound email thread — the email channel replies automatically with your final assistant message."
+disabled: true
 ---
 
 # Sending Email

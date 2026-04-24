@@ -1,7 +1,7 @@
 # tests/test_skills.py
 from pathlib import Path
 
-from src.skills import build_skill_manifest, load_skill, parse_frontmatter
+from src.skills import build_skill_manifest, load_registry, load_skill, parse_frontmatter
 
 
 class TestParseFrontmatter:
@@ -59,10 +59,38 @@ class TestLoadSkill:
     def test_existing_skill(self, tmp_path):
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# My Skill\nInstructions here.")
+        body = "---\nname: my-skill\ndescription: test\n---\n\n# My Skill\nInstructions here."
+        (skill_dir / "SKILL.md").write_text(body)
         result = load_skill("my-skill", tmp_path)
-        assert result == "# My Skill\nInstructions here."
+        assert result == body
 
     def test_missing_skill(self, tmp_path):
         result = load_skill("nonexistent", tmp_path)
         assert "not found" in result.lower()
+
+    def test_disabled_skill_not_loadable(self, tmp_path):
+        skill_dir = tmp_path / "retired"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: retired\ndescription: old\ndisabled: true\n---\n# body"
+        )
+        result = load_skill("retired", tmp_path)
+        assert "not found" in result.lower()
+
+
+class TestDisabledFlag:
+    def test_disabled_excluded_from_manifest(self, tmp_path):
+        for name, disabled in [("alpha", False), ("beta", True)]:
+            d = tmp_path / name
+            d.mkdir()
+            extra = "disabled: true\n" if disabled else ""
+            (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name} desc\n{extra}---\n")
+        manifest = build_skill_manifest(tmp_path)
+        assert "alpha" in manifest
+        assert "beta" not in manifest
+
+    def test_disabled_excluded_from_registry(self, tmp_path):
+        d = tmp_path / "gone"
+        d.mkdir()
+        (d / "SKILL.md").write_text("---\nname: gone\ndescription: x\ndisabled: yes\n---\n")
+        assert load_registry(tmp_path) == {}
