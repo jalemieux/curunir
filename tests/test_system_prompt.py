@@ -31,7 +31,7 @@ def test_no_skills_section_when_empty(tmp_context, tmp_skills, agent_config):
 def test_missing_identity_file_raises(tmp_path, tmp_skills):
     config = AgentConfig(
         identity_file=tmp_path / "nonexistent.md",
-        skills_dir=tmp_skills,
+        skill_dirs=[tmp_skills],
     )
     with pytest.raises(FileNotFoundError, match="identity file"):
         build_static_prompt(config)

@@ -28,5 +28,5 @@ def agent_config(tmp_context, tmp_skills):
     return AgentConfig(
         identity_file=tmp_context / "identity.md",
         context_dir=tmp_context,
-        skills_dir=tmp_skills,
+        skill_dirs=[tmp_skills],
     )

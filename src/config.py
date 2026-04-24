@@ -12,7 +12,9 @@ class AgentConfig:
     max_history_chars: int = 250_000
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
-    skills_dir: Path = Path("./skills")
+    skill_dirs: list[Path] = field(
+        default_factory=lambda: [Path("./skills"), Path("./context/skills")]
+    )
 
 
 @dataclass
