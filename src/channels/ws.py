@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 
@@ -10,6 +11,82 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 logger = logging.getLogger(__name__)
 
 SESSION_ID = "cli"
+
+# Size caps (mirrored in cli.py)
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
+_MAX_TEXT_BYTES = 256 * 1024                # 256 KB
+_MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
+_ALLOWED_IMAGE_MIMES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+})
+
+
+def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None]:
+    """Validate and base64-decode inbound attachment payloads.
+
+    Returns (decoded_items, None) on success, or (None, error_str) on failure.
+    A decoded item is {"filename": str, "mime_type": str, "bytes": bytes}.
+    No disk I/O here — callers stage the bytes separately.
+    """
+    if raw is None:
+        return [], None
+    if not isinstance(raw, list):
+        return None, "attachments must be a list"
+
+    decoded: list[dict] = []
+    total_bytes = 0
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            return None, f"attachment[{i}] is not an object"
+        for key in ("filename", "mime_type", "data"):
+            if key not in item or not isinstance(item[key], str):
+                return None, f"attachment[{i}] missing or invalid '{key}'"
+
+        filename = item["filename"]
+        mime = item["mime_type"]
+        try:
+            payload = base64.b64decode(item["data"], validate=True)
+        except (ValueError, base64.binascii.Error):
+            return None, f"attachment[{i}] '{filename}': invalid base64"
+
+        size = len(payload)
+
+        if mime.startswith("image/"):
+            if mime not in _ALLOWED_IMAGE_MIMES:
+                return None, (
+                    f"attachment[{i}] '{filename}': "
+                    f"unsupported image type {mime}"
+                )
+            if size > _MAX_IMAGE_BYTES:
+                return None, (
+                    f"attachment[{i}] '{filename}': "
+                    f"{size} bytes exceeds 5 MB image cap"
+                )
+        else:
+            if size > _MAX_TEXT_BYTES:
+                return None, (
+                    f"attachment[{i}] '{filename}': "
+                    f"{size} bytes exceeds 256 KB text cap"
+                )
+            try:
+                payload.decode("utf-8")
+            except UnicodeDecodeError:
+                return None, (
+                    f"attachment[{i}] '{filename}': "
+                    f"not UTF-8 decodable"
+                )
+
+        total_bytes += size
+        if total_bytes > _MAX_TOTAL_BYTES:
+            return None, "total attachment size exceeds 20 MB cap"
+
+        decoded.append({
+            "filename": filename,
+            "mime_type": mime,
+            "bytes": payload,
+        })
+
+    return decoded, None
 
 
 class WebSocketChannel:

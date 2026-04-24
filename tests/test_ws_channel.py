@@ -331,3 +331,94 @@ async def test_send_delta_defaults_false_in_payload():
             assert data["delta"] is False
     finally:
         await _stop_channel(task)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _decode_attachments — inbound attachment validation
+# ---------------------------------------------------------------------------
+import base64
+
+from src.channels.ws import _decode_attachments
+
+
+class TestDecodeAttachments:
+    def test_none_or_empty_returns_empty_list(self):
+        assert _decode_attachments(None) == ([], None)
+        assert _decode_attachments([]) == ([], None)
+
+    def test_valid_image_and_text(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png",
+             "data": base64.b64encode(png).decode()},
+            {"filename": "notes.txt", "mime_type": "text/plain",
+             "data": base64.b64encode(b"hello world").decode()},
+        ])
+        assert err is None
+        assert len(items) == 2
+        assert items[0]["bytes"] == png
+        assert items[1]["bytes"] == b"hello world"
+
+    def test_missing_field_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png"},  # no data
+        ])
+        assert items is None
+        assert "data" in err
+
+    def test_bad_base64_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png", "data": "!!!"},
+        ])
+        assert items is None
+        assert "base64" in err.lower()
+
+    def test_oversized_image_rejected(self):
+        big = b"\x00" * (5 * 1024 * 1024 + 1)
+        items, err = _decode_attachments([
+            {"filename": "big.png", "mime_type": "image/png",
+             "data": base64.b64encode(big).decode()},
+        ])
+        assert items is None
+        assert "5" in err and "MB" in err
+
+    def test_oversized_text_rejected(self):
+        big = b"x" * (256 * 1024 + 1)
+        items, err = _decode_attachments([
+            {"filename": "big.txt", "mime_type": "text/plain",
+             "data": base64.b64encode(big).decode()},
+        ])
+        assert items is None
+        assert "256" in err and "KB" in err
+
+    def test_total_batch_size_cap(self):
+        # Six 4 MB images = 24 MB total, each under the 5 MB per-image cap.
+        # Total cap (20 MB) should fire before the 6th decodes fully.
+        four_mb = b"\x00" * (4 * 1024 * 1024)
+        items, err = _decode_attachments([
+            {"filename": f"a{i}.png", "mime_type": "image/png",
+             "data": base64.b64encode(four_mb).decode()} for i in range(6)
+        ])
+        assert items is None
+        assert "20" in err and "MB" in err
+
+    def test_disallowed_image_mime_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.bmp", "mime_type": "image/bmp",
+             "data": base64.b64encode(b"bmpdata").decode()},
+        ])
+        assert items is None
+        assert "image/bmp" in err
+
+    def test_non_image_must_be_utf8(self):
+        items, err = _decode_attachments([
+            {"filename": "binary.bin", "mime_type": "application/octet-stream",
+             "data": base64.b64encode(b"\xff\xfe\xfa").decode()},
+        ])
+        assert items is None
+        assert "UTF-8" in err
+
+    def test_attachments_must_be_list(self):
+        items, err = _decode_attachments({"filename": "a.png"})
+        assert items is None
+        assert "list" in err.lower()
