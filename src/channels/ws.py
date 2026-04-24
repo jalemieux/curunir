@@ -2,11 +2,14 @@ import asyncio
 import base64
 import json
 import logging
+import os
+import uuid as _uuid
 
 import websockets
 import websockets.exceptions
 
 from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.email import _normalize_unicode_whitespace
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,50 @@ def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None
         })
 
     return decoded, None
+
+
+def _unique_filename(existing: set[str], name: str) -> str:
+    """Return `name`, suffixed `_1`, `_2`, ... if it collides with anything in `existing`."""
+    if name not in existing:
+        return name
+    if "." in name:
+        stem, _, ext = name.rpartition(".")
+        ext = "." + ext
+    else:
+        stem, ext = name, ""
+    i = 1
+    while f"{stem}_{i}{ext}" in existing:
+        i += 1
+    return f"{stem}_{i}{ext}"
+
+
+def _stage_attachments(items: list[dict], session_id: str, uploads_dir: str) -> list[dict]:
+    """Write decoded items to disk, return an email-shaped manifest.
+
+    Layout: <uploads_dir>/<session_id>/<uuid>/<normalized_filename>
+    All items in one call share a single uuid subdir.
+    """
+    if not items:
+        return []
+
+    batch_dir = os.path.join(uploads_dir, session_id, _uuid.uuid4().hex)
+    os.makedirs(batch_dir, exist_ok=True)
+
+    manifest: list[dict] = []
+    used: set[str] = set()
+    for item in items:
+        fname = _unique_filename(used, _normalize_unicode_whitespace(item["filename"]))
+        used.add(fname)
+        full_path = os.path.join(batch_dir, fname)
+        with open(full_path, "wb") as f:
+            f.write(item["bytes"])
+        manifest.append({
+            "filename": fname,
+            "path": full_path,
+            "mime_type": item["mime_type"],
+            "size": len(item["bytes"]),
+        })
+    return manifest
 
 
 class WebSocketChannel:
