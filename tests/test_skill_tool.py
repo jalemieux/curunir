@@ -5,7 +5,9 @@ class TestExecLoadSkill:
     def test_loads_existing_skill(self, tmp_skills, agent_config):
         skill_dir = tmp_skills / "research"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Research\nDo research things.")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: research\ndescription: investigate\n---\n# Research\nDo research things."
+        )
         result = exec_load_skill({"name": "research"}, agent_config)
         assert "# Research" in result
 
