@@ -170,13 +170,20 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     with the existing flow) or a list of content blocks otherwise.
     Images become `image_url` data-URI blocks; UTF-8 text files become
     fenced text blocks tagged with the filename.
+    Anthropic rejects messages whose text blocks are empty, so when the user
+    supplies no text we seed a minimal non-empty prompt referencing the files.
     """
     if not attachments:
         return text
 
     blocks: list[dict] = []
-    if text:
-        blocks.append({"type": "text", "text": text})
+    # Always include a non-empty text block. Anthropic's API rejects empty
+    # text blocks, and some vision models produce better responses when given
+    # an explicit instruction alongside the image.
+    if not text:
+        names = ", ".join(att.get("filename", "file") for att in attachments)
+        text = f"Please examine the attached file(s): {names}"
+    blocks.append({"type": "text", "text": text})
 
     for att in attachments:
         mime = att["mime_type"]
