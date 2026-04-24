@@ -160,7 +160,6 @@ class Agent:
         on_tool_call=None, attachments: list[dict] | None = None,
         system_task_prompt: str | None = None,
         metadata: dict | None = None,
-        stop_event: asyncio.Event | None = None,
         on_text_delta=None,
     ) -> str:
         """Process a message and return the agent's response.
@@ -220,13 +219,6 @@ class Agent:
             }
 
         for iteration in range(self.config.max_iterations):
-            if stop_event and stop_event.is_set():
-                logger.info("[%s] stop signal received, aborting agent loop", sid)
-                _finalize_stats()
-                if metadata and "stats" in metadata:
-                    metadata["stats"]["iterations"] = iteration
-                return "Session reset."
-
             logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
             try:
                 response = await call_llm(
@@ -270,10 +262,6 @@ class Agent:
                 history.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
-                    if stop_event and stop_event.is_set():
-                        logger.info("[%s] stop signal received during tool execution", sid)
-                        break
-
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
                     detail_lines = _tool_detail_lines(name, args_str)

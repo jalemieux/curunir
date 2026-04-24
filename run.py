@@ -5,7 +5,6 @@ import base64
 import json
 import logging
 import os
-import shutil
 
 import httpx
 from dotenv import load_dotenv
@@ -104,65 +103,6 @@ async def _fetch_llamacpp_stats(api_base: str) -> dict | None:
         return None
 
 
-_MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
-
-
-def _enrich_attachments(attachments: list[dict], project_root: str) -> None:
-    """Add content and normalize paths for text-based attachments in-place."""
-    for att in attachments:
-        path = att["path"]
-        mime = att.get("mime_type", "")
-        is_text = mime.startswith("text/") or mime == "application/json"
-
-        # Normalize path to relative
-        if os.path.isabs(path):
-            try:
-                att["path"] = os.path.relpath(path, project_root)
-            except ValueError:
-                pass  # different drive on Windows, keep absolute
-
-        if not is_text:
-            att["content"] = None
-            continue
-
-        if not os.path.isfile(path):
-            att["content"] = None
-            att["error"] = "file not found"
-            continue
-
-        if os.path.getsize(path) > _MAX_ATTACHMENT_CONTENT_SIZE:
-            att["content"] = None
-            continue
-
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                att["content"] = f.read()
-        except OSError:
-            att["content"] = None
-            att["error"] = "file not found"
-
-
-def _build_content(msg) -> str:
-    """Build LLM content from a message.
-
-    Prepends channel metadata so the agent knows the source and sender.
-    Attachments are referenced by file path in msg.content (added by the
-    channel). The agent uses the delegate tool to analyze images and
-    large documents in a sub-agent with a clean context window.
-    """
-    parts = []
-    if msg.channel and msg.channel != "cli":
-        meta = f"[channel: {msg.channel}"
-        if msg.reply_address:
-            sender = msg.reply_address.get("to", "")
-            if sender:
-                meta += f", from: {sender}"
-        meta += "]"
-        parts.append(meta)
-    parts.append(msg.content)
-    return "\n".join(parts)
-
-
 def build_multimodal_content(text: str, attachments: list[dict] | None) -> str | list:
     """Build LiteLLM content from text + a staged-attachment manifest.
 
@@ -195,6 +135,18 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
                 "type": "image_url",
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
             })
+        elif mime == "application/pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(path)
+            pages_text = "\n\n".join(p.extract_text() or "" for p in reader.pages)
+            body = pages_text.strip() or "(no extractable text)"
+            blocks.append({
+                "type": "text",
+                "text": (
+                    f"[Attachment: {att['filename']} (PDF, {len(reader.pages)} pages)]\n"
+                    f"```\n{body}\n```"
+                ),
+            })
         else:
             with open(path, "rb") as f:
                 content = f.read().decode("utf-8")
@@ -206,29 +158,16 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     return blocks
 
 
-def _purge_session_uploads(session_id: str) -> None:
-    """Remove context/uploads/<session_id>/ if it exists. Best-effort."""
-    path = os.path.join(os.getcwd(), "context", "uploads", session_id)
-    shutil.rmtree(path, ignore_errors=True)
-
-
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
-    pending: list = []  # messages received while handle() was running
-
     while True:
-        if pending:
-            msg = pending.pop(0)
-        else:
-            msg = await in_queue.get()
+        msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
-            if history and msg.command == "clear":
+            if history:
                 asyncio.create_task(extract_learnings(agent.config, list(history)))
-            if msg.channel == "cli":
-                _purge_session_uploads(msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -244,8 +183,6 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 reply_address=msg.reply_address,
             ))
             continue
-
-        stop_event = asyncio.Event()
 
         async def on_tool_call(name: str, args_str: str):
             await out_queue.put(OutgoingMessage(
@@ -267,68 +204,20 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
-        if msg.channel == "cli":
-            content = build_multimodal_content(msg.content, msg.attachments)
-        else:
-            content = _build_content(msg)
+        content = build_multimodal_content(msg.content, msg.attachments)
         attachments = []
         metadata: dict = {}
 
-        handle_task = asyncio.create_task(
-            agent.handle(
+        try:
+            text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
-                metadata=metadata, stop_event=stop_event,
+                metadata=metadata,
                 on_text_delta=on_text_delta,
             )
-        )
-
-        # Monitor queue for reset/clear while handle() runs
-        reset_msg = None
-        queue_task = asyncio.create_task(in_queue.get())
-        try:
-            while not handle_task.done():
-                done, _ = await asyncio.wait(
-                    {handle_task, queue_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if queue_task in done:
-                    next_msg = queue_task.result()
-                    if next_msg.command in ("clear", "reset") and next_msg.session_id == msg.session_id:
-                        stop_event.set()
-                        reset_msg = next_msg
-                        break
-                    pending.append(next_msg)
-                    queue_task = asyncio.create_task(in_queue.get())
-        finally:
-            if not queue_task.done():
-                queue_task.cancel()
-                try:
-                    await queue_task
-                except asyncio.CancelledError:
-                    pass
-
-        try:
-            text = await handle_task
         except Exception as e:
             logger.error("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
-
-        if reset_msg:
-            # handle() was interrupted — process the reset
-            history = agent.sessions.pop(msg.session_id, None)
-            if history and reset_msg.command == "clear":
-                asyncio.create_task(extract_learnings(agent.config, list(history)))
-            if reset_msg.channel == "cli":
-                _purge_session_uploads(reset_msg.session_id)
-            await out_queue.put(OutgoingMessage(
-                content="", channel=reset_msg.channel, session_id=reset_msg.session_id,
-                reply_address=reset_msg.reply_address,
-            ))
-            continue
-
-        if attachments:
-            _enrich_attachments(attachments, os.getcwd())
 
         # Fetch llama.cpp server stats if using a local API base
         if agent.config.api_base and metadata.get("stats"):
