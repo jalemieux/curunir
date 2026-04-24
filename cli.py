@@ -5,7 +5,10 @@ Usage:
 """
 import argparse
 import asyncio
+import base64
 import json
+import mimetypes
+import os
 
 import websockets
 import websockets.exceptions
@@ -18,6 +21,103 @@ from rich.text import Text
 # Reconnection settings
 _BACKOFF_BASE = 1.0
 _BACKOFF_MAX = 30.0
+
+# Size caps mirrored from src/channels/ws.py
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
+_MAX_TEXT_BYTES = 256 * 1024                # 256 KB
+_MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
+_ALLOWED_IMAGE_MIMES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+})
+
+
+def _guess_mime(path: str) -> str | None:
+    """Best-effort MIME detection: guess_type, then UTF-8 sniff as tiebreaker."""
+    mime, _ = mimetypes.guess_type(path)
+    if mime and mime != "application/octet-stream":
+        return mime
+    try:
+        with open(path, "rb") as f:
+            f.read(4096).decode("utf-8")
+        return "text/plain"
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+class Staging:
+    """Client-side staged attachments.
+
+    `add(path)` returns None on success, or an error string. Enforces the
+    same caps as ws.py so we fail fast without a round-trip.
+    """
+
+    def __init__(self) -> None:
+        self._items: list[dict] = []  # each: {filename, mime_type, data, size}
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(it["size"] for it in self._items)
+
+    def add(self, path: str) -> str | None:
+        if not os.path.isfile(path):
+            return f"{os.path.basename(path)}: file not found"
+        size = os.path.getsize(path)
+        mime = _guess_mime(path)
+        if mime is None:
+            return f"{os.path.basename(path)}: not a recognized image and not UTF-8 decodable"
+
+        if mime.startswith("image/"):
+            if mime not in _ALLOWED_IMAGE_MIMES:
+                return f"{os.path.basename(path)}: unsupported image type {mime}"
+            if size > _MAX_IMAGE_BYTES:
+                return (f"{os.path.basename(path)} is "
+                        f"{size / 1024 / 1024:.1f} MB (image cap is 5 MB)")
+        else:
+            if size > _MAX_TEXT_BYTES:
+                return (f"{os.path.basename(path)} is "
+                        f"{size / 1024:.0f} KB (text cap is 256 KB)")
+
+        if self.total_bytes + size > _MAX_TOTAL_BYTES:
+            return "total staged would exceed 20 MB"
+
+        with open(path, "rb") as f:
+            raw = f.read()
+        self._items.append({
+            "filename": os.path.basename(path),
+            "mime_type": mime,
+            "data": base64.b64encode(raw).decode(),
+            "size": size,
+        })
+        return None
+
+    def remove(self, index_1_based: int) -> str | None:
+        if not 1 <= index_1_based <= len(self._items):
+            return f"index {index_1_based} out of range (have {len(self._items)})"
+        self._items.pop(index_1_based - 1)
+        return None
+
+    def clear(self) -> None:
+        self._items.clear()
+
+    def list_display(self) -> str:
+        if not self._items:
+            return "no files staged"
+        parts = []
+        for i, it in enumerate(self._items, start=1):
+            size = it["size"]
+            if size >= 1024 * 1024:
+                s = f"{size / 1024 / 1024:.1f} MB"
+            else:
+                s = f"{size / 1024:.0f} KB"
+            parts.append(f"[{i}] {it['filename']} ({s})")
+        return "staged: " + ", ".join(parts)
+
+    def to_payload(self) -> list[dict]:
+        """Return the wire-format list: {filename, mime_type, data} items."""
+        return [
+            {"filename": it["filename"], "mime_type": it["mime_type"], "data": it["data"]}
+            for it in self._items
+        ]
 
 
 async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientConnection:
