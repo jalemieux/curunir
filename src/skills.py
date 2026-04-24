@@ -1,43 +1,71 @@
 # src/skills.py
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_TRUTHY = {"true", "1", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Skill:
+    name: str
+    description: str
+    path: Path
+
+
+def load_registry(skills_dir: Path) -> dict[str, Skill]:
+    """Scan skills dir and return enabled skills keyed by name.
+
+    Skills with `disabled: true` in their frontmatter are excluded.
+    Skills lacking `name` or `description` are ignored.
+    """
+    registry: dict[str, Skill] = {}
+    if not skills_dir.exists():
+        return registry
+
+    for skill_file in sorted(skills_dir.glob("*/SKILL.md")):
+        fm = parse_frontmatter(skill_file.read_text())
+        if "name" not in fm or "description" not in fm:
+            continue
+        if fm.get("disabled", "").lower() in _TRUTHY:
+            logger.info("skipping disabled skill: %s", fm["name"])
+            continue
+        registry[fm["name"]] = Skill(
+            name=fm["name"],
+            description=fm["description"],
+            path=skill_file,
+        )
+    return registry
+
 
 def build_skill_manifest(skills_dir: Path) -> str:
-    """Scan skills dir, return markdown table of name + description."""
-    if not skills_dir.exists():
-        return ""
-
-    skills = []
-    for skill_file in sorted(skills_dir.glob("*/SKILL.md")):
-        frontmatter = parse_frontmatter(skill_file.read_text())
-        if "name" in frontmatter and "description" in frontmatter:
-            skills.append((frontmatter["name"], frontmatter["description"]))
-
-    if not skills:
+    """Return markdown table of enabled skills (name + description)."""
+    registry = load_registry(skills_dir)
+    if not registry:
         logger.info("no skills found in %s", skills_dir)
         return ""
 
-    logger.info("discovered %d skills: %s", len(skills), ", ".join(n for n, _ in skills))
+    logger.info("discovered %d skills: %s", len(registry), ", ".join(registry))
 
     lines = [
         "## Available Skills",
         "| Skill | When to Use |",
         "|-------|-------------|",
     ]
-    for name, desc in skills:
-        lines.append(f"| {name} | {desc} |")
+    for skill in registry.values():
+        lines.append(f"| {skill.name} | {skill.description} |")
     return "\n".join(lines)
 
 
 def load_skill(name: str, skills_dir: Path) -> str:
-    """Load full SKILL.md content by name."""
-    path = skills_dir / name / "SKILL.md"
-    if not path.exists():
+    """Load full SKILL.md content by name, honoring registry exclusions."""
+    registry = load_registry(skills_dir)
+    skill = registry.get(name)
+    if skill is None:
         return f"Skill not found: {name}"
-    return path.read_text()
+    return skill.path.read_text()
 
 
 def parse_frontmatter(text: str) -> dict:
