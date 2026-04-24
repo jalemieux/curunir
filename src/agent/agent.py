@@ -310,13 +310,18 @@ class Agent:
                     self.sessions.pop(session_id, None)
                 return response.text
 
-            logger.warning("[%s] LLM returned empty response", sid)
             history.append({"role": "assistant", "content": ""})
             _finalize_stats()
             if metadata and "stats" in metadata:
                 metadata["stats"]["iterations"] = iteration + 1
             if system_task_prompt:
                 self.sessions.pop(session_id, None)
+            # Empty text is fine when the agent already attached a file this
+            # turn — the attachment is the reply.
+            if attachments:
+                logger.info("[%s] agent done with attachment-only reply", sid)
+                return ""
+            logger.warning("[%s] LLM returned empty response", sid)
             return "Error: LLM returned empty response."
 
         logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
