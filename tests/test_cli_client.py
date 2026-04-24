@@ -761,6 +761,22 @@ class TestExtractAndStagePaths:
         assert str(big) in out
         assert s.to_payload() == []
 
+    def test_unicode_whitespace_in_filename_is_matched(self, tmp_path):
+        # macOS Finder inserts U+202F (NARROW NO-BREAK SPACE) before AM/PM in
+        # screenshot filenames. Drag-drop sends it literally; the regex must
+        # match through it rather than treating it as a token separator.
+        nnbsp = " "
+        name = f"Screenshot 10.58.12{nnbsp}PM.png"
+        p = tmp_path / name
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        s = Staging()
+        # Only the ASCII spaces are shell-escaped; the U+202F is passed literally.
+        escaped = str(p).replace(" ", "\\ ")
+        out = _extract_and_stage_paths(f"caption: {escaped}", s, _NullConsole())
+        assert out == "caption:"
+        assert len(s.to_payload()) == 1
+        assert s.to_payload()[0]["filename"] == name
+
 
 @pytest.mark.asyncio
 async def test_drag_drop_path_autostaged_in_send(tmp_path):
