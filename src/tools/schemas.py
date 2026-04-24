@@ -288,23 +288,18 @@ _SCHEMAS = [
                 },
             },
         },
-]
-
-for _s in _SCHEMAS:
-    _register(_s)
-
-
-# Opt-in tools — not included by default, loaded when a skill requires them.
-_OPT_IN_SCHEMAS = [
-    {
+        {
         "type": "function",
         "function": {
             "name": "attach",
             "description": (
-                "Attach a file to your response. The file will be delivered "
-                "to the user alongside your text reply. Use this when you've "
-                "created a report, document, or other artifact the user should "
-                "receive as a file rather than inline text."
+                "Send a file to the user as an attachment on this response. "
+                "Use this when the user asks for a file or when you've produced "
+                "an artifact (report, document, etc.). Pass an absolute path; "
+                "do not read, glob, or stat the file beforehand if the user "
+                "already gave you the path. Call this once per file — repeated "
+                "calls duplicate the attachment. The attachment alone is a "
+                "complete reply; no follow-up text is required."
             ),
             "parameters": {
                 "type": "object",
@@ -322,6 +317,15 @@ _OPT_IN_SCHEMAS = [
             },
         },
     },
+]
+
+for _s in _SCHEMAS:
+    _register(_s)
+
+
+# Opt-in tools — not included by default, loaded when a skill requires them.
+_OPT_IN_SCHEMAS = [
+    
 ]
 
 for _s in _OPT_IN_SCHEMAS:
