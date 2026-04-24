@@ -1,6 +1,7 @@
 litellm
 python-dotenv
 rich
+prompt_toolkit
 httpx
 trafilatura
 websockets
