@@ -325,6 +325,11 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
     session: PromptSession = PromptSession()
     prompt_text = ANSI("\x1b[1;32m> \x1b[0m")
     ws = await _connect_with_retry(uri, console)
+    # First prompt doesn't wait for a prior turn; welcome/final events will
+    # re-arm subsequent waits.
+    ready.set()
+
+    staging = Staging()
 
     # A payload that failed to send (due to connection drop) and should be
     # retried on the next connection.
@@ -356,7 +361,7 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         return
 
                     text = line.strip()
-                    if not text:
+                    if not text and not staging.to_payload():
                         continue
 
                     if text == "/verbose":
@@ -365,12 +370,64 @@ async def run(host: str, port: int, console: Console | None = None) -> None:
                         console.print(f"[dim]Verbose mode {state}.[/dim]")
                         continue
 
+                    # /attach family — all local, never sent over the wire.
+                    if text.startswith("/attach"):
+                        rest = text[len("/attach"):].strip()
+                        if rest == "":
+                            console.print(f"[dim]\U0001f4ce {staging.list_display()}[/dim]")
+                            continue
+                        if rest == "clear":
+                            staging.clear()
+                            console.print("[dim]staging cleared[/dim]")
+                            continue
+                        import shlex
+                        try:
+                            paths = shlex.split(rest)
+                        except ValueError as e:
+                            console.print(f"[red]❌ {e}[/red]")
+                            continue
+                        for p in paths:
+                            err = staging.add(p)
+                            if err:
+                                console.print(f"[red]❌ rejected: {err}[/red]")
+                            else:
+                                item = staging._items[-1]
+                                size = item["size"]
+                                sstr = (
+                                    f"{size / 1024 / 1024:.1f} MB"
+                                    if size >= 1024 * 1024
+                                    else f"{size / 1024:.0f} KB"
+                                )
+                                console.print(f"[dim]\U0001f4ce staged: {item['filename']} ({sstr})[/dim]")
+                        continue
+
+                    if text.startswith("/detach"):
+                        rest = text[len("/detach"):].strip()
+                        try:
+                            idx = int(rest)
+                        except ValueError:
+                            console.print("[red]usage: /detach <index>[/red]")
+                            continue
+                        err = staging.remove(idx)
+                        if err:
+                            console.print(f"[red]❌ {err}[/red]")
+                        else:
+                            console.print("[dim]detached[/dim]")
+                        continue
+
                     if text in ("/clear", "/new"):
+                        staging.clear()
                         payload = {"content": "", "command": "clear"}
                     elif text == "/reset":
+                        staging.clear()
                         payload = {"content": "", "command": "reset"}
                     else:
-                        payload = {"content": text, "command": None}
+                        payload = {
+                            "content": text,
+                            "command": None,
+                            "attachments": staging.to_payload() or None,
+                        }
+                        staging.clear()
 
                 try:
                     await ws.send(json.dumps(payload))
