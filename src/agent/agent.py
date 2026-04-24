@@ -18,6 +18,7 @@ from src.tools.schemas import get_tool_schemas
 
 
 _DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
+_IMAGE_COST_CHARS = 2000  # fixed budget per image block for history trimming
 
 # Map tool names to their key argument(s) for log display
 _TOOL_KEY_ARGS: dict[str, list[str]] = {
@@ -68,7 +69,12 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
 
 
 def _estimate_chars(messages: list[dict]) -> int:
-    """Rough character count across all message contents."""
+    """Rough character count across all message contents.
+
+    For list-form content (multimodal messages), text blocks count their
+    text length and image blocks charge a fixed per-image cost so images
+    age out of history alongside text on long sessions.
+    """
     total = 0
     for msg in messages:
         content = msg.get("content", "")
@@ -76,7 +82,16 @@ def _estimate_chars(messages: list[dict]) -> int:
             total += len(content)
         elif isinstance(content, list):
             for block in content:
-                total += len(str(block))
+                if not isinstance(block, dict):
+                    total += len(str(block))
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    total += len(block.get("text", ""))
+                elif btype == "image_url":
+                    total += _IMAGE_COST_CHARS
+                else:
+                    total += len(str(block))
     return total
 
 
