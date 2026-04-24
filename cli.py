@@ -79,10 +79,12 @@ def _save_attachment(att: dict, download_dir: str) -> str | None:
 # Size caps mirrored from src/channels/ws.py
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
 _MAX_TEXT_BYTES = 256 * 1024                # 256 KB
+_MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDFs)
 _MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
 _ALLOWED_IMAGE_MIMES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
 })
+_ALLOWED_DOC_MIMES = frozenset({"application/pdf"})
 
 
 def _guess_mime(path: str) -> str | None:
@@ -126,6 +128,10 @@ class Staging:
             if size > _MAX_IMAGE_BYTES:
                 return (f"{os.path.basename(path)} is "
                         f"{size / 1024 / 1024:.1f} MB (image cap is 5 MB)")
+        elif mime in _ALLOWED_DOC_MIMES:
+            if size > _MAX_DOC_BYTES:
+                return (f"{os.path.basename(path)} is "
+                        f"{size / 1024 / 1024:.1f} MB (document cap is 10 MB)")
         else:
             if size > _MAX_TEXT_BYTES:
                 return (f"{os.path.basename(path)} is "
@@ -250,7 +256,7 @@ async def run(host: str, port: int, console: Console | None = None,
     uri = f"ws://{host}:{port}"
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim] [dim]rev {_detect_version()}[/dim]")
-    console.print("[dim]type /clear or /new to reset, /reset to reset without extracting, /verbose to toggle tool output[/dim]")
+    console.print("[dim]type /clear, /new, or /reset to reset the session, /verbose to toggle tool output[/dim]")
 
     verbose = True
     ready = asyncio.Event()

@@ -4,6 +4,7 @@ rich
 prompt_toolkit
 httpx
 trafilatura
+pypdf
 websockets
 pytest
 pytest-asyncio
