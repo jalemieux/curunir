@@ -80,46 +80,120 @@ def test_mixed_ordering_preserved(image_file, text_file):
     assert blocks[0]["text"] == "look"
 
 
-@pytest.mark.asyncio
-async def test_agent_worker_sends_multimodal_for_cli_channel(tmp_path, monkeypatch, image_file):
-    """CLI inbound with attachments calls agent.handle with a list content."""
+def test_pdf_attachment_produces_text_block_with_extracted_content(tmp_path, monkeypatch):
+    """PDF attachments get extracted to text and wrapped with a filename header."""
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")  # contents irrelevant; PdfReader is patched
+
+    class FakePage:
+        def extract_text(self):
+            return "Hello from PDF"
+
+    class FakeReader:
+        def __init__(self, path):
+            self.pages = [FakePage(), FakePage()]
+
+    import pypdf
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+
+    from run import build_multimodal_content
+    blocks = build_multimodal_content("summarize", [_att(pdf_path, "application/pdf")])
+
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    assert blocks[0] == {"type": "text", "text": "summarize"}
+    assert blocks[1]["type"] == "text"
+    body = blocks[1]["text"]
+    assert "report.pdf" in body
+    assert "(PDF, 2 pages)" in body
+    assert "Hello from PDF" in body
+
+
+async def _run_worker_once(in_q, out_q, fake_agent):
+    """Drive agent_worker for exactly one message, then cancel cleanly."""
     import run as run_module
-    from src.config import AgentConfig
-
-    in_q: asyncio.Queue = asyncio.Queue()
-    out_q: asyncio.Queue = asyncio.Queue()
-
-    captured: dict = {}
-    fake_agent = type("A", (), {})()
-    fake_agent.config = AgentConfig()
-
-    async def fake_handle(content, session_id, **kwargs):
-        captured["content"] = content
-        return "ok"
-
-    fake_agent.handle = fake_handle
-    fake_agent.sessions = {}
-
-    msg = IncomingMessage(
-        content="look",
-        channel="cli",
-        session_id="cli",
-        reply_address={},
-        attachments=[_att(image_file, "image/png")],
-    )
-    await in_q.put(msg)
-
     task = asyncio.create_task(run_module.agent_worker(fake_agent, in_q, out_q))
-    out = await asyncio.wait_for(out_q.get(), timeout=2.0)
+    await asyncio.wait_for(out_q.get(), timeout=2.0)
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
 
-    assert out.content == "ok"
+
+def _fake_agent(captured: dict):
+    from src.config import AgentConfig
+    agent = type("A", (), {})()
+    agent.config = AgentConfig()
+    agent.sessions = {}
+
+    async def fake_handle(content, session_id, **kwargs):
+        captured["content"] = content
+        return "ok"
+
+    agent.handle = fake_handle
+    return agent
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_sends_multimodal_for_cli_channel(image_file):
+    """CLI inbound with attachments calls agent.handle with a list content."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="look", channel="cli", session_id="cli", reply_address={},
+        attachments=[_att(image_file, "image/png")],
+    )
+    await in_q.put(msg)
+    await _run_worker_once(in_q, out_q, _fake_agent(captured))
+
     assert isinstance(captured["content"], list)
     assert captured["content"][0]["type"] == "text"
     assert captured["content"][1]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_empty_prompt_with_attachment_seeds_placeholder(image_file):
+    """Empty user prompt with an attachment gets a filename-referencing placeholder."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="", channel="cli", session_id="cli", reply_address={},
+        attachments=[_att(image_file, "image/png")],
+    )
+    await in_q.put(msg)
+    await _run_worker_once(in_q, out_q, _fake_agent(captured))
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[0]["text"]  # non-empty, satisfies Anthropic's no-empty-block rule
+    assert "img.png" in content[0]["text"]
+    assert content[1]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_non_cli_channel_builds_multimodal(image_file):
+    """Non-CLI channels (e.g. email) with attachments also go through build_multimodal_content."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="please analyze", channel="email", session_id="thread-123",
+        reply_address={"to": "user@example.com"},
+        attachments=[_att(image_file, "image/png")],
+    )
+    await in_q.put(msg)
+    await _run_worker_once(in_q, out_q, _fake_agent(captured))
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    assert content[0] == {"type": "text", "text": "please analyze"}
+    assert content[1]["type"] == "image_url"
 
 
