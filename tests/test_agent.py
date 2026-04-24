@@ -86,6 +86,16 @@ class TestAgentHandle:
             result = await agent.handle("hello", "s1")
         assert "error" in result.lower()
 
+    async def test_empty_response_after_attachment_returns_empty(self, agent):
+        """If the agent already attached a file this turn, an empty terminal
+        response is fine — the attachment is the reply, not an error."""
+        empty = LLMResponse(text=None, tool_calls=None)
+        attachments = [{"filename": "report.md", "path": "/tmp/report.md",
+                        "mime_type": "text/markdown", "size": 42}]
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=empty):
+            result = await agent.handle("hi", "s1", attachments=attachments)
+        assert result == ""
+
     async def test_max_iterations(self, agent_config):
         agent_config.max_iterations = 2
         agent = Agent(agent_config)
@@ -227,7 +237,7 @@ class TestToolAllowlist:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hello", "s1")
         schemas = mock_llm.call_args[0][2]
-        assert len(schemas) == 10  # all tools including delegate, web_fetch, and schedule
+        assert len(schemas) == 11  # all default tools including attach
 
 
 class TestHistoryTruncation:
