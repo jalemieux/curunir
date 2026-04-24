@@ -331,3 +331,234 @@ async def test_send_delta_defaults_false_in_payload():
             assert data["delta"] is False
     finally:
         await _stop_channel(task)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _decode_attachments — inbound attachment validation
+# ---------------------------------------------------------------------------
+import base64
+
+from src.channels.ws import _decode_attachments
+
+
+class TestDecodeAttachments:
+    def test_none_or_empty_returns_empty_list(self):
+        assert _decode_attachments(None) == ([], None)
+        assert _decode_attachments([]) == ([], None)
+
+    def test_valid_image_and_text(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png",
+             "data": base64.b64encode(png).decode()},
+            {"filename": "notes.txt", "mime_type": "text/plain",
+             "data": base64.b64encode(b"hello world").decode()},
+        ])
+        assert err is None
+        assert len(items) == 2
+        assert items[0]["bytes"] == png
+        assert items[1]["bytes"] == b"hello world"
+
+    def test_missing_field_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png"},  # no data
+        ])
+        assert items is None
+        assert "data" in err
+
+    def test_bad_base64_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.png", "mime_type": "image/png", "data": "!!!"},
+        ])
+        assert items is None
+        assert "base64" in err.lower()
+
+    def test_oversized_image_rejected(self):
+        big = b"\x00" * (5 * 1024 * 1024 + 1)
+        items, err = _decode_attachments([
+            {"filename": "big.png", "mime_type": "image/png",
+             "data": base64.b64encode(big).decode()},
+        ])
+        assert items is None
+        assert "5" in err and "MB" in err
+
+    def test_oversized_text_rejected(self):
+        big = b"x" * (256 * 1024 + 1)
+        items, err = _decode_attachments([
+            {"filename": "big.txt", "mime_type": "text/plain",
+             "data": base64.b64encode(big).decode()},
+        ])
+        assert items is None
+        assert "256" in err and "KB" in err
+
+    def test_total_batch_size_cap(self):
+        # Six 4 MB images = 24 MB total, each under the 5 MB per-image cap.
+        # Total cap (20 MB) should fire before the 6th decodes fully.
+        four_mb = b"\x00" * (4 * 1024 * 1024)
+        items, err = _decode_attachments([
+            {"filename": f"a{i}.png", "mime_type": "image/png",
+             "data": base64.b64encode(four_mb).decode()} for i in range(6)
+        ])
+        assert items is None
+        assert "20" in err and "MB" in err
+
+    def test_disallowed_image_mime_rejected(self):
+        items, err = _decode_attachments([
+            {"filename": "a.bmp", "mime_type": "image/bmp",
+             "data": base64.b64encode(b"bmpdata").decode()},
+        ])
+        assert items is None
+        assert "image/bmp" in err
+
+    def test_non_image_must_be_utf8(self):
+        items, err = _decode_attachments([
+            {"filename": "binary.bin", "mime_type": "application/octet-stream",
+             "data": base64.b64encode(b"\xff\xfe\xfa").decode()},
+        ])
+        assert items is None
+        assert "UTF-8" in err
+
+    def test_attachments_must_be_list(self):
+        items, err = _decode_attachments({"filename": "a.png"})
+        assert items is None
+        assert "list" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests: _stage_attachments — staging decoded items to disk
+# ---------------------------------------------------------------------------
+import os as _os_stage
+
+from src.channels.ws import _stage_attachments
+
+
+class TestStageAttachments:
+    def test_writes_files_under_session_uuid(self, tmp_uploads):
+        items = [
+            {"filename": "a.png", "mime_type": "image/png", "bytes": b"PNG"},
+            {"filename": "notes.txt", "mime_type": "text/plain", "bytes": b"hi"},
+        ]
+        manifest = _stage_attachments(items, "sid1", str(tmp_uploads))
+        assert len(manifest) == 2
+        # Both files share one uuid subdirectory.
+        uuids = {_os_stage.path.basename(_os_stage.path.dirname(m["path"])) for m in manifest}
+        assert len(uuids) == 1
+        # Shape matches email channel.
+        assert set(manifest[0].keys()) == {"filename", "path", "mime_type", "size"}
+        # Bytes landed on disk.
+        for m, src in zip(manifest, items):
+            with open(m["path"], "rb") as f:
+                assert f.read() == src["bytes"]
+            assert m["size"] == len(src["bytes"])
+
+    def test_normalizes_unicode_whitespace_in_filename(self, tmp_uploads):
+        # U+202F (narrow no-break space) in filename should become a regular space.
+        items = [{"filename": "weird name.txt",
+                  "mime_type": "text/plain", "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest[0]["filename"] == "weird name.txt"
+        assert _os_stage.path.isfile(manifest[0]["path"])
+
+    def test_collision_suffix(self, tmp_uploads):
+        items = [
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"1"},
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"2"},
+            {"filename": "same.txt", "mime_type": "text/plain", "bytes": b"3"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        names = [m["filename"] for m in manifest]
+        assert names == ["same.txt", "same_1.txt", "same_2.txt"]
+        for m, src in zip(manifest, items):
+            with open(m["path"], "rb") as f:
+                assert f.read() == src["bytes"]
+
+    def test_empty_items_returns_empty_manifest(self, tmp_uploads):
+        assert _stage_attachments([], "sid", str(tmp_uploads)) == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-to-end inbound attachments through WebSocketChannel
+# ---------------------------------------------------------------------------
+import os as _os_e2e
+
+
+class TestWsAttachmentsE2E:
+    @pytest.mark.asyncio
+    async def test_valid_batch_produces_incoming_message_with_manifest(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 20,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 20}") as ws:
+                await ws.send(json.dumps({
+                    "content": "compare these",
+                    "command": None,
+                    "attachments": [
+                        {"filename": "a.png", "mime_type": "image/png",
+                         "data": base64.b64encode(b"PNGDATA").decode()},
+                        {"filename": "b.txt", "mime_type": "text/plain",
+                         "data": base64.b64encode(b"hello").decode()},
+                    ],
+                }))
+                await asyncio.sleep(0.1)
+
+            msg = q.get_nowait()
+            assert msg.content == "compare these"
+            assert msg.attachments is not None
+            assert len(msg.attachments) == 2
+            for m in msg.attachments:
+                assert set(m.keys()) == {"filename", "path", "mime_type", "size"}
+                assert _os_e2e.path.isfile(m["path"])
+            parents = {_os_e2e.path.dirname(m["path"]) for m in msg.attachments}
+            assert len(parents) == 1
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_invalid_payload_emits_error_and_drops_message(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 21,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 21}") as ws:
+                await ws.send(json.dumps({
+                    "content": "oversized image",
+                    "command": None,
+                    "attachments": [{
+                        "filename": "huge.png",
+                        "mime_type": "image/png",
+                        "data": base64.b64encode(b"\x00" * (5 * 1024 * 1024 + 1)).decode(),
+                    }],
+                }))
+                raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                data = json.loads(raw)
+                assert data["final"] is True
+                assert "5 MB" in data["content"] or "exceeds" in data["content"]
+
+            # Drain any messages; only 'extract' from disconnect should appear, no payload.
+            messages = []
+            await asyncio.sleep(0.1)
+            while not q.empty():
+                messages.append(q.get_nowait())
+            # The bad-payload message must NOT have been enqueued.
+            assert all(m.command == "extract" for m in messages)
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_no_attachments_key_still_queues_plain_message(self, tmp_uploads):
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 22,
+                              uploads_dir=str(tmp_uploads))
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 22}") as ws:
+                await ws.send(json.dumps({"content": "no files", "command": None}))
+                await asyncio.sleep(0.1)
+            msg = q.get_nowait()
+            assert msg.content == "no files"
+            assert msg.attachments is None
+        finally:
+            await _stop_channel(task)
