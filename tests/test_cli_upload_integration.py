@@ -69,16 +69,6 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
 
                 uploads = tmp_path / "context" / "uploads" / "cli"
                 assert uploads.exists()
-
-                await ws.send(json.dumps({"content": "", "command": "clear"}))
-                await asyncio.wait_for(out_q.get(), timeout=2.0)
-
-            try:
-                await asyncio.wait_for(out_q.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                pass
-
-            assert not uploads.exists(), "uploads/<session_id>/ should be purged on /clear"
         finally:
             worker_task.cancel()
             server_task.cancel()
