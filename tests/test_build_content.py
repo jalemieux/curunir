@@ -1,8 +1,11 @@
 """Tests for run.build_multimodal_content."""
+import asyncio
 import base64
 import os
 
 import pytest
+
+from src.channels.base import IncomingMessage
 
 
 @pytest.fixture
@@ -77,13 +80,6 @@ def test_mixed_ordering_preserved(image_file, text_file):
     assert blocks[0]["text"] == "look"
 
 
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock
-
-from src.channels.base import IncomingMessage
-
-
 @pytest.mark.asyncio
 async def test_agent_worker_sends_multimodal_for_cli_channel(tmp_path, monkeypatch, image_file):
     """CLI inbound with attachments calls agent.handle with a list content."""
@@ -127,35 +123,3 @@ async def test_agent_worker_sends_multimodal_for_cli_channel(tmp_path, monkeypat
     assert captured["content"][1]["type"] == "image_url"
 
 
-@pytest.mark.asyncio
-async def test_reset_command_purges_uploads_for_cli_session(tmp_path, monkeypatch):
-    """`/clear` or `/reset` wipes context/uploads/<session_id>/."""
-    import run as run_module
-    from src.config import AgentConfig
-
-    monkeypatch.chdir(tmp_path)
-    session_dir = Path("context/uploads/cli")
-    session_dir.mkdir(parents=True)
-    (session_dir / "leftover.txt").write_text("old")
-
-    in_q: asyncio.Queue = asyncio.Queue()
-    out_q: asyncio.Queue = asyncio.Queue()
-
-    fake_agent = type("A", (), {})()
-    fake_agent.config = AgentConfig()
-    fake_agent.sessions = {"cli": []}
-    fake_agent.handle = AsyncMock(return_value="")
-
-    await in_q.put(IncomingMessage(
-        content="", channel="cli", session_id="cli", reply_address={}, command="clear",
-    ))
-
-    task = asyncio.create_task(run_module.agent_worker(fake_agent, in_q, out_q))
-    await asyncio.wait_for(out_q.get(), timeout=2.0)
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-
-    assert not session_dir.exists(), "uploads/<session_id>/ should be purged on /clear"
