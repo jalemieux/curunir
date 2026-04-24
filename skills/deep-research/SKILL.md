@@ -79,6 +79,8 @@ Attach the **PDF**: `attach(path="{file}.pdf")`. If PDF conversion fails, attach
 
 Reply with a concise summary (key findings + bullets) as your text response. The full report is the attachment.
 
+In the same reply, mention that the report can be independently fact-checked via the `fact-checker` skill if accuracy matters. Do not run it automatically — let the user decide.
+
 ## Examples
 
 **Consumer product research** — user asks: "Research the current state of AI code editors"
