@@ -158,6 +158,14 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     return blocks
 
 
+async def _extract_and_record(agent: Agent, session_id: str, history: list[dict]):
+    """Extract learnings for a session and record the archive path for reuse."""
+    archive_path = agent.session_archives.get(session_id)
+    written = await extract_learnings(agent.config, history, archive_path=archive_path)
+    if written is not None:
+        agent.session_archives[session_id] = written
+
+
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
     while True:
@@ -166,8 +174,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
 
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
+            archive_path = agent.session_archives.pop(msg.session_id, None)
             if history:
-                asyncio.create_task(extract_learnings(agent.config, list(history)))
+                asyncio.create_task(extract_learnings(
+                    agent.config, list(history), archive_path=archive_path,
+                ))
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -177,7 +188,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.command == "extract":
             history = agent.sessions.get(msg.session_id)
             if history:
-                asyncio.create_task(extract_learnings(agent.config, list(history)))
+                asyncio.create_task(_extract_and_record(
+                    agent, msg.session_id, list(history),
+                ))
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -244,7 +257,9 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
         for session_id, history in agent.sessions.items():
             prev_len = last_extracted_len.get(session_id, 0)
             if len(history) > prev_len:
-                asyncio.create_task(extract_learnings(agent.config, list(history)))
+                asyncio.create_task(_extract_and_record(
+                    agent, session_id, list(history),
+                ))
                 last_extracted_len[session_id] = len(history)
 
 
