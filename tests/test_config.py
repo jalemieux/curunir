@@ -10,12 +10,23 @@ def test_default_config():
     assert config.max_iterations == 75
     assert config.identity_file == Path("./context/identity.md")
     assert config.skill_dirs == [Path("./skills"), Path("./context/skills")]
+    assert config.vision_model is None
+    assert config.main_model_supports_vision is False
 
 
 def test_custom_config():
     config = AgentConfig(model="openai/gpt-4o", max_iterations=5)
     assert config.model == "openai/gpt-4o"
     assert config.max_iterations == 5
+
+
+def test_vision_config():
+    config = AgentConfig(
+        vision_model="openai/gpt-4o-mini",
+        main_model_supports_vision=True,
+    )
+    assert config.vision_model == "openai/gpt-4o-mini"
+    assert config.main_model_supports_vision is True
 
 
 def test_email_config_defaults():

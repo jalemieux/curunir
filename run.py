@@ -8,6 +8,7 @@ import logging.handlers
 import os
 
 import httpx
+import litellm
 from dotenv import load_dotenv
 
 from src.agent.agent import Agent
@@ -17,6 +18,7 @@ from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
+from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
 from src.usage_store import UsageStore
@@ -188,6 +190,80 @@ async def _extract_and_record(agent: Agent, session_id: str, history: list[dict]
         agent.session_archives[session_id] = written
 
 
+def _detect_vision_support(model: str) -> bool:
+    """Ask LiteLLM whether ``model`` accepts image inputs.
+
+    Defaults to False if the lookup raises (some provider/model combos aren't
+    in LiteLLM's capability table). Safer to disable vision than to send an
+    image to a model that will silently drop it.
+    """
+    try:
+        return bool(litellm.supports_vision(model=model))
+    except Exception as exc:
+        logger.debug("supports_vision lookup failed for %s: %s", model, exc)
+        return False
+
+
+async def _vision_prepass(
+    config: AgentConfig,
+    text: str,
+    attachments: list[dict] | None,
+) -> list[dict] | None:
+    """Convert image attachments to text when the main model lacks vision.
+
+    Called before ``build_multimodal_content`` so the formatter never sees an
+    image it can't render. PDFs and text attachments pass through untouched.
+    Returns a new attachment list (same shape) or the original if nothing
+    needed converting.
+
+    Each replaced image becomes a synthesized ``text/plain`` attachment whose
+    file contents are the description (or a fallback marker). The formatter's
+    existing text-file branch wraps it with ``[Attachment: <filename>]`` so
+    the main model still sees the filename context.
+    """
+    if config.main_model_supports_vision or not attachments:
+        return attachments
+    if not any(a.get("mime_type", "").startswith("image/") for a in attachments):
+        return attachments
+
+    out: list[dict] = []
+    for att in attachments:
+        mime = att.get("mime_type", "")
+        if not mime.startswith("image/"):
+            out.append(att)
+            continue
+
+        filename = att.get("filename", "image")
+        if config.vision_model:
+            try:
+                description = await describe_image(
+                    config.vision_model, att["path"], mime, text,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Vision pre-pass failed for %s: %s — falling back to size marker",
+                    filename, exc,
+                )
+                description = f"(vision model failed: {exc})"
+            replacement_text = f"Description: {description}"
+        else:
+            size_kb = max(1, att.get("size", 0) // 1024)
+            replacement_text = (
+                f"(image, {size_kb}KB) — no vision model configured"
+            )
+
+        synth_path = att["path"] + ".vision.txt"
+        with open(synth_path, "w", encoding="utf-8") as f:
+            f.write(replacement_text)
+        out.append({
+            "filename": filename,
+            "path": synth_path,
+            "mime_type": "text/plain",
+            "size": len(replacement_text.encode("utf-8")),
+        })
+    return out
+
+
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     """Bridge between the message queues and the agent loop."""
     while True:
@@ -239,11 +315,14 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
+        msg_attachments = await _vision_prepass(
+            agent.config, msg.content, msg.attachments,
+        )
+        content = build_multimodal_content(msg.content, msg_attachments)
         attachments = []
         metadata: dict = {}
 
         try:
-            content = build_multimodal_content(msg.content, msg.attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
@@ -344,6 +423,7 @@ async def main():
     attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
+    vision_model = os.environ.get("VISION_MODEL")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
@@ -352,7 +432,22 @@ async def main():
         **({"attachment_dir": attachment_dir} if attachment_dir else {}),
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
+        **({"vision_model": vision_model} if vision_model else {}),
     )
+    config.main_model_supports_vision = _detect_vision_support(config.model)
+    if not config.main_model_supports_vision:
+        if config.vision_model:
+            logger.info(
+                "Main model %s lacks vision support; routing image attachments "
+                "through VISION_MODEL=%s.",
+                config.model, config.vision_model,
+            )
+        else:
+            logger.info(
+                "Main model %s lacks vision support and no VISION_MODEL is "
+                "configured; image attachments will be replaced with a text marker.",
+                config.model,
+            )
 
     usage_store = UsageStore(config.usage_db)
     agent = Agent(config, usage_store=usage_store)

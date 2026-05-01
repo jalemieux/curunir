@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.llm import LLMResponse, call_llm
+import src.llm as llm_module
+from src.llm import LLMResponse, call_llm, describe_image
 
 
 @pytest.mark.asyncio
@@ -344,3 +345,90 @@ async def test_stream_extracts_billing_dimensions():
     assert result.usage.reasoning_tokens == 40
     assert result.usage.cost_usd == pytest.approx(0.0123)
     assert result.usage.model == "anthropic/claude-sonnet-4"
+
+
+@pytest.fixture(autouse=True)
+def _clear_description_cache():
+    """Reset describe_image's in-process cache between tests."""
+    llm_module._description_cache.clear()
+    yield
+    llm_module._description_cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_describe_image_returns_text(tmp_path):
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\nFAKEBYTES")
+
+    mock_message = MagicMock()
+    mock_message.content = "A red bicycle leaning against a brick wall."
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        text = await describe_image(
+            "openai/gpt-4o-mini", str(img), "image/png", "what is this?"
+        )
+
+    assert text == "A red bicycle leaning against a brick wall."
+
+    # Verify the multimodal payload that was sent
+    call_args = mock_litellm.acompletion.await_args
+    messages = call_args.kwargs["messages"]
+    assert len(messages) == 1
+    blocks = messages[0]["content"]
+    assert isinstance(blocks, list)
+    assert blocks[0]["type"] == "text"
+    assert "what is this?" in blocks[0]["text"]
+    assert blocks[1]["type"] == "image_url"
+    assert blocks[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_describe_image_caches_by_content_hash(tmp_path):
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\nIDENTICAL")
+
+    mock_message = MagicMock()
+    mock_message.content = "first description"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        first = await describe_image(
+            "vision-model", str(img), "image/png", "describe"
+        )
+        # Second call with same bytes should not hit the LLM again
+        second = await describe_image(
+            "vision-model", str(img), "image/png", "describe again"
+        )
+
+    assert first == "first description"
+    assert second == "first description"
+    assert mock_litellm.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_describe_image_different_bytes_calls_llm_each_time(tmp_path):
+    img1 = tmp_path / "a.png"
+    img1.write_bytes(b"AAAA")
+    img2 = tmp_path / "b.png"
+    img2.write_bytes(b"BBBB")
+
+    msg_a = MagicMock(content="desc A", tool_calls=None)
+    msg_b = MagicMock(content="desc B", tool_calls=None)
+    resp_a = MagicMock(choices=[MagicMock(message=msg_a)])
+    resp_b = MagicMock(choices=[MagicMock(message=msg_b)])
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(side_effect=[resp_a, resp_b])
+        a = await describe_image("m", str(img1), "image/png", "q")
+        b = await describe_image("m", str(img2), "image/png", "q")
+
+    assert a == "desc A"
+    assert b == "desc B"
+    assert mock_litellm.acompletion.await_count == 2
