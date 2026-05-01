@@ -19,6 +19,8 @@ class AgentConfig:
     attachment_dir: str = "/tmp/attachments"
     tts_model: str = "tts-1"
     tts_voice: str = "alloy"
+    vision_model: str | None = None
+    main_model_supports_vision: bool = False
 
 
 @dataclass
