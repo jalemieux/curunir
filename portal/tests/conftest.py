@@ -1,6 +1,7 @@
 import os
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 # Force test settings before importing the app.
@@ -12,6 +13,7 @@ os.environ.setdefault(
 os.environ.setdefault("ADMIN_EMAILS", "admin@example.com")
 os.environ.setdefault("PORTAL_BASE_URL", "http://localhost:8000")
 
+from portal import db as portal_db  # noqa: E402
 from portal.app import app  # noqa: E402
 
 
@@ -21,10 +23,6 @@ async def client():
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
-
-
-import pytest_asyncio
-from portal import db as portal_db
 
 
 @pytest_asyncio.fixture(autouse=True)
