@@ -18,5 +18,19 @@ from portal.app import app  # noqa: E402
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+
+
+import pytest_asyncio
+from portal import db as portal_db
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_db(client):
+    """After each test, truncate users."""
+    yield
+    pool = portal_db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE users RESTART IDENTITY")

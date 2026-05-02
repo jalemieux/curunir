@@ -15,6 +15,9 @@ uvicorn portal.app:app --reload
 
 ```bash
 docker compose up -d
+
+# Create test database once
+docker compose exec postgres createdb -U postgres portal_test
 pytest
 ```
 
