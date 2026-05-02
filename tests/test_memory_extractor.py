@@ -8,6 +8,16 @@ from src.llm import LLMResponse
 from src.memory_extractor import extract_learnings
 
 
+def _summary_response(slug: str, content: str = "Summary.") -> LLMResponse:
+    return LLMResponse(
+        text=json.dumps({
+            "facts": [],
+            "summary": {"topic_slug": slug, "content": content},
+        }),
+        tool_calls=None,
+    )
+
+
 def _history(user_count=3):
     """Build a minimal conversation history with N user messages."""
     msgs = []
@@ -188,3 +198,158 @@ async def test_creates_subdirectory_for_people(agent_config):
 
     assert (mem_dir / "people" / "alice.md").exists()
     assert "works on infra" in (mem_dir / "people" / "alice.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_returns_archive_path_when_summary_written(agent_config):
+    """extract_learnings returns the Path of the archive file written."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("first-topic", "First summary."),
+    ):
+        result = await extract_learnings(agent_config, _history())
+
+    assert result is not None
+    assert result.exists()
+    assert result.name.endswith("first-topic.md")
+
+
+@pytest.mark.asyncio
+async def test_returns_none_when_no_summary(agent_config):
+    """extract_learnings returns None when no summary is produced."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    # Skipped due to short history
+    result = await extract_learnings(agent_config, _history(user_count=1))
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_reuses_archive_path_across_extractions(agent_config):
+    """Two extractions for the same session reuse one archive file."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    archives = mem_dir / "archives" / "conversations"
+
+    # First extraction — LLM picks slug "first-topic", new file created.
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("first-topic", "First version."),
+    ):
+        first_path = await extract_learnings(agent_config, _history())
+
+    assert first_path is not None
+    assert first_path.exists()
+
+    # Second extraction for the same session — even though the LLM picks
+    # a different slug, the same file is overwritten.
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("different-slug", "Updated version."),
+    ):
+        second_path = await extract_learnings(
+            agent_config, _history(), archive_path=first_path
+        )
+
+    assert second_path == first_path
+    files = list(archives.glob("*.md"))
+    assert len(files) == 1
+    assert "Updated version." in first_path.read_text()
+    assert "First version." not in first_path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_distinct_sessions_get_distinct_files(agent_config):
+    """Two sessions with no shared archive_path produce two files."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    archives = mem_dir / "archives" / "conversations"
+
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("session-a", "A."),
+    ):
+        path_a = await extract_learnings(agent_config, _history())
+
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("session-b", "B."),
+    ):
+        path_b = await extract_learnings(agent_config, _history())
+
+    assert path_a != path_b
+    assert path_a.exists() and path_b.exists()
+    assert len(list(archives.glob("*.md"))) == 2
+
+
+@pytest.mark.asyncio
+async def test_archive_path_none_creates_new_file(agent_config):
+    """Passing archive_path=None preserves default slug-based behavior."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("from-slug", "Body."),
+    ):
+        result = await extract_learnings(agent_config, _history(), archive_path=None)
+
+    assert result is not None
+    assert result.name.endswith("from-slug.md")
+
+
+@pytest.mark.asyncio
+async def test_fresh_extraction_after_clear_creates_new_file(agent_config):
+    """After clearing the mapping, a fresh extraction creates a new archive."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    archives = mem_dir / "archives" / "conversations"
+
+    # First conversation: extract.
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("topic-one", "One."),
+    ):
+        first_path = await extract_learnings(agent_config, _history())
+
+    # Clear cycle: caller passes the path to extract one final time, then
+    # discards the mapping. (Simulates run.py's clear/reset handling.)
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("topic-one-final", "One final."),
+    ):
+        await extract_learnings(agent_config, _history(), archive_path=first_path)
+
+    # Mapping is now gone — caller passes archive_path=None for a brand new
+    # conversation under the same session id. A second file is created.
+    with patch(
+        "src.memory_extractor.call_llm",
+        new_callable=AsyncMock,
+        return_value=_summary_response("topic-two", "Two."),
+    ):
+        second_path = await extract_learnings(agent_config, _history(), archive_path=None)
+
+    assert second_path is not None
+    assert second_path != first_path
+    assert len(list(archives.glob("*.md"))) == 2
