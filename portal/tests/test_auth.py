@@ -25,6 +25,13 @@ async def test_garbage_cookie_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_signed_payload_without_separator_returns_none():
+    """A validly-signed payload missing the '.' separator must not crash."""
+    signed = auth._signer().sign(b"abc").decode()
+    assert auth.verify_session(signed) is None
+
+
+@pytest.mark.asyncio
 async def test_current_user_dependency_401_when_no_cookie(client):
     @app.get("/__test_protected")
     async def protected(user=Depends(auth.current_user)):
