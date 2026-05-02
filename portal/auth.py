@@ -28,7 +28,10 @@ def verify_session(cookie_value: str) -> Optional[int]:
         payload = _signer().unsign(cookie_value.encode()).decode()
     except BadSignature:
         return None
-    user_id_str, _v = payload.split(".", 1)
+    parts = payload.split(".", 1)
+    if len(parts) != 2:
+        return None
+    user_id_str, _v = parts
     try:
         return int(user_id_str)
     except ValueError:
