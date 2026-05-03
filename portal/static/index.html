@@ -68,30 +68,51 @@ main {
 }
 
 footer {
-  padding: 10px 14px; border-top: 1px solid #1a1a22;
-  display: flex; align-items: end; gap: 8px;
-  max-width: 720px; width: 100%; margin: 0 auto;
+  padding: 10px 14px 14px; border-top: 1px solid #1a1a22;
+  max-width: 760px; width: 100%; margin: 0 auto;
   flex-shrink: 0;
 }
-#attach-btn {
-  background: transparent; border: 1px solid #2a2a3e; border-radius: 4px;
-  color: #888; padding: 8px 10px; cursor: pointer; min-height: 44px;
-}
-#attach-btn:hover { color: var(--accent); border-color: var(--accent); }
-#input {
-  flex: 1; background: #12121c; color: var(--fg);
-  border: 1px solid #2a2a3e; border-radius: 6px; padding: 10px;
-  font-family: inherit; font-size: 14px; resize: none;
-  min-height: 44px; max-height: 30dvh;
-}
-#send-btn {
-  background: var(--accent); color: white; border: 0; border-radius: 4px;
-  padding: 10px 16px; cursor: pointer; min-height: 44px;
-}
-#send-btn:disabled { background: #2a2a3e; color: #666; cursor: not-allowed; }
-.staged-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+#staged.staged-list:empty { display: none; }
+.staged-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .staged-list .attachment { cursor: pointer; }
 .staged-list .attachment:hover { color: #f87171; }
+
+#composer {
+  background: #12121c;
+  border: 1px solid #2a2a3e;
+  border-radius: 14px;
+  padding: 10px 10px 8px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+#composer:focus-within { border-color: var(--accent); }
+#input {
+  background: transparent; color: var(--fg);
+  border: 0; outline: 0; resize: none; width: 100%;
+  font-family: inherit; font-size: 14px; line-height: 1.5;
+  min-height: 60px; max-height: 30dvh;
+}
+.composer-row {
+  display: flex; align-items: center; gap: 8px;
+}
+#attach-btn {
+  background: transparent; border: 0; color: #888;
+  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+  font-size: 16px; padding: 6px; box-sizing: content-box;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#attach-btn:hover { color: var(--accent); background: #1a1a2e; }
+.composer-hint {
+  color: #555; font-size: 11px;
+  flex: 1; text-align: right; margin-right: 4px;
+}
+#send-btn {
+  background: var(--accent); color: white; border: 0;
+  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+  font-size: 16px; padding: 6px; box-sizing: content-box;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#send-btn:disabled { background: #2a2a3e; color: #666; cursor: not-allowed; }
+@media (max-width: 480px) { .composer-hint { display: none; } }
 </style>
 </head>
 <body>
@@ -105,12 +126,15 @@ footer {
 <main id="messages"></main>
 <footer>
   <input type="file" id="file-input" multiple style="display:none">
-  <button id="attach-btn" title="Attach files">📎</button>
-  <div style="flex:1; display:flex; flex-direction:column;">
-    <div id="staged" class="staged-list"></div>
-    <textarea id="input" rows="1" placeholder="Type a message…"></textarea>
+  <div id="staged" class="staged-list"></div>
+  <div id="composer">
+    <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
+    <div class="composer-row">
+      <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
+      <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
+      <button id="send-btn" title="Send" aria-label="Send">↑</button>
+    </div>
   </div>
-  <button id="send-btn">Send</button>
 </footer>
 
 <script>
@@ -344,7 +368,7 @@ function startNew() {
   staged = [];
   renderStaged();
   inputEl.value = "";
-  inputEl.style.height = "auto";
+  inputEl.style.height = "";
   inputEl.focus();
 }
 
@@ -359,7 +383,10 @@ inputEl.addEventListener("keydown", (e) => {
 });
 inputEl.addEventListener("input", () => {
   inputEl.style.height = "auto";
-  inputEl.style.height = Math.min(inputEl.scrollHeight, window.innerHeight * 0.3) + "px";
+  inputEl.style.height = Math.min(
+    Math.max(inputEl.scrollHeight, 60),
+    window.innerHeight * 0.3
+  ) + "px";
 });
 attachBtn.onclick = () => fileInput.click();
 fileInput.onchange = async () => {
