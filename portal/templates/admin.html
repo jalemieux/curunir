@@ -20,8 +20,13 @@
 
   {% if new_container_token %}
   <div class="new-token">
-    <strong>Container token for {{ new_user_email }}</strong> (shown once):<br>
-    <code>{{ new_container_token }}</code>
+    <strong>New user: {{ new_user_email }}</strong> (both shown once — copy now)
+    <div style="margin-top:8px;">Sign-in link (give to user, opens in their browser):<br>
+      <code>{{ new_signin_link }}</code>
+    </div>
+    <div style="margin-top:8px;">Container token (set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
+      <code>{{ new_container_token }}</code>
+    </div>
   </div>
   {% endif %}
 

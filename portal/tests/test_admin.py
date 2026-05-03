@@ -46,9 +46,12 @@ async def test_create_user_with_valid_csrf_creates_and_shows_token(client):
     assert resp.status_code == 200
     assert "fresh@example.com" in resp.text
     assert "Container token" in resp.text
+    assert "Sign-in link" in resp.text
 
     users = await db.list_users()
-    assert any(u.email == "fresh@example.com" for u in users)
+    fresh = next(u for u in users if u.email == "fresh@example.com")
+    # Sign-in link in the response includes the user's sign_in_token verbatim
+    assert fresh.sign_in_token in resp.text
 
 
 @pytest.mark.asyncio
