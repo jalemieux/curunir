@@ -155,6 +155,62 @@ class Agent:
             base = base + extra
         return base
 
+    def history_snapshot(self, session_id: str = "portal") -> list[dict]:
+        """Return a chat-shaped projection of conversation history for the portal.
+
+        Walks self.sessions[session_id] once. Includes user turns and assistant
+        turns; tool internals are summarized as one-liners (e.g. "bash: ls -la").
+        Capped at 200 messages or 100 KB serialized.
+        """
+        import json as _json
+
+        history = self.sessions.get(session_id, [])
+        out: list[dict] = []
+        for entry in history:
+            role = entry.get("role")
+            if role == "user":
+                content = entry.get("content")
+                if isinstance(content, list):
+                    # Multimodal: extract text parts only.
+                    text = " ".join(
+                        p.get("text", "") for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                else:
+                    text = content or ""
+                out.append({"role": "user", "content": text})
+            elif role == "assistant":
+                content = entry.get("content") or ""
+                tool_calls = entry.get("tool_calls") or []
+                summaries = []
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "tool")
+                    args = fn.get("arguments", "")
+                    if isinstance(args, str) and args:
+                        try:
+                            parsed = _json.loads(args)
+                            first_val = next(iter(parsed.values()), "")
+                            summaries.append(f"{name}: {first_val}")
+                        except (ValueError, StopIteration):
+                            summaries.append(name)
+                    else:
+                        summaries.append(name)
+                out.append({
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": summaries,
+                })
+            # role == "tool" is internal noise — skip.
+
+        # Apply caps: 200 messages OR ~100 KB serialized, whichever first.
+        while len(out) > 200 or len(_json.dumps(out)) > 100_000:
+            if not out:
+                break
+            out.pop(0)
+
+        return out
+
     async def handle(
         self, message: str | list, session_id: str,
         on_tool_call=None, attachments: list[dict] | None = None,
