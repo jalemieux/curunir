@@ -1,0 +1,150 @@
+import argparse
+import asyncio
+import logging
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+from portal import auth, csrf, db, email_send
+from portal.config import settings
+from portal.db import User
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/admin")
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+async def admin_user(user: User = Depends(auth.current_user)) -> User:
+    if user.email.strip().lower() not in settings.admin_email_set:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    return user
+
+
+def _verify_csrf_form(user: User, csrf_token: str) -> None:
+    if not csrf.verify_csrf(user.id, csrf_token):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CSRF check failed")
+
+
+def _signin_link(token: str) -> str:
+    return f"{settings.portal_base_url.rstrip('/')}/sign-in?token={token}"
+
+
+@router.get("", response_class=HTMLResponse)
+async def admin_index(request: Request, user: User = Depends(admin_user)):
+    users = await db.list_users()
+    return templates.TemplateResponse(
+        request, "admin.html",
+        {
+            "users": users,
+            "csrf_token": csrf.issue_csrf(user.id),
+            "new_container_token": None,
+            "new_user_email": None,
+        },
+    )
+
+
+@router.post("/users", response_class=HTMLResponse)
+async def admin_create_user(
+    request: Request,
+    email: str = Form(...),
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    new_user = await db.create_user(email)
+    await email_send.send_signin_email(new_user.email, _signin_link(new_user.sign_in_token))
+    users = await db.list_users()
+    return templates.TemplateResponse(
+        request, "admin.html",
+        {
+            "users": users,
+            "csrf_token": csrf.issue_csrf(user.id),
+            "new_container_token": new_user.container_token,
+            "new_user_email": new_user.email,
+        },
+    )
+
+
+@router.post("/users/{user_id}/send-signin-email")
+async def admin_send_signin_email(
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    target = await db.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(404)
+    await email_send.send_signin_email(target.email, _signin_link(target.sign_in_token))
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/users/{user_id}/regenerate-sign-in")
+async def admin_regenerate_sign_in(
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    new_token = await db.regenerate_sign_in_token(user_id)
+    target = await db.get_user_by_id(user_id)
+    if target:
+        await email_send.send_signin_email(target.email, _signin_link(new_token))
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/users/{user_id}/regenerate-container")
+async def admin_regenerate_container(
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    await db.regenerate_container_token(user_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/users/{user_id}/deactivate")
+async def admin_deactivate(
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    await db.deactivate_user(user_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+# ----- CLI: python -m portal.admin create-user --email user@example.com -----
+
+async def _cli_create_user(email: str) -> None:
+    await db.init_pool()
+    await db.run_migrations()
+    try:
+        user = await db.create_user(email)
+        await email_send.send_signin_email(user.email, _signin_link(user.sign_in_token))
+        print(f"Created user {user.id} <{user.email}>")
+        print(f"Container token (set in container env as CURUNIR_PORTAL_TOKEN):")
+        print(f"  {user.container_token}")
+        print(f"Sign-in link emailed; copy of link:")
+        print(f"  {_signin_link(user.sign_in_token)}")
+    finally:
+        await db.close_pool()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="python -m portal.admin")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    create = sub.add_parser("create-user")
+    create.add_argument("--email", required=True)
+    args = parser.parse_args()
+    if args.cmd == "create-user":
+        asyncio.run(_cli_create_user(args.email))
+
+
+if __name__ == "__main__":
+    main()
