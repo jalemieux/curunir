@@ -89,6 +89,146 @@ def test_enrich_normalizes_path():
         os.unlink(path)
 
 
+import base64 as _b64
+
+
+def test_enrich_adds_data_for_image_under_cap():
+    """Images under 5 MB get base64 `data` for download."""
+    payload = b"\x89PNG\r\n" + b"\x00" * 1024
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as f:
+        f.write(payload)
+        path = f.name
+    try:
+        attachments = [{"filename": "img.png", "path": path,
+                        "mime_type": "image/png", "size": len(payload)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert attachments[0]["data"] == _b64.b64encode(payload).decode("ascii")
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_adds_data_for_pdf_under_cap():
+    """PDFs under 10 MB get base64 `data` for download."""
+    payload = b"%PDF-1.4\n" + b"\x00" * 2048
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir="/tmp") as f:
+        f.write(payload)
+        path = f.name
+    try:
+        attachments = [{"filename": "doc.pdf", "path": path,
+                        "mime_type": "application/pdf", "size": len(payload)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert attachments[0]["data"] == _b64.b64encode(payload).decode("ascii")
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_adds_data_for_text_under_cap():
+    """Text files ≤ 256 KB get both `content` (string) and `data` (base64)."""
+    body = "hello world"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir="/tmp") as f:
+        f.write(body)
+        path = f.name
+    try:
+        attachments = [{"filename": "hello.md", "path": path,
+                        "mime_type": "text/markdown", "size": len(body)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert attachments[0]["content"] == body
+        assert attachments[0]["data"] == _b64.b64encode(body.encode("utf-8")).decode("ascii")
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_omits_data_for_image_over_cap():
+    """Images > 5 MB get no `data` field."""
+    size = 5 * 1024 * 1024 + 1
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as f:
+        f.write(b"\x00" * size)
+        path = f.name
+    try:
+        attachments = [{"filename": "big.png", "path": path,
+                        "mime_type": "image/png", "size": size}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert "data" not in attachments[0]
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_omits_data_for_pdf_over_cap():
+    """PDFs > 10 MB get no `data` field."""
+    size = 10 * 1024 * 1024 + 1
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir="/tmp") as f:
+        f.write(b"\x00" * size)
+        path = f.name
+    try:
+        attachments = [{"filename": "big.pdf", "path": path,
+                        "mime_type": "application/pdf", "size": size}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert "data" not in attachments[0]
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_omits_data_for_text_over_data_cap():
+    """Text files > 256 KB get no `data` (even if under the 512 KB content cap)."""
+    size = 256 * 1024 + 1
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir="/tmp") as f:
+        f.write("x" * size)
+        path = f.name
+    try:
+        attachments = [{"filename": "big.md", "path": path,
+                        "mime_type": "text/markdown", "size": size}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert "data" not in attachments[0]
+        # `content` is still populated since 256 KB+1 < 512 KB content cap.
+        assert attachments[0]["content"] is not None
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_omits_data_for_unsupported_mime():
+    """Mimes outside the allowed image/doc/text sets get no `data`."""
+    payload = b"PK\x03\x04fakezip"
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False, dir="/tmp") as f:
+        f.write(payload)
+        path = f.name
+    try:
+        attachments = [{"filename": "thing.zip", "path": path,
+                        "mime_type": "application/zip", "size": len(payload)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert "data" not in attachments[0]
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_missing_file_sets_error_no_data():
+    """Missing file: `error` set, no `data` field, even for downloadable mime."""
+    attachments = [{"filename": "gone.pdf", "path": "/tmp/nonexistent-xyz.pdf",
+                    "mime_type": "application/pdf", "size": 100}]
+    _enrich_attachments(attachments, project_root="/tmp")
+    assert "data" not in attachments[0]
+    assert attachments[0]["error"] == "file not found"
+
+
+def test_enrich_is_idempotent_for_data():
+    """Calling `_enrich_attachments` twice produces the same `data`."""
+    payload = b"hello"
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp") as f:
+        f.write(payload)
+        path = f.name
+    try:
+        attachments = [{"filename": "x.png", "path": path,
+                        "mime_type": "image/png", "size": len(payload)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        first = attachments[0]["data"]
+        # Second call: path is now relative; _enrich must still find the file.
+        # Use absolute path again to simulate a fresh enrichment cycle.
+        attachments[0]["path"] = path
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert attachments[0]["data"] == first
+    finally:
+        os.unlink(path)
+
+
 @pytest.mark.asyncio
 async def test_agent_worker_passes_workflow_to_outgoing():
     """Workflow metadata from agent.handle() propagates to OutgoingMessage."""
