@@ -85,6 +85,8 @@ tools: attach  # Optional: comma-separated opt-in tools
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+The `introspect` skill reads this container's docker logs via `/var/run/docker.sock`, which `docker-compose.yml` mounts read-only and the image installs the `docker` CLI for. Disable that mount for shared/multi-tenant deployments.
+
 ### Memory (`src/memory_extractor.py`)
 
 Post-session, `extract_learnings()` calls the LLM with conversation history to extract facts → appends to markdown files in `context/memory/` → stores conversation summary in `context/memory/archives/conversations/`.

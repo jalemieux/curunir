@@ -8,4 +8,9 @@ services:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
+      # Docker socket — read-only — lets the introspect skill run `docker logs`
+      # against this container from inside it. SECURITY: even read-only access
+      # exposes the host docker daemon's metadata. Acceptable for single-user
+      # personal-assistant deployments; remove for shared/multi-tenant hosts.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
