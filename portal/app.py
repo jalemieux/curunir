@@ -1,3 +1,5 @@
+import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +20,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+_TOKEN_QS = re.compile(r"(\btoken=)[^&\s]+")
+
+
+class _RedactingFilter(logging.Filter):
+    """Replace `token=...` in any uvicorn-style access log message."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        record.msg = _TOKEN_QS.sub(r"\1<redacted>", msg)
+        record.args = ()
+        return True
+
+
+for _name in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_name).addFilter(_RedactingFilter())
+
 app.include_router(sign_in.router)
 app.include_router(admin.router)
 app.include_router(ws_agent.router)
