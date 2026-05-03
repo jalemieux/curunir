@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: curunir-portal
+    runtime: docker
+    rootDir: portal
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: curunir-portal-db
+          property: connectionString
+      - key: PORTAL_SECRET_KEY
+        generateValue: true
+      - key: PORTAL_BASE_URL
+        sync: false   # set per-environment in dashboard
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+
+databases:
+  - name: curunir-portal-db
+    plan: free
+    databaseName: portal
+    user: portal
