@@ -31,6 +31,14 @@ header {
   display: flex; justify-content: space-between; align-items: center;
   flex-shrink: 0;
 }
+.header-right { display: flex; align-items: center; gap: 12px; }
+#new-btn {
+  background: transparent; border: 1px solid #2a2a3e; border-radius: 4px;
+  color: #888; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+#new-btn:hover { color: var(--accent); border-color: var(--accent); }
+#new-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .dot.online { background: var(--user); }
 .dot.offline { background: #555; }
@@ -89,7 +97,10 @@ footer {
 <body>
 <header>
   <div><strong>Curunir</strong></div>
-  <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
+  <div class="header-right">
+    <button id="new-btn" title="Start a new conversation">New</button>
+    <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
+  </div>
 </header>
 <main id="messages"></main>
 <footer>
@@ -119,6 +130,7 @@ const fileInput = document.getElementById("file-input");
 const stagedEl = document.getElementById("staged");
 const statusDot = document.querySelector("#status .dot");
 const statusText = document.getElementById("status-text");
+const newBtn = document.getElementById("new-btn");
 
 // === State ===
 let ws = null;
@@ -323,8 +335,22 @@ function renderStaged() {
   });
 }
 
+// === New conversation ===
+function startNew() {
+  if (!agentOnline) return;
+  ws.send(JSON.stringify({ content: "", command: "clear" }));
+  messagesEl.innerHTML = "";
+  inProgressMsg = null;
+  staged = [];
+  renderStaged();
+  inputEl.value = "";
+  inputEl.style.height = "auto";
+  inputEl.focus();
+}
+
 // === Wiring ===
 sendBtn.onclick = send;
+newBtn.onclick = startNew;
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
