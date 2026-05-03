@@ -24,6 +24,39 @@ _ALLOWED_DOC_MIMES = frozenset({"application/pdf"})
 _MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
 
 
+def _attach_download_data(att: dict, path: str) -> None:
+    """Populate ``att["data"]`` (base64 bytes) when the file is within
+    download caps for its mime type. Sets ``att["error"]`` if the file
+    is missing. Leaves ``data`` absent for oversized files or unsupported
+    mimes.
+
+    `path` is the original (possibly absolute) filesystem path — caller
+    must pass this BEFORE rewriting ``att["path"]`` to a relative form.
+    """
+    mime = att.get("mime_type", "")
+    if mime in _ALLOWED_IMAGE_MIMES:
+        cap = _MAX_IMAGE_BYTES
+    elif mime in _ALLOWED_DOC_MIMES:
+        cap = _MAX_DOC_BYTES
+    elif mime.startswith("text/") or mime == "application/json":
+        cap = _MAX_TEXT_BYTES
+    else:
+        return
+
+    if not os.path.isfile(path):
+        att["error"] = "file not found"
+        return
+
+    if os.path.getsize(path) > cap:
+        return
+
+    try:
+        with open(path, "rb") as f:
+            att["data"] = base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        att["error"] = "file not found"
+
+
 def _enrich_attachments(attachments: list[dict], project_root: str) -> None:
     """Inline content and normalize paths for outbound attachments in-place.
 
@@ -42,6 +75,8 @@ def _enrich_attachments(attachments: list[dict], project_root: str) -> None:
                 att["path"] = os.path.relpath(path, project_root)
             except ValueError:
                 pass  # different drive on Windows, keep absolute
+
+        _attach_download_data(att, path)
 
         if not is_text:
             att["content"] = None
