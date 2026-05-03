@@ -12,6 +12,9 @@ os.environ.setdefault(
 )
 os.environ.setdefault("ADMIN_EMAILS", "admin@example.com")
 os.environ.setdefault("PORTAL_BASE_URL", "http://localhost:8000")
+# Force-override regardless of dev .env: tests assume debug=False so Secure
+# cookies are emitted (test_post_sets_signed_cookie_and_redirects).
+os.environ["DEBUG"] = "false"
 
 from portal import db as portal_db  # noqa: E402
 from portal.app import app  # noqa: E402
