@@ -18,47 +18,20 @@ for the full design.
 
 ## Prerequisites
 
-- Python 3.12+
-- Docker (for local Postgres)
-- A curunir checkout (this repo) with a working venv
+- Docker (with `docker compose`)
+- A curunir checkout (this repo)
+
+The recommended local-dev path is fully containerized — Docker runs both
+Postgres and the portal app. You do not need a Python venv unless you want
+to run the test suite (see [Tests](#tests)).
 
 ## Local development
 
-All commands assume your shell is at the **repo root** (the directory
-containing both `portal/` and `src/`), and that you have a venv activated
-with the curunir deps installed (`pip install -r requirements.txt`).
+All commands run from the `portal/` directory unless noted.
 
-### 1. Install portal dependencies
+### 1. Configure env vars
 
-The portal package is laid out as `portal/__init__.py` + sibling modules,
-so editable installs (`pip install -e portal/`) don't work cleanly — install
-the deps directly instead:
-
-```bash
-pip install \
-  "fastapi>=0.110" "uvicorn[standard]>=0.29" "asyncpg>=0.29" \
-  "itsdangerous>=2.2" "jinja2>=3.1" "httpx>=0.27" \
-  "python-multipart>=0.0.9" "pydantic-settings>=2.2" "websockets>=12.0"
-```
-
-### 2. Start Postgres
-
-```bash
-cd portal && docker compose up -d
-```
-
-This starts Postgres 16 on `localhost:5432` (user `postgres`, password
-`postgres`, db `portal`). The portal app runs schema migrations on startup.
-
-If you also want to run the test suite, create the test database once:
-
-```bash
-docker compose exec postgres createdb -U postgres portal_test
-```
-
-### 3. Configure env vars
-
-Create `portal/.env` (or export in your shell):
+Create `portal/.env`:
 
 ```bash
 # Required
@@ -67,13 +40,17 @@ ADMIN_EMAILS=you@example.com           # comma-separated allowlist
 DEBUG=true                             # required for http://localhost — see note below
 
 # Defaulted (override only if needed)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal
 PORTAL_BASE_URL=http://localhost:8000
 
 # Optional — leave blank to skip real email; sign-in links print to logs
 EMAIL_API_KEY=
 EMAIL_FROM=noreply@example.com
 ```
+
+`DATABASE_URL` is set automatically by `docker-compose.yml` when you run via
+Docker (`postgres:5432` on the compose network). If you run the portal
+natively against the dockerized Postgres, set
+`DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal`.
 
 > **Why `DEBUG=true` for local dev:** the session cookie is issued with the
 > `Secure` flag in production, which browsers refuse to store over plain
@@ -82,58 +59,97 @@ EMAIL_FROM=noreply@example.com
 > dropped, and the redirect to `/` would bounce you back to `/needs-invite`.
 > In production (HTTPS), leave `DEBUG` unset so `Secure` is enforced.
 
-### 4. Run the portal
-
-From the **repo root** (so the `portal` package is importable):
+### 2. Bring the stack up
 
 ```bash
-uvicorn portal.app:app --reload --port 8000
+docker compose up -d --build
+docker compose ps                       # both services Up, postgres healthy
+docker compose logs -f portal           # watch boot; Ctrl-C exits the log stream
 ```
 
-Or from inside `portal/`:
+The portal listens on `http://localhost:8000`; visit `/healthz` to
+confirm `{"status":"ok"}`. Source under `portal/` is bind-mounted into the
+container, so `uvicorn --reload` picks up edits live.
+
+If you hit a "port 5432 already allocated" error, another Postgres
+container or process owns the port. Find it with
+`lsof -iTCP:5432 -sTCP:LISTEN` (or `docker ps | grep 5432`) and stop it,
+or remap the host port in `docker-compose.yml`.
+
+### 3. Create your first user
 
 ```bash
-cd portal && PYTHONPATH=.. uvicorn portal.app:app --reload --port 8000
+docker compose exec portal python -m portal.admin create-user --email you@example.com
 ```
 
-Visit `http://localhost:8000/healthz` — should return `{"status":"ok"}`.
-
-### 5. Create your first user (CLI)
-
-```bash
-PYTHONPATH=. python -m portal.admin create-user --email you@example.com
-```
-
-If `EMAIL_API_KEY` is unset, the CLI prints the sign-in link directly. Copy
-it into your browser; you'll see a "Sign in as you@example.com?" page.
-Click the button to set the session cookie and land on the chat surface.
+If `EMAIL_API_KEY` is unset, the CLI prints the sign-in link directly.
+Paste it into your browser — you'll see a "Sign in as you@example.com?"
+page; clicking sets the session cookie and lands you on the chat surface.
 
 The CLI also prints the **container token** — copy it; you'll need it in
-step 6. (It's only shown once.)
+step 4. (It's only shown once.)
 
-### 6. Connect a curunir container
+### 4. Connect a curunir container
 
-In a separate shell, point a curunir process at the portal:
+In a separate shell, point a curunir process at the portal. The curunir
+backend can run natively on the host (recommended for fast iteration) or
+in its own container — either way the portal is reachable at
+`localhost:8000` thanks to the published port:
 
 ```bash
 cd /path/to/curunir
 CURUNIR_PORTAL_URL=ws://localhost:8000/ws/agent \
-CURUNIR_PORTAL_TOKEN=<container-token-from-step-5> \
+CURUNIR_PORTAL_TOKEN=<container-token-from-step-3> \
 python run.py
 ```
 
 The status pill in the browser flips from "offline" → "online" once the
 container connects. Type a message to round-trip a chat through the portal.
 
-## Tests
-
-Both suites use the same Postgres instance (separate `portal_test` db).
+### Common operations
 
 ```bash
+docker compose down                     # stop services (data persists in the named volume)
+docker compose down -v                  # stop and wipe the postgres volume (fresh DB)
+docker compose restart portal           # restart just the portal app
+docker compose exec portal sh           # shell into the portal container
+docker compose exec postgres psql -U postgres -d portal   # ad-hoc SQL
+```
+
+## Running the portal natively (alternative)
+
+If you'd rather run the portal app outside Docker (e.g. for IDE debugging),
+keep Postgres in Docker and run uvicorn from your venv:
+
+```bash
+# From repo root with curunir venv active
+pip install \
+  "fastapi>=0.110" "uvicorn[standard]>=0.29" "asyncpg>=0.29" \
+  "itsdangerous>=2.2" "jinja2>=3.1" "httpx>=0.27" \
+  "python-multipart>=0.0.9" "pydantic-settings>=2.2" "websockets>=12.0"
+
+cd portal && docker compose up -d postgres   # Postgres only
+cd .. && uvicorn portal.app:app --reload --port 8000
+```
+
+In this mode set `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal`
+in `portal/.env`, and run the create-user CLI from the repo root:
+`PYTHONPATH=. python -m portal.admin create-user --email you@example.com`.
+
+## Tests
+
+Tests run from your host venv (not from the portal container — the image
+intentionally doesn't ship dev deps). Both suites use the dockerized
+Postgres on `localhost:5432` (separate `portal_test` db).
+
+```bash
+# One-time: create the test database
+docker compose exec postgres createdb -U postgres portal_test
+
 # Portal tests (53 tests)
 cd portal && pytest
 
-# Curunir-side portal channel tests (5 tests in test_portal_channel.py + 5 in test_history_snapshot.py)
+# Curunir-side portal channel tests
 cd <repo-root> && pytest tests/test_portal_channel.py tests/test_history_snapshot.py
 ```
 
