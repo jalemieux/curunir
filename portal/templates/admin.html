@@ -18,15 +18,19 @@
 <body>
   <h1>Admin — users</h1>
 
-  {% if new_container_token %}
+  {% if new_container_token or new_signin_link %}
   <div class="new-token">
-    <strong>New user: {{ new_user_email }}</strong> (both shown once — copy now)
+    <strong>{{ new_user_email }}</strong>
+    {% if new_signin_link %}
     <div style="margin-top:8px;">Sign-in link (give to user, opens in their browser):<br>
       <code>{{ new_signin_link }}</code>
     </div>
-    <div style="margin-top:8px;">Container token (set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
+    {% endif %}
+    {% if new_container_token %}
+    <div style="margin-top:8px;">Container token (shown once — set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
       <code>{{ new_container_token }}</code>
     </div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -48,9 +52,9 @@
       <td>{{ u.email }}</td>
       <td>{{ "yes" if u.is_active else "no" }}</td>
       <td>
-        <form class="inline" method="post" action="/admin/users/{{ u.id }}/send-signin-email">
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}/show-signin-link">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <button>resend link</button>
+          <button>show sign-in link</button>
         </form>
         <form class="inline" method="post" action="/admin/users/{{ u.id }}/regenerate-sign-in">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
