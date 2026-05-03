@@ -25,12 +25,20 @@ _TOKEN_QS = re.compile(r"(\btoken=)[^&\s]+")
 
 
 class _RedactingFilter(logging.Filter):
-    """Replace `token=...` in any uvicorn-style access log message."""
+    """Replace `token=...` in any uvicorn-style access log message.
+
+    uvicorn.access uses AccessFormatter, which unpacks record.args as
+    (client_addr, method, full_path, http_version, status_code) — preserve
+    that shape and redact the path in place instead of clobbering args.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        record.msg = _TOKEN_QS.sub(r"\1<redacted>", msg)
-        record.args = ()
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            record.args = (args[0], args[1], _TOKEN_QS.sub(r"\1<redacted>", args[2]), args[3], args[4])
+        else:
+            record.msg = _TOKEN_QS.sub(r"\1<redacted>", record.getMessage())
+            record.args = ()
         return True
 
 
