@@ -8,6 +8,7 @@ def test_default_config():
     config = AgentConfig()
     assert config.model == "anthropic/claude-sonnet-4-20250514"
     assert config.max_iterations == 75
+    assert config.cap_summary_timeout == 60.0
     assert config.identity_file == Path("./context/identity.md")
     assert config.skill_dirs == [Path("./skills"), Path("./context/skills")]
 

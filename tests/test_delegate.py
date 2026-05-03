@@ -67,9 +67,14 @@ class TestDelegate:
                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
             }],
         )
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response):
+        summary_response = LLMResponse(text="partial work summary", tool_calls=None)
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, tool_response, summary_response],
+        ):
             result = await exec_delegate({"task": "loop"}, agent_config)
-        assert "iteration limit" in result.lower()
+        assert "iteration cap reached" in result.lower()
 
     async def test_empty_task_returns_error(self, agent_config):
         from src.tools.delegate import exec_delegate

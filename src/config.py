@@ -10,6 +10,7 @@ class AgentConfig:
     openrouter_provider: str | None = None
     max_iterations: int = 75
     max_history_chars: int = 250_000
+    cap_summary_timeout: float = 60.0
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     skill_dirs: list[Path] = field(
