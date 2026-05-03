@@ -55,6 +55,7 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 
 - **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`.
 - **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
+- **Portal** (`portal.py`): Outbound WebSocket to a hosted portal (`CURUNIR_PORTAL_URL` + `CURUNIR_PORTAL_TOKEN`). Container dials portal; portal multiplexes browser ↔ container. Session ID is `"portal"`. See `portal/` directory for the portal service.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
 
 Channels implement a protocol: `async start()` to listen, `async send(msg)` to respond.
@@ -84,6 +85,10 @@ tools: attach  # Optional: comma-separated opt-in tools
 ```
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
+
+### Portal Service (`portal/`)
+
+Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
 
 ### Memory (`src/memory_extractor.py`)
 
