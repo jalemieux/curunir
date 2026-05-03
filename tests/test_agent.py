@@ -114,9 +114,18 @@ class TestAgentHandle:
                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
             }],
         )
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response):
+        summary_response = LLMResponse(
+            text="I investigated the loop and found it never terminates; could not verify the result.",
+            tool_calls=None,
+        )
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, tool_response, summary_response],
+        ):
             result = await agent.handle("loop forever", "s1")
-        assert "iteration limit" in result.lower()
+        assert result.startswith("[partial — iteration cap reached]")
+        assert "investigated the loop" in result
 
     async def test_forwards_on_text_delta_to_call_llm(self, agent):
         mock_response = LLMResponse(text="streamed", tool_calls=None)
@@ -172,6 +181,155 @@ class TestAgentHandle:
         assert agent.sessions["s1"][0]["content"] == content_blocks
         user_msg = [m for m in captured["messages"] if m["role"] == "user"][-1]
         assert user_msg["content"] == content_blocks
+
+
+class TestIterationCapSummary:
+    async def test_iteration_cap_calls_summarization_without_tools(self, agent_config):
+        """Final summarization call must pass an empty tools list (no further tool use)."""
+        agent_config.max_iterations = 1
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+        summary_response = LLMResponse(text="brief summary", tool_calls=None)
+
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, summary_response],
+        ) as mock_call:
+            await agent.handle("loop", "s1")
+
+        assert mock_call.call_count == 2
+        last_call = mock_call.call_args_list[-1]
+        # tools is the third positional arg of call_llm
+        tools_arg = last_call.args[2] if len(last_call.args) >= 3 else last_call.kwargs.get("tools")
+        assert tools_arg == []
+
+    async def test_iteration_cap_summary_timeout_falls_back(self, agent_config):
+        """If summarization times out, fall back to last assistant text and never raise."""
+        agent_config.max_iterations = 1
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text="checking the docs...",
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+
+        async def fake_wait_for(coro, timeout):
+            # Close the coroutine to avoid "never awaited" warnings, then raise.
+            coro.close()
+            raise TimeoutError()
+
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=tool_response,
+        ), patch("src.agent.agent.asyncio.wait_for", new=fake_wait_for):
+            result = await agent.handle("loop", "s1")
+
+        assert result.startswith("[partial — iteration cap reached]")
+        assert "checking the docs" in result
+
+    async def test_iteration_cap_summary_exception_falls_back_to_literal(self, agent_config):
+        """If no prior assistant text exists and summary fails, return the literal string."""
+        agent_config.max_iterations = 1
+        agent = Agent(agent_config)
+
+        # Tool-only response — no assistant text accrued before cap.
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+
+        async def fake_wait_for(coro, timeout):
+            coro.close()
+            raise RuntimeError("summary backend exploded")
+
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=tool_response,
+        ), patch("src.agent.agent.asyncio.wait_for", new=fake_wait_for):
+            result = await agent.handle("loop", "s1")
+
+        # No assistant text ever produced → degrade to the literal string,
+        # preserving today's worst-case behaviour.
+        assert result == "Iteration limit reached."
+
+    async def test_iteration_cap_records_hit_cap_stat(self, agent_config):
+        """metadata['stats']['hit_cap'] is True and iterations == max_iterations."""
+        agent_config.max_iterations = 2
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+        summary_response = LLMResponse(text="summary", tool_calls=None)
+
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, tool_response, summary_response],
+        ):
+            await agent.handle("loop", "s1", metadata=metadata)
+
+        stats = metadata["stats"]
+        assert stats["hit_cap"] is True
+        assert stats["iterations"] == 2
+
+    async def test_iteration_cap_passthrough_attachments(self, agent_config):
+        """When summary call fails and attachments exist, attachments stay on the caller's list."""
+        agent_config.max_iterations = 1
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+
+        async def fake_wait_for(coro, timeout):
+            coro.close()
+            raise TimeoutError()
+
+        attachments = [
+            {"filename": "report.md", "path": "/tmp/report.md",
+             "mime_type": "text/markdown", "size": 42},
+        ]
+
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=tool_response,
+        ), patch("src.agent.agent.asyncio.wait_for", new=fake_wait_for):
+            await agent.handle("loop", "s1", attachments=attachments)
+
+        assert len(attachments) == 1
+        assert attachments[0]["filename"] == "report.md"
 
 
 class TestTrimHistoryMultimodal:

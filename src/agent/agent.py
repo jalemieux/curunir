@@ -12,10 +12,19 @@ from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
-from src.llm import call_llm
+from src.llm import LLMResponse, call_llm
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
+
+
+_CAP_MARKER = "[partial — iteration cap reached]"
+_CAP_SUMMARY_DIRECTIVE = (
+    "\n\nYou have reached the iteration cap and cannot make further tool "
+    "calls. Reply with a brief summary covering: what you investigated, "
+    "what you found, and what could not be verified or completed. Do not "
+    "ask for more tool calls — there are none available."
+)
 
 
 _DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
@@ -156,6 +165,39 @@ class Agent:
             extra = get_tool_schemas(list(self._session_tools[session_id]))
             base = base + extra
         return base
+
+    async def _summarize_at_cap(
+        self,
+        history: list[dict],
+        system_prompt: str,
+        sid: str,
+        on_text_delta=None,
+    ) -> LLMResponse | None:
+        """Run a final tools-disabled summary call to recover partial work.
+
+        Returns the LLMResponse on success, or None if the call failed,
+        timed out, or otherwise errored. History is trimmed to half-budget
+        first to give the summary call room to fit in context.
+        """
+        _trim_history(history, max_chars=self.config.max_history_chars // 2)
+        messages = [
+            {"role": "system", "content": system_prompt + _CAP_SUMMARY_DIRECTIVE}
+        ] + history
+        try:
+            return await asyncio.wait_for(
+                call_llm(
+                    self.config.model,
+                    messages,
+                    [],
+                    api_base=self.config.api_base,
+                    openrouter_provider=self.config.openrouter_provider,
+                    on_text_delta=on_text_delta,
+                ),
+                timeout=self.config.cap_summary_timeout,
+            )
+        except Exception as exc:
+            logger.warning("[%s] cap summarization failed: %s", sid, exc)
+            return None
 
     async def handle(
         self, message: str | list, session_id: str,
@@ -326,10 +368,42 @@ class Agent:
             logger.warning("[%s] LLM returned empty response", sid)
             return "Error: LLM returned empty response."
 
-        logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
+        logger.warning(
+            "[%s] iteration limit reached (%d) — summarizing partial work",
+            sid, self.config.max_iterations,
+        )
+
+        summary_response = await self._summarize_at_cap(
+            history, system_prompt, sid, on_text_delta=on_text_delta,
+        )
+
+        if summary_response and summary_response.text:
+            total_prompt_tokens += summary_response.usage.prompt_tokens
+            total_completion_tokens += summary_response.usage.completion_tokens
+            total_llm_elapsed += summary_response.usage.elapsed_sec
+            llm_calls += 1
+            result_text = f"{_CAP_MARKER}\n\n{summary_response.text}"
+            history.append({"role": "assistant", "content": result_text})
+        else:
+            # Degrade gracefully: surface the most recent assistant text if
+            # we have any, otherwise fall back to the legacy literal string.
+            fallback = None
+            for msg in reversed(history):
+                if msg.get("role") != "assistant":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    fallback = content
+                    break
+            if fallback:
+                result_text = f"{_CAP_MARKER}\n\n{fallback}"
+            else:
+                result_text = "Iteration limit reached."
+
         _finalize_stats()
         if metadata and "stats" in metadata:
             metadata["stats"]["iterations"] = self.config.max_iterations
+            metadata["stats"]["hit_cap"] = True
         if system_task_prompt:
             self.sessions.pop(session_id, None)
-        return "Iteration limit reached."
+        return result_text
