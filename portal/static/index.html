@@ -66,6 +66,8 @@ main {
   padding: 3px 8px; font-size: 11px; color: var(--accent);
   margin-right: 4px; margin-top: 4px;
 }
+.attachment.downloadable { cursor: pointer; }
+.attachment.downloadable:hover { color: #fff; border-color: var(--accent); }
 
 footer {
   padding: 10px 14px 14px; border-top: 1px solid #1a1a22;
@@ -275,9 +277,29 @@ function renderAttachments(parent, atts) {
     const chip = document.createElement("span");
     chip.className = "attachment";
     chip.textContent = `📄 ${a.filename || a.path || "file"}`;
+    if (typeof a.data === "string") {
+      chip.classList.add("downloadable");
+      chip.title = "Download";
+      chip.onclick = () => downloadAttachment(a);
+    }
     wrap.appendChild(chip);
   }
   parent.appendChild(wrap);
+}
+
+function downloadAttachment(a) {
+  const bin = atob(a.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: a.mime_type || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = a.filename || "download";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function appendMessage(role) {
