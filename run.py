@@ -148,13 +148,32 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
                     f"```\n{body}\n```"
                 ),
             })
-        else:
-            with open(path, "rb") as f:
-                content = f.read().decode("utf-8")
+        elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            import docx
+            doc = docx.Document(path)
+            body = "\n".join(p.text for p in doc.paragraphs).strip() or "(no extractable text)"
             blocks.append({
                 "type": "text",
-                "text": f"[Attachment: {att['filename']}]\n```\n{content}\n```",
+                "text": f"[Attachment: {att['filename']} (DOCX)]\n```\n{body}\n```",
             })
+        else:
+            try:
+                with open(path, "rb") as f:
+                    content = f.read().decode("utf-8")
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Attachment: {att['filename']}]\n```\n{content}\n```",
+                })
+            except UnicodeDecodeError:
+                size = att.get("size") or os.path.getsize(path)
+                blocks.append({
+                    "type": "text",
+                    "text": (
+                        f"[Attachment: {att['filename']} ({mime}, {size} bytes) "
+                        f"saved at {path} — binary file, contents not inlined. "
+                        f"Use the read tool if a reader is available for this format.]"
+                    ),
+                })
 
     return blocks
 
@@ -218,11 +237,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
-        content = build_multimodal_content(msg.content, msg.attachments)
         attachments = []
         metadata: dict = {}
 
         try:
+            content = build_multimodal_content(msg.content, msg.attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
@@ -230,7 +249,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 on_text_delta=on_text_delta,
             )
         except Exception as e:
-            logger.error("Agent error for session %s: %s", msg.session_id, e)
+            logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
 
         # Fetch llama.cpp server stats if using a local API base

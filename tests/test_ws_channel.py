@@ -410,9 +410,43 @@ class TestDecodeAttachments:
         assert items is None
         assert "image/bmp" in err
 
-    def test_non_image_must_be_utf8(self):
+    def test_docx_binary_accepted_under_doc_cap(self):
+        """DOCX is binary (zip), so it must skip the UTF-8 check and use the 10 MB doc cap."""
+        docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        payload = b"PK\x03\x04" + b"\xff\xfe" * 100  # zip magic + non-UTF-8 bytes
         items, err = _decode_attachments([
-            {"filename": "binary.bin", "mime_type": "application/octet-stream",
+            {"filename": "memo.docx", "mime_type": docx_mime,
+             "data": base64.b64encode(payload).decode()},
+        ])
+        assert err is None
+        assert len(items) == 1
+        assert items[0]["mime_type"] == docx_mime
+        assert items[0]["bytes"] == payload
+
+    def test_oversized_docx_rejected(self):
+        docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        big = b"\x00" * (10 * 1024 * 1024 + 1)
+        items, err = _decode_attachments([
+            {"filename": "big.docx", "mime_type": docx_mime,
+             "data": base64.b64encode(big).decode()},
+        ])
+        assert items is None
+        assert "10" in err and "MB" in err
+
+    def test_non_allowlisted_mime_rejected(self):
+        """Mimes outside the shared allowlist (image, PDF, DOCX, text/*, json) are refused."""
+        items, err = _decode_attachments([
+            {"filename": "blob.bin", "mime_type": "application/octet-stream",
+             "data": base64.b64encode(b"\xff\xfe\xfa").decode()},
+        ])
+        assert items is None
+        assert "unsupported mime type" in err
+        assert "application/octet-stream" in err
+
+    def test_text_mime_with_binary_payload_rejected_as_non_utf8(self):
+        """A text/plain mime with binary bytes still fails the UTF-8 check."""
+        items, err = _decode_attachments([
+            {"filename": "fake.txt", "mime_type": "text/plain",
              "data": base64.b64encode(b"\xff\xfe\xfa").decode()},
         ])
         assert items is None
