@@ -63,22 +63,32 @@ The `file` field is relative to the memory directory. Subdirectories are allowed
 async def extract_learnings(
     config: AgentConfig,
     history: list[dict],
-) -> None:
-    """Extract durable learnings from a conversation history and write to memory."""
+    *,
+    archive_path: Path | None = None,
+) -> Path | None:
+    """Extract durable learnings from a conversation history and write to memory.
+
+    When `archive_path` is provided, the conversation summary overwrites that
+    file instead of allocating a new path from the LLM-chosen slug. Returns the
+    path of the summary file written, or None if no summary was produced.
+    """
     try:
-        await _extract(config, history)
+        return await _extract(config, history, archive_path=archive_path)
     except Exception:
         log.exception("memory extraction failed")
+        return None
 
 
 async def _extract(
     config: AgentConfig,
     history: list[dict],
-) -> None:
+    *,
+    archive_path: Path | None,
+) -> Path | None:
     user_count = sum(1 for m in history if m.get("role") == "user")
     if user_count < 2:
         log.debug("skipping extraction: fewer than 2 user messages")
-        return
+        return None
 
     memory_dir = config.context_dir / "memory"
     taxonomy_path = memory_dir / "README.md"
@@ -105,11 +115,11 @@ async def _extract(
 
     if not response.text:
         log.warning("extraction returned empty response")
-        return
+        return None
 
     data = _parse_json(response.text)
     if data is None:
-        return
+        return None
 
     # Write facts
     for fact in data.get("facts", []):
@@ -118,7 +128,8 @@ async def _extract(
     # Write conversation summary
     summary = data.get("summary")
     if summary:
-        _write_summary(memory_dir, summary)
+        return _write_summary(memory_dir, summary, archive_path=archive_path)
+    return None
 
 
 def _format_history(history: list[dict]) -> str:
@@ -279,22 +290,28 @@ def _write_fact(memory_dir, fact: dict) -> "Path | None":
         return None
 
 
-def _write_summary(memory_dir, summary: dict) -> "Path | None":
+def _write_summary(
+    memory_dir,
+    summary: dict,
+    *,
+    archive_path: Path | None = None,
+) -> "Path | None":
     try:
         slug = summary.get("topic_slug", "misc")
         content = summary.get("content", "")
         if not content:
             return None
 
-        date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
-        archive_dir = memory_dir / "archives" / "conversations"
-        archive_dir.mkdir(parents=True, exist_ok=True)
+        if archive_path is not None:
+            target = archive_path
+        else:
+            date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
+            filename = f"{date_str}-{slug}.md"
+            target = _safe_path(memory_dir, f"archives/conversations/{filename}")
+            if target is None:
+                return None
 
-        filename = f"{date_str}-{slug}.md"
-        target = _safe_path(memory_dir, f"archives/conversations/{filename}")
-        if target is None:
-            return None
-
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"# {slug}\n\n{content}\n")
         return target
     except Exception:
