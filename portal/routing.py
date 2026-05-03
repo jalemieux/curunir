@@ -72,6 +72,10 @@ class RoutingTable:
         route = self._routes.get(user_id)
         return list(route.browser_wss) if route else []
 
+    def all_agents(self) -> list[Sender]:
+        """Snapshot of every currently registered agent socket."""
+        return [r.agent_ws for r in self._routes.values() if r.agent_ws is not None]
+
     async def fan_out_to_browsers(self, user_id: int, payload: str) -> int:
         """Send payload to all browsers; return count delivered."""
         targets = self.browsers_for(user_id)
