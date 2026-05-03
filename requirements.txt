@@ -5,6 +5,7 @@ prompt_toolkit
 httpx
 trafilatura
 pypdf
+python-docx
 websockets
 pytest
 pytest-asyncio

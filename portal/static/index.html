@@ -127,7 +127,8 @@ footer {
 </header>
 <main id="messages"></main>
 <footer>
-  <input type="file" id="file-input" multiple style="display:none">
+  <input type="file" id="file-input" multiple style="display:none"
+         accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,text/plain,text/markdown,text/csv,application/json,.md,.txt,.csv,.json,.yaml,.yml,.log,.xml,.toml,.ini">
   <div id="staged" class="staged-list"></div>
   <div id="composer">
     <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
@@ -143,9 +144,12 @@ footer {
 // === Constants ===
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_PDF = 10 * 1024 * 1024;
+const MAX_DOCX = 10 * 1024 * 1024;
 const MAX_TEXT = 256 * 1024;
 const MAX_TOTAL = 20 * 1024 * 1024;
 const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const TEXT_EXTS = [".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".xml", ".toml", ".ini"];
 
 // === Elements ===
 const messagesEl = document.getElementById("messages");
@@ -344,16 +348,27 @@ function send() {
 
 // === Attachments staging ===
 async function stageFile(file) {
-  // Validate
+  // Classify against the supported allowlist (mirrors the file-input `accept`).
+  const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
   const isImg = file.type.startsWith("image/");
-  const isPdf = file.type === "application/pdf";
-  const isText = !isImg && !isPdf;
+  const isPdf = file.type === "application/pdf" || ext === ".pdf";
+  const isDocx = file.type === DOCX_MIME || ext === ".docx";
+  const isText = !isImg && !isPdf && !isDocx && (
+    file.type.startsWith("text/") ||
+    file.type === "application/json" ||
+    TEXT_EXTS.includes(ext)
+  );
 
   if (isImg && !IMAGE_MIMES.includes(file.type)) {
     alert(`Unsupported image type: ${file.type}`); return;
   }
+  if (!isImg && !isPdf && !isDocx && !isText) {
+    alert(`Unsupported file type: ${file.name}\nSupported: images (png/jpg/gif/webp), PDF, DOCX, and text formats.`);
+    return;
+  }
   if (isImg && file.size > MAX_IMAGE) { alert(`Image > 5 MB`); return; }
   if (isPdf && file.size > MAX_PDF) { alert(`PDF > 10 MB`); return; }
+  if (isDocx && file.size > MAX_DOCX) { alert(`DOCX > 10 MB`); return; }
   if (isText && file.size > MAX_TEXT) { alert(`Text > 256 KB`); return; }
 
   const totalAfter = staged.reduce((s, a) => s + a.size, 0) + file.size;
