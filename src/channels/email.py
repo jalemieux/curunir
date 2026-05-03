@@ -7,18 +7,14 @@ import re
 from datetime import datetime, timezone
 
 from src.channels import gmail
+from src.channels._attachments import (
+    _normalize_unicode_whitespace,
+    _validate_attachment_metadata,
+)
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
-
-# Regex matching any Unicode whitespace character that isn't a regular space
-_UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
-
-
-def _normalize_unicode_whitespace(s: str) -> str:
-    """Replace Unicode whitespace characters (e.g. \\u202f) with regular spaces."""
-    return _UNICODE_WHITESPACE_RE.sub(' ', s)
 
 
 def _parse_retry_after(error_text: str) -> int | None:
@@ -227,11 +223,17 @@ class EmailChannel:
             if not os.path.isfile(full_path):
                 logger.warning("Attachment matched but not a file: %s", full_path)
                 continue
+            mime = att.get("mimeType", "application/octet-stream")
+            size = att.get("size") or os.path.getsize(full_path)
+            reason = _validate_attachment_metadata(mime, size)
+            if reason:
+                logger.warning("Dropping email attachment %s: %s", fname, reason)
+                continue
             manifest.append({
                 "filename": fname,
                 "path": full_path,
-                "mime_type": att.get("mimeType", "application/octet-stream"),
-                "size": att.get("size", 0),
+                "mime_type": mime,
+                "size": size,
             })
         return manifest or None
 

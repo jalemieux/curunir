@@ -109,6 +109,58 @@ def test_pdf_attachment_produces_text_block_with_extracted_content(tmp_path, mon
     assert "Hello from PDF" in body
 
 
+def test_docx_attachment_produces_text_block_with_extracted_content(tmp_path, monkeypatch):
+    """DOCX attachments get extracted via python-docx and wrapped with a filename header."""
+    docx_path = tmp_path / "memo.docx"
+    docx_path.write_bytes(b"PK\x03\x04")  # zip magic; contents irrelevant — Document is patched
+
+    class FakePara:
+        def __init__(self, text):
+            self.text = text
+
+    class FakeDoc:
+        def __init__(self, path):
+            self.paragraphs = [FakePara("Hello from DOCX"), FakePara("Second line")]
+
+    import sys, types
+    fake = types.ModuleType("docx")
+    fake.Document = FakeDoc
+    monkeypatch.setitem(sys.modules, "docx", fake)
+
+    from run import build_multimodal_content
+    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    blocks = build_multimodal_content("summarize", [_att(docx_path, mime)])
+
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    assert blocks[0] == {"type": "text", "text": "summarize"}
+    assert blocks[1]["type"] == "text"
+    body = blocks[1]["text"]
+    assert "memo.docx" in body
+    assert "(DOCX)" in body
+    assert "Hello from DOCX" in body
+    assert "Second line" in body
+
+
+def test_unknown_binary_attachment_falls_back_to_notice(tmp_path):
+    """Binary files that aren't decodable as UTF-8 must not crash — emit a notice instead."""
+    bin_path = tmp_path / "blob.bin"
+    bin_path.write_bytes(b"\xe4\xa0\xff\x00\x01garbage\x80")
+
+    from run import build_multimodal_content
+    blocks = build_multimodal_content(
+        "what is this", [_att(bin_path, "application/octet-stream")]
+    )
+
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    assert blocks[1]["type"] == "text"
+    notice = blocks[1]["text"]
+    assert "blob.bin" in notice
+    assert "binary" in notice.lower()
+    assert "application/octet-stream" in notice
+
+
 async def _run_worker_once(in_q, out_q, fake_agent):
     """Drive agent_worker for exactly one message, then cancel cleanly."""
     import run as run_module

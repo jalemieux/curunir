@@ -424,6 +424,96 @@ async def test_attachment_missing_from_disk_is_excluded(in_queue):
 
 
 @pytest.mark.asyncio
+async def test_attachment_unsupported_mime_dropped(in_queue):
+    """Email channel mirrors the portal/ws allowlist: unsupported mimes are
+    dropped from the manifest with a warning, supported ones flow through."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = _make_channel(in_queue, config)
+
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Mixed",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "ok.pdf", "mimeType": "application/pdf", "size": 4096},
+                        {"filename": "bad.zip", "mimeType": "application/zip", "size": 4096},
+                    ],
+                }
+            ],
+        }
+
+        def fake_download(thread_id, message, out_dir, service):
+            os.makedirs(out_dir, exist_ok=True)
+            for name in ("ok.pdf", "bad.zip"):
+                with open(os.path.join(out_dir, name), "wb") as f:
+                    f.write(b"x" * 4096)
+
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+        assert msg.attachments[0]["filename"] == "ok.pdf"
+
+
+@pytest.mark.asyncio
+async def test_attachment_oversized_pdf_dropped(in_queue):
+    """An oversized PDF (>10 MB) is dropped at email intake."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = EmailChannelConfig(
+            service_account_file="/fake/key.json",
+            delegated_user="bot@example.com",
+            allowed_senders=["alice@example.com"],
+            attachment_dir=tmpdir,
+        )
+        ch = _make_channel(in_queue, config)
+
+        oversized = 11 * 1024 * 1024
+        thread = {
+            "id": "thread_1",
+            "messages": [
+                {
+                    "id": "msg_1",
+                    "from": "alice@example.com",
+                    "subject": "Huge",
+                    "body": "See attached.",
+                    "attachments": [
+                        {"filename": "huge.pdf", "mimeType": "application/pdf", "size": oversized},
+                    ],
+                }
+            ],
+        }
+
+        def fake_download(thread_id, message, out_dir, service):
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, "huge.pdf"), "wb") as f:
+                f.write(b"\x00" * oversized)
+
+        with patch("src.channels.email.gmail") as mock_gmail:
+            mock_gmail.search.return_value = [{"id": "thread_1"}]
+            mock_gmail.thread_get.return_value = thread
+            mock_gmail.download_attachments.side_effect = fake_download
+            await ch._poll_once()
+
+        msg = in_queue.get_nowait()
+        assert msg.attachments is None
+
+
+@pytest.mark.asyncio
 async def test_poll_once_continues_on_thread_error(email_config, in_queue):
     """If one thread fails to fetch, other threads still get processed."""
     ch = _make_channel(in_queue, email_config)

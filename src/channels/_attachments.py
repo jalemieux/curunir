@@ -7,21 +7,57 @@ and outbound enrichment without duplication.
 
 import base64
 import os
+import re
 import uuid as _uuid
 
-from src.channels.email import _normalize_unicode_whitespace
+# Regex matching any Unicode whitespace character that isn't a regular space.
+_UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
+
+
+def _normalize_unicode_whitespace(s: str) -> str:
+    """Replace Unicode whitespace characters (e.g. \\u202f) with regular spaces.
+
+    LLMs convert exotic whitespace to regular spaces when generating tool
+    calls, so attachment filenames need normalizing on intake to avoid
+    file-not-found errors downstream.
+    """
+    return _UNICODE_WHITESPACE_RE.sub(' ', s)
 
 # Size caps (mirrored in cli.py)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
 _MAX_TEXT_BYTES = 256 * 1024                # 256 KB
-_MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDFs)
+_MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDF, DOCX)
 _MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
 _ALLOWED_IMAGE_MIMES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
 })
-_ALLOWED_DOC_MIMES = frozenset({"application/pdf"})
+_ALLOWED_DOC_MIMES = frozenset({
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+})
 
 _MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
+
+
+def _validate_attachment_metadata(mime: str, size: int) -> str | None:
+    """Channel-agnostic mime + size policy. Returns None if accepted,
+    or a human-readable rejection reason. Used by every inbound channel
+    so they all enforce the same allowlist (images, PDF, DOCX, UTF-8 text).
+    """
+    if mime.startswith("image/"):
+        if mime not in _ALLOWED_IMAGE_MIMES:
+            return f"unsupported image type {mime}"
+        if size > _MAX_IMAGE_BYTES:
+            return f"{size} bytes exceeds 5 MB image cap"
+    elif mime in _ALLOWED_DOC_MIMES:
+        if size > _MAX_DOC_BYTES:
+            return f"{size} bytes exceeds 10 MB document cap"
+    elif mime.startswith("text/") or mime == "application/json":
+        if size > _MAX_TEXT_BYTES:
+            return f"{size} bytes exceeds 256 KB text cap"
+    else:
+        return f"unsupported mime type {mime}"
+    return None
 
 
 def _attach_download_data(att: dict, path: str) -> None:
@@ -129,36 +165,18 @@ def _decode_attachments(raw: list | None) -> tuple[list[dict] | None, str | None
 
         size = len(payload)
 
-        if mime.startswith("image/"):
-            if mime not in _ALLOWED_IMAGE_MIMES:
-                return None, (
-                    f"attachment[{i}] '{filename}': "
-                    f"unsupported image type {mime}"
-                )
-            if size > _MAX_IMAGE_BYTES:
-                return None, (
-                    f"attachment[{i}] '{filename}': "
-                    f"{size} bytes exceeds 5 MB image cap"
-                )
-        elif mime in _ALLOWED_DOC_MIMES:
-            if size > _MAX_DOC_BYTES:
-                return None, (
-                    f"attachment[{i}] '{filename}': "
-                    f"{size} bytes exceeds 10 MB document cap"
-                )
-        else:
-            if size > _MAX_TEXT_BYTES:
-                return None, (
-                    f"attachment[{i}] '{filename}': "
-                    f"{size} bytes exceeds 256 KB text cap"
-                )
+        reason = _validate_attachment_metadata(mime, size)
+        if reason:
+            return None, f"attachment[{i}] '{filename}': {reason}"
+
+        # Text payloads are in memory here — verify they're actually UTF-8
+        # so a wrongly-mime'd binary doesn't reach the agent. (Email runs the
+        # same metadata check but skips this since payload is on disk.)
+        if mime.startswith("text/") or mime == "application/json":
             try:
                 payload.decode("utf-8")
             except UnicodeDecodeError:
-                return None, (
-                    f"attachment[{i}] '{filename}': "
-                    f"not UTF-8 decodable"
-                )
+                return None, f"attachment[{i}] '{filename}': not UTF-8 decodable"
 
         total_bytes += size
         if total_bytes > _MAX_TOTAL_BYTES:

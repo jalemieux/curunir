@@ -104,6 +104,23 @@ EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 
 See **[docs/gmail-setup.md](docs/gmail-setup.md)** for the full GCP and Workspace Admin setup walkthrough.
 
+## Attachments
+
+Channels accept file uploads (portal drag-drop / file picker, email MIME parts, CLI paths) and stage them as a manifest on the inbound message. `run.py:build_multimodal_content` then converts that manifest into LiteLLM content blocks before the agent sees the message.
+
+Supported formats:
+
+| Format | Handling | Size cap (portal) |
+|---|---|---|
+| Images — PNG, JPEG, GIF, WEBP | Inlined as base64 `image_url` blocks (vision models) | 5 MB |
+| PDF | Text extracted via `pypdf`, fenced text block tagged with filename + page count | 10 MB |
+| DOCX | Text extracted via `python-docx`, fenced text block | 10 MB |
+| Plain text — `.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.log`, `.xml`, `.toml`, `.ini`, etc. | Decoded as UTF-8, fenced text block | 256 KB |
+
+Total upload size per message is capped at 20 MB. Unsupported formats are filtered out by the portal file picker (`accept=` allowlist) and rejected client-side; if a binary somehow reaches the backend, it falls back to a notice block describing the file rather than crashing.
+
+To add a new inline format: branch in `build_multimodal_content` (`run.py`), add the parser to `requirements.txt`, extend the portal's `accept=` allowlist and `stageFile` validator (`portal/static/index.html`), and cover both with tests in `tests/test_build_content.py` (mock the parser to keep tests hermetic).
+
 ## Adding Skills
 
 Drop a directory into `skills/` with a `SKILL.md` file:
