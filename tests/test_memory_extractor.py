@@ -13,6 +13,16 @@ from src.memory_extractor import (
 )
 
 
+def _summary_response(slug: str, content: str = "Summary.") -> LLMResponse:
+    return LLMResponse(
+        text=json.dumps({
+            "facts": [],
+            "summary": {"topic_slug": slug, "content": content},
+        }),
+        tool_calls=None,
+    )
+
+
 def _history(user_count=3):
     """Build a minimal conversation history with N user messages."""
     msgs = []

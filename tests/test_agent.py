@@ -13,6 +13,12 @@ def agent(agent_config):
     return Agent(agent_config)
 
 
+def test_agent_initializes_session_archives_dict(agent_config):
+    """Agent has an empty session_archives dict for tracking archive file paths."""
+    agent = Agent(agent_config)
+    assert agent.session_archives == {}
+
+
 class TestAgentHandle:
     async def test_returns_text_response(self, agent):
         mock_response = LLMResponse(text="Hello!", tool_calls=None)
