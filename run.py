@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from src.agent.agent import Agent
 from src.channels.base import OutgoingMessage
 from src.channels.email import EmailChannel
+from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
@@ -312,6 +313,19 @@ async def main():
         email_channel = EmailChannel(in_queue, email_config)
         channels["email"] = email_channel
         logger.info("Email channel enabled for %s (poll every %ds)", email_config.delegated_user, email_config.poll_interval_sec)
+
+    # Portal channel (conditional)
+    portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
+    portal_token = os.environ.get("CURUNIR_PORTAL_TOKEN", "").strip()
+    if portal_url and portal_token:
+        portal_channel = PortalChannel(
+            in_queue=in_queue,
+            url=portal_url,
+            token=portal_token,
+            history_provider=lambda: agent.history_snapshot(),
+        )
+        channels["portal"] = portal_channel
+        logger.info("Portal channel enabled for %s", portal_url)
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
 
