@@ -7,12 +7,34 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from portal import admin, auth, db, sign_in, ws_agent, ws_browser
+from portal.config import settings
+
+
+logger = logging.getLogger(__name__)
+# Route seed-only messages through uvicorn's pre-configured logger so they
+# actually surface in `docker compose logs portal` without us setting up
+# a global logging config for what is otherwise a dev-only signal.
+_seed_logger = logging.getLogger("uvicorn.error")
+
+
+async def _maybe_seed_dev_user() -> None:
+    if not (settings.debug
+            and settings.seed_user_email
+            and settings.seed_container_token):
+        return
+    user = await db.upsert_user_with_container_token(
+        settings.seed_user_email, settings.seed_container_token
+    )
+    _seed_logger.info(
+        "dev seed: upserted user id=%s email=%s", user.id, user.email
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_pool()
     await db.run_migrations()
+    await _maybe_seed_dev_user()
     try:
         yield
     finally:

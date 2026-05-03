@@ -82,6 +82,31 @@ async def create_user(email: str) -> User:
     return _row_to_user(row)
 
 
+async def upsert_user_with_container_token(
+    email: str, container_token: str
+) -> User:
+    """Idempotent seed for dev. If the email exists, refreshes its
+    container token and reactivates; otherwise creates the row with a
+    fresh sign-in token alongside the given container token.
+    """
+    sign_in_token = make_token()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO users (email, sign_in_token, container_token, is_active)
+            VALUES ($1, $2, $3, TRUE)
+            ON CONFLICT (email) DO UPDATE
+              SET container_token = EXCLUDED.container_token,
+                  is_active = TRUE
+            RETURNING id, email, sign_in_token, container_token, is_active
+            """,
+            email.strip().lower(),
+            sign_in_token,
+            container_token,
+        )
+    return _row_to_user(row)
+
+
 async def get_user_by_id(user_id: int) -> Optional[User]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
