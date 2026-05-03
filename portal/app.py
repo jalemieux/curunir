@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from portal import admin, db, sign_in
+from portal import admin, db, sign_in, ws_agent
 
 
 @asynccontextmanager
@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(sign_in.router)
 app.include_router(admin.router)
+app.include_router(ws_agent.router)
 
 
 @app.get("/healthz")
