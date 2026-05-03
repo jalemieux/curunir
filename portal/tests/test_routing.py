@@ -77,3 +77,22 @@ async def test_unregister_agent_only_clears_if_same_socket():
     await rt.register_agent(2, b)  # kicks a
     await rt.unregister_agent(2, a)  # stale unregister of a
     assert rt.agent_for(2) is b
+
+
+@pytest.mark.asyncio
+async def test_all_agents_returns_every_registered_agent():
+    rt = RoutingTable()
+    a1, a2 = FakeWS(), FakeWS()
+    await rt.register_agent(1, a1)
+    await rt.register_agent(2, a2)
+    assert set(rt.all_agents()) == {a1, a2}
+
+
+@pytest.mark.asyncio
+async def test_all_agents_skips_users_with_no_agent():
+    rt = RoutingTable()
+    browser = FakeWS()
+    await rt.add_browser(5, browser)  # user 5 has no agent
+    agent = FakeWS()
+    await rt.register_agent(6, agent)
+    assert rt.all_agents() == [agent]

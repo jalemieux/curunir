@@ -76,6 +76,27 @@ def test_ws_agent_second_connection_kicks_first(sync_client):
             assert routing.agent_for(user.id) is not None
 
 
+def test_heartbeat_pings_emitted(sync_client, monkeypatch):
+    """The portal sends `{"type":"ping"}` to each agent on a fixed cadence."""
+    from portal.config import settings
+
+    monkeypatch.setattr(settings, "agent_heartbeat_interval", 0.05)
+    user = _create_user(sync_client, "heartbeat@example.com")
+
+    pings: list[dict] = []
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        for _ in range(5):
+            msg = json.loads(ws.receive_text())
+            if msg.get("type") == "ping":
+                pings.append(msg)
+            if len(pings) >= 2:
+                break
+    assert len(pings) >= 2, f"expected ≥2 ping frames, got {pings}"
+
+
 def test_agent_message_unwraps_and_would_fan_out(sync_client, monkeypatch):
     user = _create_user(sync_client, "unwrap@example.com")
     captured = []
