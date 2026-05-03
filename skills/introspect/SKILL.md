@@ -9,9 +9,18 @@ tools: bash
 Self-hosted observability loop. Scan recent docker logs, classify findings, dedup
 against open GitHub issues, and file new ones for novel problems.
 
+> **Replaces `self-introspect`.** This skill subsumes the older `self-introspect`
+> skill. If your `context/schedules.json` still references `self-introspect`,
+> remove that entry and use `introspect-daily` (or the example schedule below)
+> instead — they do the same job.
+
 **Requires:**
 - `gh` CLI authenticated via `GH_TOKEN` (see the `github` skill for details)
-- Access to `docker logs` — either the host's `docker` CLI, or `/var/run/docker.sock` mounted into the container alongside a `docker` client install
+- Access to `docker logs`. The default Docker image ships the `docker` CLI and
+  `docker-compose.yml` mounts `/var/run/docker.sock:ro` into the container, so
+  this works out of the box on a fresh `docker compose up`. If you've removed
+  the socket mount or are running outside compose, the host's `docker` CLI on
+  `$PATH` works equivalently.
 
 If neither is available, log a one-line failure to `context/memory/introspection.md`
 and exit cleanly. Do not invent findings.
@@ -168,6 +177,25 @@ If the run produced zero findings, still append one line:
 ```
 
 The clean-run line is intentional — it confirms the loop is alive, not silently broken.
+
+**Dedup before appending `error` lines.** Operator misconfig (no docker socket,
+no `gh` auth, repo unresolvable) repeats every tick and would otherwise spam
+the ledger with identical errors. Before writing an `error` line, compare its
+signature against the last line of the ledger; if it matches, skip the write.
+
+```bash
+sig="docker-unreachable:docker-cli-not-installed-and-no-docker-sock"
+last=$(tail -n 1 context/memory/introspection.md 2>/dev/null || true)
+case "$last" in
+  *"| error |"*"| $sig"*) ;;  # same error already last — skip
+  *) printf '%s | error | %s | - | %s\n' "$(date -u +%FT%TZ)" "$category" "$sig" \
+       >> context/memory/introspection.md ;;
+esac
+```
+
+Apply the dedup guard only to `error` lines. `new`/`dup`/`clean` entries should
+always be appended so the ledger remains a faithful per-tick record of what the
+skill saw and did.
 
 ## Volume management
 
