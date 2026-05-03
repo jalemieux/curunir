@@ -1,11 +1,60 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - portal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  portal:
+    build: ./portal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: ./portal/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/portal
+      # Dev-only seed: portal upserts this user with this exact container
+      # token on startup when DEBUG=true. Lets curunir authenticate without
+      # a manual `python -m portal.admin create-user` step. The default
+      # token here MUST match curunir's CURUNIR_PORTAL_TOKEN default below.
+      SEED_USER_EMAIL: ${SEED_USER_EMAIL:-dev@example.com}
+      SEED_CONTAINER_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
+    volumes:
+      - ./portal:/app/portal
+    ports:
+      - "8000:8000"
+    command: uvicorn portal.app:app --host 0.0.0.0 --port 8000 --reload
+
   curunir:
     build: .
     env_file: .env
+    environment:
+      # In-network portal URL; override via .env if needed.
+      CURUNIR_PORTAL_URL: ${CURUNIR_PORTAL_URL:-ws://portal:8000/ws/agent}
+      # Matches portal's SEED_CONTAINER_TOKEN default — both services agree
+      # on `dev-seed-token-change-me` unless overridden in .env. Override
+      # CURUNIR_PORTAL_TOKEN in .env and the portal seed picks up the same
+      # value via interpolation above.
+      CURUNIR_PORTAL_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
     ports:
       - "8765:8765"
     volumes:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
+    depends_on:
+      - portal
     restart: unless-stopped
+
+volumes:
+  portal-postgres-data:

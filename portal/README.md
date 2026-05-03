@@ -27,7 +27,8 @@ to run the test suite (see [Tests](#tests)).
 
 ## Local development
 
-All commands run from the `portal/` directory unless noted.
+The portal's compose stack is merged into the root `docker-compose.yml`.
+All `docker compose` commands below run from the **repo root**.
 
 ### 1. Configure env vars
 
@@ -47,9 +48,9 @@ EMAIL_API_KEY=
 EMAIL_FROM=noreply@example.com
 ```
 
-`DATABASE_URL` is set automatically by `docker-compose.yml` when you run via
-Docker (`postgres:5432` on the compose network). If you run the portal
-natively against the dockerized Postgres, set
+`DATABASE_URL` is set automatically by the root `docker-compose.yml` when
+you run via Docker (`postgres:5432` on the compose network). If you run
+the portal natively against the dockerized Postgres, set
 `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal`.
 
 > **Why `DEBUG=true` for local dev:** the session cookie is issued with the
@@ -61,10 +62,18 @@ natively against the dockerized Postgres, set
 
 ### 2. Bring the stack up
 
+From the repo root:
+
 ```bash
-docker compose up -d --build
-docker compose ps                       # both services Up, postgres healthy
+docker compose up -d --build            # postgres + portal + curunir
+docker compose ps                       # all services Up, postgres healthy
 docker compose logs -f portal           # watch boot; Ctrl-C exits the log stream
+```
+
+To start just postgres + portal (skip curunir for now):
+
+```bash
+docker compose up -d --build postgres portal
 ```
 
 The portal listens on `http://localhost:8000`; visit `/healthz` to
@@ -89,22 +98,53 @@ page; clicking sets the session cookie and lands you on the chat surface.
 The CLI also prints the **container token** — copy it; you'll need it in
 step 4. (It's only shown once.)
 
-### 4. Connect a curunir container
+### Quick start: dev seed (skip step 3 + 4 setup)
 
-In a separate shell, point a curunir process at the portal. The curunir
-backend can run natively on the host (recommended for fast iteration) or
-in its own container — either way the portal is reachable at
-`localhost:8000` thanks to the published port:
+If you just want to bring everything up locally for testing, the root
+`docker-compose.yml` already wires a dev seed:
+
+- Portal default `SEED_USER_EMAIL=dev@example.com`,
+  `SEED_CONTAINER_TOKEN=dev-seed-token-change-me`.
+- Curunir default `CURUNIR_PORTAL_TOKEN=dev-seed-token-change-me` (matches).
+
+When `DEBUG=true` is set in `portal/.env`, the portal lifespan idempotently
+upserts the seed user with that exact token on startup, so `docker compose
+up --build` produces a working portal ↔ curunir round-trip without any
+manual CLI steps. To use a non-default token, set `CURUNIR_PORTAL_TOKEN`
+in the **root** `.env` — both services pick it up via interpolation.
+
+For a real (non-dev) workflow, leave `DEBUG` unset and use the manual
+flow below.
+
+### 4. Wire curunir to the portal
+
+The curunir service in the root `docker-compose.yml` already defaults
+`CURUNIR_PORTAL_URL=ws://portal:8000/ws/agent` (the in-network address).
+You just need to set the container token in the root `.env`:
 
 ```bash
-cd /path/to/curunir
-CURUNIR_PORTAL_URL=ws://localhost:8000/ws/agent \
-CURUNIR_PORTAL_TOKEN=<container-token-from-step-3> \
-python run.py
+# In <repo-root>/.env
+CURUNIR_PORTAL_TOKEN=<container-token-from-step-3>
+```
+
+Then restart curunir:
+
+```bash
+docker compose up -d curunir            # picks up the new token
 ```
 
 The status pill in the browser flips from "offline" → "online" once the
 container connects. Type a message to round-trip a chat through the portal.
+
+To run curunir natively on the host instead (useful for fast iteration),
+start only postgres + portal in Docker and run curunir from your venv:
+
+```bash
+docker compose up -d postgres portal
+CURUNIR_PORTAL_URL=ws://localhost:8000/ws/agent \
+CURUNIR_PORTAL_TOKEN=<container-token-from-step-3> \
+python run.py
+```
 
 ### Common operations
 
@@ -128,8 +168,8 @@ pip install \
   "itsdangerous>=2.2" "jinja2>=3.1" "httpx>=0.27" \
   "python-multipart>=0.0.9" "pydantic-settings>=2.2" "websockets>=12.0"
 
-cd portal && docker compose up -d postgres   # Postgres only
-cd .. && uvicorn portal.app:app --reload --port 8000
+docker compose up -d postgres                # Postgres only (from repo root)
+uvicorn portal.app:app --reload --port 8000
 ```
 
 In this mode set `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal`
@@ -146,11 +186,11 @@ Postgres on `localhost:5432` (separate `portal_test` db).
 # One-time: create the test database
 docker compose exec postgres createdb -U postgres portal_test
 
-# Portal tests (53 tests)
+# Portal tests (53 tests) — from <repo-root>/portal
 cd portal && pytest
 
-# Curunir-side portal channel tests
-cd <repo-root> && pytest tests/test_portal_channel.py tests/test_history_snapshot.py
+# Curunir-side portal channel tests — from <repo-root>
+pytest tests/test_portal_channel.py tests/test_history_snapshot.py
 ```
 
 The portal test suite uses `pythonpath = [".."]` in `pyproject.toml` to
