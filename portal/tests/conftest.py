@@ -29,6 +29,9 @@ async def client():
 async def _clean_db(client):
     """After each test, truncate users."""
     yield
-    pool = portal_db.get_pool()
+    try:
+        pool = portal_db.get_pool()
+    except RuntimeError:
+        return
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE users RESTART IDENTITY")
