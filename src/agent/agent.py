@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 import litellm
 
@@ -144,6 +145,7 @@ class Agent:
     def __init__(self, config: AgentConfig, tools: list[str] | None = None):
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
+        self.session_archives: dict[str, Path] = {}
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
