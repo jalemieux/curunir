@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     rate_limit_per_min: int = 10
     debug: bool = False
 
+    # Dev-only seed: when DEBUG=true and both are set, lifespan startup
+    # idempotently upserts a user with this email + container token.
+    # Lets `docker compose up` produce a known token without a manual CLI step.
+    seed_user_email: str = ""
+    seed_container_token: str = ""
+
     @property
     def admin_email_set(self) -> set[str]:
         return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
