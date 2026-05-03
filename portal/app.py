@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -7,6 +8,31 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from portal import admin, auth, db, sign_in, ws_agent, ws_browser
+from portal.routing import routing
+
+
+logger = logging.getLogger(__name__)
+
+
+_SHUTDOWN_FRAME = json.dumps({"type": "shutdown"})
+
+
+async def _shutdown_agents() -> None:
+    """Best-effort: tell every connected agent we're going down, then close.
+
+    Agents that recognise `{"type":"shutdown"}` will reconnect immediately
+    rather than wait for their heartbeat-timeout to fire. A failure on one
+    socket must not block the others — portal shutdown is time-sensitive.
+    """
+    for agent in routing.all_agents():
+        try:
+            await agent.send_text(_SHUTDOWN_FRAME)
+        except Exception:
+            logger.warning("shutdown frame send failed", exc_info=True)
+        try:
+            await agent.close(code=1012, reason="portal shutdown")
+        except Exception:
+            logger.warning("agent close failed during shutdown", exc_info=True)
 
 
 @asynccontextmanager
@@ -16,6 +42,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await _shutdown_agents()
         await db.close_pool()
 
 

@@ -11,19 +11,38 @@ This endpoint reads messages from the container and either:
     envelope to browsers (browser side knows how to render snapshots)
 
 Browser-bound payloads are the unwrapped OutgoingMessage envelope.
+
+A per-connection background heartbeat task sends `{"type":"ping"}` every
+`settings.agent_heartbeat_interval` seconds so the agent can detect a
+silent upstream even when the proxy keeps the TCP socket open.
 """
 
+import asyncio
 import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from portal import db
+from portal.config import settings
 from portal.routing import routing
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _heartbeat(ws: WebSocket) -> None:
+    """Send `{"type":"ping"}` to `ws` every `agent_heartbeat_interval`s."""
+    try:
+        while True:
+            await asyncio.sleep(settings.agent_heartbeat_interval)
+            await ws.send_text(json.dumps({"type": "ping"}))
+    except (WebSocketDisconnect, RuntimeError):
+        # Socket closed under us — nothing more to do.
+        return
+    except asyncio.CancelledError:
+        raise
 
 
 def _bearer_from_headers(ws: WebSocket) -> str | None:
@@ -51,6 +70,7 @@ async def ws_agent(ws: WebSocket) -> None:
     await routing.register_agent(user.id, ws)
     logger.info("agent connected", extra={"user_id": user.id})
 
+    heartbeat_task = asyncio.create_task(_heartbeat(ws))
     try:
         while True:
             raw = await ws.receive_text()
@@ -71,5 +91,10 @@ async def ws_agent(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
         await routing.unregister_agent(user.id, ws)
         logger.info("agent disconnected", extra={"user_id": user.id})

@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     admin_emails: str = ""  # comma-separated
     rate_limit_per_min: int = 10
     debug: bool = False
+    # Application-level heartbeat sent to each connected agent socket so a
+    # cycling portal app behind a connection-keeping proxy is detectable.
+    agent_heartbeat_interval: float = 15.0
 
     @property
     def admin_email_set(self) -> set[str]:

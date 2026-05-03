@@ -35,6 +35,12 @@ _BACKOFF_INITIAL = 1.0
 _BACKOFF_MAX = 30.0
 _TERMINAL_CODES = {4002, 4003}
 
+# 3× the portal's 15s heartbeat cadence — the proxy can hold the TCP socket
+# open and answer ws-level pings on behalf of a cycling portal app, so we
+# rely on application-level pings to detect a dead upstream.
+_READ_TIMEOUT = 45.0
+_HEARTBEAT_INTERVAL = 15.0
+
 
 def _backoff_with_jitter(attempt: int) -> float:
     base = min(_BACKOFF_INITIAL * (2 ** attempt), _BACKOFF_MAX)
@@ -69,6 +75,8 @@ class PortalChannel:
                     self.url,
                     additional_headers={"Authorization": f"Bearer {self.token}"},
                     max_size=32 * 1024 * 1024,
+                    ping_interval=_HEARTBEAT_INTERVAL,
+                    ping_timeout=_HEARTBEAT_INTERVAL,
                 ) as ws:
                     logger.info("PortalChannel connected to %s", self.url)
                     self._connection = ws
@@ -104,7 +112,19 @@ class PortalChannel:
             await asyncio.sleep(delay)
 
     async def _read_loop(self, ws) -> None:
-        async for raw in ws:
+        while True:
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=_READ_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Portal silent for %.0fs; closing and reconnecting",
+                    _READ_TIMEOUT,
+                )
+                try:
+                    await ws.close(code=1011, reason="heartbeat timeout")
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                return
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
@@ -115,6 +135,17 @@ class PortalChannel:
                 await self._handle_user_message(msg.get("payload") or {})
             elif mtype == "history_request":
                 await self._handle_history_request()
+            elif mtype == "ping":
+                # Heartbeat from portal — receiving the frame already reset
+                # the read timeout; nothing else to do.
+                continue
+            elif mtype == "shutdown":
+                logger.info("Portal sent shutdown; closing to reconnect")
+                try:
+                    await ws.close(code=1012, reason="portal shutdown")
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                return
             else:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
