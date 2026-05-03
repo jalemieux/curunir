@@ -31,11 +31,14 @@ For each extracted fact:
 
 ## Memory Integration
 
-After extraction, optionally save to memory:
+Memory writes are **upsert by heading**: the writer uses the first H2 (`## …`) of the extracted content as a stable section key. If a section with that exact heading already exists in the target file, it is replaced in place; otherwise the new section is appended.
 
-1. Check if topic file exists in memory dir
-2. Update existing entry OR create new one
-3. Link from MEMORY.md if new topic
+To make this work:
+
+1. Pick a canonical, stable topic heading the first time you record a fact.
+2. When updating or correcting a previously-stored fact, **reuse the existing heading verbatim** so the writer can replace the section instead of accumulating duplicates.
+3. Only invent a new heading for a genuinely new topic.
+4. Link from MEMORY.md if the topic is new.
 
 ## Example
 
