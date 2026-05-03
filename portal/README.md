@@ -64,6 +64,7 @@ Create `portal/.env` (or export in your shell):
 # Required
 PORTAL_SECRET_KEY=any-long-random-string-not-the-default
 ADMIN_EMAILS=you@example.com           # comma-separated allowlist
+DEBUG=true                             # required for http://localhost — see note below
 
 # Defaulted (override only if needed)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal
@@ -73,6 +74,13 @@ PORTAL_BASE_URL=http://localhost:8000
 EMAIL_API_KEY=
 EMAIL_FROM=noreply@example.com
 ```
+
+> **Why `DEBUG=true` for local dev:** the session cookie is issued with the
+> `Secure` flag in production, which browsers refuse to store over plain
+> HTTP — including `http://localhost` in Safari and recent Chrome. Without
+> `DEBUG=true`, you'd click the sign-in button, the cookie would silently be
+> dropped, and the redirect to `/` would bounce you back to `/needs-invite`.
+> In production (HTTPS), leave `DEBUG` unset so `Secure` is enforced.
 
 ### 4. Run the portal
 
