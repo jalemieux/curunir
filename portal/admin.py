@@ -42,6 +42,7 @@ async def admin_index(request: Request, user: User = Depends(admin_user)):
             "users": users,
             "csrf_token": csrf.issue_csrf(user.id),
             "new_container_token": None,
+            "new_signin_link": None,
             "new_user_email": None,
         },
     )
@@ -56,7 +57,8 @@ async def admin_create_user(
 ):
     _verify_csrf_form(user, csrf_token)
     new_user = await db.create_user(email)
-    await email_send.send_signin_email(new_user.email, _signin_link(new_user.sign_in_token))
+    signin_link = _signin_link(new_user.sign_in_token)
+    await email_send.send_signin_email(new_user.email, signin_link)
     users = await db.list_users()
     return templates.TemplateResponse(
         request, "admin.html",
@@ -64,6 +66,7 @@ async def admin_create_user(
             "users": users,
             "csrf_token": csrf.issue_csrf(user.id),
             "new_container_token": new_user.container_token,
+            "new_signin_link": signin_link,
             "new_user_email": new_user.email,
         },
     )
