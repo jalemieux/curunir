@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Curunir</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a12;
+  --fg: #e0e0e0;
+  --user: #4ade80;
+  --tool: #555;
+  --muted: #444;
+  --accent: #6366f1;
+  --bubble: #12121c;
+}
+html, body { height: 100dvh; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  display: flex; flex-direction: column;
+}
+header {
+  padding: 8px 14px; border-bottom: 1px solid #1a1a22;
+  font-size: 12px; color: #888;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-shrink: 0;
+}
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.dot.online { background: var(--user); }
+.dot.offline { background: #555; }
+.dot.reconnecting { background: #e2b55a; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+main {
+  flex: 1; overflow-y: auto;
+  padding: 14px;
+  max-width: 720px; width: 100%; margin: 0 auto;
+}
+.msg { margin-bottom: 14px; line-height: 1.5; }
+.msg.user .role { color: var(--user); font-weight: bold; font-size: 11px; }
+.msg.user .body { white-space: pre-wrap; }
+.msg.assistant .role { color: var(--accent); font-weight: bold; font-size: 11px; }
+.msg.assistant .body code { background: #1a1a2e; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.msg.assistant .body pre { background: #1a1a2e; border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.4; }
+.msg.assistant .body pre code { background: none; padding: 0; }
+.msg .tools { color: var(--tool); font-size: 11px; margin-top: 4px; }
+.msg .tool-line { padding: 2px 0; }
+
+.attachment {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px;
+  padding: 3px 8px; font-size: 11px; color: var(--accent);
+  margin-right: 4px; margin-top: 4px;
+}
+
+footer {
+  padding: 10px 14px; border-top: 1px solid #1a1a22;
+  display: flex; align-items: end; gap: 8px;
+  max-width: 720px; width: 100%; margin: 0 auto;
+  flex-shrink: 0;
+}
+#attach-btn {
+  background: transparent; border: 1px solid #2a2a3e; border-radius: 4px;
+  color: #888; padding: 8px 10px; cursor: pointer; min-height: 44px;
+}
+#attach-btn:hover { color: var(--accent); border-color: var(--accent); }
+#input {
+  flex: 1; background: #12121c; color: var(--fg);
+  border: 1px solid #2a2a3e; border-radius: 6px; padding: 10px;
+  font-family: inherit; font-size: 14px; resize: none;
+  min-height: 44px; max-height: 30dvh;
+}
+#send-btn {
+  background: var(--accent); color: white; border: 0; border-radius: 4px;
+  padding: 10px 16px; cursor: pointer; min-height: 44px;
+}
+#send-btn:disabled { background: #2a2a3e; color: #666; cursor: not-allowed; }
+.staged-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.staged-list .attachment { cursor: pointer; }
+.staged-list .attachment:hover { color: #f87171; }
+</style>
+</head>
+<body>
+<header>
+  <div><strong>Curunir</strong></div>
+  <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
+</header>
+<main id="messages"></main>
+<footer>
+  <input type="file" id="file-input" multiple style="display:none">
+  <button id="attach-btn" title="Attach files">📎</button>
+  <div style="flex:1; display:flex; flex-direction:column;">
+    <div id="staged" class="staged-list"></div>
+    <textarea id="input" rows="1" placeholder="Type a message…"></textarea>
+  </div>
+  <button id="send-btn">Send</button>
+</footer>
+
+<script>
+// === Constants ===
+const MAX_IMAGE = 5 * 1024 * 1024;
+const MAX_PDF = 10 * 1024 * 1024;
+const MAX_TEXT = 256 * 1024;
+const MAX_TOTAL = 20 * 1024 * 1024;
+const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+// === Elements ===
+const messagesEl = document.getElementById("messages");
+const inputEl = document.getElementById("input");
+const sendBtn = document.getElementById("send-btn");
+const attachBtn = document.getElementById("attach-btn");
+const fileInput = document.getElementById("file-input");
+const stagedEl = document.getElementById("staged");
+const statusDot = document.querySelector("#status .dot");
+const statusText = document.getElementById("status-text");
+
+// === State ===
+let ws = null;
+let agentOnline = false;
+let staged = []; // {filename, mime_type, data (base64), size}
+let inProgressMsg = null; // current assistant DOM node
+let backoff = 1000;
+
+// === Markdown setup ===
+marked.setOptions({
+  highlight: (code, lang) => hljs.highlightAuto(code, lang ? [lang] : undefined).value,
+  breaks: true,
+});
+
+// === Status ===
+function setStatus(state) {
+  statusDot.className = "dot " + state;
+  statusText.textContent = state;
+  agentOnline = state === "online";
+  sendBtn.disabled = !agentOnline;
+}
+
+// === WS connect ===
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws/browser`);
+  setStatus("reconnecting");
+
+  ws.onopen = () => { backoff = 1000; };
+  ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
+  ws.onclose = () => {
+    setStatus("offline");
+    setTimeout(connect, backoff + Math.random() * 500);
+    backoff = Math.min(backoff * 2, 30000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+// === Inbound dispatch ===
+function onServerMessage(msg) {
+  if (msg.type === "agent_status") {
+    setStatus(msg.status);
+    return;
+  }
+  if (msg.type === "history_snapshot") {
+    messagesEl.innerHTML = "";
+    inProgressMsg = null;
+    for (const m of msg.messages) renderHistoryEntry(m);
+    return;
+  }
+  // Otherwise: an OutgoingMessage payload.
+  renderAgentChunk(msg);
+}
+
+function renderHistoryEntry(m) {
+  if (m.role === "user") {
+    const el = appendMessage("user");
+    el.querySelector(".body").textContent = m.content || "";
+    renderAttachments(el, m.attachments);
+  } else if (m.role === "assistant") {
+    const el = appendMessage("assistant");
+    el.querySelector(".body").innerHTML = marked.parse(m.content || "");
+    if (m.tool_calls && m.tool_calls.length) {
+      const tools = document.createElement("div");
+      tools.className = "tools";
+      for (const t of m.tool_calls) {
+        const line = document.createElement("div");
+        line.className = "tool-line";
+        line.textContent = t;
+        tools.appendChild(line);
+      }
+      el.appendChild(tools);
+    }
+    renderAttachments(el, m.attachments);
+  } else if (m.role === "system") {
+    const el = appendMessage("assistant");
+    el.querySelector(".body").innerHTML = `<em style="color:#666">${m.content}</em>`;
+  }
+}
+
+function renderAgentChunk(m) {
+  if (!inProgressMsg) {
+    inProgressMsg = appendMessage("assistant");
+  }
+  const body = inProgressMsg.querySelector(".body");
+  if (m.delta) {
+    body.dataset.raw = (body.dataset.raw || "") + (m.content || "");
+    body.innerHTML = marked.parse(body.dataset.raw);
+  } else if (m.content) {
+    body.dataset.raw = m.content;
+    body.innerHTML = marked.parse(m.content);
+  }
+  if (m.tool_calls && m.tool_calls.length) {
+    let tools = inProgressMsg.querySelector(".tools");
+    if (!tools) {
+      tools = document.createElement("div");
+      tools.className = "tools";
+      inProgressMsg.appendChild(tools);
+    }
+    for (const t of m.tool_calls) {
+      const line = document.createElement("div");
+      line.className = "tool-line";
+      line.textContent = t;
+      tools.appendChild(line);
+    }
+  }
+  renderAttachments(inProgressMsg, m.attachments);
+  if (m.final) {
+    inProgressMsg = null;
+  }
+  scrollToBottom();
+}
+
+function renderAttachments(parent, atts) {
+  if (!atts || !atts.length) return;
+  const wrap = document.createElement("div");
+  for (const a of atts) {
+    const chip = document.createElement("span");
+    chip.className = "attachment";
+    chip.textContent = `📄 ${a.filename || a.path || "file"}`;
+    wrap.appendChild(chip);
+  }
+  parent.appendChild(wrap);
+}
+
+function appendMessage(role) {
+  const el = document.createElement("div");
+  el.className = `msg ${role}`;
+  el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
+  messagesEl.appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function scrollToBottom() {
+  requestAnimationFrame(() => {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+}
+
+// === Send ===
+function send() {
+  const content = inputEl.value.trim();
+  if (!content && staged.length === 0) return;
+  if (!agentOnline) {
+    const el = appendMessage("assistant");
+    el.querySelector(".body").innerHTML = "<em>Agent is offline.</em>";
+    return;
+  }
+  // Optimistic local render
+  const el = appendMessage("user");
+  el.querySelector(".body").textContent = content;
+  renderAttachments(el, staged.map(a => ({filename: a.filename})));
+
+  ws.send(JSON.stringify({
+    content,
+    attachments: staged.length ? staged.map(a => ({
+      filename: a.filename, mime_type: a.mime_type, data: a.data,
+    })) : null,
+  }));
+  inputEl.value = "";
+  staged = [];
+  renderStaged();
+}
+
+// === Attachments staging ===
+async function stageFile(file) {
+  // Validate
+  const isImg = file.type.startsWith("image/");
+  const isPdf = file.type === "application/pdf";
+  const isText = !isImg && !isPdf;
+
+  if (isImg && !IMAGE_MIMES.includes(file.type)) {
+    alert(`Unsupported image type: ${file.type}`); return;
+  }
+  if (isImg && file.size > MAX_IMAGE) { alert(`Image > 5 MB`); return; }
+  if (isPdf && file.size > MAX_PDF) { alert(`PDF > 10 MB`); return; }
+  if (isText && file.size > MAX_TEXT) { alert(`Text > 256 KB`); return; }
+
+  const totalAfter = staged.reduce((s, a) => s + a.size, 0) + file.size;
+  if (totalAfter > MAX_TOTAL) { alert(`Total > 20 MB`); return; }
+
+  const buf = await file.arrayBuffer();
+  const data = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  staged.push({
+    filename: file.name,
+    mime_type: file.type || "application/octet-stream",
+    data,
+    size: file.size,
+  });
+  renderStaged();
+}
+
+function renderStaged() {
+  stagedEl.innerHTML = "";
+  staged.forEach((a, i) => {
+    const chip = document.createElement("span");
+    chip.className = "attachment";
+    chip.textContent = `📎 ${a.filename} ✕`;
+    chip.onclick = () => { staged.splice(i, 1); renderStaged(); };
+    stagedEl.appendChild(chip);
+  });
+}
+
+// === Wiring ===
+sendBtn.onclick = send;
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+inputEl.addEventListener("input", () => {
+  inputEl.style.height = "auto";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, window.innerHeight * 0.3) + "px";
+});
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  for (const f of fileInput.files) await stageFile(f);
+  fileInput.value = "";
+};
+
+connect();
+</script>
+</body>
+</html>
