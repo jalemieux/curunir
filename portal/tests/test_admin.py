@@ -73,6 +73,36 @@ async def test_deactivate_marks_user_inactive(client):
 
 
 @pytest.mark.asyncio
+async def test_show_signin_link_renders_link_for_existing_user(client):
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("target@example.com")
+    csrf_token = csrf.issue_csrf(admin_id)
+
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-signin-link",
+        data={"csrf": csrf_token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    assert "Sign-in link" in resp.text
+    assert target.sign_in_token in resp.text
+    # Container token must NOT be re-shown via this flow
+    assert target.container_token not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_show_signin_link_requires_csrf(client):
+    _, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("target@example.com")
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-signin-link",
+        data={"csrf": "wrong"},
+        cookies=cookies,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_admin_email_compare_case_insensitive(client, monkeypatch):
     from portal.config import settings
     monkeypatch.setattr(settings, "admin_emails", "Admin@Example.Com")
