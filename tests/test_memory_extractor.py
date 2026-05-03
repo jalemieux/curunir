@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.llm import LLMResponse
-from src.memory_extractor import extract_learnings
+from src.memory_extractor import (
+    _collect_existing_headings,
+    _parse_first_heading,
+    _replace_section,
+    extract_learnings,
+)
 
 
 def _history(user_count=3):
@@ -188,3 +193,195 @@ async def test_creates_subdirectory_for_people(agent_config):
 
     assert (mem_dir / "people" / "alice.md").exists()
     assert "works on infra" in (mem_dir / "people" / "alice.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_replaces_existing_section_by_heading(agent_config):
+    """Same H2 heading should replace the existing section, not duplicate it."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    target = mem_dir / "tasks.md"
+    target.write_text(
+        "## Adobe Agentic Role\n"
+        "**Source:** chat - 2026-04-01\n"
+        "**Fact:** old fact about Adobe role\n"
+        "\n"
+        "## Other Task\n"
+        "**Fact:** unrelated\n"
+    )
+
+    new_block = (
+        "## Adobe Agentic Role\n"
+        "**Source:** chat - 2026-05-03\n"
+        "**Fact:** new fact about Adobe role"
+    )
+
+    llm_response = LLMResponse(
+        text=json.dumps({
+            "facts": [{"file": "tasks.md", "content": new_block}],
+            "summary": {"topic_slug": "test", "content": "summary"},
+        }),
+        tool_calls=None,
+    )
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock, return_value=llm_response):
+        await extract_learnings(agent_config, _history())
+
+    text = target.read_text()
+    assert "old fact about Adobe role" not in text
+    assert "new fact about Adobe role" in text
+    assert text.count("## Adobe Agentic Role") == 1
+    assert "## Other Task" in text
+    assert "unrelated" in text
+
+
+@pytest.mark.asyncio
+async def test_appends_when_heading_is_new(agent_config):
+    """Genuinely new headings should still be appended (existing behavior preserved)."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    target = mem_dir / "tasks.md"
+    target.write_text("## Existing Topic\n**Fact:** existing\n")
+
+    new_block = "## Brand New Topic\n**Fact:** new content"
+    llm_response = LLMResponse(
+        text=json.dumps({
+            "facts": [{"file": "tasks.md", "content": new_block}],
+            "summary": {"topic_slug": "test", "content": "summary"},
+        }),
+        tool_calls=None,
+    )
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock, return_value=llm_response):
+        await extract_learnings(agent_config, _history())
+
+    text = target.read_text()
+    assert "## Existing Topic" in text
+    assert "existing" in text
+    assert "## Brand New Topic" in text
+    assert "new content" in text
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_existing_headings(agent_config):
+    """The system prompt should list existing H2 headings from memory files."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+    (mem_dir / "MEMORY.md").write_text("- index entry\n")
+    (mem_dir / "tasks.md").write_text(
+        "## Adobe Agentic Role\nfact1\n\n## X Listener\nfact2\n"
+    )
+    (mem_dir / "people").mkdir()
+    (mem_dir / "people" / "alice.md").write_text("## Alice Background\nbio\n")
+
+    archives = mem_dir / "archives" / "conversations"
+    archives.mkdir(parents=True)
+    (archives / "2026-05-03-something.md").write_text("## Should Not Appear\nblah\n")
+
+    llm_response = LLMResponse(
+        text=json.dumps({"facts": [], "summary": {"topic_slug": "test", "content": "s"}}),
+        tool_calls=None,
+    )
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock, return_value=llm_response) as mock_llm:
+        await extract_learnings(agent_config, _history())
+
+    mock_llm.assert_called_once()
+    sys_prompt = mock_llm.call_args[0][1][0]["content"]
+    assert "Adobe Agentic Role" in sys_prompt
+    assert "X Listener" in sys_prompt
+    assert "Alice Background" in sys_prompt
+    assert "tasks.md" in sys_prompt
+    assert "people/alice.md" in sys_prompt
+    assert "Should Not Appear" not in sys_prompt
+
+
+def test_parse_first_heading():
+    assert _parse_first_heading("## Topic\nbody") == "Topic"
+    assert _parse_first_heading("preamble\n\n## First\n**Fact:** x\n## Second\n") == "First"
+    assert _parse_first_heading("no heading here") is None
+    assert _parse_first_heading("### h3 only\n") is None
+    assert _parse_first_heading("## Trimmed   \n") == "Trimmed"
+
+
+def test_replace_section_at_end_of_file():
+    text = "## A\nfact A\n\n## B\nfact B\n"
+    new = "## B\nupdated B"
+    result = _replace_section(text, "B", new)
+    assert "## A" in result
+    assert "fact A" in result
+    assert "fact B" not in result
+    assert "updated B" in result
+    assert result.count("## B") == 1
+    assert result.endswith("\n")
+
+
+def test_replace_section_between_sections():
+    text = "## A\nfact A\n\n## B\nfact B\n\n## C\nfact C\n"
+    new = "## B\nupdated B"
+    result = _replace_section(text, "B", new)
+    assert "fact A" in result
+    assert "fact B" not in result
+    assert "updated B" in result
+    assert "fact C" in result
+    assert "## A" in result
+    assert "## B" in result
+    assert "## C" in result
+    # Verify a blank line still separates ## B from ## C
+    assert "updated B\n\n## C" in result
+
+
+def test_replace_section_returns_none_when_heading_missing():
+    text = "## A\nfact A\n"
+    assert _replace_section(text, "Nonexistent", "## Nonexistent\nblah") is None
+
+
+def test_replace_section_preserves_preamble():
+    text = "preamble line\n\n## A\nfact A\n"
+    new = "## A\nupdated"
+    result = _replace_section(text, "A", new)
+    assert result.startswith("preamble line\n")
+    assert "updated" in result
+    assert "fact A" not in result
+
+
+def test_replace_section_h3_not_boundary():
+    """`### ` lines should not terminate a section — only `## ` does."""
+    text = "## A\nfact A\n\n### A subheading\nh3 content\n\n## B\nfact B\n"
+    new = "## A\nupdated"
+    result = _replace_section(text, "A", new)
+    assert "updated" in result
+    # H3 was part of section A — replaced along with it
+    assert "h3 content" not in result
+    assert "fact A" not in result
+    # H2 "## B" was the real boundary — preserved
+    assert "fact B" in result
+    assert "## B" in result
+
+
+def test_collect_existing_headings(tmp_path):
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir()
+    (mem_dir / "README.md").write_text("# README\n## ignore me\n")
+    (mem_dir / "MEMORY.md").write_text("- index\n## also ignore\n")
+    (mem_dir / "tasks.md").write_text("## Topic A\nbody\n\n## Topic B\nbody\n")
+    (mem_dir / "people").mkdir()
+    (mem_dir / "people" / "alice.md").write_text("## Alice\nbio\n")
+    archives = mem_dir / "archives" / "conversations"
+    archives.mkdir(parents=True)
+    (archives / "x.md").write_text("## ignored archive\n")
+
+    headings = _collect_existing_headings(mem_dir)
+
+    assert headings.get("tasks.md") == ["Topic A", "Topic B"]
+    assert headings.get("people/alice.md") == ["Alice"]
+    assert "README.md" not in headings
+    assert "MEMORY.md" not in headings
+    assert not any("archives" in k for k in headings)
+
+
+def test_collect_existing_headings_missing_dir(tmp_path):
+    assert _collect_existing_headings(tmp_path / "does-not-exist") == {}
