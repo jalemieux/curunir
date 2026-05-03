@@ -9,6 +9,8 @@ Fetch and extract content from JS-rendered web pages using `shot-scraper` CLI. N
 
 **Requires:** `shot-scraper` + Chromium binary (`pip install shot-scraper && shot-scraper install`)
 
+> **Pick the right subcommand.** Bare `shot-scraper URL` produces a **PNG screenshot** (binary) — useless for text extraction. For HTML/text use `shot-scraper html URL -o -`; for structured data or page text use `shot-scraper javascript URL "..."`. See "Common Mistakes" below.
+
 ## Usage
 
 ### Get rendered HTML from a page
@@ -300,6 +302,7 @@ When a site blocks headless access, check for:
 
 ## Common Mistakes
 
+- **Using `shot-scraper URL` (no subcommand) when you wanted text** — that takes a PNG screenshot. For HTML use `shot-scraper html URL -o -`; for text/data use `shot-scraper javascript URL "..."`.
 - **Forgetting `shot-scraper install`** — after `pip install shot-scraper`, you must run `shot-scraper install` to download Chromium. Without it, every command fails.
 - **Using `--wait` on `shot-scraper javascript`** — the `javascript` subcommand does NOT support `--wait` or `--wait-for`. Use an `async () => {}` wrapper with `await new Promise(r => setTimeout(r, ms))` instead.
 - **Inline JS with CSS attribute selectors** — selectors like `a[href*="/user/"]` break when nested in shell quotes. Use `-i /dev/stdin` with a heredoc or `-i script.js` to avoid escaping hell.
