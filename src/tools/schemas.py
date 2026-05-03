@@ -161,7 +161,16 @@ _SCHEMAS = [
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Execute a shell command and return stdout + stderr.",
+                "description": (
+                    "Execute a shell command and return stdout + stderr. "
+                    "Use this ONLY for shell commands (binaries on PATH, shell "
+                    "builtins, scripts). Do NOT type agent tool names like "
+                    "`load_skill`, `web_fetch`, `delegate`, `schedule`, or "
+                    "`attach` here — those are agent tools invoked via the "
+                    "tool-call schema (set `name=\"<tool>\"` on a tool call), "
+                    "not shell binaries. Typing them as bash commands will "
+                    "silently fail with 'command not found'."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -182,7 +191,12 @@ _SCHEMAS = [
             "type": "function",
             "function": {
                 "name": "load_skill",
-                "description": "Load a skill's instructions by name.",
+                "description": (
+                    "Agent tool (invoke via tool-call, not shell): load a "
+                    "skill's instructions by name. Call this as a tool with "
+                    "`name=\"load_skill\"` — do NOT type `load_skill <name>` "
+                    "into the bash tool."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -200,9 +214,12 @@ _SCHEMAS = [
             "function": {
                 "name": "web_fetch",
                 "description": (
-                    "Fetch a URL and return the extracted text content (no HTML). "
+                    "Agent tool (invoke via tool-call, not shell): fetch a URL "
+                    "and return the extracted text content (no HTML). "
                     "Use this instead of curl for reading web pages — it strips "
-                    "navigation, scripts, and ads, returning only readable text."
+                    "navigation, scripts, and ads, returning only readable text. "
+                    "Do NOT type `web_fetch <url>` into the bash tool — "
+                    "invoke it as a tool call with `name=\"web_fetch\"`."
                 ),
                 "parameters": {
                     "type": "object",
@@ -221,12 +238,15 @@ _SCHEMAS = [
             "function": {
                 "name": "delegate",
                 "description": (
-                    "Delegate a task to a sub-agent with a clean context window. "
+                    "Agent tool (invoke via tool-call, not shell): delegate a "
+                    "task to a sub-agent with a clean context window. "
                     "Use this for tasks that involve processing large documents, "
                     "analyzing images, or doing multi-step research. The sub-agent "
                     "has access to all tools (read, write, bash, etc.) but runs in "
                     "isolation — its intermediate work won't fill up your context. "
-                    "You get back only the final answer."
+                    "You get back only the final answer. Do NOT type "
+                    "`delegate ...` into the bash tool — invoke it as a tool "
+                    "call with `name=\"delegate\"`."
                 ),
                 "parameters": {
                     "type": "object",
@@ -250,10 +270,13 @@ _SCHEMAS = [
             "function": {
                 "name": "schedule",
                 "description": (
-                    "Manage scheduled tasks that run autonomously on a cron schedule. "
+                    "Agent tool (invoke via tool-call, not shell): manage "
+                    "scheduled tasks that run autonomously on a cron schedule. "
                     "Use this to set up recurring tasks like morning briefs, PR checks, "
                     "or maintenance jobs. Scheduled tasks run in their own session with "
-                    "no conversation context, so make prompts self-contained."
+                    "no conversation context, so make prompts self-contained. "
+                    "Do NOT type `schedule ...` into the bash tool — invoke it "
+                    "as a tool call with `name=\"schedule\"`."
                 ),
                 "parameters": {
                     "type": "object",
@@ -293,13 +316,16 @@ _SCHEMAS = [
         "function": {
             "name": "attach",
             "description": (
-                "Send a file to the user as an attachment on this response. "
+                "Agent tool (invoke via tool-call, not shell): send a file to "
+                "the user as an attachment on this response. "
                 "Use this when the user asks for a file or when you've produced "
                 "an artifact (report, document, etc.). Pass an absolute path; "
                 "do not read, glob, or stat the file beforehand if the user "
                 "already gave you the path. Call this once per file — repeated "
                 "calls duplicate the attachment. The attachment alone is a "
-                "complete reply; no follow-up text is required."
+                "complete reply; no follow-up text is required. Do NOT type "
+                "`attach ...` into the bash tool — invoke it as a tool call "
+                "with `name=\"attach\"`."
             ),
             "parameters": {
                 "type": "object",
