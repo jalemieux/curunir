@@ -8,6 +8,7 @@ from pathlib import Path
 
 import litellm
 
+from src.agent.repetition import RepetitionDetector, Verdict
 from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,19 @@ _TOOL_KEY_ARGS: dict[str, list[str]] = {
 }
 
 _MAX_ARG_LEN = 120
+
+_REPETITION_NUDGE_ADVISORY = (
+    "[advisory] You have made several near-identical tool calls without "
+    "obtaining new information. Change strategy substantially — try different "
+    "search terms, a different tool, or a different angle — or stop and "
+    "report what you have already found."
+)
+_REPETITION_BLOCK_ADVISORY = (
+    "[advisory] One of your tool calls was blocked because you have already "
+    "issued the same call many times this session without new information. "
+    "Stop repeating that query and either change strategy or report your "
+    "current findings to the user."
+)
 
 
 def _display_name(tool_name: str) -> str:
@@ -149,6 +163,20 @@ class Agent:
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
+        self.session_detectors: dict[str, RepetitionDetector] = {}
+
+    def _get_detector(self, session_id: str) -> RepetitionDetector:
+        d = self.session_detectors.get(session_id)
+        if d is None:
+            d = RepetitionDetector(
+                key_args=_TOOL_KEY_ARGS,
+                exact_nudge_threshold=self.config.repetition_nudge_threshold,
+                exact_block_threshold=self.config.repetition_block_threshold,
+                similar_window=self.config.repetition_similar_window,
+                similar_jaccard=self.config.repetition_similar_jaccard,
+            )
+            self.session_detectors[session_id] = d
+        return d
 
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         base = get_tool_schemas(self.tools)
@@ -319,9 +347,19 @@ class Agent:
                     assistant_msg["content"] = response.text
                 history.append(assistant_msg)
 
+                detector = self._get_detector(session_id)
+                turn_advisory: str | None = None
+
                 for tool_call in response.tool_calls:
                     name = tool_call["function"]["name"]
                     args_str = tool_call["function"]["arguments"]
+                    try:
+                        args = json.loads(args_str)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+
+                    verdict = detector.observe(name, args)
+
                     detail_lines = _tool_detail_lines(name, args_str)
                     logger.info("[%s] tool call: %s", sid, name)
                     for line in detail_lines:
@@ -330,21 +368,42 @@ class Agent:
                     if on_tool_call:
                         await on_tool_call(name, args_str)
 
-                    result = await execute_tool_call(
-                        name,
-                        json.loads(args_str),
-                        self.config,
-                        attachments=attachments,
-                        on_tool_call=on_tool_call,
-                    )
+                    if verdict == Verdict.BLOCK:
+                        logger.warning(
+                            "[%s] repetition BLOCK: skipping tool call %s "
+                            "(>= %d near-identical calls)",
+                            sid, name, self.config.repetition_block_threshold,
+                        )
+                        result = (
+                            f"[blocked: {self.config.repetition_block_threshold} "
+                            f"near-identical calls to {name} in this session. "
+                            f"Change strategy or stop.]"
+                        )
+                        turn_advisory = _REPETITION_BLOCK_ADVISORY
+                    else:
+                        if verdict == Verdict.NUDGE:
+                            logger.warning(
+                                "[%s] repetition NUDGE: %s call resembles recent "
+                                "calls", sid, name,
+                            )
+                            if turn_advisory is None:
+                                turn_advisory = _REPETITION_NUDGE_ADVISORY
 
-                    # After load_skill, check for required tools in frontmatter
-                    if name == "load_skill":
-                        required = _parse_skill_tools(result)
-                        if required:
-                            self._session_tools.setdefault(session_id, set()).update(required)
-                            tool_schemas = self._get_tool_schemas(session_id)
-                            logger.info("[%s] skill loaded tools: %s", sid, required)
+                        result = await execute_tool_call(
+                            name,
+                            args,
+                            self.config,
+                            attachments=attachments,
+                            on_tool_call=on_tool_call,
+                        )
+
+                        # After load_skill, check for required tools in frontmatter
+                        if name == "load_skill":
+                            required = _parse_skill_tools(result)
+                            if required:
+                                self._session_tools.setdefault(session_id, set()).update(required)
+                                tool_schemas = self._get_tool_schemas(session_id)
+                                logger.info("[%s] skill loaded tools: %s", sid, required)
 
                     result_preview = result[:200] if result else "(empty)"
                     logger.debug("[%s] tool result: %s", sid, result_preview)
@@ -353,6 +412,9 @@ class Agent:
                         "tool_call_id": tool_call["id"],
                         "content": result,
                     })
+
+                if turn_advisory:
+                    history.append({"role": "user", "content": turn_advisory})
 
                 _trim_history(history, max_chars=self.config.max_history_chars)
                 messages = [{"role": "system", "content": system_prompt}] + history
@@ -366,6 +428,7 @@ class Agent:
                     metadata["stats"]["iterations"] = iteration + 1
                 if system_task_prompt:
                     self.sessions.pop(session_id, None)
+                    self.session_detectors.pop(session_id, None)
                 return response.text
 
             history.append({"role": "assistant", "content": ""})
@@ -374,6 +437,7 @@ class Agent:
                 metadata["stats"]["iterations"] = iteration + 1
             if system_task_prompt:
                 self.sessions.pop(session_id, None)
+                self.session_detectors.pop(session_id, None)
             # Empty text is fine when the agent already attached a file this
             # turn — the attachment is the reply.
             if attachments:
@@ -388,4 +452,5 @@ class Agent:
             metadata["stats"]["iterations"] = self.config.max_iterations
         if system_task_prompt:
             self.sessions.pop(session_id, None)
+            self.session_detectors.pop(session_id, None)
         return "Iteration limit reached."

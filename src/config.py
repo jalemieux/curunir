@@ -15,6 +15,12 @@ class AgentConfig:
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
+    # Repetition detector — nudge/block the agent when it loops on near-identical
+    # tool calls. See src/agent/repetition.py for semantics.
+    repetition_nudge_threshold: int = 3
+    repetition_block_threshold: int = 10
+    repetition_similar_window: int = 5
+    repetition_similar_jaccard: float = 0.5
 
 
 @dataclass

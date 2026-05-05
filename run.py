@@ -195,6 +195,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
             archive_path = agent.session_archives.pop(msg.session_id, None)
+            agent.session_detectors.pop(msg.session_id, None)
             if history:
                 asyncio.create_task(extract_learnings(
                     agent.config, list(history), archive_path=archive_path,
@@ -300,11 +301,19 @@ async def main():
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
+    rep_nudge = os.environ.get("REPETITION_NUDGE_THRESHOLD")
+    rep_block = os.environ.get("REPETITION_BLOCK_THRESHOLD")
+    rep_window = os.environ.get("REPETITION_SIMILAR_WINDOW")
+    rep_jaccard = os.environ.get("REPETITION_SIMILAR_JACCARD")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
+        **({"repetition_nudge_threshold": int(rep_nudge)} if rep_nudge else {}),
+        **({"repetition_block_threshold": int(rep_block)} if rep_block else {}),
+        **({"repetition_similar_window": int(rep_window)} if rep_window else {}),
+        **({"repetition_similar_jaccard": float(rep_jaccard)} if rep_jaccard else {}),
     )
 
     agent = Agent(config)

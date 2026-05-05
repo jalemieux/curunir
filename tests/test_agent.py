@@ -380,6 +380,98 @@ class TestSystemTaskMode:
         assert history[0]["content"] == "hi"
 
 
+class TestRepetitionIntegration:
+    """Wiring of the per-session repetition detector into the agent loop."""
+
+    @staticmethod
+    def _tool_response(call_id: str, name: str = "web_fetch",
+                       args: dict | None = None) -> LLMResponse:
+        args = args or {"url": "https://example.com"}
+        return LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }],
+        )
+
+    async def test_injects_advisory_after_repeated_tool_calls(self, agent):
+        """3rd identical tool call appends a synthetic advisory user message."""
+        responses = [
+            self._tool_response("c1"),
+            self._tool_response("c2"),
+            self._tool_response("c3"),
+            LLMResponse(text="Stopping.", tool_calls=None),
+        ]
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=responses), \
+             patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock,
+                   return_value="ok"):
+            result = await agent.handle("loop", "rep1")
+
+        assert result == "Stopping."
+        history = agent.sessions["rep1"]
+        # Advisory should land in history as a user-role advisory.
+        advisories = [
+            m for m in history
+            if m["role"] == "user" and isinstance(m.get("content"), str)
+            and "[advisory]" in m["content"]
+        ]
+        assert advisories, "expected at least one advisory user message"
+
+    async def test_blocks_after_excessive_repetition(self, agent_config):
+        """At the BLOCK threshold the underlying tool is no longer dispatched."""
+        agent_config.repetition_nudge_threshold = 3
+        agent_config.repetition_block_threshold = 4
+        agent_config.max_iterations = 6
+        agent = Agent(agent_config)
+
+        # Five identical tool calls then a final text response.
+        responses = [self._tool_response(f"c{i}") for i in range(5)]
+        responses.append(LLMResponse(text="Stopped.", tool_calls=None))
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=responses), \
+             patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock,
+                   return_value="ok") as mock_exec:
+            await agent.handle("spin", "rep2")
+
+        # First 3 calls: OK (executed). 4th: BLOCK (skipped). 5th: still BLOCK.
+        # So execute_tool_call is invoked 3 times, not 5.
+        assert mock_exec.await_count == 3
+        # History should contain a synthetic blocked-result tool message.
+        tool_msgs = [m for m in agent.sessions["rep2"] if m["role"] == "tool"]
+        assert any("blocked" in (m.get("content") or "").lower()
+                   for m in tool_msgs)
+
+    async def test_state_resets_when_session_cleared(self, agent):
+        """Popping the session detector starts the next conversation fresh."""
+        responses = [
+            self._tool_response("c1"),
+            self._tool_response("c2"),
+            self._tool_response("c3"),
+            LLMResponse(text="ok", tool_calls=None),
+        ]
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=responses), \
+             patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock,
+                   return_value="ok"):
+            await agent.handle("loop", "rep3")
+
+        # Detector exists with prior counts.
+        assert "rep3" in agent.session_detectors
+
+        # Simulate /clear or /reset.
+        agent.sessions.pop("rep3", None)
+        agent.session_detectors.pop("rep3", None)
+
+        # Fresh session — same args should be OK on first call.
+        from src.agent.repetition import Verdict
+        new_det = agent._get_detector("rep3")
+        assert new_det.observe("web_fetch", {"url": "https://example.com"}) == Verdict.OK
+
+
 class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
