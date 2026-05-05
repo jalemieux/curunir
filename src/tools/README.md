@@ -14,7 +14,8 @@ The tools subsystem gives the agent the ability to interact with the filesystem,
 | `skill_tool.py` | `load_skill` — loads a skill's SKILL.md |
 | `delegate.py` | `delegate` — spawns a sub-agent |
 | `schedule_tool.py` | `schedule` — CRUD for cron tasks |
-| `attach.py` | `attach` — attaches a file to the response (opt-in) |
+| `attach.py` | `attach` — attaches a file to the response |
+| `to_audio.py` | `to_audio` — rewrites text for speech and attaches an MP3 (opt-in) |
 
 ## Schema Registry (`schemas.py`)
 
@@ -35,7 +36,7 @@ _register(schema, opt_in=True)    # opt-in tool — only available when a skill 
 
 ### Opt-in Tools
 
-`attach` — only available when a skill's frontmatter includes `tools: attach`.
+`to_audio` — only available when a skill's frontmatter includes `tools: to_audio`.
 
 ## Dispatcher (`dispatcher.py`)
 
@@ -114,6 +115,10 @@ CRUD operations on `context/schedules.json`. Supports `list`, `add`, `update`, `
 ### Attach (`attach.py`)
 
 Records file metadata (path, MIME type, size) into the `attachments` list that the agent carries through a request. The channel layer later delivers these files alongside the text response.
+
+### To Audio (`to_audio.py`) — opt-in
+
+Rewrites text into a spoken-word script via the configured LLM, then calls OpenAI's TTS API (`tts-1` by default) to synthesize an MP3 written to `{config.attachment_dir}/audio/`. Registers the file on the response's `attachments` list so the email and portal channels deliver it alongside the text reply. Voice and model are tunable via the `TTS_VOICE` / `TTS_MODEL` env vars or per-call args. Requires `OPENAI_API_KEY`. Wire it into a skill by adding `tools: to_audio` to the SKILL.md frontmatter.
 
 ## Adding a New Tool
 

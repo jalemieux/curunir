@@ -46,3 +46,30 @@ class TestExecuteToolCall:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             result = await execute_tool_call("delegate", {"task": "say hello"}, agent_config)
         assert result == "sub-agent result"
+
+    async def test_dispatches_to_audio_async_with_attachments(self, tmp_path, agent_config):
+        """to_audio is dispatched as native async and receives the attachments list."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.llm import LLMResponse
+
+        agent_config.attachment_dir = str(tmp_path / "att")
+        rewrite = LLMResponse(text="Spoken script.", tool_calls=None)
+        resp = MagicMock()
+        resp.content = b"BYTES"
+        client = MagicMock()
+        client.audio.speech.create = AsyncMock(return_value=resp)
+        attachments: list[dict] = []
+
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock, return_value=rewrite
+        ), patch("src.tools.to_audio.AsyncOpenAI", return_value=client):
+            result = await execute_tool_call(
+                "to_audio",
+                {"content": "hello", "filename": "x.mp3"},
+                agent_config,
+                attachments=attachments,
+            )
+
+        assert "x.mp3" in result
+        assert len(attachments) == 1
+        assert attachments[0]["mime_type"] == "audio/mpeg"
