@@ -15,6 +15,9 @@ class AgentConfig:
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
+    attachment_dir: str = "/tmp/attachments"
+    tts_model: str = "tts-1"
+    tts_voice: str = "alloy"
 
 
 @dataclass

@@ -300,11 +300,17 @@ async def main():
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
+    attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
+    tts_model = os.environ.get("TTS_MODEL")
+    tts_voice = os.environ.get("TTS_VOICE")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
+        **({"attachment_dir": attachment_dir} if attachment_dir else {}),
+        **({"tts_model": tts_model} if tts_model else {}),
+        **({"tts_voice": tts_voice} if tts_voice else {}),
     )
 
     agent = Agent(config)
