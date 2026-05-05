@@ -325,7 +325,43 @@ for _s in _SCHEMAS:
 
 # Opt-in tools — not included by default, loaded when a skill requires them.
 _OPT_IN_SCHEMAS = [
-    
+    {
+        "type": "function",
+        "function": {
+            "name": "to_audio",
+            "description": (
+                "Rewrite text for natural speech and synthesize it into an "
+                "MP3 audio attachment on this response. Use when the user "
+                "wants to listen to a digest, summary, or article. Pass the "
+                "raw text in `content`; the tool handles the spoken-word "
+                "rewrite (bullet → prose, emoji handling, transitions) "
+                "internally before calling TTS. Optional `voice`, `model`, "
+                "and `filename` arguments override the defaults."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Text to convert to spoken audio.",
+                    },
+                    "voice": {
+                        "type": "string",
+                        "description": "OpenAI TTS voice (alloy, echo, fable, onyx, nova, shimmer). Defaults to TTS_VOICE.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "OpenAI TTS model (tts-1 or tts-1-hd). Defaults to TTS_MODEL.",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Output filename for the MP3. Defaults to digest-YYYY-MM-DD.mp3.",
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
 ]
 
 for _s in _OPT_IN_SCHEMAS:

@@ -28,7 +28,14 @@ def _get_native_async_executor(name: str):
     if name == "delegate":
         from src.tools.delegate import exec_delegate
         return exec_delegate
+    if name == "to_audio":
+        from src.tools.to_audio import exec_to_audio
+        return exec_to_audio
     return None
+
+
+# Async executors that need the mutable attachments list.
+_ASYNC_EXECUTORS_WITH_ATTACHMENTS = {"to_audio"}
 
 
 async def execute_tool_call(
@@ -42,6 +49,10 @@ async def execute_tool_call(
     # Check native async executors first (e.g. delegate)
     async_executor = _get_native_async_executor(key)
     if async_executor:
+        if key in _ASYNC_EXECUTORS_WITH_ATTACHMENTS:
+            return await async_executor(
+                args, config, attachments=attachments, on_tool_call=on_tool_call,
+            )
         return await async_executor(args, config, on_tool_call=on_tool_call)
 
     # Sync executors run in a thread to avoid blocking the event loop

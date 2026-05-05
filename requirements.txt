@@ -13,3 +13,4 @@ croniter
 shot-scraper
 google-auth
 google-api-python-client
+openai>=1.0
