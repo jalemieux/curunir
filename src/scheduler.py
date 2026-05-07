@@ -30,8 +30,8 @@ def _load_tasks(config) -> list[dict]:
         return []
 
 
-def _update_last_run(config, task_id: str, timestamp: int) -> None:
-    """Atomically update a task's last_run timestamp in the schedule file."""
+def _update_task_fields(config, task_id: str, fields: dict) -> None:
+    """Atomically merge ``fields`` into the task with id ``task_id``."""
     path = _schedule_path(config)
     try:
         tasks = json.loads(path.read_text())
@@ -39,7 +39,7 @@ def _update_last_run(config, task_id: str, timestamp: int) -> None:
         return
     for t in tasks:
         if t["id"] == task_id:
-            t["last_run"] = timestamp
+            t.update(fields)
             break
     else:
         return  # task not found
@@ -56,20 +56,26 @@ def _update_last_run(config, task_id: str, timestamp: int) -> None:
         raise
 
 
+def _update_last_run(config, task_id: str, timestamp: int) -> None:
+    """Back-compat wrapper around :func:`_update_task_fields`."""
+    _update_task_fields(config, task_id, {"last_run": timestamp})
+
+
 def _is_due(task: dict, now: float) -> bool:
-    """Check if a task is due: was there a fire time between last_run and now?"""
-    last_run = task.get("last_run", 0)
-    if last_run >= now:
+    """Check if a task is due. Baseline is the latest of last_run / last_attempt_at
+    so an in-flight or recently-failed task does not re-fire until its next cron tick."""
+    baseline = max(task.get("last_run", 0), task.get("last_attempt_at", 0))
+    if baseline >= now:
         return False
     try:
-        cron = croniter(task["cron"], last_run)
+        cron = croniter(task["cron"], baseline)
         next_fire = cron.get_next(float)
         return next_fire <= now
     except (ValueError, KeyError):
         return False
 
 
-async def _run_task(agent, task_id: str, session_id: str, prompt: str) -> None:
+async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -> None:
     """Run a single scheduled task. Called via asyncio.create_task() for concurrency."""
     try:
         await agent.handle(
@@ -77,8 +83,17 @@ async def _run_task(agent, task_id: str, session_id: str, prompt: str) -> None:
             session_id=session_id,
             system_task_prompt=prompt,
         )
+        _update_task_fields(config, task_id, {
+            "last_run": int(time.time()),
+            "last_status": "success",
+            "last_error": None,
+        })
         logger.info("Scheduled task completed: %s", task_id)
     except Exception as e:
+        _update_task_fields(config, task_id, {
+            "last_status": "error",
+            "last_error": str(e)[:500],
+        })
         logger.error("Scheduled task failed: %s — %s", task_id, e)
 
 
@@ -106,11 +121,12 @@ async def _check_and_fire(agent) -> list[str]:
         timestamp = int(now)
         session_id = f"sched:{task_id}:{timestamp}"
 
-        # Update last_run before firing to prevent double-fires
-        _update_last_run(agent.config, task_id, timestamp)
+        # Mark the attempt before dispatch so a slow or crashed task does not
+        # re-fire on the next tick. last_run only advances on success.
+        _update_task_fields(agent.config, task_id, {"last_attempt_at": timestamp})
 
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
-        asyncio.create_task(_run_task(agent, task_id, session_id, prompt))
+        asyncio.create_task(_run_task(agent, agent.config, task_id, session_id, prompt))
         fired.append(task_id)
 
     return fired
