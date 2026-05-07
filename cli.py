@@ -236,7 +236,10 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
     attempt = 0
     while True:
         try:
-            ws = await websockets.connect(uri)
+            # Match the server's max_size so attachment-bearing frames
+            # (e.g. images returned by the attach tool) aren't rejected as
+            # PayloadTooBig — the websockets default is 1 MB.
+            ws = await websockets.connect(uri, max_size=32 * 1024 * 1024)
             if attempt > 0:
                 console.print(f"[green]Reconnected to {uri}[/green]")
             return ws
