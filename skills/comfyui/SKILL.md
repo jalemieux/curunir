@@ -63,6 +63,8 @@ cp skills/comfyui/templates/flux-redux.json "$SESSION/workflow.json"
 | `flux-redux.json` | Image variation from a single input image + optional prompt nudge. | `templates/README.md` |
 | `flux-kontext.json` | Text-to-image with Flux. Edit `CLIPTextEncode.text` and `KSampler.seed`. | `templates/README.md` |
 | `multi-image-in.json` | Two image inputs feeding a composite (style + subject). | `templates/README.md` |
+| `flux2-klein-seed-hunt.json` | Bulk seed hunting with Flux 2 Klein + dual image reference. Used by `comfyui-seed-hunt` skill. | `templates/README.md` |
+| `persephone-flux-model-seed.json` | Model seed discovery — text-to-image front-view character sheets with random seeds. Used by `comfyui-model-seed-hunt` skill. | `templates/README.md` |
 
 ## 3. Edit the workflow JSON
 
