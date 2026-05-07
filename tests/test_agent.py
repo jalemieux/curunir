@@ -152,6 +152,53 @@ class TestAgentHandle:
         for call in mock_call.call_args_list:
             assert call.kwargs.get("on_text_delta") is cb
 
+    async def test_writes_usage_row_per_call_llm(self, agent_config):
+        from src.llm import LLMUsage
+
+        records: list = []
+
+        class StubStore:
+            def record(self, row):
+                records.append(row)
+
+        agent = Agent(agent_config, usage_store=StubStore())
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo hi"})},
+            }],
+            usage=LLMUsage(prompt_tokens=10, completion_tokens=2, model="m1", cost_usd=0.001),
+        )
+        text_response = LLMResponse(
+            text="done",
+            tool_calls=None,
+            usage=LLMUsage(prompt_tokens=20, completion_tokens=5, model="m1", cost_usd=0.002),
+        )
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, text_response]):
+            await agent.handle("hi", "sess-x")
+
+        assert len(records) == 2
+        assert all(r.session_id == "sess-x" for r in records)
+        assert records[0].model == "m1"
+        assert records[0].prompt_tokens == 10
+        assert records[1].completion_tokens == 5
+
+    async def test_usage_store_failure_does_not_break_response(self, agent_config):
+        class BrokenStore:
+            def record(self, row):
+                raise RuntimeError("disk full")
+
+        agent = Agent(agent_config, usage_store=BrokenStore())
+
+        text_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=text_response):
+            result = await agent.handle("hi", "s1")
+        assert result == "ok"
+
     async def test_accepts_list_content_and_forwards_to_llm(self, agent):
         captured: dict = {}
 

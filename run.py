@@ -18,6 +18,7 @@ from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
+from src.usage_store import UsageStore
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -313,7 +314,8 @@ async def main():
         **({"tts_voice": tts_voice} if tts_voice else {}),
     )
 
-    agent = Agent(config)
+    usage_store = UsageStore(config.usage_db)
+    agent = Agent(config, usage_store=usage_store)
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
 
