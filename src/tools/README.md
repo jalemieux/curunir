@@ -126,3 +126,11 @@ Rewrites text into a spoken-word script via the configured LLM, then calls OpenA
 2. **Write the executor** in a new or existing file. Signature: `def exec_foo(args: dict, config: AgentConfig) -> str`.
 3. **Register the executor** in `dispatcher.py` — add it to `_SYNC_EXECUTORS` (or use `_get_native_async_executor()` for async executors).
 4. **Add tests** in `tests/test_tools.py`.
+
+### When *not* to add a runtime tool
+
+Service-specific introspection (hitting a local HTTP API, reading a config a particular skill cares about, talking to one CLI) is usually better as a **skill-local helper script** invoked through `bash`. Drop the helper in `skills/<skill>/scripts/` and document its invocation in the skill's `SKILL.md`. This keeps the runtime tool surface narrow and version-coupled with the skill that uses it.
+
+Promote a helper to a real tool when *multiple* skills need it, when it has to be awaitable inside the agent loop, or when shelling out becomes awkward (e.g. you need streaming output, or to mutate the agent's `attachments` list).
+
+Example: `skills/comfyui-workflows/scripts/fetch_object_info.py` hits `http://127.0.0.1:8188/object_info` to get node schemas. It stays a per-skill helper rather than a `comfyui_api` tool because only one skill uses it and `bash` + `read` cover the workflow.
