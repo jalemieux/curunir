@@ -54,7 +54,7 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
     lines = []
     for key in key_names:
         val = args.get(key, "")
-        val_str = str(val)
+        val_str = " ".join(str(val).split())
         if len(val_str) > _MAX_ARG_LEN:
             val_str = val_str[:_MAX_ARG_LEN] + "..."
         lines.append(f"{_display_name(name)} {val_str}")
