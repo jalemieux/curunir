@@ -11,6 +11,8 @@ import logging
 import mimetypes
 import os
 import re
+import signal
+import time
 
 import websockets
 import websockets.exceptions
@@ -452,6 +454,46 @@ async def run(host: str, port: int, console: Console | None = None,
     prompt_text = ANSI("\x1b[1;32m> \x1b[0m")
     ws = await _connect_with_retry(uri, console)
 
+    # While the agent is busy (ready not set), Ctrl-C sends an interrupt frame
+    # to the server instead of killing the CLI. A second Ctrl-C within
+    # _DOUBLE_SIGINT_WINDOW exits the program — escape hatch when the server
+    # is unresponsive or the interrupt itself is wedged. prompt_toolkit
+    # installs its own SIGINT handler during prompt_async and clears it
+    # (clobbering ours) on exit, so we re-install after each prompt. While the
+    # prompt is active, prompt_toolkit reads Ctrl-C as a key in raw mode and
+    # our handler doesn't fire.
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
+    last_sigint = [0.0]
+    _DOUBLE_SIGINT_WINDOW = 1.5
+
+    async def _send_interrupt() -> None:
+        try:
+            await ws.send(json.dumps({"command": "interrupt"}))
+            console.print("[dim italic]⏹ interrupt sent (Ctrl-C again to exit)[/dim italic]")
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
+    def _on_sigint() -> None:
+        if ready.is_set():
+            return
+        now = time.monotonic()
+        if now - last_sigint[0] < _DOUBLE_SIGINT_WINDOW:
+            console.print("[yellow]exiting…[/yellow]")
+            if main_task is not None:
+                main_task.cancel()
+            return
+        last_sigint[0] = now
+        loop.create_task(_send_interrupt())
+
+    def _install_sigint_handler() -> None:
+        try:
+            loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        except (NotImplementedError, RuntimeError):
+            pass  # not supported on this platform
+
+    _install_sigint_handler()
+
     staging = Staging()
 
     # A payload that failed to send (due to connection drop) and should be
@@ -491,6 +533,11 @@ async def run(host: str, port: int, console: Console | None = None,
                         out_task.cancel()
                         await ws.close()
                         return
+                    finally:
+                        # prompt_toolkit removes any SIGINT handler on exit,
+                        # which clobbers ours — re-install so Ctrl-C during
+                        # the next agent run is captured.
+                        _install_sigint_handler()
 
                     text = line.strip()
                     if not text and not staging.to_payload():
@@ -606,7 +653,7 @@ def main() -> None:
 
     try:
         asyncio.run(run(args.host, args.port))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 
 
