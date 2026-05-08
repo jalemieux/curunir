@@ -135,7 +135,11 @@ class Agent:
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         base = get_tool_schemas(self.tools)
         if session_id and session_id in self._session_tools:
-            extra = get_tool_schemas(list(self._session_tools[session_id]))
+            existing = {s["function"]["name"] for s in base}
+            extra = [
+                s for s in get_tool_schemas(list(self._session_tools[session_id]))
+                if s["function"]["name"] not in existing
+            ]
             base = base + extra
         return base
 
