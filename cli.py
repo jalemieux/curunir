@@ -17,6 +17,7 @@ import time
 import websockets
 import websockets.exceptions
 from prompt_toolkit import ANSI, PromptSession
+from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -327,14 +328,14 @@ async def run(host: str, port: int, console: Console | None = None,
                     if stream_live is None:
                         stream_buffer.clear()
                         stream_live = Live(
-                            Text(""),
+                            Text("", style="bold"),
                             console=console,
                             transient=True,
                             refresh_per_second=20,
                         )
                         stream_live.start()
                     stream_buffer.append(chunk)
-                    stream_live.update(Text("".join(stream_buffer)))
+                    stream_live.update(Text("".join(stream_buffer), style="bold"))
                     continue
 
                 # Welcome message with model info
@@ -355,7 +356,7 @@ async def run(host: str, port: int, console: Console | None = None,
                 if streamed_text.strip():
                     if verbose:
                         flush_tool_calls()
-                    console.print(Markdown(streamed_text))
+                    console.print(Markdown(streamed_text), style="bold")
 
                 if verbose and tool_calls:
                     for tc in tool_calls:
@@ -368,7 +369,7 @@ async def run(host: str, port: int, console: Console | None = None,
                 if content and not streamed_text:
                     if verbose:
                         flush_tool_calls()
-                    console.print(Markdown(content))
+                    console.print(Markdown(content), style="bold")
 
                 if attachments:
                     for att in attachments:
@@ -452,6 +453,9 @@ async def run(host: str, port: int, console: Console | None = None,
     # ------------------------------------------------------------------ #
     session: PromptSession = PromptSession()
     prompt_text = ANSI("\x1b[1;32m> \x1b[0m")
+    # Bold what the user types so their messages stand out from tool-call
+    # output. The empty key applies to text with no other style class.
+    prompt_style = PTStyle.from_dict({"": "bold"})
     ws = await _connect_with_retry(uri, console)
 
     # While the agent is busy (ready not set), Ctrl-C sends an interrupt frame
@@ -470,7 +474,6 @@ async def run(host: str, port: int, console: Console | None = None,
     async def _send_interrupt() -> None:
         try:
             await ws.send(json.dumps({"command": "interrupt"}))
-            console.print("[dim italic]⏹ interrupt sent (Ctrl-C again to exit)[/dim italic]")
         except websockets.exceptions.ConnectionClosed:
             pass
 
@@ -484,6 +487,15 @@ async def run(host: str, port: int, console: Console | None = None,
                 main_task.cancel()
             return
         last_sigint[0] = now
+        # Print acknowledgement synchronously so the user sees feedback
+        # immediately, before the ws.send round-trip. The agent only honors
+        # cancellation between iterations, so the in-flight tool batch may
+        # still take a while to finish — the indicator prevents the user
+        # from wondering whether their press registered.
+        console.print(
+            "[yellow]⏹ interrupt requested — waiting for current step to finish "
+            "(Ctrl-C again to force exit)[/yellow]"
+        )
         loop.create_task(_send_interrupt())
 
     def _install_sigint_handler() -> None:
@@ -527,7 +539,7 @@ async def run(host: str, port: int, console: Console | None = None,
                     # Native async prompt: bracketed paste keeps multi-line
                     # pastes as one input, and Ctrl-C raises cleanly.
                     try:
-                        line = await session.prompt_async(prompt_text)
+                        line = await session.prompt_async(prompt_text, style=prompt_style)
                     except EOFError:
                         # Ctrl-D: close cleanly and exit
                         out_task.cancel()
