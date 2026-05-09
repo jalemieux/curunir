@@ -37,6 +37,8 @@
   --system-text: #9ca3af;
   --offline: #9ca3af;
   --hover-fg: #1a1a1f;
+  --stop: #dc2626;
+  --stop-hover: #b91c1c;
 }
 [data-theme="dark"] {
   --bg: #0a0a12;
@@ -57,6 +59,8 @@
   --system-text: #666;
   --offline: #555;
   --hover-fg: #ffffff;
+  --stop: #f87171;
+  --stop-hover: #fca5a5;
 }
 html, body { height: 100dvh; }
 body {
@@ -160,6 +164,12 @@ footer {
   display: inline-flex; align-items: center; justify-content: center;
 }
 #send-btn:disabled { background: var(--btn-disabled-bg); color: var(--btn-disabled-fg); cursor: not-allowed; }
+#send-btn[data-mode="stop"] { background: var(--stop); }
+#send-btn[data-mode="stop"]:hover { background: var(--stop-hover); }
+.msg.assistant.stopping .body::after {
+  content: " stopping…";
+  color: var(--hint); font-style: italic; font-size: 12px;
+}
 @media (max-width: 480px) { .composer-hint { display: none; } }
 </style>
 </head>
@@ -182,7 +192,7 @@ footer {
     <div class="composer-row">
       <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
-      <button id="send-btn" title="Send" aria-label="Send">↑</button>
+      <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
     </div>
   </div>
 </footer>
@@ -246,7 +256,29 @@ function setStatus(state) {
   statusDot.className = "dot " + state;
   statusText.textContent = state;
   agentOnline = state === "online";
-  sendBtn.disabled = !agentOnline;
+  if (!agentOnline && inProgressMsg) {
+    inProgressMsg.classList.remove("stopping");
+    inProgressMsg = null;
+  }
+  updateComposerMode();
+}
+
+// === Composer mode (send / stop) ===
+function updateComposerMode() {
+  const responding = inProgressMsg !== null;
+  if (responding && agentOnline) {
+    sendBtn.dataset.mode = "stop";
+    sendBtn.textContent = "■";
+    sendBtn.title = "Stop";
+    sendBtn.setAttribute("aria-label", "Stop");
+    sendBtn.disabled = false;
+  } else {
+    sendBtn.dataset.mode = "send";
+    sendBtn.textContent = "↑";
+    sendBtn.title = "Send";
+    sendBtn.setAttribute("aria-label", "Send");
+    sendBtn.disabled = !agentOnline;
+  }
 }
 
 // === WS connect ===
@@ -275,6 +307,7 @@ function onServerMessage(msg) {
     messagesEl.innerHTML = "";
     inProgressMsg = null;
     for (const m of msg.messages) renderHistoryEntry(m);
+    updateComposerMode();
     return;
   }
   // Otherwise: an OutgoingMessage payload.
@@ -335,8 +368,10 @@ function renderAgentChunk(m) {
   }
   renderAttachments(inProgressMsg, m.attachments);
   if (m.final) {
+    inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
+  updateComposerMode();
   scrollToBottom();
 }
 
@@ -410,6 +445,27 @@ function send() {
   inputEl.value = "";
   staged = [];
   renderStaged();
+  // Optimistic flip — actual flip happens once chunks start streaming, but
+  // pre-create the in-progress slot so the button shows Stop immediately.
+  if (!inProgressMsg) inProgressMsg = appendMessage("assistant");
+  updateComposerMode();
+}
+
+// === Interrupt ===
+// NOTE: send the *inner* shape only — `portal/ws_browser.py` already wraps
+// every browser frame as `{type:"user_message", payload:<this>}`. Sending a
+// pre-wrapped frame here would double-wrap and confuse the agent.
+function interrupt() {
+  if (!inProgressMsg || !agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ command: "interrupt" }));
+  inProgressMsg.classList.add("stopping");
+  // Don't clear inProgressMsg — the agent will emit a final "(interrupted)"
+  // frame which the existing m.final handler clears. But flip the button back
+  // to Send mode now so the composer is usable while we wait.
+  sendBtn.dataset.mode = "send";
+  sendBtn.textContent = "↑";
+  sendBtn.title = "Send";
+  sendBtn.setAttribute("aria-label", "Send");
 }
 
 // === Attachments staging ===
@@ -476,13 +532,24 @@ function startNew() {
 }
 
 // === Wiring ===
-sendBtn.onclick = send;
+sendBtn.onclick = () => {
+  if (sendBtn.dataset.mode === "stop") interrupt();
+  else send();
+};
 newBtn.onclick = startNew;
 themeBtn.onclick = toggleTheme;
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     send();
+  }
+});
+// Esc anywhere on the page interrupts an in-flight response. Bound globally
+// because the user may be reading the stream and not have focus on the input.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && inProgressMsg) {
+    e.preventDefault();
+    interrupt();
   }
 });
 inputEl.addEventListener("input", () => {
