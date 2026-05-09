@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    profiles: ["portal"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,6 +18,7 @@ services:
 
   portal:
     build: ./portal
+    profiles: ["portal"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,8 +54,6 @@ services:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
-    depends_on:
-      - portal
     restart: unless-stopped
 
 volumes:
