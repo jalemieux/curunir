@@ -138,6 +138,9 @@ async def test_history_request_invokes_provider_and_sends_snapshot(portal_server
         msg = json.loads(raw)
         assert msg["type"] == "history_snapshot"
         assert msg["messages"] == fake_history
+        # session_id rides on the envelope so the portal can route the
+        # snapshot to the right browser.
+        assert msg["session_id"] == PORTAL_SESSION_ID
         # No session_id in payload → falls back to the legacy id.
         assert seen_sids == [PORTAL_SESSION_ID]
     finally:
@@ -257,7 +260,41 @@ async def test_outbound_payload_includes_session_id(portal_server):
 @pytest.mark.asyncio
 async def test_interrupt_command_routes_to_cancel_session_callback(portal_server):
     """A {command: interrupt} payload from the portal triggers cancel_session
-    and is NOT enqueued (the agent_worker is blocked while handle() runs)."""
+    and is NOT enqueued (the agent_worker is blocked while handle() runs).
+
+    The interrupt cancels the session_id carried on the payload, not the
+    legacy `"portal"` id — otherwise stop-button clicks from a tab using
+    a non-default session id can't actually cancel that tab's loop
+    (issue #88).
+    """
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen: list[str] = []
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        cancel_session=lambda sid: (seen.append(sid) or True),
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "interrupt", "session_id": "tab-A"},
+        })
+        await asyncio.sleep(0.1)
+        assert seen == ["tab-A"]
+        assert in_q.empty()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_interrupt_without_session_id_falls_back_to_legacy(portal_server):
+    """Stale browser builds that don't send session_id still get
+    interrupts routed (to the legacy default)."""
     in_q: asyncio.Queue = asyncio.Queue()
     seen: list[str] = []
     ch = PortalChannel(
@@ -273,6 +310,42 @@ async def test_interrupt_command_routes_to_cancel_session_callback(portal_server
         })
         await asyncio.sleep(0.1)
         assert seen == [PORTAL_SESSION_ID]
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_history_request_command_triggers_snapshot(portal_server):
+    """Browser-driven history bootstrap: a user_message with
+    command=history_request and a session_id should trigger a
+    history_snapshot scoped to that session."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen_sids: list[str] = []
+
+    def provider(sid: str) -> list[dict]:
+        seen_sids.append(sid)
+        return [{"role": "user", "content": "u1"}]
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        history_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "history_request", "session_id": "tab-Q"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "history_snapshot"
+        assert msg["session_id"] == "tab-Q"
+        assert seen_sids == ["tab-Q"]
         assert in_q.empty()
     finally:
         task.cancel()
