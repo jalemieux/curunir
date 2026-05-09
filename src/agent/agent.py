@@ -149,6 +149,21 @@ class Agent:
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
+        self._cancel_events: dict[str, asyncio.Event] = {}
+        self._running_sessions: set[str] = set()
+
+    def request_cancel(self, session_id: str) -> bool:
+        """Signal an in-flight handle() to stop after the current iteration.
+
+        Returns True if a session was running and the signal was delivered.
+        """
+        if session_id not in self._running_sessions:
+            return False
+        event = self._cancel_events.get(session_id)
+        if event is None:
+            return False
+        event.set()
+        return True
 
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         base = get_tool_schemas(self.tools)
@@ -250,6 +265,10 @@ class Agent:
         msg_chars = _estimate_chars(history)
         logger.info("[%s] agent loop start — %d messages, ~%dk chars", sid, len(history), msg_chars // 1000)
 
+        cancel_event = self._cancel_events.setdefault(session_id, asyncio.Event())
+        cancel_event.clear()
+        self._running_sessions.add(session_id)
+
         tool_schemas = self._get_tool_schemas(session_id)
 
         # Accumulate LLM usage stats across iterations
@@ -276,24 +295,18 @@ class Agent:
                 "iterations": 0,  # filled at return site
             }
 
-        for iteration in range(self.config.max_iterations):
-            logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
-            try:
-                response = await call_llm(
-                    self.config.model, messages, tool_schemas,
-                    api_base=self.config.api_base,
-                    openrouter_provider=self.config.openrouter_provider,
-                    on_text_delta=on_text_delta,
-                )
-            except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
-                if not _is_context_overflow(e):
-                    raise
-                half = self.config.max_history_chars // 2
-                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
-                _trim_history(history, max_chars=half)
-                if not history:
-                    return "Sorry, the message was too long for me to process."
-                messages = [{"role": "system", "content": system_prompt}] + history
+        try:
+            for iteration in range(self.config.max_iterations):
+                if cancel_event.is_set():
+                    logger.info("[%s] interrupted by user after %d iteration(s)", sid, iteration)
+                    history.append({"role": "assistant", "content": "(interrupted)"})
+                    _finalize_stats()
+                    if metadata and "stats" in metadata:
+                        metadata["stats"]["iterations"] = iteration
+                    if system_task_prompt:
+                        self.sessions.pop(session_id, None)
+                    return "(interrupted)"
+                logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 try:
                     response = await call_llm(
                         self.config.model, messages, tool_schemas,
@@ -301,91 +314,124 @@ class Agent:
                         openrouter_provider=self.config.openrouter_provider,
                         on_text_delta=on_text_delta,
                     )
-                except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
-                    if not _is_context_overflow(e2):
+                except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
+                    if not _is_context_overflow(e):
                         raise
-                    logger.error("[%s] context window still exceeded after trim, aborting", sid)
-                    return "Sorry, the conversation is too long. Please start a new thread."
+                    half = self.config.max_history_chars // 2
+                    logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
+                    _trim_history(history, max_chars=half)
+                    if not history:
+                        return "Sorry, the message was too long for me to process."
+                    messages = [{"role": "system", "content": system_prompt}] + history
+                    try:
+                        response = await call_llm(
+                            self.config.model, messages, tool_schemas,
+                            api_base=self.config.api_base,
+                            openrouter_provider=self.config.openrouter_provider,
+                            on_text_delta=on_text_delta,
+                        )
+                    except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
+                        if not _is_context_overflow(e2):
+                            raise
+                        logger.error("[%s] context window still exceeded after trim, aborting", sid)
+                        return "Sorry, the conversation is too long. Please start a new thread."
 
-            # Accumulate usage
-            total_prompt_tokens += response.usage.prompt_tokens
-            total_completion_tokens += response.usage.completion_tokens
-            total_llm_elapsed += response.usage.elapsed_sec
-            llm_calls += 1
+                # Accumulate usage
+                total_prompt_tokens += response.usage.prompt_tokens
+                total_completion_tokens += response.usage.completion_tokens
+                total_llm_elapsed += response.usage.elapsed_sec
+                llm_calls += 1
 
-            if response.tool_calls:
-                assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
+                if response.tool_calls:
+                    assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
+                    if response.text:
+                        assistant_msg["content"] = response.text
+                    history.append(assistant_msg)
+
+                    for tool_call in response.tool_calls:
+                        name = tool_call["function"]["name"]
+                        args_str = tool_call["function"]["arguments"]
+
+                        # Mid-batch cancel: schema requires a tool response per
+                        # tool_call, so stub remaining calls with "(interrupted)"
+                        # rather than execute them. The outer-loop cancel check
+                        # fires on the next iteration and exits cleanly.
+                        if cancel_event.is_set():
+                            logger.info("[%s] skipping tool call %s (interrupted)", sid, name)
+                            history.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": "(interrupted)",
+                            })
+                            continue
+
+                        detail_lines = _tool_detail_lines(name, args_str)
+                        logger.info("[%s] tool call: %s", sid, name)
+                        for line in detail_lines:
+                            logger.info("  %s", line)
+
+                        if on_tool_call:
+                            await on_tool_call(name, args_str)
+
+                        result = await execute_tool_call(
+                            name,
+                            json.loads(args_str),
+                            self.config,
+                            attachments=attachments,
+                            on_tool_call=on_tool_call,
+                        )
+
+                        # After load_skill, check for required tools in frontmatter
+                        if name == "load_skill":
+                            required = _parse_skill_tools(result)
+                            if required:
+                                self._session_tools.setdefault(session_id, set()).update(required)
+                                tool_schemas = self._get_tool_schemas(session_id)
+                                logger.info("[%s] skill loaded tools: %s", sid, required)
+
+                        result_preview = result[:200] if result else "(empty)"
+                        logger.debug("[%s] tool result: %s", sid, result_preview)
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result,
+                        })
+
+                    _trim_history(history, max_chars=self.config.max_history_chars)
+                    messages = [{"role": "system", "content": system_prompt}] + history
+                    continue
+
                 if response.text:
-                    assistant_msg["content"] = response.text
-                history.append(assistant_msg)
+                    logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
+                    history.append({"role": "assistant", "content": response.text})
+                    _finalize_stats()
+                    if metadata and "stats" in metadata:
+                        metadata["stats"]["iterations"] = iteration + 1
+                    if system_task_prompt:
+                        self.sessions.pop(session_id, None)
+                    return response.text
 
-                for tool_call in response.tool_calls:
-                    name = tool_call["function"]["name"]
-                    args_str = tool_call["function"]["arguments"]
-                    detail_lines = _tool_detail_lines(name, args_str)
-                    logger.info("[%s] tool call: %s", sid, name)
-                    for line in detail_lines:
-                        logger.info("  %s", line)
-
-                    if on_tool_call:
-                        await on_tool_call(name, args_str)
-
-                    result = await execute_tool_call(
-                        name,
-                        json.loads(args_str),
-                        self.config,
-                        attachments=attachments,
-                        on_tool_call=on_tool_call,
-                    )
-
-                    # After load_skill, check for required tools in frontmatter
-                    if name == "load_skill":
-                        required = _parse_skill_tools(result)
-                        if required:
-                            self._session_tools.setdefault(session_id, set()).update(required)
-                            tool_schemas = self._get_tool_schemas(session_id)
-                            logger.info("[%s] skill loaded tools: %s", sid, required)
-
-                    result_preview = result[:200] if result else "(empty)"
-                    logger.debug("[%s] tool result: %s", sid, result_preview)
-                    history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": result,
-                    })
-
-                _trim_history(history, max_chars=self.config.max_history_chars)
-                messages = [{"role": "system", "content": system_prompt}] + history
-                continue
-
-            if response.text:
-                logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
-                history.append({"role": "assistant", "content": response.text})
+                history.append({"role": "assistant", "content": ""})
                 _finalize_stats()
                 if metadata and "stats" in metadata:
                     metadata["stats"]["iterations"] = iteration + 1
                 if system_task_prompt:
                     self.sessions.pop(session_id, None)
-                return response.text
+                # Empty text is fine when the agent already attached a file this
+                # turn — the attachment is the reply.
+                if attachments:
+                    logger.info("[%s] agent done with attachment-only reply", sid)
+                    return ""
+                logger.warning("[%s] LLM returned empty response", sid)
+                return "Error: LLM returned empty response."
 
-            history.append({"role": "assistant", "content": ""})
+            logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
             _finalize_stats()
             if metadata and "stats" in metadata:
-                metadata["stats"]["iterations"] = iteration + 1
+                metadata["stats"]["iterations"] = self.config.max_iterations
             if system_task_prompt:
                 self.sessions.pop(session_id, None)
-            # Empty text is fine when the agent already attached a file this
-            # turn — the attachment is the reply.
-            if attachments:
-                logger.info("[%s] agent done with attachment-only reply", sid)
-                return ""
-            logger.warning("[%s] LLM returned empty response", sid)
-            return "Error: LLM returned empty response."
-
-        logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
-        _finalize_stats()
-        if metadata and "stats" in metadata:
-            metadata["stats"]["iterations"] = self.config.max_iterations
-        if system_task_prompt:
-            self.sessions.pop(session_id, None)
-        return "Iteration limit reached."
+            return "Iteration limit reached."
+        finally:
+            self._running_sessions.discard(session_id)
+            cancel_event.clear()
