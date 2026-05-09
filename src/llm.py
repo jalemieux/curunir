@@ -21,11 +21,70 @@ class LLMUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     elapsed_sec: float = 0.0
+    model: str = ""
+    cached_prompt_tokens: int = 0
+    reasoning_tokens: int = 0
+    image_tokens: int = 0
+    audio_tokens: int = 0
+    cost_usd: float | None = None
 
     @property
     def completion_tps(self) -> float:
         """Completion tokens per second."""
         return self.completion_tokens / self.elapsed_sec if self.elapsed_sec > 0 else 0.0
+
+
+def _attr(obj, name, default=None):
+    """Read a field from a pydantic-like object or a dict, with default."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _int_at(obj, *path: str) -> int:
+    """Walk nested fields, returning 0 if any segment is absent or non-numeric."""
+    cur = obj
+    for p in path:
+        cur = _attr(cur, p)
+        if cur is None:
+            return 0
+    try:
+        return int(cur)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _populate_usage_dims(usage: LLMUsage, raw_usage, response=None) -> None:
+    """Fill OpenRouter-aligned billing dimensions from a raw usage object.
+
+    Probes both OpenAI/OpenRouter shapes (prompt_tokens_details.cached_tokens,
+    completion_tokens_details.reasoning_tokens) and Anthropic-direct shapes
+    (cache_read_input_tokens). Falls back to 0 when fields are absent.
+    """
+    if raw_usage is None:
+        return
+    usage.cached_prompt_tokens = (
+        _int_at(raw_usage, "prompt_tokens_details", "cached_tokens")
+        or _int_at(raw_usage, "cache_read_input_tokens")
+    )
+    usage.reasoning_tokens = _int_at(raw_usage, "completion_tokens_details", "reasoning_tokens")
+    usage.image_tokens = _int_at(raw_usage, "prompt_tokens_details", "image_tokens")
+    usage.audio_tokens = (
+        _int_at(raw_usage, "prompt_tokens_details", "audio_tokens")
+        or _int_at(raw_usage, "completion_tokens_details", "audio_tokens")
+    )
+
+    cost = _attr(raw_usage, "cost")
+    if cost is None and response is not None:
+        hidden = getattr(response, "_hidden_params", None) or {}
+        cost = hidden.get("response_cost") if isinstance(hidden, dict) else None
+    if cost is not None:
+        try:
+            usage.cost_usd = float(cost)
+        except (TypeError, ValueError):
+            usage.cost_usd = None
 
 
 @dataclass
@@ -50,9 +109,13 @@ async def _consume_stream(
 
     async for chunk in response_iter:
         if getattr(chunk, "usage", None):
-            usage.prompt_tokens = chunk.usage.prompt_tokens or 0
-            usage.completion_tokens = chunk.usage.completion_tokens or 0
-            usage.total_tokens = chunk.usage.total_tokens or 0
+            usage.prompt_tokens = _attr(chunk.usage, "prompt_tokens", 0) or 0
+            usage.completion_tokens = _attr(chunk.usage, "completion_tokens", 0) or 0
+            usage.total_tokens = _attr(chunk.usage, "total_tokens", 0) or 0
+            _populate_usage_dims(usage, chunk.usage, response=chunk)
+            chunk_model = getattr(chunk, "model", None)
+            if chunk_model:
+                usage.model = chunk_model
 
         if not chunk.choices:
             continue
@@ -103,8 +166,14 @@ async def call_llm(
     }
     if api_base:
         kwargs["api_base"] = api_base
+    extra_body: dict = {}
     if openrouter_provider:
-        kwargs["extra_body"] = {"provider": {"order": [openrouter_provider]}}
+        extra_body["provider"] = {"order": [openrouter_provider]}
+    if model.startswith("openrouter/"):
+        # Ask OpenRouter to include the authoritative cost in the response.
+        extra_body["usage"] = {"include": True}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     if tools:
         kwargs["tools"] = tools
 
@@ -152,6 +221,8 @@ async def call_llm(
     if streaming:
         text, tc_by_index, usage = await _consume_stream(response, on_text_delta)
         usage.elapsed_sec = time.monotonic() - t0
+        if not usage.model:
+            usage.model = model
 
         tool_calls: list[dict] | None = None
         if tc_by_index:
@@ -173,10 +244,12 @@ async def call_llm(
     choice = response.choices[0].message
 
     usage = LLMUsage(elapsed_sec=elapsed)
+    usage.model = getattr(response, "model", None) or model
     if response.usage:
-        usage.prompt_tokens = response.usage.prompt_tokens or 0
-        usage.completion_tokens = response.usage.completion_tokens or 0
-        usage.total_tokens = response.usage.total_tokens or 0
+        usage.prompt_tokens = _attr(response.usage, "prompt_tokens", 0) or 0
+        usage.completion_tokens = _attr(response.usage, "completion_tokens", 0) or 0
+        usage.total_tokens = _attr(response.usage, "total_tokens", 0) or 0
+        _populate_usage_dims(usage, response.usage, response=response)
 
     text = choice.content if choice.content else None
 
