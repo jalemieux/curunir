@@ -3,7 +3,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import litellm
@@ -16,6 +16,7 @@ from src.llm import call_llm
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
+from src.usage_store import UsageRecord, UsageStore
 
 
 _DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
@@ -142,13 +143,19 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
 
 
 class Agent:
-    def __init__(self, config: AgentConfig, tools: list[str] | None = None):
+    def __init__(
+        self,
+        config: AgentConfig,
+        tools: list[str] | None = None,
+        usage_store: "UsageStore | None" = None,
+    ):
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
         self.session_archives: dict[str, Path] = {}
         self.static_prompt = build_static_prompt(config)
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
+        self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
 
@@ -401,6 +408,27 @@ class Agent:
                     messages = [{"role": "system", "content": system_prompt}] + history
                     continue
 
+            if self.usage_store is not None:
+                record = UsageRecord(
+                    ts=datetime.now(timezone.utc),
+                    session_id=session_id,
+                    model=response.usage.model or self.config.model,
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    cached_prompt_tokens=response.usage.cached_prompt_tokens,
+                    reasoning_tokens=response.usage.reasoning_tokens,
+                    image_tokens=response.usage.image_tokens,
+                    audio_tokens=response.usage.audio_tokens,
+                    cost_usd=response.usage.cost_usd,
+                    elapsed_sec=response.usage.elapsed_sec,
+                )
+                try:
+                    await asyncio.to_thread(self.usage_store.record, record)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[%s] usage_store.record failed: %s", sid, exc)
+
+            if response.tool_calls:
+                assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
                 if response.text:
                     logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                     history.append({"role": "assistant", "content": response.text})

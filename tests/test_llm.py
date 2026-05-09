@@ -1,4 +1,5 @@
 # tests/test_llm.py
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -182,3 +183,164 @@ async def test_stream_accumulates_tool_call_arguments():
     assert tc["id"] == "call_abc"
     assert tc["function"]["name"] == "bash"
     assert tc["function"]["arguments"] == '{"command": "echo hi"}'
+
+
+@pytest.mark.asyncio
+async def test_usage_extracts_openrouter_billing_dimensions():
+    """Non-streaming path populates the OpenRouter-aligned usage fields."""
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=80, image_tokens=2, audio_tokens=0),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=20, audio_tokens=0),
+        cost=0.0042,
+    )
+    mock_message = MagicMock()
+    mock_message.content = "ok"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = usage
+    mock_response.model = "anthropic/claude-sonnet-4"
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        result = await call_llm("openrouter/anthropic/claude-sonnet-4", [], [])
+
+    assert result.usage.prompt_tokens == 100
+    assert result.usage.completion_tokens == 50
+    assert result.usage.cached_prompt_tokens == 80
+    assert result.usage.reasoning_tokens == 20
+    assert result.usage.image_tokens == 2
+    assert result.usage.audio_tokens == 0
+    assert result.usage.cost_usd == pytest.approx(0.0042)
+    assert result.usage.model == "anthropic/claude-sonnet-4"
+
+
+@pytest.mark.asyncio
+async def test_usage_falls_back_to_response_cost():
+    """When provider doesn't return upstream `cost`, fall back to LiteLLM's response_cost."""
+    usage = SimpleNamespace(
+        prompt_tokens=10, completion_tokens=5, total_tokens=15,
+    )
+    mock_message = MagicMock()
+    mock_message.content = "hi"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = usage
+    mock_response.model = "gpt-4"
+    mock_response._hidden_params = {"response_cost": 0.001}
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        result = await call_llm("openai/gpt-4", [], [])
+
+    assert result.usage.cost_usd == pytest.approx(0.001)
+
+
+@pytest.mark.asyncio
+async def test_usage_cost_none_when_unavailable():
+    """When neither cost nor response_cost is available, cost_usd is None."""
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    mock_message = MagicMock()
+    mock_message.content = "hi"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = usage
+    mock_response.model = "local-model"
+    mock_response._hidden_params = {}
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        result = await call_llm("local-model", [], [])
+
+    assert result.usage.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_extra_body_merges_usage_flag():
+    """OpenRouter calls add usage.include without clobbering provider.order."""
+    mock_message = MagicMock()
+    mock_message.content = "ok"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    mock_response.model = "anthropic/claude-sonnet-4"
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        await call_llm(
+            "openrouter/anthropic/claude-sonnet-4",
+            [{"role": "user", "content": "hi"}],
+            [],
+            openrouter_provider="anthropic",
+        )
+
+    kwargs = mock_litellm.acompletion.call_args.kwargs
+    extra_body = kwargs["extra_body"]
+    assert extra_body["provider"]["order"] == ["anthropic"]
+    assert extra_body["usage"]["include"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_openrouter_omits_usage_flag():
+    """Non-OpenRouter calls don't add usage.include; extra_body absent without provider."""
+    mock_message = MagicMock()
+    mock_message.content = "ok"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    mock_response.model = "anthropic/claude-sonnet-4"
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        await call_llm("anthropic/claude-sonnet-4", [{"role": "user", "content": "hi"}], [])
+
+    kwargs = mock_litellm.acompletion.call_args.kwargs
+    assert "extra_body" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_stream_extracts_billing_dimensions():
+    """Streaming path also populates the new usage fields from the final usage chunk."""
+    delta_text = MagicMock()
+    delta_text.content = "hello"
+    delta_text.tool_calls = None
+    text_chunk = MagicMock()
+    text_chunk.choices = [MagicMock(delta=delta_text)]
+    text_chunk.usage = None
+
+    usage_chunk = MagicMock()
+    usage_chunk.choices = []
+    usage_chunk.usage = SimpleNamespace(
+        prompt_tokens=200,
+        completion_tokens=100,
+        total_tokens=300,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=150, image_tokens=0, audio_tokens=0),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=40, audio_tokens=0),
+        cost=0.0123,
+    )
+    usage_chunk.model = "anthropic/claude-sonnet-4"
+
+    received: list[str] = []
+
+    async def on_delta(t: str):
+        received.append(t)
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter([text_chunk, usage_chunk]))
+        result = await call_llm(
+            "openrouter/anthropic/claude-sonnet-4", [], [],
+            on_text_delta=on_delta,
+        )
+
+    assert result.usage.prompt_tokens == 200
+    assert result.usage.cached_prompt_tokens == 150
+    assert result.usage.reasoning_tokens == 40
+    assert result.usage.cost_usd == pytest.approx(0.0123)
+    assert result.usage.model == "anthropic/claude-sonnet-4"
