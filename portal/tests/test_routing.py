@@ -64,6 +64,81 @@ async def test_fan_out_to_browsers_delivers_to_all():
 
 
 @pytest.mark.asyncio
+async def test_route_to_session_only_targets_bound_browsers():
+    rt = RoutingTable()
+    b1, b2, b3 = FakeWS(), FakeWS(), FakeWS()
+    await rt.add_browser(5, b1)
+    await rt.add_browser(5, b2)
+    await rt.add_browser(5, b3)
+    await rt.bind_browser_session(5, b1, "tab-A")
+    await rt.bind_browser_session(5, b2, "tab-B")
+    # b3 stays unbound
+
+    delivered = await rt.route_to_session(5, "tab-A", "for-A")
+    assert delivered == 1
+    assert b1.sent[-1] == "for-A"
+    # The other tabs must not receive A's stream — that was the cross-tab bleed bug.
+    assert "for-A" not in b2.sent
+    assert "for-A" not in b3.sent
+
+
+@pytest.mark.asyncio
+async def test_route_to_session_returns_zero_when_no_binding():
+    rt = RoutingTable()
+    b = FakeWS()
+    await rt.add_browser(6, b)
+    # Browser registered but never bound.
+    delivered = await rt.route_to_session(6, "tab-A", "payload")
+    assert delivered == 0
+    assert b.sent == []
+
+
+@pytest.mark.asyncio
+async def test_bind_browser_session_is_idempotent_and_overwrites():
+    rt = RoutingTable()
+    b = FakeWS()
+    await rt.add_browser(7, b)
+    await rt.bind_browser_session(7, b, "tab-A")
+    await rt.bind_browser_session(7, b, "tab-A")  # idempotent
+    await rt.bind_browser_session(7, b, "tab-B")  # rebinds
+    await rt.route_to_session(7, "tab-A", "old")
+    await rt.route_to_session(7, "tab-B", "new")
+    assert "old" not in b.sent
+    assert "new" in b.sent
+
+
+@pytest.mark.asyncio
+async def test_status_broadcast_reaches_unbound_browsers():
+    """agent_status is global — even tabs that haven't sent a frame yet
+    should learn the agent is online/offline."""
+    rt = RoutingTable()
+    unbound = FakeWS()
+    bound = FakeWS()
+    await rt.add_browser(8, unbound)
+    await rt.add_browser(8, bound)
+    await rt.bind_browser_session(8, bound, "tab-X")
+
+    agent = FakeWS()
+    await rt.register_agent(8, agent)
+
+    statuses_unbound = [json.loads(s) for s in unbound.sent]
+    statuses_bound = [json.loads(s) for s in bound.sent]
+    assert {"type": "agent_status", "status": "online"} in statuses_unbound
+    assert {"type": "agent_status", "status": "online"} in statuses_bound
+
+
+@pytest.mark.asyncio
+async def test_remove_browser_drops_binding():
+    rt = RoutingTable()
+    b = FakeWS()
+    await rt.add_browser(9, b)
+    await rt.bind_browser_session(9, b, "tab-A")
+    await rt.remove_browser(9, b)
+    delivered = await rt.route_to_session(9, "tab-A", "payload")
+    assert delivered == 0
+
+
+@pytest.mark.asyncio
 async def test_forward_to_agent_returns_false_when_no_agent():
     rt = RoutingTable()
     assert await rt.forward_to_agent(11, "msg") is False

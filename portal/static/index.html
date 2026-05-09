@@ -223,6 +223,17 @@ const hljsLight = document.getElementById("hljs-light");
 const hljsDark = document.getElementById("hljs-dark");
 
 // === State ===
+// One session_id per browser tab. Persisted in sessionStorage so a tab
+// reload keeps the same id (and therefore replays its own history),
+// while a new tab mints a fresh id and starts a clean conversation.
+// The portal binds this id to the ws on the first frame we send and
+// only routes that session's traffic back here — that's what kills
+// the cross-tab bleed introduced by multi-session support.
+let sessionId = sessionStorage.getItem("curunir-session-id");
+if (!sessionId) {
+  sessionId = crypto.randomUUID();
+  sessionStorage.setItem("curunir-session-id", sessionId);
+}
 let ws = null;
 let agentOnline = false;
 let staged = []; // {filename, mime_type, data (base64), size}
@@ -287,7 +298,19 @@ function connect() {
   ws = new WebSocket(`${proto}//${location.host}/ws/browser`);
   setStatus("reconnecting");
 
-  ws.onopen = () => { backoff = 1000; };
+  ws.onopen = () => {
+    backoff = 1000;
+    // Announce this tab's session_id (binds the socket on the portal)
+    // and pull the agent-side history for it. The portal forwards this
+    // user_message frame to the container's PortalChannel, which sees
+    // command=history_request and responds with a history_snapshot
+    // tagged with the same session_id.
+    ws.send(JSON.stringify({
+      content: "",
+      command: "history_request",
+      session_id: sessionId,
+    }));
+  };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
     setStatus("offline");
@@ -438,6 +461,7 @@ function send() {
 
   ws.send(JSON.stringify({
     content,
+    session_id: sessionId,
     attachments: staged.length ? staged.map(a => ({
       filename: a.filename, mime_type: a.mime_type, data: a.data,
     })) : null,
@@ -457,7 +481,7 @@ function send() {
 // pre-wrapped frame here would double-wrap and confuse the agent.
 function interrupt() {
   if (!inProgressMsg || !agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ command: "interrupt" }));
+  ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId }));
   inProgressMsg.classList.add("stopping");
   // Don't clear inProgressMsg — the agent will emit a final "(interrupted)"
   // frame which the existing m.final handler clears. But flip the button back
@@ -521,7 +545,7 @@ function renderStaged() {
 // === New conversation ===
 function startNew() {
   if (!agentOnline) return;
-  ws.send(JSON.stringify({ content: "", command: "clear" }));
+  ws.send(JSON.stringify({ content: "", command: "clear", session_id: sessionId }));
   messagesEl.innerHTML = "";
   inProgressMsg = null;
   staged = [];
