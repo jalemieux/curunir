@@ -132,3 +132,4 @@ See `.env.example` for full list. Critical ones:
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
+- `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.

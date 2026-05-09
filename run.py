@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import logging.handlers
 import os
 
 import httpx
@@ -287,15 +288,59 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
 logger = logging.getLogger(__name__)
 
 
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_DATEFMT = "%H:%M:%S"
+_LOG_MAX_BYTES = 10_000_000
+_LOG_BACKUP_COUNT = 3
+
+
+def _configure_logging(log_file: str | None) -> None:
+    """Configure root logging.
+
+    With ``log_file`` set, attach a rotating file handler at that path
+    (10 MB × 3 backups) so the introspection skill and ``docker exec ...
+    tail`` can read agent activity from inside the container. Without
+    it, fall back to stderr-only ``basicConfig`` for local dev.
+
+    A ``PermissionError`` while opening the file (host-mounted volume
+    owned by another UID) downgrades to stderr instead of crashing.
+    """
+    level = getattr(
+        logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO
+    )
+
+    if not log_file:
+        logging.basicConfig(
+            level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
+        )
+        return
+
+    try:
+        os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=_LOG_MAX_BYTES,
+            backupCount=_LOG_BACKUP_COUNT,
+        )
+    except (PermissionError, OSError) as e:
+        logging.basicConfig(
+            level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
+        )
+        logging.getLogger(__name__).warning(
+            "LOG_FILE=%s could not be opened (%s); falling back to stderr.",
+            log_file, e,
+        )
+        return
+
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.addHandler(handler)
+
+
 async def main():
     load_dotenv()
-    log_file = os.environ.get("LOG_FILE", "")
-    logging.basicConfig(
-        level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        **({"filename": log_file} if log_file else {}),
-    )
+    _configure_logging(os.environ.get("LOG_FILE", ""))
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
@@ -352,6 +397,7 @@ async def main():
             in_queue=in_queue,
             url=portal_url,
             token=portal_token,
+            history_provider=lambda sid: agent.history_snapshot(sid),
             history_provider=lambda: agent.history_snapshot(),
             cancel_session=agent.request_cancel,
         )
