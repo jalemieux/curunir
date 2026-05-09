@@ -102,6 +102,87 @@ class TestAgentHandle:
             result = await agent.handle("hi", "s1", attachments=attachments)
         assert result == ""
 
+    async def test_request_cancel_returns_false_when_no_session_running(self, agent):
+        assert agent.request_cancel("nope") is False
+
+    async def test_cancel_interrupts_loop_between_iterations(self, agent_config):
+        """Setting the cancel event mid-flight stops the loop on the next iteration."""
+        agent_config.max_iterations = 10
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_x",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo x"})},
+            }],
+        )
+
+        call_count = 0
+
+        async def fake_call_llm(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            # Trigger interrupt after the first LLM call returns; the second
+            # iteration should observe it at the top of the loop and stop.
+            if call_count == 1:
+                agent.request_cancel("s1")
+            return tool_response
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=fake_call_llm):
+            result = await agent.handle("run", "s1")
+
+        assert result == "(interrupted)"
+        assert call_count == 1
+        # Cleanup happened
+        assert "s1" not in agent._running_sessions
+        assert not agent._cancel_events["s1"].is_set()
+
+    async def test_cancel_mid_batch_pads_remaining_tools_with_stubs(self, agent_config):
+        """When cancel fires mid-batch, the remaining tool calls in the same
+        batch are stubbed with '(interrupted)' so every tool_call_id has a
+        matching tool response — required by the chat schema."""
+        agent_config.max_iterations = 10
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[
+                {"id": "c1", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 1"})}},
+                {"id": "c2", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 2"})}},
+                {"id": "c3", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 3"})}},
+            ],
+        )
+
+        execute_call_count = 0
+
+        async def fake_execute(name, args, config, attachments=None, on_tool_call=None):
+            nonlocal execute_call_count
+            execute_call_count += 1
+            if execute_call_count == 1:
+                agent.request_cancel("s1")
+            return f"result-{execute_call_count}"
+
+        with patch("src.agent.agent.execute_tool_call", new=fake_execute), \
+             patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response):
+            result = await agent.handle("run", "s1")
+
+        assert result == "(interrupted)"
+        assert execute_call_count == 1  # only first tool actually ran
+
+        history = agent.sessions["s1"]
+        tool_msgs = [m for m in history if m.get("role") == "tool"]
+        assert len(tool_msgs) == 3
+        assert tool_msgs[0]["tool_call_id"] == "c1"
+        assert tool_msgs[0]["content"] == "result-1"
+        assert tool_msgs[1] == {"role": "tool", "tool_call_id": "c2", "content": "(interrupted)"}
+        assert tool_msgs[2] == {"role": "tool", "tool_call_id": "c3", "content": "(interrupted)"}
+        assert history[-1] == {"role": "assistant", "content": "(interrupted)"}
+
     async def test_max_iterations(self, agent_config):
         agent_config.max_iterations = 2
         agent = Agent(agent_config)
