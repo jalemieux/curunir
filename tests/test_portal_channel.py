@@ -120,9 +120,15 @@ async def test_history_request_invokes_provider_and_sends_snapshot(portal_server
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
     ]
+    seen_sids: list[str] = []
+
+    def provider(sid: str) -> list[dict]:
+        seen_sids.append(sid)
+        return fake_history
+
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        history_provider=lambda: fake_history,
+        history_provider=provider,
     )
     task = asyncio.create_task(ch.start())
     try:
@@ -132,6 +138,114 @@ async def test_history_request_invokes_provider_and_sends_snapshot(portal_server
         msg = json.loads(raw)
         assert msg["type"] == "history_snapshot"
         assert msg["messages"] == fake_history
+        # No session_id in payload → falls back to the legacy id.
+        assert seen_sids == [PORTAL_SESSION_ID]
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_user_message_uses_payload_session_id(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"content": "hi", "session_id": "abc"},
+        })
+        msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
+        assert msg.session_id == "abc"
+        assert msg.content == "hi"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_user_message_without_session_id_uses_legacy_default(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"content": "hello"},
+        })
+        msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
+        assert msg.session_id == PORTAL_SESSION_ID
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_history_request_with_session_id_passed_to_provider(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen_sids: list[str] = []
+
+    def provider(sid: str) -> list[dict]:
+        seen_sids.append(sid)
+        return []
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        history_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "history_request",
+            "payload": {"session_id": "abc"},
+        })
+        # Wait for the snapshot reply (proxy for processing).
+        await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        assert seen_sids == ["abc"]
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_outbound_payload_includes_session_id(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        await ch.send(OutgoingMessage(
+            content="hi", channel="portal",
+            session_id="tab-42", reply_address={}, final=True,
+        ))
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["payload"]["session_id"] == "tab-42"
     finally:
         task.cancel()
         try:

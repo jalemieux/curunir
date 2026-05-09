@@ -263,6 +263,10 @@ async def run(host: str, port: int, console: Console | None = None,
 
     verbose = True
     ready = asyncio.Event()
+    # Server-issued session id (from the welcome `hello` frame). Held in
+    # memory only — used to resume the same session across transient
+    # disconnects within a single CLI invocation.
+    session_id: str | None = None
 
     # Spinner handle
     spinner: object = None  # Rich Live/status object
@@ -283,6 +287,7 @@ async def run(host: str, port: int, console: Console | None = None,
     # Output loop: receives messages from the server and renders them.    #
     # ------------------------------------------------------------------ #
     async def output_loop(ws: websockets.ClientConnection) -> None:
+        nonlocal session_id
         # Streaming state: when the server sends delta messages, we accumulate
         # them in `stream_buffer` and display them in a transient Live region.
         # On the next non-delta message, we close the Live (which erases the
@@ -335,9 +340,15 @@ async def run(host: str, port: int, console: Console | None = None,
                     stream_live.update(Text("".join(stream_buffer)))
                     continue
 
-                # Welcome message with model info
-                if "model" in data:
-                    console.print(f"[dim]model: {data['model']}[/dim]\n")
+                # Welcome / hello frame. New servers send
+                # {"type": "hello", "session_id": "...", "model": "..."}.
+                # Older servers send a bare {"content": "", "model": "..."}.
+                if data.get("type") == "hello" or "model" in data:
+                    sid = data.get("session_id")
+                    if isinstance(sid, str) and sid:
+                        session_id = sid
+                    if data.get("model"):
+                        console.print(f"[dim]model: {data['model']}[/dim]\n")
                     ready.set()
                     continue
 
@@ -461,6 +472,18 @@ async def run(host: str, port: int, console: Console | None = None,
     while True:
         # Launch output reader for the current connection
         out_task = asyncio.create_task(output_loop(ws))
+
+        # On reconnect (we already hold a session id from the prior welcome)
+        # ask the server to resume that same session. On a fresh connect this
+        # is a no-op — the server mints a new id and sends it back. Older
+        # servers without hello support ignore this frame.
+        if session_id is not None:
+            try:
+                await ws.send(json.dumps({
+                    "type": "hello", "session_id": session_id,
+                }))
+            except websockets.exceptions.ConnectionClosed:
+                pass
 
         # Give the server a brief window to send its welcome before we show
         # the prompt, so "model: …" renders above the input line. If no
