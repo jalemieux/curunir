@@ -7,7 +7,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels.base import OutgoingMessage
-from src.channels.ws import SESSION_ID, WebSocketChannel
+from src.channels.ws import WebSocketChannel
 
 # Use a fixed test port — pick something unlikely to clash
 TEST_PORT = 18765
@@ -30,6 +30,16 @@ async def _stop_channel(task: asyncio.Task) -> None:
         pass
 
 
+async def _read_hello(ws: websockets.ClientConnection) -> str:
+    """Read the welcome frame and return the assigned session id."""
+    raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+    data = json.loads(raw)
+    assert data.get("type") == "hello"
+    sid = data.get("session_id")
+    assert isinstance(sid, str) and sid
+    return sid
+
+
 @pytest.mark.asyncio
 async def test_accepts_connection_and_forwards_to_queue():
     """Client message is forwarded to in_queue as IncomingMessage."""
@@ -39,13 +49,20 @@ async def test_accepts_connection_and_forwards_to_queue():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT}") as ws:
+            sid = await _read_hello(ws)
             await ws.send(json.dumps({"content": "hello", "command": None}))
             await asyncio.sleep(0.05)
 
-        msg = q.get_nowait()
+        # Drop the disconnect 'extract' message; we want the user message.
+        msgs = []
+        while not q.empty():
+            msgs.append(q.get_nowait())
+        user_msgs = [m for m in msgs if m.command != "extract"]
+        assert len(user_msgs) == 1
+        msg = user_msgs[0]
         assert msg.content == "hello"
         assert msg.channel == "cli"
-        assert msg.session_id == SESSION_ID
+        assert msg.session_id == sid
         assert msg.reply_address == {}
         assert msg.command is None
     finally:
@@ -61,16 +78,15 @@ async def test_send_delivers_to_connected_client():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 1}") as ws:
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="Here is the answer",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 tool_calls=["Read foo.py"],
                 final=True,
             )
-            # Give _handle_connection a moment to set self._connection
-            await asyncio.sleep(0.05)
             await ch.send(outgoing)
 
             raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
@@ -95,7 +111,7 @@ async def test_send_drops_when_no_client(caplog):
         outgoing = OutgoingMessage(
             content="nobody home",
             channel="cli",
-            session_id=SESSION_ID,
+            session_id="missing-session",
             reply_address={},
         )
         with caplog.at_level(logging.WARNING, logger="src.channels.ws"):
@@ -107,78 +123,142 @@ async def test_send_drops_when_no_client(caplog):
 
 
 @pytest.mark.asyncio
-async def test_replaces_stale_connection_with_new_client():
-    """A second connection replaces the first (last-connection-wins)."""
+async def test_concurrent_connections_get_distinct_sessions():
+    """Two simultaneous connections each get a distinct session id."""
     q = asyncio.Queue()
     ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 3)
     task = await _start_channel(ch)
 
     try:
         ws1 = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}")
-        await asyncio.sleep(0.05)  # ensure first connection is registered
+        ws2 = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}")
+        sid1 = await _read_hello(ws1)
+        sid2 = await _read_hello(ws2)
+        assert sid1 != sid2
 
-        # Second connection replaces the first
-        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 3}") as ws2:
-            await asyncio.sleep(0.05)
-            # ws2 should be the active connection — verify by sending a message
-            await ws2.send(json.dumps({"content": "from-ws2", "command": None}))
-            await asyncio.sleep(0.05)
+        # ws1 is still alive (not evicted by ws2's connect).
+        await ws1.send(json.dumps({"content": "from-ws1", "command": None}))
+        await ws2.send(json.dumps({"content": "from-ws2", "command": None}))
+        await asyncio.sleep(0.05)
 
-        # ws1 should have been closed by the server
-        with pytest.raises(websockets.exceptions.ConnectionClosedError):
-            await ws1.recv()
+        # Each session sees only its own send() payloads.
+        await ch.send(OutgoingMessage(
+            content="for-1", channel="cli",
+            session_id=sid1, reply_address={}, final=True,
+        ))
+        await ch.send(OutgoingMessage(
+            content="for-2", channel="cli",
+            session_id=sid2, reply_address={}, final=True,
+        ))
 
+        r1 = json.loads(await asyncio.wait_for(ws1.recv(), timeout=1.0))
+        r2 = json.loads(await asyncio.wait_for(ws2.recv(), timeout=1.0))
+        assert r1["content"] == "for-1"
+        assert r2["content"] == "for-2"
+
+        await ws1.close()
+        await ws2.close()
         await asyncio.sleep(0.1)
+
         messages = []
         while not q.empty():
             messages.append(q.get_nowait())
-        contents = [m.content for m in messages]
-        assert "from-ws2" in contents
+        user_msgs = [m for m in messages if m.command != "extract"]
+        # Each user message carries the session id of its originating connection.
+        sessions_for_content = {m.content: m.session_id for m in user_msgs}
+        assert sessions_for_content == {"from-ws1": sid1, "from-ws2": sid2}
     finally:
-        try:
-            await ws1.close()
-        except Exception:
-            pass
         await _stop_channel(task)
 
 
 @pytest.mark.asyncio
-async def test_client_reconnect_preserves_session():
-    """After disconnect, a new connection can be made; session_id stays constant."""
+async def test_disconnect_emits_extract_only_for_disconnected_session():
+    """Disconnecting one client emits 'extract' for that session only."""
     q = asyncio.Queue()
     ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 4)
     task = await _start_channel(ch)
 
     try:
-        # First connection
-        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 4}") as ws:
-            await ws.send(json.dumps({"content": "first", "command": None}))
-            await asyncio.sleep(0.05)
-        # Disconnect triggers extract; wait for that to be queued
+        ws1 = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 4}")
+        ws2 = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 4}")
+        sid1 = await _read_hello(ws1)
+        sid2 = await _read_hello(ws2)
+
+        await ws1.close()
         await asyncio.sleep(0.1)
 
-        # Second connection
-        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 4}") as ws:
-            await ws.send(json.dumps({"content": "second", "command": None}))
-            await asyncio.sleep(0.05)
+        # ws2's connection is still in the registry.
+        assert sid2 in ch._connections
+        assert sid1 not in ch._connections
 
-        await asyncio.sleep(0.1)
-
-        messages = []
+        # Drain queue; only sid1 should have an extract.
+        extracts = []
         while not q.empty():
-            messages.append(q.get_nowait())
+            m = q.get_nowait()
+            if m.command == "extract":
+                extracts.append(m.session_id)
+        assert extracts == [sid1]
 
-        contents = [m.content for m in messages]
-        commands = [m.command for m in messages]
+        await ws2.close()
+    finally:
+        await _stop_channel(task)
 
-        assert "first" in contents
-        assert "second" in contents
-        # After each disconnect an "extract" command is enqueued
-        assert commands.count("extract") >= 2
 
-        # All messages share the same session_id
-        for m in messages:
-            assert m.session_id == SESSION_ID
+@pytest.mark.asyncio
+async def test_hello_with_prior_session_id_resumes_and_evicts_stale():
+    """A hello frame with a known session id evicts the prior socket for that id."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 11)
+    task = await _start_channel(ch)
+
+    try:
+        ws_a = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 11}")
+        ws_other = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 11}")
+        sid_a = await _read_hello(ws_a)
+        sid_other = await _read_hello(ws_other)
+
+        # New client wants to resume sid_a.
+        ws_b = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 11}")
+        await _read_hello(ws_b)  # initial minted id (will be re-keyed)
+        await ws_b.send(json.dumps({"type": "hello", "session_id": sid_a}))
+        # Server replies with another hello frame echoing the new id.
+        raw = await asyncio.wait_for(ws_b.recv(), timeout=1.0)
+        echoed = json.loads(raw)
+        assert echoed["type"] == "hello"
+        assert echoed["session_id"] == sid_a
+
+        # ws_a should have been closed; ws_other untouched.
+        with pytest.raises(websockets.exceptions.ConnectionClosed):
+            await asyncio.wait_for(ws_a.recv(), timeout=1.0)
+
+        # ws_other still connected: server send to sid_other reaches it.
+        await ch.send(OutgoingMessage(
+            content="still-here", channel="cli",
+            session_id=sid_other, reply_address={}, final=True,
+        ))
+        msg = json.loads(await asyncio.wait_for(ws_other.recv(), timeout=1.0))
+        assert msg["content"] == "still-here"
+
+        await ws_b.close()
+        await ws_other.close()
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_send_to_unknown_session_warns_no_crash(caplog):
+    """send() with a session id no socket holds is a no-op + warning."""
+    import logging
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 12)
+    task = await _start_channel(ch)
+    try:
+        with caplog.at_level(logging.WARNING, logger="src.channels.ws"):
+            await ch.send(OutgoingMessage(
+                content="lost", channel="cli",
+                session_id="not-a-real-id", reply_address={}, final=True,
+            ))
+        assert "not-a-real-id" in caplog.text
     finally:
         await _stop_channel(task)
 
@@ -192,11 +272,11 @@ async def test_send_attachments_null_when_empty():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 5}") as ws:
-            await asyncio.sleep(0.05)
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="no attachments",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 attachments=[],   # explicitly empty list
             )
@@ -217,13 +297,13 @@ async def test_disconnect_enqueues_extract_command():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 6}") as ws:
-            pass  # immediately disconnect
+            sid = await _read_hello(ws)
 
         await asyncio.sleep(0.1)
 
         msg = q.get_nowait()
         assert msg.command == "extract"
-        assert msg.session_id == SESSION_ID
+        assert msg.session_id == sid
     finally:
         await _stop_channel(task)
 
@@ -237,11 +317,11 @@ async def test_send_includes_workflow_field():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 7}") as ws:
-            await asyncio.sleep(0.05)
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="design phase",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 workflow={"steps": ["plan", "design", "implement"], "current": "design"},
             )
@@ -263,11 +343,11 @@ async def test_send_workflow_null_when_not_set():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 8}") as ws:
-            await asyncio.sleep(0.05)
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="no workflow",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
             )
             await ch.send(outgoing)
@@ -288,11 +368,11 @@ async def test_send_includes_delta_field():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 9}") as ws:
-            await asyncio.sleep(0.05)
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="chunk",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 delta=True,
                 final=False,
@@ -317,11 +397,11 @@ async def test_send_delta_defaults_false_in_payload():
 
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 10}") as ws:
-            await asyncio.sleep(0.05)
+            sid = await _read_hello(ws)
             outgoing = OutgoingMessage(
                 content="full",
                 channel="cli",
-                session_id=SESSION_ID,
+                session_id=sid,
                 reply_address={},
             )
             await ch.send(outgoing)
@@ -557,6 +637,7 @@ class TestWsAttachmentsE2E:
         task = await _start_channel(ch)
         try:
             async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 21}") as ws:
+                await _read_hello(ws)
                 await ws.send(json.dumps({
                     "content": "oversized image",
                     "command": None,
