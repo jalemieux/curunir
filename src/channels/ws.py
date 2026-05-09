@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import uuid
+from typing import Callable
 
 import websockets
 import websockets.exceptions
@@ -25,6 +26,7 @@ class WebSocketChannel:
         port: int = 8765,
         model: str = "",
         uploads_dir: str | None = None,
+        cancel_session: Callable[[str], bool] | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
@@ -32,6 +34,8 @@ class WebSocketChannel:
         self.model = model
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
         self._connections: dict[str, websockets.ServerConnection] = {}
+        self.cancel_session = cancel_session
+        self._connection: websockets.ServerConnection | None = None
 
     async def start(self) -> None:
         try:
@@ -121,6 +125,21 @@ class WebSocketChannel:
                     if new_sid != session_id:
                         session_id = new_sid
                         await self._send_hello(websocket, session_id)
+                if data.get("command") == "interrupt":
+                    delivered = bool(self.cancel_session and self.cancel_session(SESSION_ID))
+                    logger.info("Interrupt requested for cli session (delivered=%s)", delivered)
+                    continue
+
+                decoded, err = _decode_attachments(data.get("attachments"))
+                if err is not None:
+                    logger.info("Rejected inbound message: %s", err)
+                    await self.send(OutgoingMessage(
+                        content=f"Attachment rejected: {err}",
+                        channel="cli",
+                        session_id=SESSION_ID,
+                        reply_address={},
+                        final=True,
+                    ))
                     continue
 
                 await self._process_inbound(data, session_id)

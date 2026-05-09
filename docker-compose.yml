@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    profiles: ["portal"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,6 +18,7 @@ services:
 
   portal:
     build: ./portal
+    profiles: ["portal"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,14 +48,17 @@ services:
       # CURUNIR_PORTAL_TOKEN in .env and the portal seed picks up the same
       # value via interpolation above.
       CURUNIR_PORTAL_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
+      # Lives on the workspace volume so the introspection skill and
+      # `docker exec curunir tail -f /app/workspace/curunir.log` can
+      # read agent activity from inside the container. RotatingFileHandler
+      # in run.py caps it at 10MB × 3 backups.
+      LOG_FILE: ${LOG_FILE:-/app/workspace/curunir.log}
     ports:
       - "8765:8765"
     volumes:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
-    depends_on:
-      - portal
     restart: unless-stopped
 
 volumes:

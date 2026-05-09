@@ -677,3 +677,23 @@ class TestWsAttachmentsE2E:
             assert msg.attachments is None
         finally:
             await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_command_routes_to_cancel_session_callback():
+    """Inbound {command: interrupt} bypasses the queue and calls cancel_session."""
+    q = asyncio.Queue()
+    seen: list[str] = []
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 23,
+        cancel_session=lambda sid: (seen.append(sid) or True),
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 23}") as ws:
+            await ws.send(json.dumps({"command": "interrupt"}))
+            await asyncio.sleep(0.1)
+        assert seen == [SESSION_ID]
+        assert q.empty()
+    finally:
+        await _stop_channel(task)

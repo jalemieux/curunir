@@ -37,6 +37,8 @@ Curunir is a configurable agentic LLM framework for building digital assistants.
 
 Context overflow is caught from LiteLLM exceptions; history is adaptively trimmed to 125k chars and retried.
 
+**Cancellation.** `Agent.request_cancel(session_id)` sets a per-session `asyncio.Event` that the loop checks at the top of each iteration and before each tool call within a batch. Channels call this out-of-band when the user requests a stop (the in_queue is blocked while `handle()` runs). The in-flight LLM call and the currently-executing tool run to completion, but any remaining tool calls in the batch are skipped and stubbed with an `(interrupted)` tool response so every `tool_call_id` has a matching response (chat schemas require this). On the next iteration the outer cancel check fires, an `(interrupted)` assistant turn is appended, and `handle()` returns `"(interrupted)"`.
+
 ### Message Flow
 
 ```
@@ -59,6 +61,8 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
 
 Channels implement a protocol: `async start()` to listen, `async send(msg)` to respond.
+
+**Interrupts.** WS and Portal channels accept an optional `cancel_session=agent.request_cancel` callback. When the client sends `{"command": "interrupt"}`, the channel routes it directly to the callback instead of enqueuing it (the agent_worker is blocked inside `handle()` and wouldn't drain the queue in time). The CLI (`cli.py`) wires Ctrl-C to send this frame while the agent is busy, via `loop.add_signal_handler(SIGINT, ...)`. While the prompt is active, prompt_toolkit reads Ctrl-C as a key in raw mode so the signal handler doesn't fire there — Ctrl-C at the prompt still exits.
 
 ### Tools (`src/tools/`)
 
@@ -128,3 +132,4 @@ See `.env.example` for full list. Critical ones:
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
+- `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.
