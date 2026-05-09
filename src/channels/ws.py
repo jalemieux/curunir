@@ -126,8 +126,13 @@ class WebSocketChannel:
                         session_id = new_sid
                         await self._send_hello(websocket, session_id)
                 if data.get("command") == "interrupt":
-                    delivered = bool(self.cancel_session and self.cancel_session(SESSION_ID))
-                    logger.info("Interrupt requested for cli session (delivered=%s)", delivered)
+                    delivered = bool(
+                        self.cancel_session and self.cancel_session(session_id)
+                    )
+                    logger.info(
+                        "Interrupt requested for cli session %s (delivered=%s)",
+                        session_id, delivered,
+                    )
                     continue
 
                 decoded, err = _decode_attachments(data.get("attachments"))
@@ -136,7 +141,7 @@ class WebSocketChannel:
                     await self.send(OutgoingMessage(
                         content=f"Attachment rejected: {err}",
                         channel="cli",
-                        session_id=SESSION_ID,
+                        session_id=session_id,
                         reply_address={},
                         final=True,
                     ))
