@@ -91,6 +91,17 @@ python run.py               # starts CLI channel
 docker compose up --build
 ```
 
+### CLI controls
+
+| Input | Effect |
+|---|---|
+| `/clear`, `/new`, `/reset` | Reset the session (and trigger memory extraction) |
+| `/verbose` | Toggle live tool-call output |
+| `/attach <path>` / `/detach <i>` | Stage or remove a file for the next message |
+| **Ctrl-C while the agent is working** | Send an interrupt — the agent finishes the in-flight tool, skips any remaining tools in the batch, and replies `(interrupted)` |
+| Ctrl-C at the prompt | Exit the CLI |
+| Ctrl-D at the prompt | Exit cleanly |
+
 #### Email Channel (Gmail)
 
 The email channel connects to Gmail via a Google Workspace service account with domain-wide delegation. No OAuth token management or external CLI tools — just a JSON key file.

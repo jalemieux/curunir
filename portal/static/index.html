@@ -4,12 +4,43 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Curunir</title>
+<script>
+  // Apply persisted theme before paint to avoid a flash.
+  (function () {
+    var t = localStorage.getItem("curunir-theme") || "light";
+    if (t !== "light" && t !== "dark") t = "light";
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" disabled>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
+  --bg: #ffffff;
+  --fg: #1a1a1f;
+  --user: #16a34a;
+  --tool: #6b7280;
+  --muted: #d1d5db;
+  --accent: #4f46e5;
+  --bubble: #f4f4f8;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --header-text: #6b7280;
+  --hint: #9ca3af;
+  --code-bg: #f3f4f6;
+  --btn-disabled-bg: #e5e7eb;
+  --btn-disabled-fg: #9ca3af;
+  --hover-bg: #f3f4f6;
+  --system-text: #9ca3af;
+  --offline: #9ca3af;
+  --hover-fg: #1a1a1f;
+  --stop: #dc2626;
+  --stop-hover: #b91c1c;
+}
+[data-theme="dark"] {
   --bg: #0a0a12;
   --fg: #e0e0e0;
   --user: #4ade80;
@@ -17,6 +48,19 @@
   --muted: #444;
   --accent: #6366f1;
   --bubble: #12121c;
+  --border: #1a1a22;
+  --border-strong: #2a2a3e;
+  --header-text: #888;
+  --hint: #555;
+  --code-bg: #1a1a2e;
+  --btn-disabled-bg: #2a2a3e;
+  --btn-disabled-fg: #666;
+  --hover-bg: #1a1a2e;
+  --system-text: #666;
+  --offline: #555;
+  --hover-fg: #ffffff;
+  --stop: #f87171;
+  --stop-hover: #fca5a5;
 }
 html, body { height: 100dvh; }
 body {
@@ -26,22 +70,27 @@ body {
   display: flex; flex-direction: column;
 }
 header {
-  padding: 8px 14px; border-bottom: 1px solid #1a1a22;
-  font-size: 12px; color: #888;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--header-text);
   display: flex; justify-content: space-between; align-items: center;
   flex-shrink: 0;
 }
 .header-right { display: flex; align-items: center; gap: 12px; }
-#new-btn {
-  background: transparent; border: 1px solid #2a2a3e; border-radius: 4px;
-  color: #888; padding: 4px 10px; font-size: 12px; cursor: pointer;
+.header-btn {
+  background: transparent; border: 1px solid var(--border-strong); border-radius: 4px;
+  color: var(--header-text); padding: 4px 10px; font-size: 12px; cursor: pointer;
   font-family: inherit;
 }
-#new-btn:hover { color: var(--accent); border-color: var(--accent); }
-#new-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.header-btn:hover { color: var(--accent); border-color: var(--accent); }
+.header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#theme-btn {
+  width: 28px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1;
+}
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .dot.online { background: var(--user); }
-.dot.offline { background: #555; }
+.dot.offline { background: var(--offline); }
 .dot.reconnecting { background: #e2b55a; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.4; } }
 
@@ -54,23 +103,24 @@ main {
 .msg.user .role { color: var(--user); font-weight: bold; font-size: 11px; }
 .msg.user .body { white-space: pre-wrap; }
 .msg.assistant .role { color: var(--accent); font-weight: bold; font-size: 11px; }
-.msg.assistant .body code { background: #1a1a2e; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
-.msg.assistant .body pre { background: #1a1a2e; border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.4; }
+.msg.assistant .body code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.msg.assistant .body pre { background: var(--code-bg); border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.4; }
 .msg.assistant .body pre code { background: none; padding: 0; }
 .msg .tools { color: var(--tool); font-size: 11px; margin-top: 4px; }
 .msg .tool-line { padding: 2px 0; }
+.system-msg { color: var(--system-text); }
 
 .attachment {
   display: inline-flex; align-items: center; gap: 4px;
-  background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px;
+  background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: 4px;
   padding: 3px 8px; font-size: 11px; color: var(--accent);
   margin-right: 4px; margin-top: 4px;
 }
 .attachment.downloadable { cursor: pointer; }
-.attachment.downloadable:hover { color: #fff; border-color: var(--accent); }
+.attachment.downloadable:hover { color: var(--hover-fg); border-color: var(--accent); }
 
 footer {
-  padding: 10px 14px 14px; border-top: 1px solid #1a1a22;
+  padding: 10px 14px 14px; border-top: 1px solid var(--border);
   max-width: 760px; width: 100%; margin: 0 auto;
   flex-shrink: 0;
 }
@@ -80,8 +130,8 @@ footer {
 .staged-list .attachment:hover { color: #f87171; }
 
 #composer {
-  background: #12121c;
-  border: 1px solid #2a2a3e;
+  background: var(--bubble);
+  border: 1px solid var(--border-strong);
   border-radius: 14px;
   padding: 10px 10px 8px 14px;
   display: flex; flex-direction: column; gap: 6px;
@@ -97,14 +147,14 @@ footer {
   display: flex; align-items: center; gap: 8px;
 }
 #attach-btn {
-  background: transparent; border: 0; color: #888;
+  background: transparent; border: 0; color: var(--header-text);
   width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
   font-size: 16px; padding: 6px; box-sizing: content-box;
   display: inline-flex; align-items: center; justify-content: center;
 }
-#attach-btn:hover { color: var(--accent); background: #1a1a2e; }
+#attach-btn:hover { color: var(--accent); background: var(--hover-bg); }
 .composer-hint {
-  color: #555; font-size: 11px;
+  color: var(--hint); font-size: 11px;
   flex: 1; text-align: right; margin-right: 4px;
 }
 #send-btn {
@@ -113,7 +163,13 @@ footer {
   font-size: 16px; padding: 6px; box-sizing: content-box;
   display: inline-flex; align-items: center; justify-content: center;
 }
-#send-btn:disabled { background: #2a2a3e; color: #666; cursor: not-allowed; }
+#send-btn:disabled { background: var(--btn-disabled-bg); color: var(--btn-disabled-fg); cursor: not-allowed; }
+#send-btn[data-mode="stop"] { background: var(--stop); }
+#send-btn[data-mode="stop"]:hover { background: var(--stop-hover); }
+.msg.assistant.stopping .body::after {
+  content: " stopping…";
+  color: var(--hint); font-style: italic; font-size: 12px;
+}
 @media (max-width: 480px) { .composer-hint { display: none; } }
 </style>
 </head>
@@ -121,7 +177,8 @@ footer {
 <header>
   <div><strong>Curunir</strong></div>
   <div class="header-right">
-    <button id="new-btn" title="Start a new conversation">New</button>
+    <button id="theme-btn" class="header-btn" title="Toggle theme" aria-label="Toggle theme"></button>
+    <button id="new-btn" class="header-btn" title="Start a new conversation">New</button>
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
   </div>
 </header>
@@ -135,7 +192,7 @@ footer {
     <div class="composer-row">
       <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
-      <button id="send-btn" title="Send" aria-label="Send">↑</button>
+      <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
     </div>
   </div>
 </footer>
@@ -161,6 +218,9 @@ const stagedEl = document.getElementById("staged");
 const statusDot = document.querySelector("#status .dot");
 const statusText = document.getElementById("status-text");
 const newBtn = document.getElementById("new-btn");
+const themeBtn = document.getElementById("theme-btn");
+const hljsLight = document.getElementById("hljs-light");
+const hljsDark = document.getElementById("hljs-dark");
 
 // === State ===
 let ws = null;
@@ -175,12 +235,50 @@ marked.setOptions({
   breaks: true,
 });
 
+// === Theme ===
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  hljsLight.disabled = theme !== "light";
+  hljsDark.disabled = theme !== "dark";
+  themeBtn.textContent = theme === "light" ? "☾" : "☀";
+  themeBtn.title = theme === "light" ? "Switch to dark mode" : "Switch to light mode";
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const next = current === "light" ? "dark" : "light";
+  localStorage.setItem("curunir-theme", next);
+  applyTheme(next);
+}
+applyTheme(document.documentElement.getAttribute("data-theme") || "light");
+
 // === Status ===
 function setStatus(state) {
   statusDot.className = "dot " + state;
   statusText.textContent = state;
   agentOnline = state === "online";
-  sendBtn.disabled = !agentOnline;
+  if (!agentOnline && inProgressMsg) {
+    inProgressMsg.classList.remove("stopping");
+    inProgressMsg = null;
+  }
+  updateComposerMode();
+}
+
+// === Composer mode (send / stop) ===
+function updateComposerMode() {
+  const responding = inProgressMsg !== null;
+  if (responding && agentOnline) {
+    sendBtn.dataset.mode = "stop";
+    sendBtn.textContent = "■";
+    sendBtn.title = "Stop";
+    sendBtn.setAttribute("aria-label", "Stop");
+    sendBtn.disabled = false;
+  } else {
+    sendBtn.dataset.mode = "send";
+    sendBtn.textContent = "↑";
+    sendBtn.title = "Send";
+    sendBtn.setAttribute("aria-label", "Send");
+    sendBtn.disabled = !agentOnline;
+  }
 }
 
 // === WS connect ===
@@ -209,6 +307,7 @@ function onServerMessage(msg) {
     messagesEl.innerHTML = "";
     inProgressMsg = null;
     for (const m of msg.messages) renderHistoryEntry(m);
+    updateComposerMode();
     return;
   }
   // Otherwise: an OutgoingMessage payload.
@@ -237,7 +336,7 @@ function renderHistoryEntry(m) {
     renderAttachments(el, m.attachments);
   } else if (m.role === "system") {
     const el = appendMessage("assistant");
-    el.querySelector(".body").innerHTML = `<em style="color:#666">${m.content}</em>`;
+    el.querySelector(".body").innerHTML = `<em class="system-msg">${m.content}</em>`;
   }
 }
 
@@ -269,8 +368,10 @@ function renderAgentChunk(m) {
   }
   renderAttachments(inProgressMsg, m.attachments);
   if (m.final) {
+    inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
+  updateComposerMode();
   scrollToBottom();
 }
 
@@ -344,6 +445,27 @@ function send() {
   inputEl.value = "";
   staged = [];
   renderStaged();
+  // Optimistic flip — actual flip happens once chunks start streaming, but
+  // pre-create the in-progress slot so the button shows Stop immediately.
+  if (!inProgressMsg) inProgressMsg = appendMessage("assistant");
+  updateComposerMode();
+}
+
+// === Interrupt ===
+// NOTE: send the *inner* shape only — `portal/ws_browser.py` already wraps
+// every browser frame as `{type:"user_message", payload:<this>}`. Sending a
+// pre-wrapped frame here would double-wrap and confuse the agent.
+function interrupt() {
+  if (!inProgressMsg || !agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ command: "interrupt" }));
+  inProgressMsg.classList.add("stopping");
+  // Don't clear inProgressMsg — the agent will emit a final "(interrupted)"
+  // frame which the existing m.final handler clears. But flip the button back
+  // to Send mode now so the composer is usable while we wait.
+  sendBtn.dataset.mode = "send";
+  sendBtn.textContent = "↑";
+  sendBtn.title = "Send";
+  sendBtn.setAttribute("aria-label", "Send");
 }
 
 // === Attachments staging ===
@@ -410,12 +532,24 @@ function startNew() {
 }
 
 // === Wiring ===
-sendBtn.onclick = send;
+sendBtn.onclick = () => {
+  if (sendBtn.dataset.mode === "stop") interrupt();
+  else send();
+};
 newBtn.onclick = startNew;
+themeBtn.onclick = toggleTheme;
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     send();
+  }
+});
+// Esc anywhere on the page interrupts an in-flight response. Bound globally
+// because the user may be reading the stream and not have focus on the input.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && inProgressMsg) {
+    e.preventDefault();
+    interrupt();
   }
 });
 inputEl.addEventListener("input", () => {
