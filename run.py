@@ -395,6 +395,7 @@ async def main():
             in_queue=in_queue,
             url=portal_url,
             token=portal_token,
+            history_provider=lambda sid: agent.history_snapshot(sid),
             history_provider=lambda: agent.history_snapshot(),
             cancel_session=agent.request_cancel,
         )
