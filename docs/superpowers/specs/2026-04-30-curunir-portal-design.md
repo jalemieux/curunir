@@ -276,6 +276,24 @@ value: `f"portal-{user_id}"`. This keeps memory extraction and
 schedules cleanly partitioned from the local CLI session
 (`SESSION_ID = "cli"`).
 
+### Addendum (2026-05-09): per-tab `session_id`
+
+To support multiple browser tabs each holding an independent history
+bucket, `session_id` is now a per-message field on `user_message`,
+`agent_message`, and `history_request` payloads. The portal mints
+the id (per browser tab) and threads it through; the container
+treats whatever id arrives as the session key into
+`Agent.sessions`. When the field is absent, the container falls
+back to the legacy `"portal"` id so an older portal build keeps
+working unchanged.
+
+The local CLI shifted to the same model: server mints a
+`uuid4().hex` per WebSocket connection and echoes it via a new
+`{"type": "hello", "session_id": ...}` welcome frame. The CLI
+persists the id in memory so a transient reconnect resumes the
+same session via a `hello` frame from the client side. The
+hardcoded `SESSION_ID = "cli"` constant is gone.
+
 ## Browser ↔ portal protocol
 
 Browser opens `wss://portal.example/ws/browser`. The session cookie is
