@@ -323,7 +323,10 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "0.0.0.0")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws = WebSocketChannel(in_queue, host=ws_host, port=ws_port, model=config.model)
+    ws = WebSocketChannel(
+        in_queue, host=ws_host, port=ws_port, model=config.model,
+        cancel_session=agent.request_cancel,
+    )
     channels["cli"] = ws
 
     # Email channel (conditional)
@@ -350,6 +353,7 @@ async def main():
             url=portal_url,
             token=portal_token,
             history_provider=lambda: agent.history_snapshot(),
+            cancel_session=agent.request_cancel,
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
