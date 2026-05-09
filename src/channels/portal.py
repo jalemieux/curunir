@@ -50,6 +50,7 @@ class PortalChannel:
         token: str,
         history_provider: "callable[[], list[dict]] | None" = None,
         uploads_dir: str | None = None,
+        cancel_session: "callable[[str], bool] | None" = None,
     ):
         self.in_queue = in_queue
         self.url = url
@@ -58,6 +59,7 @@ class PortalChannel:
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
+        self.cancel_session = cancel_session
         self._connection: Any = None
         self._terminate = False
 
@@ -119,6 +121,11 @@ class PortalChannel:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
     async def _handle_user_message(self, payload: dict) -> None:
+        if payload.get("command") == "interrupt":
+            delivered = bool(self.cancel_session and self.cancel_session(PORTAL_SESSION_ID))
+            logger.info("Interrupt requested for portal session (delivered=%s)", delivered)
+            return
+
         decoded, err = _decode_attachments(payload.get("attachments"))
         if err is not None:
             await self.send(OutgoingMessage(
