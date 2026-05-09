@@ -141,6 +141,34 @@ async def test_history_request_invokes_provider_and_sends_snapshot(portal_server
 
 
 @pytest.mark.asyncio
+async def test_interrupt_command_routes_to_cancel_session_callback(portal_server):
+    """A {command: interrupt} payload from the portal triggers cancel_session
+    and is NOT enqueued (the agent_worker is blocked while handle() runs)."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen: list[str] = []
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        cancel_session=lambda sid: (seen.append(sid) or True),
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "interrupt"},
+        })
+        await asyncio.sleep(0.1)
+        assert seen == [PORTAL_SESSION_ID]
+        assert in_q.empty()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_close_4003_terminal_does_not_reconnect(portal_server):
     in_q: asyncio.Queue = asyncio.Queue()
     ch = PortalChannel(
