@@ -691,9 +691,11 @@ async def test_interrupt_command_routes_to_cancel_session_callback():
     task = await _start_channel(ch)
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 23}") as ws:
+            hello = json.loads(await ws.recv())
+            sid = hello["session_id"]
             await ws.send(json.dumps({"command": "interrupt"}))
             await asyncio.sleep(0.1)
-        assert seen == [SESSION_ID]
+        assert seen == [sid]
         assert q.empty()
     finally:
         await _stop_channel(task)
