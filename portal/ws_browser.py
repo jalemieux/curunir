@@ -5,10 +5,15 @@ upgrade request. Cookie + `Origin` header must both be valid:
   - Cookie absent / invalid / user inactive → close 4003.
   - Origin header missing or != PORTAL_BASE_URL → close 4003 (CSWSH).
 
-Browser sends `IncomingMessage`-shaped JSON. We wrap as
-`{"type": "user_message", "payload": ...}` and forward to the user's
-agent socket. If no agent is connected, we reply directly to *this*
-browser with a synthetic offline message — other browsers do not see it.
+Browser sends `IncomingMessage`-shaped JSON. Each frame is expected to
+carry a `session_id` (per-tab UUID). The first frame's `session_id` is
+recorded against this socket so that agent-emitted traffic for that
+session can be routed back here without bleeding into other tabs.
+
+If a frame omits `session_id` (stale browser build) the socket stays
+unbound and only receives global frames such as `agent_status` —
+single-tab use still works because the browser's later frames will
+typically include the id once it reloads against the new build.
 """
 
 import json
@@ -58,17 +63,15 @@ async def ws_browser(ws: WebSocket) -> None:
     await routing.add_browser(user.id, ws)
     logger.info("browser connected", extra={"user_id": user.id})
 
-    # Initial state push: agent_status + history_request to the agent
-    # (agent will respond with history_snapshot which fans out to browsers).
+    # Push current agent status. History is bootstrapped by the browser
+    # itself once it has a session_id (it sends a history_request frame
+    # that we forward to the agent).
     await ws.send_text(json.dumps({
         "type": "agent_status",
         "status": "online" if routing.agent_for(user.id) else "offline",
     }))
-    if routing.agent_for(user.id) is not None:
-        await routing.forward_to_agent(
-            user.id, json.dumps({"type": "history_request"})
-        )
 
+    bound_session: str | None = None
     try:
         while True:
             raw = await ws.receive_text()
@@ -78,6 +81,12 @@ async def ws_browser(ws: WebSocket) -> None:
                 logger.warning("browser sent invalid json",
                                extra={"user_id": user.id})
                 continue
+
+            session_id = payload.get("session_id")
+            if isinstance(session_id, str) and session_id and session_id != bound_session:
+                await routing.bind_browser_session(user.id, ws, session_id)
+                bound_session = session_id
+
             wrapped = json.dumps({"type": "user_message", "payload": payload})
             ok = await routing.forward_to_agent(user.id, wrapped)
             if not ok:
@@ -85,6 +94,7 @@ async def ws_browser(ws: WebSocket) -> None:
                     "content": "Agent offline.",
                     "final": True,
                     "delta": False,
+                    "session_id": session_id,
                 }))
     except WebSocketDisconnect:
         pass

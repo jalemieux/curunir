@@ -76,14 +76,46 @@ def test_ws_agent_second_connection_kicks_first(sync_client):
             assert routing.agent_for(user.id) is not None
 
 
-def test_agent_message_unwraps_and_would_fan_out(sync_client, monkeypatch):
+def test_agent_message_routes_to_bound_session(sync_client, monkeypatch):
     user = _create_user(sync_client, "unwrap@example.com")
     captured = []
 
-    async def fake_fan(user_id, payload):
-        captured.append((user_id, payload))
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
         return 1
 
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        ws.send_text(json.dumps({
+            "type": "agent_message",
+            "payload": {"content": "hi", "final": True, "session_id": "tab-A"},
+        }))
+        ws.close()
+
+    payloads = [(sid, json.loads(p)) for (_, sid, p) in captured]
+    assert ("tab-A", {"content": "hi", "final": True, "session_id": "tab-A"}) in payloads
+
+
+def test_agent_message_without_session_id_dropped(sync_client, monkeypatch):
+    """No session_id → no routing target. Drop instead of fanning out
+    to every tab, which was the cross-tab bleed we are fixing."""
+    user = _create_user(sync_client, "drop@example.com")
+    routed = []
+    fanned = []
+
+    async def fake_route(user_id, session_id, payload):
+        routed.append((user_id, session_id, payload))
+        return 0
+
+    async def fake_fan(user_id, payload):
+        fanned.append((user_id, payload))
+        return 0
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
     monkeypatch.setattr(routing, "fan_out_to_browsers", fake_fan)
 
     with sync_client.websocket_connect(
@@ -96,6 +128,35 @@ def test_agent_message_unwraps_and_would_fan_out(sync_client, monkeypatch):
         }))
         ws.close()
 
-    # The first call(s) include online-broadcast(s); find the unwrap.
-    payloads = [json.loads(p) for (_, p) in captured]
-    assert any(p == {"content": "hi", "final": True} for p in payloads)
+    assert routed == []
+    # online/offline status broadcasts still go through fan_out — that's
+    # expected. We just want to make sure the agent_message itself wasn't
+    # broadcast.
+    fanned_payloads = [json.loads(p) for (_, p) in fanned]
+    assert all("content" not in p for p in fanned_payloads)
+
+
+def test_history_snapshot_routes_by_session_id(sync_client, monkeypatch):
+    user = _create_user(sync_client, "snap@example.com")
+    captured = []
+
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
+        return 1
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        snapshot = {
+            "type": "history_snapshot",
+            "session_id": "tab-Z",
+            "messages": [{"role": "user", "content": "u1"}],
+        }
+        ws.send_text(json.dumps(snapshot))
+        ws.close()
+
+    targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
+    assert any(sid == "tab-Z" and p == snapshot for sid, p in targets)

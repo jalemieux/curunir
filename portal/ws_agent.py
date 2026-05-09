@@ -4,19 +4,25 @@ Container dials wss://portal/ws/agent with `Authorization: Bearer <token>`.
 Token is validated against `users.container_token`; valid → register on
 the routing table; invalid/inactive → close 4003.
 
-This endpoint reads messages from the container and either:
-  - {"type": "agent_message", "payload": ...} → unwrap and fan out
-    payload (alone) to the user's browsers
-  - {"type": "history_snapshot", "messages": ...} → fan out the full
-    envelope to browsers (browser side knows how to render snapshots)
+This endpoint reads messages from the container and routes by the
+`session_id` riding on the payload, so traffic for one browser tab does
+not bleed into another:
+  - {"type": "agent_message", "payload": ...}        → unwrap, route the
+    payload to browsers bound to `payload.session_id`.
+  - {"type": "history_snapshot", "session_id": ...,
+     "messages": ...}                                 → route the whole
+    envelope to browsers bound to `session_id`.
 
-Browser-bound payloads are the unwrapped OutgoingMessage envelope.
+If `session_id` is missing on either frame (stale container build), the
+frame is dropped on the assumption that legacy single-session use is
+already on its way out — fanning out without a session_id was the
+source of the cross-tab bleed we are fixing.
 """
 
 import json
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from portal import db
 from portal.routing import routing
@@ -62,9 +68,25 @@ async def ws_agent(ws: WebSocket) -> None:
             mtype = msg.get("type")
             if mtype == "agent_message":
                 payload = msg.get("payload") or {}
-                await routing.fan_out_to_browsers(user.id, json.dumps(payload))
+                session_id = payload.get("session_id")
+                if not isinstance(session_id, str) or not session_id:
+                    logger.warning(
+                        "agent_message without session_id; dropping",
+                        extra={"user_id": user.id},
+                    )
+                    continue
+                await routing.route_to_session(
+                    user.id, session_id, json.dumps(payload)
+                )
             elif mtype == "history_snapshot":
-                await routing.fan_out_to_browsers(user.id, raw)
+                session_id = msg.get("session_id")
+                if not isinstance(session_id, str) or not session_id:
+                    logger.warning(
+                        "history_snapshot without session_id; dropping",
+                        extra={"user_id": user.id},
+                    )
+                    continue
+                await routing.route_to_session(user.id, session_id, raw)
             else:
                 logger.warning("agent sent unknown type %r", mtype,
                                extra={"user_id": user.id})
