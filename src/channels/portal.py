@@ -123,8 +123,14 @@ class PortalChannel:
     async def _handle_user_message(self, payload: dict) -> None:
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
         if payload.get("command") == "interrupt":
-            delivered = bool(self.cancel_session and self.cancel_session(PORTAL_SESSION_ID))
-            logger.info("Interrupt requested for portal session (delivered=%s)", delivered)
+            delivered = bool(self.cancel_session and self.cancel_session(session_id))
+            logger.info(
+                "Interrupt requested for portal session %s (delivered=%s)",
+                session_id, delivered,
+            )
+            return
+        if payload.get("command") == "history_request":
+            await self._handle_history_request({"session_id": session_id})
             return
 
         decoded, err = _decode_attachments(payload.get("attachments"))
@@ -159,6 +165,7 @@ class PortalChannel:
         try:
             await self._connection.send(json.dumps({
                 "type": "history_snapshot",
+                "session_id": session_id,
                 "messages": messages,
             }))
         except websockets.exceptions.ConnectionClosed:
