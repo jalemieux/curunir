@@ -94,3 +94,25 @@ def test_user_message_with_no_agent_replies_offline(sync_client):
         reply = json.loads(ws.receive_text())
         assert reply["content"] == "Agent offline."
         assert reply["final"] is True
+
+
+def test_browser_frame_binds_session_on_routing_table(sync_client):
+    """First inbound frame with session_id should bind the ws → session
+    so that later agent traffic for that session lands on this socket."""
+    user = _create_user(sync_client, "bind@example.com")
+    cookie = auth.sign_session(user.id)
+    with sync_client.websocket_connect(
+        "/ws/browser",
+        cookies={auth.SESSION_COOKIE: cookie},
+        headers=GOOD_ORIGIN,
+    ) as ws:
+        _status = ws.receive_text()
+        ws.send_text(json.dumps({
+            "content": "hello",
+            "session_id": "tab-XYZ",
+        }))
+        # Offline reply (no agent connected) — proves the frame was processed.
+        _reply = ws.receive_text()
+        assert routing.browsers_for_session(user.id, "tab-XYZ"), (
+            "browser ws should be bound to session tab-XYZ"
+        )
