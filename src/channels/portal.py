@@ -29,7 +29,7 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
-PORTAL_SESSION_ID = "portal"  # Single user per container; no per-user partition needed.
+PORTAL_SESSION_ID = "portal"  # Legacy fallback when the portal omits session_id.
 
 _BACKOFF_INITIAL = 1.0
 _BACKOFF_MAX = 30.0
@@ -48,14 +48,14 @@ class PortalChannel:
         in_queue: asyncio.Queue,
         url: str,
         token: str,
-        history_provider: "callable[[], list[dict]] | None" = None,
+        history_provider: "callable[[str], list[dict]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
     ):
         self.in_queue = in_queue
         self.url = url
         self.token = token
-        self.history_provider = history_provider or (lambda: [])
+        self.history_provider = history_provider or (lambda _sid: [])
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -116,11 +116,12 @@ class PortalChannel:
             if mtype == "user_message":
                 await self._handle_user_message(msg.get("payload") or {})
             elif mtype == "history_request":
-                await self._handle_history_request()
+                await self._handle_history_request(msg.get("payload") or {})
             else:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
     async def _handle_user_message(self, payload: dict) -> None:
+        session_id = payload.get("session_id") or PORTAL_SESSION_ID
         if payload.get("command") == "interrupt":
             delivered = bool(self.cancel_session and self.cancel_session(PORTAL_SESSION_ID))
             logger.info("Interrupt requested for portal session (delivered=%s)", delivered)
@@ -131,29 +132,30 @@ class PortalChannel:
             await self.send(OutgoingMessage(
                 content=f"Attachment rejected: {err}",
                 channel="portal",
-                session_id=PORTAL_SESSION_ID,
+                session_id=session_id,
                 reply_address={},
                 final=True,
             ))
             return
 
         manifest = (
-            _stage_attachments(decoded, PORTAL_SESSION_ID, self.uploads_dir)
+            _stage_attachments(decoded, session_id, self.uploads_dir)
             if decoded else None
         )
         await self.in_queue.put(IncomingMessage(
             content=payload.get("content", ""),
             channel="portal",
-            session_id=PORTAL_SESSION_ID,
+            session_id=session_id,
             reply_address={},
             command=payload.get("command") or None,
             attachments=manifest,
         ))
 
-    async def _handle_history_request(self) -> None:
+    async def _handle_history_request(self, payload: dict) -> None:
         if self._connection is None:
             return
-        messages = self.history_provider()
+        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        messages = self.history_provider(session_id)
         try:
             await self._connection.send(json.dumps({
                 "type": "history_snapshot",
@@ -172,6 +174,7 @@ class PortalChannel:
         wrapped = {
             "type": "agent_message",
             "payload": {
+                "session_id": msg.session_id,
                 "content": msg.content,
                 "tool_calls": msg.tool_calls,
                 "final": msg.final,

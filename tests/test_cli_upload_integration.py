@@ -67,8 +67,12 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
                 assert isinstance(user_msg["content"], list)
                 assert any(b.get("type") == "image_url" for b in user_msg["content"])
 
-                uploads = tmp_path / "context" / "uploads" / "cli"
-                assert uploads.exists()
+                # Each connection now gets a server-minted session id, so
+                # uploads land under context/uploads/<session_id>/.
+                uploads_root = tmp_path / "context" / "uploads"
+                assert uploads_root.exists()
+                session_dirs = [d for d in uploads_root.iterdir() if d.is_dir()]
+                assert len(session_dirs) == 1
         finally:
             worker_task.cancel()
             server_task.cancel()
