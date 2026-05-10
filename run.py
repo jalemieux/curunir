@@ -133,6 +133,22 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     for att in attachments:
         mime = att["mime_type"]
         path = att["path"]
+        if mime == "text/x-vision-prepass":
+            with open(path, "r", encoding="utf-8") as f:
+                description = f.read()
+            original_mime = att.get("original_mime", "image/*")
+            vision_model = att.get("vision_model", "vision sidecar model")
+            blocks.append({
+                "type": "text",
+                "text": (
+                    f"[Image attachment: {att['filename']} ({original_mime}) — "
+                    f"the active model is text-only, so {vision_model} rendered "
+                    f"the image into the description below. Treat this as your "
+                    f"own observation of the image, not as text the user typed.]\n"
+                    f"{description}"
+                ),
+            })
+            continue
         if mime.startswith("image/"):
             with open(path, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
@@ -237,26 +253,35 @@ async def _vision_prepass(
             continue
 
         filename = att.get("filename", "image")
+        logger.info(
+            "Vision pre-pass: describing %s via %s",
+            filename, config.vision_model,
+        )
         try:
             description = await describe_image(
                 config.vision_model, att["path"], mime, text,
             )
+            logger.info(
+                "Vision pre-pass: %s described in %d chars",
+                filename, len(description),
+            )
         except Exception as exc:
             logger.warning(
-                "Vision pre-pass failed for %s: %s — falling back to size marker",
+                "Vision pre-pass failed for %s: %s — falling back to error marker",
                 filename, exc,
             )
             description = f"(vision model failed: {exc})"
-        replacement_text = f"Description: {description}"
 
         synth_path = att["path"] + ".vision.txt"
         with open(synth_path, "w", encoding="utf-8") as f:
-            f.write(replacement_text)
+            f.write(description)
         out.append({
             "filename": filename,
             "path": synth_path,
-            "mime_type": "text/plain",
-            "size": len(replacement_text.encode("utf-8")),
+            "mime_type": "text/x-vision-prepass",
+            "size": len(description.encode("utf-8")),
+            "vision_model": config.vision_model,
+            "original_mime": mime,
         })
     return out
 
@@ -272,6 +297,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
     while True:
         msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
+        if msg.attachments:
+            logger.info(
+                "Inbound attachments: %s",
+                [(a.get("filename"), a.get("mime_type"), a.get("size")) for a in msg.attachments],
+            )
 
         # Control commands: drop or summarize the session before it's gone,
         # then ack with an empty reply so the channel can render UI feedback.
