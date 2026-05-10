@@ -633,6 +633,18 @@ function interrupt() {
 }
 
 // === Attachments staging ===
+// Spreading a large Uint8Array into String.fromCharCode overflows the call
+// stack on anything bigger than ~100 KB, which is why image uploads silently
+// failed. Encode in 32 KB chunks instead.
+function bytesToBase64(bytes) {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 async function stageFile(file) {
   // Classify against the supported allowlist (mirrors the file-input `accept`).
   const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
@@ -661,7 +673,7 @@ async function stageFile(file) {
   if (totalAfter > MAX_TOTAL) { alert(`Total > 20 MB`); return; }
 
   const buf = await file.arrayBuffer();
-  const data = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const data = bytesToBase64(new Uint8Array(buf));
   staged.push({
     filename: file.name,
     mime_type: file.type || "application/octet-stream",
