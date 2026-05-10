@@ -99,15 +99,94 @@ main {
   padding: 14px;
   max-width: 720px; width: 100%; margin: 0 auto;
 }
-.msg { margin-bottom: 14px; line-height: 1.5; }
-.msg.user .role { color: var(--user); font-weight: bold; font-size: 11px; }
-.msg.user .body { white-space: pre-wrap; }
-.msg.assistant .role { color: var(--accent); font-weight: bold; font-size: 11px; }
-.msg.assistant .body code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.msg { margin-bottom: 14px; line-height: 1.6; }
+.msg .role { display: none; }
+.msg.user .body {
+  background: var(--bubble);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-left: 80px;
+  white-space: pre-wrap;
+}
+.msg.assistant .body { padding: 2px 0; }
+.msg.assistant .body > p { margin: 0 0 8px; }
+.msg.assistant .body > p:last-child { margin-bottom: 0; }
+.msg.assistant .body h1,
+.msg.assistant .body h2,
+.msg.assistant .body h3 {
+  font-weight: 600; margin: 18px 0 8px;
+}
+.msg.assistant .body h1 { font-size: 17px; }
+.msg.assistant .body h2 { font-size: 15px; }
+.msg.assistant .body h3 { font-size: 14px; }
+.msg.assistant .body > h1:first-child,
+.msg.assistant .body > h2:first-child,
+.msg.assistant .body > h3:first-child { margin-top: 4px; }
+.msg.assistant .body ul,
+.msg.assistant .body ol { padding-left: 20px; margin: 6px 0 10px; }
+.msg.assistant .body li { margin-bottom: 6px; }
+.msg.assistant .body table {
+  border-collapse: collapse; width: 100%;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+.msg.assistant .body th,
+.msg.assistant .body td {
+  padding: 8px 0;
+  text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.msg.assistant .body th {
+  font-weight: 600; font-size: 11px; color: var(--header-text);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-strong);
+}
+.msg.assistant .body td:first-child {
+  font-weight: 600; padding-right: 16px;
+}
+.msg.assistant .body code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
 .msg.assistant .body pre { background: var(--code-bg); border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.4; }
 .msg.assistant .body pre code { background: none; padding: 0; }
-.msg .tools { color: var(--tool); font-size: 11px; margin-top: 4px; }
-.msg .tool-line { padding: 2px 0; }
+.msg.assistant .body a { color: var(--accent); }
+.msg.assistant .body blockquote {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 12px; color: var(--header-text);
+  margin: 6px 0 10px;
+}
+
+/* Tool ticker — live-updating one-liner that expands into the full list. */
+.msg details.tools { margin: 6px 0; }
+.msg details.tools > summary { list-style: none; cursor: pointer; user-select: none; outline: none; }
+.msg details.tools > summary::-webkit-details-marker { display: none; }
+.msg details.tools .ticker {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11.5px; color: var(--header-text);
+}
+.msg details.tools .ticker-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); opacity: 0.6; flex-shrink: 0;
+}
+.msg details.tools .ticker-last {
+  color: var(--tool); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.msg details.tools .ticker-count {
+  color: var(--header-text); font-size: 10.5px;
+  padding: 1px 6px; background: var(--code-bg); border-radius: 4px; flex-shrink: 0;
+}
+.msg details.tools[open] .ticker-last { display: none; }
+.msg details.tools .tool-list {
+  margin: 6px 0 4px 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11.5px; color: var(--tool); line-height: 1.7;
+}
+.msg details.tools .tool-line {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .system-msg { color: var(--system-text); }
 
 .attachment {
@@ -345,22 +424,41 @@ function renderHistoryEntry(m) {
   } else if (m.role === "assistant") {
     const el = appendMessage("assistant");
     el.querySelector(".body").innerHTML = marked.parse(m.content || "");
-    if (m.tool_calls && m.tool_calls.length) {
-      const tools = document.createElement("div");
-      tools.className = "tools";
-      for (const t of m.tool_calls) {
-        const line = document.createElement("div");
-        line.className = "tool-line";
-        line.textContent = t;
-        tools.appendChild(line);
-      }
-      el.appendChild(tools);
-    }
+    appendToolCalls(el, m.tool_calls);
     renderAttachments(el, m.attachments);
   } else if (m.role === "system") {
     const el = appendMessage("assistant");
     el.querySelector(".body").innerHTML = `<em class="system-msg">${m.content}</em>`;
   }
+}
+
+// Builds (once) and updates the tool ticker on a message: a collapsed one-liner
+// showing the most recent tool call + a count badge, expandable to the full list.
+function appendToolCalls(msgEl, calls) {
+  if (!calls || !calls.length) return;
+  let tools = msgEl.querySelector("details.tools");
+  if (!tools) {
+    tools = document.createElement("details");
+    tools.className = "tools";
+    tools.innerHTML =
+      '<summary><div class="ticker">' +
+      '<span class="ticker-dot"></span>' +
+      '<span class="ticker-last"></span>' +
+      '<span class="ticker-count"></span>' +
+      '</div></summary>' +
+      '<div class="tool-list"></div>';
+    msgEl.appendChild(tools);
+  }
+  const list = tools.querySelector(".tool-list");
+  for (const t of calls) {
+    const line = document.createElement("div");
+    line.className = "tool-line";
+    line.textContent = t;
+    list.appendChild(line);
+  }
+  const total = list.children.length;
+  tools.querySelector(".ticker-count").textContent = total === 1 ? "1 tool" : `${total} tools`;
+  tools.querySelector(".ticker-last").textContent = list.lastElementChild.textContent;
 }
 
 function renderAgentChunk(m) {
@@ -375,20 +473,7 @@ function renderAgentChunk(m) {
     body.dataset.raw = m.content;
     body.innerHTML = marked.parse(m.content);
   }
-  if (m.tool_calls && m.tool_calls.length) {
-    let tools = inProgressMsg.querySelector(".tools");
-    if (!tools) {
-      tools = document.createElement("div");
-      tools.className = "tools";
-      inProgressMsg.appendChild(tools);
-    }
-    for (const t of m.tool_calls) {
-      const line = document.createElement("div");
-      line.className = "tool-line";
-      line.textContent = t;
-      tools.appendChild(line);
-    }
-  }
+  appendToolCalls(inProgressMsg, m.tool_calls);
   renderAttachments(inProgressMsg, m.attachments);
   if (m.final) {
     inProgressMsg.classList.remove("stopping");
