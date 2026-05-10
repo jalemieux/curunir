@@ -217,9 +217,12 @@ async def _vision_prepass(
     needed converting.
 
     Each replaced image becomes a synthesized ``text/plain`` attachment whose
-    file contents are the description (or a fallback marker). The formatter's
+    file contents are the description from the vision model. The formatter's
     existing text-file branch wraps it with ``[Attachment: <filename>]`` so
     the main model still sees the filename context.
+
+    ``config.vision_model`` is required when the main model lacks vision —
+    boot raises if it's unset, so this function trusts it's present here.
     """
     if config.main_model_supports_vision or not attachments:
         return attachments
@@ -234,23 +237,17 @@ async def _vision_prepass(
             continue
 
         filename = att.get("filename", "image")
-        if config.vision_model:
-            try:
-                description = await describe_image(
-                    config.vision_model, att["path"], mime, text,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Vision pre-pass failed for %s: %s — falling back to size marker",
-                    filename, exc,
-                )
-                description = f"(vision model failed: {exc})"
-            replacement_text = f"Description: {description}"
-        else:
-            size_kb = max(1, att.get("size", 0) // 1024)
-            replacement_text = (
-                f"(image, {size_kb}KB) — no vision model configured"
+        try:
+            description = await describe_image(
+                config.vision_model, att["path"], mime, text,
             )
+        except Exception as exc:
+            logger.warning(
+                "Vision pre-pass failed for %s: %s — falling back to size marker",
+                filename, exc,
+            )
+            description = f"(vision model failed: {exc})"
+        replacement_text = f"Description: {description}"
 
         synth_path = att["path"] + ".vision.txt"
         with open(synth_path, "w", encoding="utf-8") as f:
@@ -265,11 +262,19 @@ async def _vision_prepass(
 
 
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
-    """Bridge between the message queues and the agent loop."""
+    """Bridge between the message queues and the agent loop.
+
+    One IncomingMessage per iteration: handle control commands inline, or
+    prep its content + attachments, run the agent, and emit the reply on
+    out_queue. Streaming deltas and tool-call notifications go out mid-turn
+    via the on_text_delta / on_tool_call hooks.
+    """
     while True:
         msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
+        # Control commands: drop or summarize the session before it's gone,
+        # then ack with an empty reply so the channel can render UI feedback.
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
             archive_path = agent.session_archives.pop(msg.session_id, None)
@@ -295,6 +300,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
             continue
 
+        # Streaming hooks: the agent loop fires these mid-turn so the user
+        # sees tool activity and partial text without waiting for the final
+        # response. Each goes out as a non-final OutgoingMessage.
         async def on_tool_call(name: str, args_str: str):
             await out_queue.put(OutgoingMessage(
                 content="",
@@ -315,10 +323,15 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
+        # Inbound prep: route images through VISION_MODEL when the main model
+        # is text-only (no-op when it isn't), then format into LiteLLM content.
         msg_attachments = await _vision_prepass(
             agent.config, msg.content, msg.attachments,
         )
         content = build_multimodal_content(msg.content, msg_attachments)
+
+        # Outbound sinks the agent fills during the turn: any files it wants
+        # to attach to its reply, and a metadata bag for workflow/stats.
         attachments = []
         metadata: dict = {}
 
@@ -333,12 +346,14 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
 
-        # Fetch llama.cpp server stats if using a local API base
+        # llama.cpp exposes per-request server stats over HTTP — fold them in
+        # alongside the agent's own stats so the UI can show both.
         if agent.config.api_base and metadata.get("stats"):
             llama_stats = await _fetch_llamacpp_stats(agent.config.api_base)
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
+        # Final reply: routed back to the originating channel by route_outbound.
         await out_queue.put(OutgoingMessage(
             content=text,
             channel=msg.channel,
@@ -436,18 +451,19 @@ async def main():
     )
     config.main_model_supports_vision = _detect_vision_support(config.model)
     if not config.main_model_supports_vision:
-        if config.vision_model:
-            logger.info(
-                "Main model %s lacks vision support; routing image attachments "
-                "through VISION_MODEL=%s.",
-                config.model, config.vision_model,
+        if not config.vision_model:
+            raise RuntimeError(
+                f"Main model {config.model} lacks vision support and no "
+                "VISION_MODEL is configured. Set VISION_MODEL in the "
+                "environment to a vision-capable model (e.g. "
+                "openai/gpt-4o-mini) or switch MODEL to one that supports "
+                "images."
             )
-        else:
-            logger.info(
-                "Main model %s lacks vision support and no VISION_MODEL is "
-                "configured; image attachments will be replaced with a text marker.",
-                config.model,
-            )
+        logger.info(
+            "Main model %s lacks vision support; routing image attachments "
+            "through VISION_MODEL=%s.",
+            config.model, config.vision_model,
+        )
 
     usage_store = UsageStore(config.usage_db)
     agent = Agent(config, usage_store=usage_store)
