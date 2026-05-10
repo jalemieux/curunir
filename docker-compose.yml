@@ -60,6 +60,19 @@ services:
       # read agent activity from inside the container. RotatingFileHandler
       # in run.py caps it at 10MB × 3 backups.
       LOG_FILE: ${LOG_FILE:-/app/workspace/curunir.log}
+      # WebSocket CLI listener. Default 0.0.0.0 so `python cli.py` on the
+      # host can reach the container via the published port. Set WS_HOST=""
+      # in .env to disable the listener entirely (portal-only deployments).
+      WS_HOST: ${WS_HOST:-0.0.0.0}
+      # Bearer token required from CLI clients on the very first frame.
+      # Mandatory whenever WS_HOST is non-loopback — startup fails fast
+      # otherwise. The seeded value is an obvious dev placeholder; replace
+      # it via .env (and pass --token / CURUNIR_WS_TOKEN to cli.py).
+      WS_AUTH_TOKEN: ${WS_AUTH_TOKEN:-dev-ws-token-change-me}
+    # WARNING: Publishing 8765 exposes the agent listener on the host
+    # network. Even with WS_AUTH_TOKEN, anyone reachable to the host port
+    # can attempt connections. Drop this `ports:` entry for portal-only
+    # deployments, or firewall it to trusted addresses.
     ports:
       - "8765:8765"
     volumes:

@@ -55,7 +55,7 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 
 ### Channels (`src/channels/`)
 
-- **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`.
+- **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Server-issued per-connection session id (resumable via the hello frame). When `WS_AUTH_TOKEN` is set, the very first inbound frame must be `{"type": "hello", "token": "..."}` (compared with `hmac.compare_digest`); pre-auth rejections close 1008 and don't enqueue an `extract`. `WS_HOST=""` disables the listener. Startup refuses to bind a non-loopback host without a token.
 - **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
 - **Portal** (`portal.py`): Outbound WebSocket to a hosted portal (`CURUNIR_PORTAL_URL` + `CURUNIR_PORTAL_TOKEN`). Container dials portal; portal multiplexes browser ↔ container. Session ID is `"portal"`. See `portal/` directory for the portal service.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
@@ -131,5 +131,9 @@ See `.env.example` for full list. Critical ones:
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
+- `WS_HOST` — bind interface for the WebSocket CLI listener (default `0.0.0.0`; set to `""` to disable the listener entirely)
+- `WS_AUTH_TOKEN` — bearer token clients must present in their first hello frame; mandatory whenever `WS_HOST` is non-loopback
+- `WS_ALLOWED_ORIGINS` — comma-separated browser Origin allowlist (default empty: only no-Origin clients accepted when auth is on)
+- `CURUNIR_WS_TOKEN` — CLI client side; sent as the auth token in the first hello frame (also `cli.py --token`)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
 - `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.
