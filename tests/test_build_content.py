@@ -292,32 +292,18 @@ async def test_text_only_main_with_vision_model_replaces_image_with_description(
 
 
 @pytest.mark.asyncio
-async def test_text_only_main_no_vision_model_uses_fallback_text(image_file):
-    """Text-only main + no vision model: image becomes a fallback text
-    attachment naming the filename and size; no image_url block emitted."""
-    in_q: asyncio.Queue = asyncio.Queue()
-    out_q: asyncio.Queue = asyncio.Queue()
-    captured: dict = {}
+async def test_text_only_main_no_vision_model_boot_raises(monkeypatch):
+    """At boot, if the main model lacks vision and no VISION_MODEL is set,
+    main() raises rather than silently degrading images to text markers."""
+    import run as run_module
 
-    msg = IncomingMessage(
-        content="describe this", channel="cli", session_id="cli", reply_address={},
-        attachments=[_att(image_file, "image/png")],
-    )
-    await in_q.put(msg)
+    monkeypatch.setattr(run_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(run_module, "_detect_vision_support", lambda m: False)
+    monkeypatch.setenv("MODEL", "text-only/model")
+    monkeypatch.delenv("VISION_MODEL", raising=False)
 
-    fake = _fake_agent(captured, supports_vision=False, vision_model=None)
-    with patch("run.describe_image", new_callable=AsyncMock) as mock_desc:
-        await _run_worker_once(in_q, out_q, fake)
-
-    mock_desc.assert_not_awaited()
-
-    content = captured["content"]
-    assert isinstance(content, list)
-    assert all(b["type"] != "image_url" for b in content)
-    fallback = next(b for b in content if "img.png" in b.get("text", ""))
-    assert "no vision model configured" in fallback["text"]
-    # Filename and size both surfaced
-    assert "img.png" in fallback["text"]
+    with pytest.raises(RuntimeError, match="VISION_MODEL"):
+        await run_module.main()
 
 
 @pytest.mark.asyncio
