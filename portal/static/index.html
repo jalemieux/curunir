@@ -193,10 +193,12 @@ main {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: 4px;
   padding: 3px 8px; font-size: 11px; color: var(--accent);
-  margin-right: 4px; margin-top: 4px;
 }
 .attachment.downloadable { cursor: pointer; }
 .attachment.downloadable:hover { color: var(--hover-fg); border-color: var(--accent); }
+.attachments { display: flex; flex-wrap: wrap; gap: 4px; }
+.msg.user .body .attachments { margin-bottom: 6px; }
+.msg.assistant .attachments { margin-top: 6px; }
 
 footer {
   padding: 10px 14px 14px; border-top: 1px solid var(--border);
@@ -209,13 +211,29 @@ footer {
 .staged-list .attachment:hover { color: #f87171; }
 
 #composer {
+  position: relative;
   background: var(--bubble);
   border: 1px solid var(--border-strong);
   border-radius: 14px;
   padding: 10px 10px 8px 14px;
   display: flex; flex-direction: column; gap: 6px;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 #composer:focus-within { border-color: var(--accent); }
+body.dragging #composer {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bubble));
+}
+.drop-hint {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  border-radius: 14px;
+  color: var(--accent); font-size: 13px; font-weight: 600;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+body.dragging .drop-hint { display: flex; }
 #input {
   background: transparent; color: var(--fg);
   border: 0; outline: 0; resize: none; width: 100%;
@@ -284,9 +302,10 @@ footer {
     <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
     <div class="composer-row">
       <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
-      <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
+      <span class="composer-hint">Enter to send · Shift+Enter for newline · drop or paste files to attach</span>
       <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
     </div>
+    <div class="drop-hint">Drop files to attach</div>
   </div>
 </footer>
 
@@ -502,6 +521,7 @@ function renderAgentChunk(m) {
 function renderAttachments(parent, atts) {
   if (!atts || !atts.length) return;
   const wrap = document.createElement("div");
+  wrap.className = "attachments";
   for (const a of atts) {
     const chip = document.createElement("span");
     chip.className = "attachment";
@@ -513,7 +533,15 @@ function renderAttachments(parent, atts) {
     }
     wrap.appendChild(chip);
   }
-  parent.appendChild(wrap);
+  // User attachments live inside the bubble (above the text) so they read as
+  // part of the message, not orphaned beneath it. Assistant artifacts stay
+  // outside the body since the assistant has no bubble background.
+  if (parent.classList && parent.classList.contains("user")) {
+    const body = parent.querySelector(".body");
+    body.insertBefore(wrap, body.firstChild);
+  } else {
+    parent.appendChild(wrap);
+  }
 }
 
 function downloadAttachment(a) {
@@ -700,6 +728,53 @@ fileInput.onchange = async () => {
   for (const f of fileInput.files) await stageFile(f);
   fileInput.value = "";
 };
+
+// === Drag & drop anywhere on the page ===
+// dragenter/leave fire for every child boundary, so we count depth instead of
+// trying to track which element the cursor is over.
+let dragDepth = 0;
+function isFileDrag(e) {
+  return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+}
+document.addEventListener("dragenter", (e) => {
+  if (!isFileDrag(e)) return;
+  dragDepth++;
+  document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", (e) => {
+  if (!isFileDrag(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove("dragging");
+});
+document.addEventListener("dragover", (e) => {
+  // Required to allow `drop` to fire — without preventDefault the browser
+  // refuses the drop and opens the file instead.
+  if (isFileDrag(e)) e.preventDefault();
+});
+document.addEventListener("drop", async (e) => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  for (const f of e.dataTransfer.files) await stageFile(f);
+  inputEl.focus();
+});
+
+// Paste an image (or any file) from the clipboard into the composer. Only
+// fires when focus is in the textarea, which is what users expect.
+inputEl.addEventListener("paste", async (e) => {
+  const items = e.clipboardData?.items || [];
+  const files = [];
+  for (const it of items) {
+    if (it.kind === "file") {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) await stageFile(f);
+});
 
 connect();
 </script>
