@@ -99,6 +99,16 @@ python run.py               # starts CLI channel
 docker compose up --build
 ```
 
+#### WebSocket security
+
+The WebSocket CLI listener is the entry point for `cli.py`. The standard Docker setup runs the agent inside a container while the CLI runs on the host, so the listener cannot bind to loopback only — it has to accept off-container traffic. Treat that listener as remotely reachable and authenticate it accordingly.
+
+- Set `WS_AUTH_TOKEN` (server) and pass `--token` / `CURUNIR_WS_TOKEN` (client) before exposing the agent beyond `localhost`. Startup refuses to bind a non-loopback host without a token.
+- The compose file seeds a placeholder token (`dev-ws-token-change-me`) so a fresh checkout boots cleanly. Replace it via `.env` before running anywhere shared. The agent logs a warning when the seeded value is in use.
+- Set `WS_HOST=""` to disable the listener entirely; pair with the portal channel (which dials *out* over TLS) for remote access.
+- Do not publish port 8765 publicly without firewalling. The shared-secret auth is a low bar: the token is a bearer token sniffable on cleartext WS — terminate TLS at a reverse proxy if the network isn't trusted.
+- `WS_AUTH_TOKEN` and `CURUNIR_PORTAL_TOKEN` are independent; one authenticates inbound CLI connections, the other authenticates the agent *to* the portal.
+
 ### CLI controls
 
 | Input | Effect |

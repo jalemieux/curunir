@@ -256,8 +256,33 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
             delay = min(delay * 2, _BACKOFF_MAX)
 
 
+async def _send_auth_hello(
+    ws: websockets.ClientConnection,
+    token: str | None,
+    session_id: str | None,
+) -> None:
+    """Send the initial hello frame, including the auth token if configured.
+
+    Servers with auth disabled ignore extra fields, so this is safe to call
+    unconditionally. Sent before any other frame so a token-protected server
+    sees auth on the very first inbound message.
+    """
+    if token is None and session_id is None:
+        return
+    payload: dict = {"type": "hello"}
+    if token is not None:
+        payload["token"] = token
+    if session_id is not None:
+        payload["session_id"] = session_id
+    try:
+        await ws.send(json.dumps(payload))
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
 async def run(host: str, port: int, console: Console | None = None,
-              download_dir: str = _DEFAULT_DOWNLOAD_DIR) -> None:
+              download_dir: str = _DEFAULT_DOWNLOAD_DIR,
+              token: str | None = None) -> None:
     console = console or Console()
     uri = f"ws://{host}:{port}"
 
@@ -527,17 +552,11 @@ async def run(host: str, port: int, console: Console | None = None,
         # Launch output reader for the current connection
         out_task = asyncio.create_task(output_loop(ws))
 
-        # On reconnect (we already hold a session id from the prior welcome)
-        # ask the server to resume that same session. On a fresh connect this
-        # is a no-op — the server mints a new id and sends it back. Older
-        # servers without hello support ignore this frame.
-        if session_id is not None:
-            try:
-                await ws.send(json.dumps({
-                    "type": "hello", "session_id": session_id,
-                }))
-            except websockets.exceptions.ConnectionClosed:
-                pass
+        # First frame: combined auth + (optional) session resume hello. Sent
+        # before any other traffic so token-protected servers see auth on the
+        # very first inbound message. On a fresh connect with no token this
+        # is a no-op; older servers without hello support ignore it.
+        await _send_auth_hello(ws, token, session_id)
 
         # Give the server a brief window to send its welcome before we show
         # the prompt, so "model: …" renders above the input line. If no
@@ -662,7 +681,9 @@ async def run(host: str, port: int, console: Console | None = None,
             return
 
         # If we reach here, the connection dropped while in the input loop or
-        # the output task finished unexpectedly. Attempt reconnection.
+        # the output task finished unexpectedly. Attempt reconnection — unless
+        # the server kicked us with 1008 (unauthorized), in which case
+        # reconnecting will just loop with the same bad token.
         out_task.cancel()
         try:
             await out_task
@@ -671,6 +692,19 @@ async def run(host: str, port: int, console: Console | None = None,
 
         stop_spinner()
         ready.set()
+
+        close_code = getattr(ws, "close_code", None)
+        if close_code == 1008:
+            console.print(
+                f"[red]Server closed connection: unauthorized "
+                f"(close code 1008). Set --token or CURUNIR_WS_TOKEN.[/red]"
+            )
+            try:
+                await ws.close()
+            except Exception:
+                pass
+            return
+
         console.print(f"[yellow]Disconnected from {uri}. Reconnecting…[/yellow]")
         try:
             await ws.close()
@@ -684,10 +718,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Curunir WebSocket CLI client")
     parser.add_argument("--host", default="localhost", help="Server host (default: localhost)")
     parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
+    parser.add_argument(
+        "--token", default=os.environ.get("CURUNIR_WS_TOKEN") or None,
+        help="Auth token sent in the initial hello frame "
+             "(env: CURUNIR_WS_TOKEN). Required when the server sets WS_AUTH_TOKEN.",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(run(args.host, args.port))
+        asyncio.run(run(args.host, args.port, token=args.token))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 
