@@ -26,6 +26,25 @@ class TestAgentHandle:
             result = await agent.handle("hi", "test-session")
         assert result == "Hello!"
 
+    async def test_text_only_response_exits_after_one_iteration(self, agent):
+        """A text-only response must exit the agent loop immediately.
+
+        Regression for the loop-exit bug where a usage_store refactor moved
+        the `if response.text: return` block outside the for-loop, causing
+        the agent to re-call the LLM up to max_iterations times (and stream
+        the same answer N times to the client) before returning
+        'Iteration limit reached.'
+        """
+        mock_response = LLMResponse(text="done", tool_calls=None)
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_call:
+            result = await agent.handle("hi", "s1")
+        assert result == "done"
+        assert mock_call.call_count == 1
+
     async def test_session_persistence(self, agent):
         response1 = LLMResponse(text="First", tool_calls=None)
         response2 = LLMResponse(text="Second", tool_calls=None)
