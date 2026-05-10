@@ -363,11 +363,27 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "0.0.0.0")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws = WebSocketChannel(
-        in_queue, host=ws_host, port=ws_port, model=config.model,
-        cancel_session=agent.request_cancel,
-    )
-    channels["cli"] = ws
+    ws_token = os.environ.get("WS_AUTH_TOKEN", "").strip() or None
+    ws_allowed_origins = [
+        o.strip()
+        for o in os.environ.get("WS_ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
+    if ws_host == "":
+        logger.info("WS_HOST is empty; skipping WebSocket channel registration")
+    else:
+        if ws_token == "dev-ws-token-change-me":
+            logger.warning(
+                "WS_AUTH_TOKEN is set to the seeded dev value; replace it before "
+                "exposing the agent beyond localhost",
+            )
+        ws = WebSocketChannel(
+            in_queue, host=ws_host, port=ws_port, model=config.model,
+            cancel_session=agent.request_cancel,
+            auth_token=ws_token,
+            allowed_origins=ws_allowed_origins,
+        )
+        channels["cli"] = ws
 
     # Email channel (conditional)
     email_config = EmailChannelConfig(

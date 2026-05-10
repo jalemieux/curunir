@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -17,6 +18,10 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
+# Hosts that don't expose the listener beyond the local machine. Used by the
+# startup guard to decide whether WS_AUTH_TOKEN is mandatory.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
 
 class WebSocketChannel:
     def __init__(
@@ -27,6 +32,8 @@ class WebSocketChannel:
         model: str = "",
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
+        auth_token: str | None = None,
+        allowed_origins: list[str] | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
@@ -36,16 +43,42 @@ class WebSocketChannel:
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
         self._connection: websockets.ServerConnection | None = None
+        self.auth_token = auth_token or None  # treat empty string as unset
+        self.allowed_origins = allowed_origins or []
 
     async def start(self) -> None:
+        if self.host == "":
+            logger.info(
+                "WebSocket channel disabled (WS_HOST is empty); not binding listener"
+            )
+            return
+
+        if self.auth_token is None and self.host not in _LOOPBACK_HOSTS:
+            raise RuntimeError(
+                "WS_HOST=%s requires WS_AUTH_TOKEN to be set "
+                "(refusing to bind an unauthenticated listener to a non-loopback "
+                "interface)" % self.host
+            )
+
+        # When auth is on, also enforce an Origin header check at the upgrade
+        # layer. `None` in the list means "no Origin header" — CLI clients
+        # don't send one, so they remain accepted by default.
+        serve_kwargs: dict = {}
+        if self.auth_token is not None:
+            serve_kwargs["origins"] = [None, *self.allowed_origins]
+
         try:
             # max_size accommodates the 20 MB attachment batch cap after base64
             # expansion (~27 MB on the wire), plus headroom for the JSON envelope.
             async with websockets.serve(
                 self._handle_connection, self.host, self.port,
                 max_size=32 * 1024 * 1024,
+                **serve_kwargs,
             ) as server:
-                logger.info("WebSocket server listening on %s:%d", self.host, self.port)
+                logger.info(
+                    "WebSocket server listening on %s:%d (auth=%s)",
+                    self.host, self.port, "on" if self.auth_token else "off",
+                )
                 await asyncio.get_running_loop().create_future()
         except asyncio.CancelledError:
             logger.info("WebSocket server shutting down")
@@ -68,6 +101,12 @@ class WebSocketChannel:
             await websocket.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
             pass
+
+    def _token_ok(self, candidate) -> bool:
+        """Constant-time compare of *candidate* to ``self.auth_token``."""
+        if not isinstance(candidate, str):
+            return False
+        return hmac.compare_digest(candidate, self.auth_token or "")
 
     async def _rekey(
         self,
@@ -102,9 +141,75 @@ class WebSocketChannel:
         self._connections[new_sid] = websocket
         return new_sid
 
+    async def _authenticate(
+        self, websocket: websockets.ServerConnection,
+    ) -> tuple[bool, str | None]:
+        """Read and validate the client's auth-hello frame.
+
+        Returns ``(ok, requested_session_id)``. On failure the socket is closed
+        with code 1008 and ``ok`` is False; the caller must NOT register a
+        session or enqueue any messages so unauthenticated traffic doesn't
+        leak into the agent or the memory extractor.
+        """
+        remote = websocket.remote_address
+        try:
+            raw = await websocket.recv()
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("Client from %s disconnected before auth", remote)
+            return False, None
+
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            data = None
+
+        if not isinstance(data, dict) or data.get("type") != "hello":
+            logger.warning(
+                "Rejected unauthenticated client from %s: missing hello frame",
+                remote,
+            )
+            await websocket.close(1008, "unauthorized")
+            return False, None
+
+        if not self._token_ok(data.get("token")):
+            logger.warning(
+                "Rejected unauthenticated client from %s: bad or missing token",
+                remote,
+            )
+            await websocket.close(1008, "unauthorized")
+            return False, None
+
+        sid = data.get("session_id")
+        return True, sid if isinstance(sid, str) and sid else None
+
     async def _handle_connection(self, websocket: websockets.ServerConnection) -> None:
         remote = websocket.remote_address
-        session_id = uuid.uuid4().hex
+
+        requested_sid: str | None = None
+        if self.auth_token is not None:
+            ok, requested_sid = await self._authenticate(websocket)
+            if not ok:
+                # No session was registered and no extract should be enqueued —
+                # unauthorized scanners must not churn the memory extractor.
+                return
+
+        if requested_sid is not None:
+            # Honor the resume request from the auth-hello frame. If a stale
+            # connection holds this id, evict it before claiming ownership.
+            existing = self._connections.get(requested_sid)
+            if existing is not None and existing is not websocket:
+                logger.info(
+                    "Replacing stale connection for session %s with new client",
+                    requested_sid,
+                )
+                try:
+                    await existing.close(1008, "Replaced by new connection")
+                except Exception:
+                    pass
+            session_id = requested_sid
+        else:
+            session_id = uuid.uuid4().hex
+
         self._connections[session_id] = websocket
         logger.info("Client connected from %s (session %s)", remote, session_id)
 
@@ -119,6 +224,17 @@ class WebSocketChannel:
                     continue
 
                 if isinstance(data, dict) and data.get("type") == "hello":
+                    # Mid-session rekey must re-validate auth so a hijacked
+                    # open socket cannot be re-purposed onto a different sid.
+                    if self.auth_token is not None and not self._token_ok(
+                        data.get("token")
+                    ):
+                        logger.warning(
+                            "Rejected mid-session rekey from %s: bad or missing token",
+                            remote,
+                        )
+                        await websocket.close(1008, "unauthorized")
+                        return
                     new_sid = await self._rekey(
                         websocket, session_id, data.get("session_id"),
                     )

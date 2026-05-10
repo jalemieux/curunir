@@ -699,3 +699,251 @@ async def test_interrupt_command_routes_to_cancel_session_callback():
         assert q.empty()
     finally:
         await _stop_channel(task)
+
+
+# ---------------------------------------------------------------------------
+# Tests: WebSocket auth + bind safety (issue #92)
+# ---------------------------------------------------------------------------
+
+
+class TestWsAuthAndBind:
+    @pytest.mark.asyncio
+    async def test_empty_host_disables_listener(self):
+        """host="" returns immediately without binding a server."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host="", port=TEST_PORT + 30)
+        # start() must complete (or be cancellable) without raising.
+        task = asyncio.create_task(ch.start())
+        # Give it a beat to either bind (it shouldn't) or return (it should).
+        await asyncio.sleep(0.05)
+        # Port must NOT be listening — a connect attempt should fail.
+        with pytest.raises((OSError, websockets.exceptions.WebSocketException)):
+            await asyncio.wait_for(
+                websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 30}"),
+                timeout=0.5,
+            )
+        await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_non_loopback_host_without_token_raises_runtime_error(self):
+        """Binding to 0.0.0.0 without auth_token must fail-fast at start()."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host="0.0.0.0", port=TEST_PORT + 31)
+        with pytest.raises(RuntimeError, match="WS_AUTH_TOKEN"):
+            await ch.start()
+
+    @pytest.mark.asyncio
+    async def test_loopback_without_token_still_works(self):
+        """127.0.0.1 with no token preserves existing dev behavior."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(q, host="127.0.0.1", port=TEST_PORT + 32)
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(f"ws://127.0.0.1:{TEST_PORT + 32}") as ws:
+                await _read_hello(ws)
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_correct_token_allows_connection(self):
+        """Client that sends correct hello-with-token proceeds normally."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 33, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            async with websockets.connect(
+                f"ws://{TEST_HOST}:{TEST_PORT + 33}"
+            ) as ws:
+                # First frame must be the auth hello.
+                await ws.send(json.dumps({"type": "hello", "token": "s3cret"}))
+                # Server replies with welcome hello carrying session id.
+                sid = await _read_hello(ws)
+                # Now we can send a normal message.
+                await ws.send(json.dumps({"content": "hi", "command": None}))
+                await asyncio.sleep(0.05)
+            msgs = []
+            while not q.empty():
+                msgs.append(q.get_nowait())
+            user_msgs = [m for m in msgs if m.command != "extract"]
+            assert len(user_msgs) == 1
+            assert user_msgs[0].content == "hi"
+            assert user_msgs[0].session_id == sid
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_wrong_token_closes_with_1008(self):
+        """Client sending wrong token gets close 1008 unauthorized."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 34, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 34}")
+            await ws.send(json.dumps({"type": "hello", "token": "wrong"}))
+            with pytest.raises(websockets.exceptions.ConnectionClosed) as exc:
+                await asyncio.wait_for(ws.recv(), timeout=1.0)
+            assert exc.value.code == 1008
+            await asyncio.sleep(0.05)
+            # Pre-auth rejection must NOT enqueue an 'extract' message.
+            assert q.empty()
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_missing_token_first_frame_closes_with_1008(self):
+        """Any non-hello first frame is rejected when auth is on."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 35, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 35}")
+            # Send a normal content message instead of hello-with-token.
+            await ws.send(json.dumps({"content": "no auth", "command": None}))
+            with pytest.raises(websockets.exceptions.ConnectionClosed) as exc:
+                await asyncio.wait_for(ws.recv(), timeout=1.0)
+            assert exc.value.code == 1008
+            await asyncio.sleep(0.05)
+            assert q.empty()
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_hello_without_token_field_closes_with_1008(self):
+        """A hello frame missing the token field is rejected when auth is on."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 36, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 36}")
+            await ws.send(json.dumps({"type": "hello"}))  # no token
+            with pytest.raises(websockets.exceptions.ConnectionClosed) as exc:
+                await asyncio.wait_for(ws.recv(), timeout=1.0)
+            assert exc.value.code == 1008
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_mid_session_rekey_without_token_rejected(self):
+        """When auth is on, a mid-session hello frame must still carry the token."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 37, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 37}")
+            # Auth and pick up a session id.
+            await ws.send(json.dumps({"type": "hello", "token": "s3cret"}))
+            sid = await _read_hello(ws)
+            # Try to rekey with a hello that omits the token.
+            await ws.send(json.dumps({
+                "type": "hello", "session_id": "hijacked-sid",
+            }))
+            with pytest.raises(websockets.exceptions.ConnectionClosed) as exc:
+                await asyncio.wait_for(ws.recv(), timeout=1.0)
+            assert exc.value.code == 1008
+            # Original sid is gone too — the connection died.
+            await asyncio.sleep(0.05)
+            assert "hijacked-sid" not in ch._connections
+            # Drain the queue: the only message should be the extract for the
+            # authenticated session that just disconnected (no 'hijacked-sid').
+            extracts = []
+            while not q.empty():
+                m = q.get_nowait()
+                if m.command == "extract":
+                    extracts.append(m.session_id)
+            assert sid in extracts
+            assert "hijacked-sid" not in extracts
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_mid_session_rekey_with_valid_token(self):
+        """A hello-rekey carrying the correct token should succeed."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 38, auth_token="s3cret",
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 38}")
+            await ws.send(json.dumps({"type": "hello", "token": "s3cret"}))
+            await _read_hello(ws)
+            # Resume a prior session id, with the token.
+            await ws.send(json.dumps({
+                "type": "hello", "token": "s3cret",
+                "session_id": "resumed-sid",
+            }))
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["type"] == "hello"
+            assert data["session_id"] == "resumed-sid"
+            await ws.close()
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_origin_header_rejected_when_not_in_allowlist(self):
+        """When auth is on, an Origin header outside the allowlist is rejected."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 39, auth_token="s3cret",
+            allowed_origins=[],
+        )
+        task = await _start_channel(ch)
+        try:
+            with pytest.raises(websockets.exceptions.InvalidStatus):
+                await asyncio.wait_for(
+                    websockets.connect(
+                        f"ws://{TEST_HOST}:{TEST_PORT + 39}",
+                        origin="http://evil.example",
+                    ),
+                    timeout=1.0,
+                )
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_no_origin_accepted_when_auth_on(self):
+        """CLI clients (no Origin header) are accepted when auth is on."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 40, auth_token="s3cret",
+            allowed_origins=[],
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 40}")
+            await ws.send(json.dumps({"type": "hello", "token": "s3cret"}))
+            await _read_hello(ws)
+            await ws.close()
+        finally:
+            await _stop_channel(task)
+
+    @pytest.mark.asyncio
+    async def test_origin_in_allowlist_accepted(self):
+        """An Origin in WS_ALLOWED_ORIGINS is accepted even with auth on."""
+        q = asyncio.Queue()
+        ch = WebSocketChannel(
+            q, host=TEST_HOST, port=TEST_PORT + 41, auth_token="s3cret",
+            allowed_origins=["http://ok.example"],
+        )
+        task = await _start_channel(ch)
+        try:
+            ws = await websockets.connect(
+                f"ws://{TEST_HOST}:{TEST_PORT + 41}",
+                origin="http://ok.example",
+            )
+            await ws.send(json.dumps({"type": "hello", "token": "s3cret"}))
+            await _read_hello(ws)
+            await ws.close()
+        finally:
+            await _stop_channel(task)
