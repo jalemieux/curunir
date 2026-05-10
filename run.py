@@ -297,22 +297,22 @@ _LOG_BACKUP_COUNT = 3
 def _configure_logging(log_file: str | None) -> None:
     """Configure root logging.
 
-    With ``log_file`` set, attach a rotating file handler at that path
-    (10 MB × 3 backups) so the introspection skill and ``docker exec ...
-    tail`` can read agent activity from inside the container. Without
-    it, fall back to stderr-only ``basicConfig`` for local dev.
+    Always logs to stderr so ``docker logs`` shows agent activity. When
+    ``log_file`` is set, also attaches a rotating file handler (10 MB ×
+    3 backups) at that path for the introspection skill and
+    ``docker exec ... tail``.
 
     A ``PermissionError`` while opening the file (host-mounted volume
-    owned by another UID) downgrades to stderr instead of crashing.
+    owned by another UID) is downgraded to a warning — stderr still works.
     """
     level = getattr(
         logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO
     )
+    logging.basicConfig(
+        level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
+    )
 
     if not log_file:
-        logging.basicConfig(
-            level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
-        )
         return
 
     try:
@@ -323,19 +323,14 @@ def _configure_logging(log_file: str | None) -> None:
             backupCount=_LOG_BACKUP_COUNT,
         )
     except (PermissionError, OSError) as e:
-        logging.basicConfig(
-            level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
-        )
         logging.getLogger(__name__).warning(
-            "LOG_FILE=%s could not be opened (%s); falling back to stderr.",
+            "LOG_FILE=%s could not be opened (%s); stderr-only.",
             log_file, e,
         )
         return
 
     handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
-    root = logging.getLogger()
-    root.setLevel(level)
-    root.addHandler(handler)
+    logging.getLogger().addHandler(handler)
 
 
 async def main():
