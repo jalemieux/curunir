@@ -349,6 +349,25 @@ class Agent:
                 total_llm_elapsed += response.usage.elapsed_sec
                 llm_calls += 1
 
+                if self.usage_store is not None:
+                    record = UsageRecord(
+                        ts=datetime.now(timezone.utc),
+                        session_id=session_id,
+                        model=response.usage.model or self.config.model,
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                        cached_prompt_tokens=response.usage.cached_prompt_tokens,
+                        reasoning_tokens=response.usage.reasoning_tokens,
+                        image_tokens=response.usage.image_tokens,
+                        audio_tokens=response.usage.audio_tokens,
+                        cost_usd=response.usage.cost_usd,
+                        elapsed_sec=response.usage.elapsed_sec,
+                    )
+                    try:
+                        await asyncio.to_thread(self.usage_store.record, record)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("[%s] usage_store.record failed: %s", sid, exc)
+
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
                     if response.text:
@@ -408,27 +427,7 @@ class Agent:
                     messages = [{"role": "system", "content": system_prompt}] + history
                     continue
 
-            if self.usage_store is not None:
-                record = UsageRecord(
-                    ts=datetime.now(timezone.utc),
-                    session_id=session_id,
-                    model=response.usage.model or self.config.model,
-                    prompt_tokens=response.usage.prompt_tokens,
-                    completion_tokens=response.usage.completion_tokens,
-                    cached_prompt_tokens=response.usage.cached_prompt_tokens,
-                    reasoning_tokens=response.usage.reasoning_tokens,
-                    image_tokens=response.usage.image_tokens,
-                    audio_tokens=response.usage.audio_tokens,
-                    cost_usd=response.usage.cost_usd,
-                    elapsed_sec=response.usage.elapsed_sec,
-                )
-                try:
-                    await asyncio.to_thread(self.usage_store.record, record)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[%s] usage_store.record failed: %s", sid, exc)
-
-            if response.tool_calls:
-                assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
+                # No tool calls — final response, exit the loop.
                 if response.text:
                     logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                     history.append({"role": "assistant", "content": response.text})
