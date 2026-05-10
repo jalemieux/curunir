@@ -27,6 +27,7 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
         identity_file=identity,
         context_dir=tmp_path / "context",
         skill_dirs=[skill_dir],
+        main_model_supports_vision=True,
     )
     agent = Agent(config)
 

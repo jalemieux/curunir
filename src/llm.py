@@ -1,5 +1,7 @@
 # src/llm.py
 import asyncio
+import base64
+import hashlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -13,6 +15,11 @@ log = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2  # seconds
+
+# In-process cache for describe_image, keyed by SHA-256 of the image bytes so
+# entries stay valid even when the same logical file is re-staged at a new
+# path. Unbounded by design — fine for normal session sizes.
+_description_cache: dict[str, str] = {}
 
 
 @dataclass
@@ -268,3 +275,71 @@ async def call_llm(
         ]
 
     return LLMResponse(text=text, tool_calls=tool_calls, usage=usage)
+
+
+async def describe_image(
+    model: str,
+    image_path: str,
+    mime_type: str,
+    user_prompt: str,
+    api_base: str | None = None,
+) -> str:
+    """Single-shot multimodal call asking ``model`` to describe an image.
+
+    Used as a pre-pass when the main agent model lacks vision support: the
+    returned text is substituted in place of the image attachment so the
+    main model can reason about it as text.
+
+    Cached in-process by SHA-256 of the image bytes.
+    """
+    with open(image_path, "rb") as f:
+        data = f.read()
+    cache_key = hashlib.sha256(data).hexdigest()
+    if cache_key in _description_cache:
+        return _description_cache[cache_key]
+
+    b64 = base64.b64encode(data).decode()
+    prompt = (
+        f"The user said: {user_prompt}\n\n" if user_prompt else ""
+    ) + (
+        "Describe this image in detail. Include any visible text verbatim, "
+        "objects, layout, colors, and anything else that might be relevant "
+        "for answering the user."
+    )
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+            },
+        ],
+    }]
+
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 1000,
+        "num_retries": 0,
+    }
+    if api_base:
+        kwargs["api_base"] = api_base
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = await litellm.acompletion(**kwargs)
+            break
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                log.warning("Vision model returned %s, retrying in %ss (attempt %d/%d)",
+                            status, delay, attempt + 1, MAX_RETRIES)
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+    text = response.choices[0].message.content or ""
+    _description_cache[cache_key] = text
+    return text
