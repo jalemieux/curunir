@@ -40,6 +40,13 @@ services:
   curunir:
     build: .
     env_file: .env
+    # Soft dep: when the portal profile is active, wait for portal to start
+    # so curunir doesn't burn through reconnect attempts during startup.
+    # `required: false` keeps curunir startable without the portal profile.
+    depends_on:
+      portal:
+        condition: service_started
+        required: false
     environment:
       # In-network portal URL; override via .env if needed.
       CURUNIR_PORTAL_URL: ${CURUNIR_PORTAL_URL:-ws://portal:8000/ws/agent}
