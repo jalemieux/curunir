@@ -249,6 +249,20 @@ footer {
   content: " stopping…";
   color: var(--hint); font-style: italic; font-size: 12px;
 }
+
+/* Typing indicator — three pulsing dots while we wait for the first chunk. */
+.typing { display: inline-flex; gap: 4px; padding: 6px 0; align-items: center; }
+.typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--header-text);
+  animation: typing-bounce 1.4s infinite ease-in-out both;
+}
+.typing span:nth-child(2) { animation-delay: 0.16s; }
+.typing span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes typing-bounce {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
 @media (max-width: 480px) { .composer-hint { display: none; } }
 </style>
 </head>
@@ -347,6 +361,7 @@ function setStatus(state) {
   statusText.textContent = state;
   agentOnline = state === "online";
   if (!agentOnline && inProgressMsg) {
+    removeThinking(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
@@ -463,7 +478,7 @@ function appendToolCalls(msgEl, calls) {
 
 function renderAgentChunk(m) {
   if (!inProgressMsg) {
-    inProgressMsg = appendMessage("assistant");
+    inProgressMsg = appendMessage("assistant", true);
   }
   const body = inProgressMsg.querySelector(".body");
   if (m.delta) {
@@ -476,6 +491,7 @@ function renderAgentChunk(m) {
   appendToolCalls(inProgressMsg, m.tool_calls);
   renderAttachments(inProgressMsg, m.attachments);
   if (m.final) {
+    removeThinking(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
@@ -515,13 +531,22 @@ function downloadAttachment(a) {
   URL.revokeObjectURL(url);
 }
 
-function appendMessage(role) {
+function appendMessage(role, thinking = false) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
+  const bodyHtml = thinking
+    ? '<span class="typing"><span></span><span></span><span></span></span>'
+    : "";
+  el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body">${bodyHtml}</div>`;
   messagesEl.appendChild(el);
   scrollToBottom();
   return el;
+}
+
+function removeThinking(el) {
+  if (!el) return;
+  const t = el.querySelector(".typing");
+  if (t) t.remove();
 }
 
 function scrollToBottom() {
@@ -556,7 +581,9 @@ function send() {
   renderStaged();
   // Optimistic flip — actual flip happens once chunks start streaming, but
   // pre-create the in-progress slot so the button shows Stop immediately.
-  if (!inProgressMsg) inProgressMsg = appendMessage("assistant");
+  // The typing-dots indicator gives the user a "received, working" signal
+  // before any content or tool call arrives.
+  if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
   updateComposerMode();
 }
 
