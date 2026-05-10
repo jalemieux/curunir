@@ -19,8 +19,9 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
   Channels              Core                    LLM
   ────────          ──────────              ──────────
   CLI ──────┐
-  Email ────┤       ┌──────────┐        ┌──────────────┐
-  Slack* ───┴──►  Queue  ──►  Agent Loop  ◄──►  LiteLLM  │
+  Email ────┤
+  Portal ───┤       ┌──────────┐        ┌──────────────┐
+  Slack† ───┴──►  Queue  ──►  Agent Loop  ◄──►  LiteLLM  │
                     └──────────┘        └──────────────┘
                          │
                          ▼
@@ -33,6 +34,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
                  │ load_skill    │
                  │ web_fetch     │
                  │ delegate      │
+                 │ schedule      │
                  │ attach*       │
                  └───────────────┘
                  * opt-in, loaded by skills
@@ -43,10 +45,10 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
                  │  Extractor    │
                  └───────────────┘
 
-  * planned
+  † planned
 ```
 
-Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 15 tool-calling rounds per turn. Replies are routed back to the originating channel.
+Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel.
 
 Dashed nodes are planned but not yet implemented. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`.
 
@@ -55,19 +57,25 @@ Dashed nodes are planned but not yet implemented. The memory extractor runs post
 ```
 curunir/
 ├── run.py                  # Entry point — wires channels, queues, agent
+├── cli.py                  # Standalone WebSocket CLI client
 ├── src/
 │   ├── agent/              # Core agent loop and system prompt builder
-│   ├── channels/           # Channel implementations (CLI, Email) and router
+│   ├── channels/           # CLI/WS, Email, Portal channels and router
 │   ├── tools/              # Tool schemas, dispatch, and executors
 │   ├── config.py           # AgentConfig dataclass
 │   ├── llm.py              # LLM interface (LiteLLM)
 │   ├── memory_extractor.py # Post-session memory extraction
+│   ├── scheduler.py        # Cron task runner (context/schedules.json)
+│   ├── usage_store.py      # SQLite per-call token/cost ledger
 │   └── skills.py           # Skill manifest and loader
 ├── skills/                 # Drop-in skills (each a dir with SKILL.md)
-│   └── extract-learnings/  # Extract durable knowledge from comms
+├── portal/                 # Standalone FastAPI portal app (separate project)
+├── eval/                   # LLM-graded eval suites and harness
+├── onboarding/             # First-run identity scaffolding
 ├── context/
 │   ├── identity.md         # Assistant persona and instructions
-│   └── memory/             # Persistent markdown memory store
+│   ├── memory/             # Persistent markdown memory store
+│   └── schedules.json      # Cron tasks evaluated by scheduler
 └── Dockerfile              # Container with Python 3.12, ripgrep, git
 ```
 
@@ -114,6 +122,19 @@ EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
 See **[docs/gmail-setup.md](docs/gmail-setup.md)** for the full GCP and Workspace Admin setup walkthrough.
+
+#### Portal Channel (hosted web UI)
+
+The portal is a standalone FastAPI app (in `portal/`) that gives the agent a multi-user browser front end with email-link sign-in, per-tab sessions, and drag-drop attachments. The curunir container dials *out* to the portal over WebSocket on startup; the portal multiplexes each browser to the matching container.
+
+Enable it by setting:
+
+```bash
+CURUNIR_PORTAL_URL=wss://your-portal.example.com/ws/agent
+CURUNIR_PORTAL_TOKEN=<bearer-token-issued-by-portal>
+```
+
+See **[portal/README.md](portal/README.md)** for portal deployment and the local `docker compose --profile portal up` dev path.
 
 ## Attachments
 
@@ -179,23 +200,26 @@ When the agent loads this skill via `load_skill`, the listed tools are added to 
 
 ## Evals
 
-Simple eval harness that sends prompts to Curunir over WebSocket and records results.
+LLM-graded eval harness in `eval/` that sends prompts to Curunir over WebSocket and records results.
 
 ```bash
 # Run basic evals (tool use, planning, memory, instruction following)
-python run_evals.py
+python eval/run_evals.py
 
 # Run advanced evals (web search, deep research, delegation, cross-skill orchestration)
-python run_evals.py --file advanced_evals.md
+python eval/run_evals.py --file eval/advanced_evals.md
+
+# Cap iterations per prompt
+python eval/run_evals.py --max-loops 20
 
 # Against a remote instance
-python run_evals.py --host myserver.example.com --port 8765
+python eval/run_evals.py --host myserver.example.com --port 8765
 ```
 
-Results are saved to `eval_results/` as timestamped JSON files including the model name, all prompts, responses, and tool calls.
+Results are saved to `eval/eval_results/` as timestamped JSON files including the model name, all prompts, responses, and tool calls.
 
-- `simple_evals.md` — 18 prompts testing core capabilities (no API keys needed)
-- `advanced_evals.md` — 30 prompts testing skills like web-search, deep-research, and delegation (requires `BRAVE_API_KEY` and network access)
+- `eval/simple_evals.md` — prompts testing core capabilities (no API keys needed)
+- `eval/advanced_evals.md` — prompts testing skills like web-search, deep-research, and delegation (requires `BRAVE_API_KEY` and network access)
 
 ## Configuration
 
@@ -204,12 +228,24 @@ Configuration is handled via `src/config.py`:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `model` | `anthropic/claude-sonnet-4-20250514` | LLM model (any LiteLLM-supported model) |
-| `max_iterations` | `15` | Max tool-calling rounds per turn |
+| `max_iterations` | `75` | Max tool-calling rounds per turn |
+| `max_history_chars` | `250000` | Conversation history limit; lower for small-context models |
 | `identity_file` | `./context/identity.md` | Path to persona file |
 | `context_dir` | `./context` | Path to context directory (memory, etc.) |
 | `skill_dirs` | `[./skills, ./context/skills]` | Directories scanned for skills in priority order (first-seen wins on name collision) |
 
-API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.). See `.env.example` for the full list.
+
+Useful operational env vars:
+
+- `LOG_FILE` — path to a rotating log file (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill can read agent activity.
+- `LOG_LEVEL=DEBUG` — verbose agent tracing.
+
+Per-call token usage and cost are persisted to `context/usage.db` (SQLite). Inspect with:
+
+```bash
+python -m src.usage --window 7d
+```
 
 ## License
 
