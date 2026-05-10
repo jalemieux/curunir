@@ -8,6 +8,7 @@ import logging.handlers
 import os
 
 import httpx
+import litellm
 from dotenv import load_dotenv
 
 from src.agent.agent import Agent
@@ -17,6 +18,7 @@ from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
+from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
 from src.usage_store import UsageStore
@@ -188,12 +190,91 @@ async def _extract_and_record(agent: Agent, session_id: str, history: list[dict]
         agent.session_archives[session_id] = written
 
 
+def _detect_vision_support(model: str) -> bool:
+    """Ask LiteLLM whether ``model`` accepts image inputs.
+
+    Defaults to False if the lookup raises (some provider/model combos aren't
+    in LiteLLM's capability table). Safer to disable vision than to send an
+    image to a model that will silently drop it.
+    """
+    try:
+        return bool(litellm.supports_vision(model=model))
+    except Exception as exc:
+        logger.debug("supports_vision lookup failed for %s: %s", model, exc)
+        return False
+
+
+async def _vision_prepass(
+    config: AgentConfig,
+    text: str,
+    attachments: list[dict] | None,
+) -> list[dict] | None:
+    """Convert image attachments to text when the main model lacks vision.
+
+    Called before ``build_multimodal_content`` so the formatter never sees an
+    image it can't render. PDFs and text attachments pass through untouched.
+    Returns a new attachment list (same shape) or the original if nothing
+    needed converting.
+
+    Each replaced image becomes a synthesized ``text/plain`` attachment whose
+    file contents are the description from the vision model. The formatter's
+    existing text-file branch wraps it with ``[Attachment: <filename>]`` so
+    the main model still sees the filename context.
+
+    ``config.vision_model`` is required when the main model lacks vision —
+    boot raises if it's unset, so this function trusts it's present here.
+    """
+    if config.main_model_supports_vision or not attachments:
+        return attachments
+    if not any(a.get("mime_type", "").startswith("image/") for a in attachments):
+        return attachments
+
+    out: list[dict] = []
+    for att in attachments:
+        mime = att.get("mime_type", "")
+        if not mime.startswith("image/"):
+            out.append(att)
+            continue
+
+        filename = att.get("filename", "image")
+        try:
+            description = await describe_image(
+                config.vision_model, att["path"], mime, text,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Vision pre-pass failed for %s: %s — falling back to size marker",
+                filename, exc,
+            )
+            description = f"(vision model failed: {exc})"
+        replacement_text = f"Description: {description}"
+
+        synth_path = att["path"] + ".vision.txt"
+        with open(synth_path, "w", encoding="utf-8") as f:
+            f.write(replacement_text)
+        out.append({
+            "filename": filename,
+            "path": synth_path,
+            "mime_type": "text/plain",
+            "size": len(replacement_text.encode("utf-8")),
+        })
+    return out
+
+
 async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
-    """Bridge between the message queues and the agent loop."""
+    """Bridge between the message queues and the agent loop.
+
+    One IncomingMessage per iteration: handle control commands inline, or
+    prep its content + attachments, run the agent, and emit the reply on
+    out_queue. Streaming deltas and tool-call notifications go out mid-turn
+    via the on_text_delta / on_tool_call hooks.
+    """
     while True:
         msg = await in_queue.get()
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
 
+        # Control commands: drop or summarize the session before it's gone,
+        # then ack with an empty reply so the channel can render UI feedback.
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
             archive_path = agent.session_archives.pop(msg.session_id, None)
@@ -219,6 +300,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
             continue
 
+        # Streaming hooks: the agent loop fires these mid-turn so the user
+        # sees tool activity and partial text without waiting for the final
+        # response. Each goes out as a non-final OutgoingMessage.
         async def on_tool_call(name: str, args_str: str):
             await out_queue.put(OutgoingMessage(
                 content="",
@@ -239,11 +323,19 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
+        # Inbound prep: route images through VISION_MODEL when the main model
+        # is text-only (no-op when it isn't), then format into LiteLLM content.
+        msg_attachments = await _vision_prepass(
+            agent.config, msg.content, msg.attachments,
+        )
+        content = build_multimodal_content(msg.content, msg_attachments)
+
+        # Outbound sinks the agent fills during the turn: any files it wants
+        # to attach to its reply, and a metadata bag for workflow/stats.
         attachments = []
         metadata: dict = {}
 
         try:
-            content = build_multimodal_content(msg.content, msg.attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
@@ -254,12 +346,14 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
 
-        # Fetch llama.cpp server stats if using a local API base
+        # llama.cpp exposes per-request server stats over HTTP — fold them in
+        # alongside the agent's own stats so the UI can show both.
         if agent.config.api_base and metadata.get("stats"):
             llama_stats = await _fetch_llamacpp_stats(agent.config.api_base)
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
+        # Final reply: routed back to the originating channel by route_outbound.
         await out_queue.put(OutgoingMessage(
             content=text,
             channel=msg.channel,
@@ -344,6 +438,7 @@ async def main():
     attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
+    vision_model = os.environ.get("VISION_MODEL")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
@@ -352,7 +447,23 @@ async def main():
         **({"attachment_dir": attachment_dir} if attachment_dir else {}),
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
+        **({"vision_model": vision_model} if vision_model else {}),
     )
+    config.main_model_supports_vision = _detect_vision_support(config.model)
+    if not config.main_model_supports_vision:
+        if not config.vision_model:
+            raise RuntimeError(
+                f"Main model {config.model} lacks vision support and no "
+                "VISION_MODEL is configured. Set VISION_MODEL in the "
+                "environment to a vision-capable model (e.g. "
+                "openai/gpt-4o-mini) or switch MODEL to one that supports "
+                "images."
+            )
+        logger.info(
+            "Main model %s lacks vision support; routing image attachments "
+            "through VISION_MODEL=%s.",
+            config.model, config.vision_model,
+        )
 
     usage_store = UsageStore(config.usage_db)
     agent = Agent(config, usage_store=usage_store)

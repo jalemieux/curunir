@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -173,10 +174,14 @@ async def _run_worker_once(in_q, out_q, fake_agent):
         pass
 
 
-def _fake_agent(captured: dict):
+def _fake_agent(captured: dict, *, supports_vision: bool = True,
+                vision_model: str | None = None):
     from src.config import AgentConfig
     agent = type("A", (), {})()
-    agent.config = AgentConfig()
+    agent.config = AgentConfig(
+        main_model_supports_vision=supports_vision,
+        vision_model=vision_model,
+    )
     agent.sessions = {}
 
     async def fake_handle(content, session_id, **kwargs):
@@ -247,5 +252,167 @@ async def test_agent_worker_non_cli_channel_builds_multimodal(image_file):
     assert isinstance(content, list)
     assert content[0] == {"type": "text", "text": "please analyze"}
     assert content[1]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
+async def test_text_only_main_with_vision_model_replaces_image_with_description(image_file):
+    """Text-only main + configured vision model: describe_image is called and
+    its output replaces the image attachment before build_multimodal_content."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="what is in this picture?", channel="cli",
+        session_id="cli", reply_address={},
+        attachments=[_att(image_file, "image/png")],
+    )
+    await in_q.put(msg)
+
+    fake = _fake_agent(captured, supports_vision=False, vision_model="vision/m")
+    with patch("run.describe_image", new_callable=AsyncMock) as mock_desc:
+        mock_desc.return_value = "A small PNG with a diagonal red line."
+        await _run_worker_once(in_q, out_q, fake)
+
+    mock_desc.assert_awaited_once()
+    args, kwargs = mock_desc.await_args
+    # Signature: describe_image(model, image_path, mime_type, user_prompt, ...)
+    assert args[0] == "vision/m"
+    assert args[1] == str(image_file)
+    assert args[2] == "image/png"
+    assert args[3] == "what is in this picture?"
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    # No image_url block — image was converted to text
+    assert all(b["type"] != "image_url" for b in content)
+    # The description appears in a text block, prefixed with the filename
+    described = next(b for b in content if "img.png" in b.get("text", ""))
+    assert "A small PNG with a diagonal red line." in described["text"]
+
+
+@pytest.mark.asyncio
+async def test_text_only_main_no_vision_model_boot_raises(monkeypatch):
+    """At boot, if the main model lacks vision and no VISION_MODEL is set,
+    main() raises rather than silently degrading images to text markers."""
+    import run as run_module
+
+    monkeypatch.setattr(run_module, "load_dotenv", lambda: None)
+    monkeypatch.setattr(run_module, "_detect_vision_support", lambda m: False)
+    monkeypatch.setenv("MODEL", "text-only/model")
+    monkeypatch.delenv("VISION_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="VISION_MODEL"):
+        await run_module.main()
+
+
+@pytest.mark.asyncio
+async def test_text_only_main_pdf_and_text_pass_through_unchanged(tmp_path, image_file, monkeypatch):
+    """PDFs and plain text attachments are not affected by the vision pre-pass."""
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    txt_path = tmp_path / "notes.txt"
+    txt_path.write_text("hello")
+
+    class FakePage:
+        def extract_text(self):
+            return "PDF body"
+
+    class FakeReader:
+        def __init__(self, path):
+            self.pages = [FakePage()]
+
+    import pypdf
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="review", channel="cli", session_id="cli", reply_address={},
+        attachments=[
+            _att(pdf_path, "application/pdf"),
+            _att(txt_path, "text/plain"),
+            _att(image_file, "image/png"),
+        ],
+    )
+    await in_q.put(msg)
+
+    fake = _fake_agent(captured, supports_vision=False, vision_model="vision/m")
+    with patch("run.describe_image", new_callable=AsyncMock) as mock_desc:
+        mock_desc.return_value = "image description"
+        await _run_worker_once(in_q, out_q, fake)
+
+    # Only the image goes through describe_image; pdf and text are untouched
+    assert mock_desc.await_count == 1
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    # PDF block still present and contains extracted text
+    assert any("doc.pdf" in b.get("text", "") and "PDF body" in b.get("text", "")
+               for b in content)
+    # Text file block still present
+    assert any("notes.txt" in b.get("text", "") and "hello" in b.get("text", "")
+               for b in content)
+
+
+def test_detect_vision_support_returns_false_when_lookup_raises():
+    """LiteLLM doesn't know every provider; raise → safe default of no vision."""
+    from run import _detect_vision_support
+    with patch("run.litellm") as mock_litellm:
+        mock_litellm.supports_vision.side_effect = RuntimeError("unknown model")
+        assert _detect_vision_support("exotic-provider/whatever") is False
+
+
+def test_detect_vision_support_passes_through_truthy_result():
+    from run import _detect_vision_support
+    with patch("run.litellm") as mock_litellm:
+        mock_litellm.supports_vision.return_value = True
+        assert _detect_vision_support("anthropic/claude-sonnet-4-20250514") is True
+
+
+def test_detect_vision_support_passes_through_falsy_result():
+    from run import _detect_vision_support
+    with patch("run.litellm") as mock_litellm:
+        mock_litellm.supports_vision.return_value = False
+        assert _detect_vision_support("openai/gpt-3.5-turbo") is False
+
+
+@pytest.mark.asyncio
+async def test_describe_image_cache_persists_across_worker_calls(image_file):
+    """describe_image is cached by content hash, so re-sending the same image
+    in a second turn does not re-call the vision model."""
+    import src.llm as llm_module
+    llm_module._description_cache.clear()
+
+    captured: dict = {}
+    fake = _fake_agent(captured, supports_vision=False, vision_model="vision/m")
+
+    # We patch litellm.acompletion (which describe_image calls into) so we can
+    # observe how many real LLM round-trips happen.
+    from unittest.mock import MagicMock
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(
+        content="cached description", tool_calls=None,
+    ))]
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+
+        for _ in range(2):
+            in_q: asyncio.Queue = asyncio.Queue()
+            out_q: asyncio.Queue = asyncio.Queue()
+            msg = IncomingMessage(
+                content="again", channel="cli", session_id="cli",
+                reply_address={},
+                attachments=[_att(image_file, "image/png")],
+            )
+            await in_q.put(msg)
+            await _run_worker_once(in_q, out_q, fake)
+
+        assert mock_litellm.acompletion.await_count == 1
+
+    llm_module._description_cache.clear()
 
 
