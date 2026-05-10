@@ -195,10 +195,15 @@ class Agent:
             if role == "user":
                 content = entry.get("content")
                 if isinstance(content, list):
-                    # Multimodal: extract text parts only.
-                    text = " ".join(
-                        p.get("text", "") for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
+                    # Multimodal: only the first text block is the user's typed
+                    # prompt; later text blocks are attachment-content wrappers
+                    # ([Attachment: ...]\n```...```) injected by
+                    # build_multimodal_content. Don't replay those into the
+                    # user bubble.
+                    text = next(
+                        (p.get("text", "") for p in content
+                         if isinstance(p, dict) and p.get("type") == "text"),
+                        "",
                     )
                 else:
                     text = content or ""
