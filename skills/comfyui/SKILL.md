@@ -1,10 +1,23 @@
 ---
 name: comfyui
-description: "Use when the user asks to generate or edit images (or video) via the local ComfyUI instance — Flux Redux variations, Flux Kontext text-to-image, multi-image composites, or any custom workflow. Trigger: requests like 'generate an image', 'run this through ComfyUI', 'make a variation of this photo', or anything pointing at a local ComfyUI graph."
+description: "Load this for ANY mention of ComfyUI — image or video generation, editing, variations, workflows, graphs, character sheets, LoRA references, seed hunts, upscales, model discovery, custom nodes. The entire ComfyUI toolkit lives here, with sub-skills under `skills/comfyui/` for deeper flows (character pipeline, workflow JSON authoring). Triggers: 'comfyui', 'comfy', 'generate an image', 'make a variation', 'run this through the graph', 'build a character', 'multi-view sheet', 'edit this workflow json', 'why is my comfyui workflow failing', anything pointing at a local ComfyUI instance."
 tools: attach
 ---
 
 # ComfyUI
+
+**Top-level entry point for everything ComfyUI.** If a user mentions ComfyUI, comfy, image/video generation via a local graph, character sheets, workflow JSON, or anything in that orbit — start here. The basics are in this file; deeper specialized flows are sub-skills under this directory that you read on demand with the `read` tool.
+
+## Sub-skills (read on demand)
+
+| When the user wants… | Read this |
+|---|---|
+| To author, edit, debug, or adapt a ComfyUI workflow JSON (txt2img/img2img/controlnet, custom nodes, schema errors) | `skills/comfyui/workflows/SKILL.md` |
+| End-to-end character creation: discover base model → lock front/back refs → multi-view sheet → hi-res finals (LoRA training set) | `skills/comfyui/character-pipeline/SKILL.md` |
+
+These are sub-flows, not standalone skills — they're not in the top-level manifest. Read them as needed; you're already in the right skill.
+
+## The basics: drive the local instance
 
 Drive the local ComfyUI instance: discover what's installed, copy a
 template workflow, edit prompts/seeds/inputs, submit, wait, fetch the
@@ -63,7 +76,7 @@ cp skills/comfyui/templates/flux-redux.json "$SESSION/workflow.json"
 | `flux-redux.json` | Image variation from a single input image + optional prompt nudge. | `templates/README.md` |
 | `flux-kontext.json` | Text-to-image with Flux. Edit `CLIPTextEncode.text` and `KSampler.seed`. | `templates/README.md` |
 | `multi-image-in.json` | Two image inputs feeding a composite (style + subject). | `templates/README.md` |
-| `flux2-klein-seed-hunt.json` | Bulk seed hunting with Flux 2 Klein + dual image reference. Used by `comfyui-seed-hunt` skill. | `templates/README.md` |
+| `flux2-klein-seed-hunt.json` | Bulk seed hunting with Flux 2 Klein + dual image reference. Used by `comfyui-multiview-seed-hunt` skill. | `templates/README.md` |
 | `persephone-flux-model-seed.json` | Model seed discovery — text-to-image front-view character sheets with random seeds. Used by `comfyui-model-seed-hunt` skill. | `templates/README.md` |
 
 ## 3. Edit the workflow JSON
