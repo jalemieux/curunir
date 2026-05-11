@@ -307,6 +307,69 @@ class Agent:
                 "iterations": 0,  # filled at return site
             }
 
+        async def _call_and_record():
+            """Single LLM call + usage accumulation + context-overflow recovery.
+
+            Returns (response, error_message). When error_message is non-None,
+            the caller should return it to the user.
+            """
+            nonlocal total_prompt_tokens, total_completion_tokens
+            nonlocal total_llm_elapsed, llm_calls, messages
+            try:
+                resp = await call_llm(
+                    self.config.model, messages, tool_schemas,
+                    api_base=self.config.api_base,
+                    openrouter_provider=self.config.openrouter_provider,
+                    on_text_delta=on_text_delta,
+                )
+            except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
+                if not _is_context_overflow(e):
+                    raise
+                half = self.config.max_history_chars // 2
+                logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
+                _trim_history(history, max_chars=half)
+                if not history:
+                    return None, "Sorry, the message was too long for me to process."
+                messages = [{"role": "system", "content": system_prompt}] + history
+                try:
+                    resp = await call_llm(
+                        self.config.model, messages, tool_schemas,
+                        api_base=self.config.api_base,
+                        openrouter_provider=self.config.openrouter_provider,
+                        on_text_delta=on_text_delta,
+                    )
+                except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
+                    if not _is_context_overflow(e2):
+                        raise
+                    logger.error("[%s] context window still exceeded after trim, aborting", sid)
+                    return None, "Sorry, the conversation is too long. Please start a new thread."
+
+            total_prompt_tokens += resp.usage.prompt_tokens
+            total_completion_tokens += resp.usage.completion_tokens
+            total_llm_elapsed += resp.usage.elapsed_sec
+            llm_calls += 1
+
+            if self.usage_store is not None:
+                record = UsageRecord(
+                    ts=datetime.now(timezone.utc),
+                    session_id=session_id,
+                    model=resp.usage.model or self.config.model,
+                    prompt_tokens=resp.usage.prompt_tokens,
+                    completion_tokens=resp.usage.completion_tokens,
+                    cached_prompt_tokens=resp.usage.cached_prompt_tokens,
+                    reasoning_tokens=resp.usage.reasoning_tokens,
+                    image_tokens=resp.usage.image_tokens,
+                    audio_tokens=resp.usage.audio_tokens,
+                    cost_usd=resp.usage.cost_usd,
+                    elapsed_sec=resp.usage.elapsed_sec,
+                )
+                try:
+                    await asyncio.to_thread(self.usage_store.record, record)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[%s] usage_store.record failed: %s", sid, exc)
+
+            return resp, None
+
         try:
             for iteration in range(self.config.max_iterations):
                 if cancel_event.is_set():
@@ -319,59 +382,33 @@ class Agent:
                         self.sessions.pop(session_id, None)
                     return "(interrupted)"
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
-                try:
-                    response = await call_llm(
-                        self.config.model, messages, tool_schemas,
-                        api_base=self.config.api_base,
-                        openrouter_provider=self.config.openrouter_provider,
-                        on_text_delta=on_text_delta,
+                response, err = await _call_and_record()
+                if err is not None:
+                    return err
+
+                # Empty response (no text, no tool_calls): a transient model
+                # glitch that otherwise kills the session. Retry the same call
+                # once; if still empty, append a "Continue." nudge and try once
+                # more before giving up.
+                if not response.tool_calls and not response.text:
+                    logger.warning(
+                        "[%s] empty LLM response (finish_reason=%s); retrying",
+                        sid, response.finish_reason,
                     )
-                except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
-                    if not _is_context_overflow(e):
-                        raise
-                    half = self.config.max_history_chars // 2
-                    logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
-                    _trim_history(history, max_chars=half)
-                    if not history:
-                        return "Sorry, the message was too long for me to process."
+                    response, err = await _call_and_record()
+                    if err is not None:
+                        return err
+                if not response.tool_calls and not response.text:
+                    logger.warning(
+                        "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
+                        sid, response.finish_reason,
+                    )
+                    nudge = {"role": "user", "content": "Continue."}
+                    history.append(nudge)
                     messages = [{"role": "system", "content": system_prompt}] + history
-                    try:
-                        response = await call_llm(
-                            self.config.model, messages, tool_schemas,
-                            api_base=self.config.api_base,
-                            openrouter_provider=self.config.openrouter_provider,
-                            on_text_delta=on_text_delta,
-                        )
-                    except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
-                        if not _is_context_overflow(e2):
-                            raise
-                        logger.error("[%s] context window still exceeded after trim, aborting", sid)
-                        return "Sorry, the conversation is too long. Please start a new thread."
-
-                # Accumulate usage
-                total_prompt_tokens += response.usage.prompt_tokens
-                total_completion_tokens += response.usage.completion_tokens
-                total_llm_elapsed += response.usage.elapsed_sec
-                llm_calls += 1
-
-                if self.usage_store is not None:
-                    record = UsageRecord(
-                        ts=datetime.now(timezone.utc),
-                        session_id=session_id,
-                        model=response.usage.model or self.config.model,
-                        prompt_tokens=response.usage.prompt_tokens,
-                        completion_tokens=response.usage.completion_tokens,
-                        cached_prompt_tokens=response.usage.cached_prompt_tokens,
-                        reasoning_tokens=response.usage.reasoning_tokens,
-                        image_tokens=response.usage.image_tokens,
-                        audio_tokens=response.usage.audio_tokens,
-                        cost_usd=response.usage.cost_usd,
-                        elapsed_sec=response.usage.elapsed_sec,
-                    )
-                    try:
-                        await asyncio.to_thread(self.usage_store.record, record)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("[%s] usage_store.record failed: %s", sid, exc)
+                    response, err = await _call_and_record()
+                    if err is not None:
+                        return err
 
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
