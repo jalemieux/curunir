@@ -107,9 +107,49 @@ class TestAgentHandle:
 
     async def test_empty_response_returns_error(self, agent):
         empty = LLMResponse(text=None, tool_calls=None)
-        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=empty):
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=empty) as mock_call:
             result = await agent.handle("hello", "s1")
         assert "error" in result.lower()
+        # Empty triggers retry-then-nudge: 3 LLM calls before surfacing error.
+        assert mock_call.await_count == 3
+
+    async def test_empty_response_retries_once_and_recovers(self, agent):
+        """A single transient empty response is retried and the second result is used."""
+        empty = LLMResponse(text=None, tool_calls=None)
+        good = LLMResponse(text="recovered", tool_calls=None)
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[empty, good],
+        ) as mock_call:
+            result = await agent.handle("hi", "s1")
+        assert result == "recovered"
+        assert mock_call.await_count == 2
+        # No "Continue." nudge should have been appended since retry succeeded.
+        user_msgs = [m for m in agent.sessions["s1"] if m.get("role") == "user"]
+        assert all(m.get("content") != "Continue." for m in user_msgs)
+
+    async def test_empty_response_nudges_with_continue_after_retry_fails(self, agent):
+        """Two empty responses in a row trigger a 'Continue.' nudge before the third call."""
+        empty = LLMResponse(text=None, tool_calls=None)
+        good = LLMResponse(text="kept going", tool_calls=None)
+
+        seen_messages: list[list[dict]] = []
+
+        async def fake_call_llm(model, messages, tools, **kw):
+            seen_messages.append(list(messages))
+            return [empty, empty, good][len(seen_messages) - 1]
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            result = await agent.handle("hi", "s1")
+
+        assert result == "kept going"
+        assert len(seen_messages) == 3
+        # Third call must include the "Continue." nudge as the last user turn.
+        assert seen_messages[2][-1] == {"role": "user", "content": "Continue."}
+        # First two calls must NOT include the nudge yet.
+        assert seen_messages[0][-1].get("content") != "Continue."
+        assert seen_messages[1][-1].get("content") != "Continue."
 
     async def test_empty_response_after_attachment_returns_empty(self, agent):
         """If the agent already attached a file this turn, an empty terminal
