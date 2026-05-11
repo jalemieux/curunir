@@ -1,4 +1,4 @@
-"""Tests for the comfyui-workflows /object_info helper script."""
+"""Tests for the comfyui workflows sub-flow /object_info helper script."""
 import importlib.util
 import json
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-SKILL_ROOT = Path(__file__).parent.parent / "skills" / "comfyui-workflows"
+SKILL_ROOT = Path(__file__).parent.parent / "skills" / "comfyui" / "workflows"
 HELPER = SKILL_ROOT / "scripts" / "fetch_object_info.py"
 
 

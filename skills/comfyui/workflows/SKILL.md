@@ -1,9 +1,12 @@
 ---
 name: comfyui-workflows
-description: "Use when the user asks to create, edit, debug, or adapt a ComfyUI workflow / graph / pipeline. Trigger phrases: 'comfyui workflow', 'build a comfy graph', 'txt2img / img2img / controlnet pipeline', 'modify this comfyui json', 'add a node to my workflow', 'why is my comfyui workflow failing'."
+description: "Sub-flow of the `comfyui` skill. Read this file with the `read` tool when the user asks to create, edit, debug, or adapt a ComfyUI workflow / graph / pipeline JSON. Triggers from inside the `comfyui` skill: 'comfyui workflow', 'build a comfy graph', 'txt2img / img2img / controlnet pipeline', 'modify this comfyui json', 'add a node to my workflow', 'why is my comfyui workflow failing'. NOT auto-loaded — the top-level `comfyui` skill points at this file."
+disabled: true
 ---
 
 # ComfyUI Workflows
+
+Sub-flow of the `comfyui` skill (this file lives at `skills/comfyui/workflows/SKILL.md`).
 
 Author and edit ComfyUI workflow JSON. Default to the **API `/prompt` format** (a flat object keyed by node ID) — it is the execution format ComfyUI actually consumes. Editor-saved workflow JSON (`workflow.json`) carries extra UI/layout state and should only be touched when the user explicitly hands it over.
 
@@ -71,10 +74,10 @@ ComfyUI exposes node schemas at `GET /object_info`. The skill ships a helper tha
 
 ```bash
 # default URL is http://127.0.0.1:8188 (override with COMFYUI_URL or --url)
-python skills/comfyui-workflows/scripts/fetch_object_info.py --out /tmp/object_info.json
+python skills/comfyui/workflows/scripts/fetch_object_info.py --out /tmp/object_info.json
 
 # only fetch a few classes
-python skills/comfyui-workflows/scripts/fetch_object_info.py \
+python skills/comfyui/workflows/scripts/fetch_object_info.py \
     --out /tmp/object_info.json \
     --classes KSampler CheckpointLoaderSimple CLIPTextEncode
 ```
