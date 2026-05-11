@@ -1,220 +1,250 @@
 ---
 name: comfyui-character-pipeline
-description: "Sub-flow of the `comfyui` skill. Read this file with the `read` tool when the user wants to go end-to-end from nothing to a finished, hi-res multi-view character sheet ready for LoRA training — discover a base model, lock front+back references at full quality, generate side / three-quarter views, then upscale the winners. Triggers from inside the `comfyui` skill: 'build me a character', 'I need a new character sheet', 'full character pipeline', 'train a new LoRA from zero', 'find model seeds', 'multi-view character sheet'. NOT auto-loaded — the top-level `comfyui` skill points at this file."
+description: "Sub-flow of the `comfyui` skill. Read this file with the `read` tool when the user wants to generate a LoRA-ready character sheet from a single reference image using Flux Kontext. Covers: multi-angle generation, expression/pose/clothing/lighting diversity, batch workflows with per-pose seed variants, sheet stitching, and training-set curation. Triggers: 'build me a character sheet', 'generate LoRA training data', 'character sheet from one photo', 'kontext character pipeline', 'LoRA training images'."
 tools: attach
-disabled: true
 ---
 
-# ComfyUI Character Pipeline
+# ComfyUI Character Pipeline (Kontext-based)
 
-Sub-flow of the `comfyui` skill (this file lives at `skills/comfyui/character-pipeline/SKILL.md`).
+Generate a **LoRA-ready character sheet** from a single source image using local Flux Kontext in-context editing.
 
-Orchestrate the **four-stage character creation pipeline** from a blank slate to a hi-res multi-view character sheet. Each stage is a sub-flow documented in this directory's `references/`; this file is the conductor — it sequences them, holds checkpoints between stages so the user can pick winners, and makes sure the artifact from each stage feeds correctly into the next.
+## Why Kontext instead of seed-hunting
 
-**Depends on:** the parent `comfyui` skill (already loaded — this is a sub-flow of it). Also load `flux2-prompt` at Stage 1 for prompt authoring. The four stage sub-flows are reference docs in this skill, **not** separate loadable skills — read them with the `read` tool when you reach each stage:
+The old pipeline (persephone seed-hunt → multi-view seed-hunt → upscale) required hours of compute and careful seed locking. Kontext eliminates all of that:
 
-- `references/model-seed-hunt.md` — Stage 1
-- `references/model-upscale.md` — Stages 2 and 4
-- `references/multiview-seed-hunt.md` — Stage 3
-- `references/poses/` — pose packs for Stage 3
+| Old pipeline | Kontext pipeline |
+|---|---|
+| Discover base model via seed hunt (~30 images) | One good reference image |
+| Lock front + back refs at high res | Skip — Kontext preserves identity from reference |
+| Multi-view seed hunt per pose (5 seeds × N poses) | One Kontext edit per pose, identity preserved |
+| Upscale winners | Native 1024×1024 — no upscale needed |
+| ~1-2 hours total | ~25-40 min for a full sheet |
+
+**Key insight:** Kontext's `ReferenceLatent` node feeds the source image's latent directly into conditioning, so the model "sees" the character while applying the edit instruction. Identity preservation comes from the model architecture, not from seed locking.
 
 ## The pipeline
 
 ```
-Stage 1: discover         Stage 2: lock           Stage 3: multi-view       Stage 4: finish
-─────────────────         ────────────             ─────────────────         ───────────────
-model-seed-hunt        →  model-upscale         →  multiview-seed-hunt    →  model-upscale
-random seeds, low res     fixed seed, full res     derived prompts, 5 seeds   hi-res final views
-20–30 throwaway picks     1–3 hero refs            one ref per pose (agent     1 keeper per pose
-                          + back-view variant       picks front or back)
+Stage 1: Prepare          Stage 2: Generate          Stage 3: Curate
+─────────────────         ─────────────────          ────────────────
+Source image              Batch Kontext edits        User picks
+→ verify quality          (N poses × K variants)     → LoRA training set
+→ copy to ComfyUI input   → stitch preview sheet     → caption (Stage 4)
+→ pre-flight models       → user reviews             → train LoRA
 ```
 
-The artifact handed between stages:
+## Template
 
-| From → To | Artifact | What changes |
-|-----------|----------|--------------|
-| 1 → 2 | User-picked discovery PNG(s) | Resolution + steps go up; seed/prompt preserved (read from PNG metadata). Front-view ref re-rendered + back-view variant generated from the same seed/prompt. |
-| 2 → 3 | The hi-res **front** ref, **back** ref, **reference prompt**, and **reference seed** | Prompts derived by swapping the view clause; one ref image selected per pose (agent decides front vs back based on pose angle); `max_images_allowed="1"` for single-image ref mode |
-| 3 → 4 | User-picked sheet view PNG(s) | Megapixels + steps go up; seed/prompt/refs preserved |
+The workflow template is `skills/comfyui/templates/flux-kontext-edit.json`.
 
-Front and back are produced as reference images in Stage 2 — together they cover the head-on and rear anatomy that the multi-view sweep won't re-roll. Stage 3 only sweeps in-between angles (sides, three-quarters).
+**Required models:**
+- `flux1-kontext-dev.safetensors` (in `models/unet/`)
+- `ae.safetensors` (in `models/vae/`)
+- `t5xxl_fp16.safetensors` + `clip_l.safetensors` (in `models/clip/`)
 
-## Workflow
+## Stage 1 — Prepare
 
-### Stage 0 — Pre-flight (once)
-
-Before starting, confirm ComfyUI is up and the required models are present. This avoids waiting through stage 1 only to find a missing checkpoint.
+### Pre-flight
 
 ```bash
 python skills/comfyui/comfy.py models
-# Required: persephoneFluxNSFWSFW_20FP16.safetensors  (stages 1–2)
-#           flux-2-klein-base-9b.safetensors          (stages 3–4)
+# Verify: flux1-kontext-dev.safetensors in checkpoints
+#          ae.safetensors in vaes
+python skills/comfyui/comfy.py nodes --required FluxKontextImageScale,ReferenceLatent,LoadImage
 ```
 
-If anything is missing, stop and tell the user the exact filename(s) needed.
+### Source image
 
-Create one **pipeline session directory** that holds artifacts from every stage — keeps things easy to reason about across long-running batches:
+The user provides one front-facing reference image. Requirements:
+- Clear face, good lighting
+- Full body or at least upper body visible
+- Neutral or simple background (helps Kontext focus on identity)
+- 1024×1024 or larger preferred
+
+Copy it to ComfyUI's input directory:
+```bash
+cp /path/to/source.png /Users/jac/Dev/src/ComfyUI/input/<name>.png
+```
+
+### Session setup
 
 ```bash
 TS=$(date +%Y%m%d-%H%M%S)
-PIPELINE=context/uploads/comfyui/pipelines/$TS
-mkdir -p "$PIPELINE"/{1-discover,2-reference,3-sheet,4-final}
+PIPELINE=context/uploads/comfyui/sessions/$TS
+mkdir -p "$PIPELINE"/{outputs,character-sheet}
 ```
 
-#### Pose pack — required input for Stage 3
+### Pose list
 
-Stage 3 needs to know **which poses to seed-hunt for** before the
-pipeline starts (so the wall-time estimate is accurate and so the user
-isn't ambushed by a mid-pipeline question). Resolve this now:
+The standard character sheet for LoRA training covers these categories:
 
-1. **If the user named a pack at kickoff** (e.g., "use turnaround", or
-   gave an absolute path), resolve it:
-   - A bare name → `skills/comfyui/character-pipeline/references/poses/<name>.md`
-   - An absolute path → use as-is
-2. **If they didn't**, list the bundled packs and ask. Print:
+**Multi-angle (6 views):**
+1. Front view (source or re-rendered)
+2. Profile left
+3. Profile right
+4. Three-quarter left
+5. Three-quarter right
+6. Back view
 
-   ```bash
-   ls skills/comfyui/character-pipeline/references/poses/*.md
-   ```
+**Poses (4-6):**
+7. Seated (on stool)
+8. Arms raised
+9. Walking / mid-stride
+10. Hands on hips
+11. Crouching
+12. Leaning against wall
 
-   Then for each one show the `name`, `description`, and `poses` count
-   from its frontmatter. Tell the user they can also point at a custom
-   pack file by absolute path. See
-   `skills/comfyui/character-pipeline/references/poses/README.md` for
-   the format if they want to author their own.
+**Expressions (3-4):**
+13. Smiling warmly
+14. Laughing
+15. Serious / intense
+16. Surprised
 
-3. **Validate** the chosen pack: file exists, has frontmatter with
-   `name`/`description`/`poses`, and at least one pose entry under
-   `## Poses`. Each pose entry should be a simple natural-language
-   instruction describing the pose and camera angle. If validation
-   fails, stop and tell the user what's wrong — don't paper over it.
+**Environments (3-4):**
+17. Outdoor park / nature
+18. Café / indoor
+19. City street / urban
+20. Moody / dramatic lighting
 
-   The bundled packs deliberately exclude front and back poses
-   because Stage 2 produces those as reference images. If a custom
-   pack includes front/back entries, flag it — they'll just duplicate
-   the refs.
+**Clothing (2-3):**
+21. Casual jeans + t-shirt
+22. Black dress / formal
+23. Sporty / athletic
 
-4. **Freeze it into the session** so the run is self-contained:
+**Lighting (2-3):**
+24. Golden hour / warm backlight
+25. Dramatic side lighting
+26. Soft overcast
 
-   ```bash
-   cp <chosen-pack-path> "$PIPELINE/3-sheet/pose-pack.md"
-   ```
+Total: ~25-30 poses. The user can customize this list — add, remove, or replace entries.
 
-   Stage 3 reads this frozen copy, not the source pack — so editing
-   the source mid-pipeline won't corrupt the run.
+## Stage 2 — Generate
 
-### Stage 1 — Discover (model-seed-hunt)
+### Per-pose variants
 
-Read the sub-flow doc and follow it:
+For each pose, generate **4-5 seed variants** so the user can pick the best one. This addresses the stochastic nature of diffusion — same prompt, different seeds give different results. Some will have better identity preservation, some better pose accuracy, some better composition.
+
+Create a workflow per variant:
+
+```python
+for pose in pose_list:        # ~25 poses
+    for variant in range(5):  # 5 variants per pose
+        # copy flux-kontext-edit.json template
+        # edit 41.inputs.image → source filename
+        # edit 6.inputs.text → pose-specific edit instruction
+        # edit 25.inputs.noise_seed → 0 (randomize each)
+        # edit 9.inputs.filename_prefix → "{pose_name}_v{variant+1}"
+        # save as wf_{pose_name}_v{variant+1}.json
+```
+
+### Prompt engineering for Kontext edits
+
+Each pose prompt should follow this pattern:
 
 ```
-read skills/comfyui/character-pipeline/references/model-seed-hunt.md
+Same [woman/man/person], now [EDIT DESCRIPTION], same [background/clothing/appearance as appropriate], [style/quality notes]
 ```
 
-Use `$PIPELINE/1-discover` as the session dir for that flow. The output is 20–30 low-res front-view candidates.
+**Key rules:**
+- Always start with "Same [subject]" — this anchors identity preservation
+- Describe the *change*, not the whole scene — Kontext already sees the source
+- Preserve what shouldn't change: "same clothing", "same face", "same hair"
+- Keep prompts focused — Kontext struggles with too many simultaneous changes
 
-**Checkpoint:** present the grid to the user and ask them to **pick 1–3 winners**. Save their picks under `$PIPELINE/1-discover/picks/`.
+**Example prompts:**
 
-Don't proceed automatically. The user must approve picks before stage 2 — wrong base character ⇒ everything downstream is wasted compute.
+| Pose | Prompt |
+|------|--------|
+| Profile left | "Same woman in profile view facing left, same white studio background, same clothing and appearance, full body studio photography" |
+| Smile | "Same woman smiling warmly at the camera, natural expression, same white studio background, same clothing and appearance, full body studio photography" |
+| Café | "Same woman inside a cozy café, warm interior lighting, same clothing and appearance, full body photography" |
+| Jeans | "Same woman wearing casual blue jeans and a fitted white t-shirt, standing front view, same white studio background, same face and hair, full body studio photography" |
+| Golden hour | "Same woman outdoors at golden hour, warm sunset light, same clothing and appearance, full body photography" |
+| Back | "Same woman viewed from behind, back of head and full back visible, same white studio background, same clothing and appearance, full body studio photography" |
 
-### Stage 2 — Lock the references (front **and** back)
-
-```
-read skills/comfyui/character-pipeline/references/model-upscale.md
-```
-
-Feed it the picks from Stage 1. The flow reads each PNG's embedded seed/prompt and re-renders at full resolution (1024×1536, 32 steps for persephone). Output goes to `$PIPELINE/2-reference/`.
-
-**Both reference angles are required**, not optional. Stage 3's multi-view sweep covers sides and three-quarters; the front and back references are what carry head-on and rear anatomy across to the final character sheet. Skip the back-view ref and you lose all spine / glutes / heels detail in the final set — which is exactly the gap this pipeline exists to close.
-
-For each chosen front-view pick, generate a matching back-view variant by **re-rendering the same seed and prompt with one swap in the prompt text**: replace `front view, facing camera` (or the equivalent head-on framing clause) with `rear view, facing away from camera`. Everything else — seed, identity blurb, lens, lighting — stays verbatim. The seed lock keeps it the same person from the back.
-
-Practically:
-
-1. Run the front-view upscale per `references/model-upscale.md`. Output: `$PIPELINE/2-reference/front_<stem>.png` (1024×1536, 32 steps).
-2. For each front upscale, write a sibling job that flips the framing clause to rear view and submits with the same seed. The model-upscale flow's batch script is the right shape — clone the metadata, edit the prompt text, write a new filename prefix (`front-back/back_<stem>`), submit. Output: `$PIPELINE/2-reference/back_<stem>.png`.
-3. Verify the back render actually shows the back. Persephone sometimes ignores the rear-view clause if the rest of the prompt is strongly front-loaded — if the back render still shows the face, tighten the rear-view clause (e.g., "rear view, back to camera, face not visible") and re-run that one seed.
-
-**Checkpoint:** confirm both upscaled refs (front + back) still look like the same person — sometimes the higher step count drifts slightly; sometimes the back render diverges in skin tone or hair length. If drift is unacceptable, go back to Stage 1 with a different pick. Do **not** change the seed at this stage; the seed *is* the identity.
-
-Then **promote both refs** into ComfyUI's `input/` directory under stable names so Stage 3 can refer to them:
+### Batch submission and monitoring
 
 ```bash
-COMFYUI_INPUT=$(find /Users -maxdepth 5 -path "*/ComfyUI/input" -type d 2>/dev/null | head -1)
-cp "$PIPELINE/2-reference/front_<chosen>.png" "$COMFYUI_INPUT/front_m4.png"
-cp "$PIPELINE/2-reference/back_<chosen>.png"  "$COMFYUI_INPUT/back_m4.png"
+# Submit all workflows
+for wf in wf_*.json; do
+    python skills/comfyui/comfy.py submit "$wf"
+done
+
+# Wait for each (sequential — ComfyUI processes one at a time on MPS)
+# ~5 min per image on MPS with flux1-kontext-dev
+# Total: ~25 poses × 5 variants × 5 min ≈ 10 hours for full sheet
+# Or: ~25 poses × 1 variant × 5 min ≈ 2 hours for quick preview
 ```
 
-### Stage 3 — Multi-view sheet (multiview-seed-hunt)
+**Practical advice:**
+- For a first pass, generate **1 variant per pose** (~25 images, ~2 hours) to get a quick sheet
+- Then generate additional variants only for poses where the first result wasn't ideal
+- This saves significant compute vs. always generating 5× everything
 
-```
-read skills/comfyui/character-pipeline/references/multiview-seed-hunt.md
-```
+### Stitch preview sheets
 
-Hand the multi-view flow everything it needs and let it own the rest. It will derive per-pose prompts from the Stage 2 reference prompt, get user approval on the derived prompts, and run the sweep.
+After generation, stitch images into grids for easy review:
 
-Inputs to pass through:
+```python
+from PIL import Image
 
-- **Stage 2 reference prompt** — the exact prompt text used to produce the locked front-view reference. Every pose prompt is derived from this by swapping only the view/positioning clause; the identity blurb, wardrobe, lighting, and lens stay verbatim. Don't paraphrase between stages.
-- **Stage 2 reference seed** — carried from the locked front-view. Used as the seed for all Stage 3 renders to lock likeness.
-- **Pose pack** — `$PIPELINE/3-sheet/pose-pack.md` (the frozen copy from Stage 0).
-- **Reference images** — both front and back from Stage 2. The agent **decides per-pose which reference to use** based on the pose's view angle: front-facing or side poses → front ref; rear-facing poses → back ref. Only one ref image is fed per job (`IMAGE1`), with `max_images_allowed` set to `"1"` so the second slot is ignored (it still requires a file on disk — keep the default in node 169, it won't be processed).
-- **Seeds per pose** — default 5.
-
-Session dir: `$PIPELINE/3-sheet`. The multi-view flow creates its own session subdir under that and writes the seed-hunt batch script + outputs there.
-
-**Checkpoint:** the multi-view flow returns the per-pose grids. Present them and ask the user to pick **the best seed per pose**. Total keepers scale with pack size (e.g., 1 pick/pose × 4 poses = 4 keepers for `character-sheet.md`).
-
-### Stage 4 — Hi-res final renders (model-upscale)
-
-```
-read skills/comfyui/character-pipeline/references/model-upscale.md
+# Per-category sheets (5 columns)
+# Or full sheet: 5 columns × N rows
+cols = 5
+# Arrange in grid, save as PNG
 ```
 
-Feed it the stage-3 picks. Important: this is a **flux2-klein-seed-hunt** workflow type, not persephone — the upscale flow auto-detects from PNG metadata, but if you set `WORKFLOW_TYPE` manually in its script, set it to `"flux2-klein-seed-hunt"` (1.5 MP, 12 steps).
+## Stage 3 — Curate
 
-Output: `$PIPELINE/4-final/`. These are the LoRA training reference images. Don't forget that the locked Stage-2 refs (front + back) are also part of the LoRA training set — copy them alongside:
+Present the generated images to the user for review. For each category (angles, poses, expressions, etc.), ask them to pick the best variant(s).
 
+### Review criteria
+
+For each image, evaluate:
+1. **Identity preservation** — does it still look like the source person?
+2. **Pose accuracy** — does it match the requested pose/view?
+3. **Quality** — artifacts, blurring, anatomical issues?
+4. **Consistency** — does it fit with the other selected images?
+
+### Curated training set
+
+The user's picks form the LoRA training set. Best practices for the final set:
+- **20-30 images** minimum for a solid LoRA
+- **Balance across categories** — don't over-weight any single pose/angle
+- **Regularity images** — consider adding non-character images of similar style to prevent overfitting (the model learning to always generate a white studio)
+
+Save the curated set:
 ```bash
-cp "$PIPELINE/2-reference/front_<chosen>.png" "$PIPELINE/4-final/"
-cp "$PIPELINE/2-reference/back_<chosen>.png"  "$PIPELINE/4-final/"
+mkdir -p "$PIPELINE/training-set"
+# Copy user's picks from outputs/ to training-set/
 ```
 
-Deliver the final set to the user with a short summary: how many views × how many seeds per view, file paths, and the original discovery seed (so they can recreate the character later).
+## Stage 4 — Caption (planned)
 
-## Decision points (don't skip these)
+Each training image needs a descriptive caption for LoRA training:
+- Unique trigger token (e.g., `nikki woman`)
+- Pose/body description
+- Clothing description
+- Expression
+- Lighting/environment
 
-| Between stages | Question | Why it matters |
-|---------------|----------|----------------|
-| 0 → 1 | "Which pose pack should I use for Stage 3?" | The pose set defines what the character is useful for downstream — turnaround for LoRA, character-sheet for game/comic bibles, custom pack for fashion/action/etc. Drives wall-time too. |
-| 1 → 2 | "Which 1–3 of these do you want to lock in?" | Identity is fixed once you commit; later stages can't change the face |
-| 2 → 3 | "Does the upscaled front + back still look like the same person?" | Drift here means stage 3 produces views of someone else — and a back that doesn't match the front means the LoRA learns two people. |
-| 3 → 4 | "Which seed per pose do you want at full quality?" | Stage 4 burns ~3× the compute — only upscale keepers |
-
-These are user calls, not your calls. Don't auto-pick.
+This is the remaining gap — the pipeline produces images but not yet captions. Future update will add auto-captioning via vision-language model.
 
 ## Estimated wall time on MPS (Apple Silicon)
 
-| Stage | Volume | Per image | Total |
-|-------|--------|-----------|-------|
-| 1 | 15 × 0.39 MP, 8 steps | ~12s | ~3 min |
-| 2 | 1–3 × 1.78 MP, 32 steps × 2 (front + back) | ~110s | ~5–10 min |
-| 3 | N poses × 5 seeds × 0.5 MP, 8 steps | ~75s | **~6 min × N** |
-| 4 | (2–4 keepers) × 1.5 MP, 12 steps | ~3 min | ~6–12 min |
-| **Total** | — | — | **~25 min (turnaround) / ~45 min (character-sheet)** |
-
-Stage 3 scales linearly with pose-pack size — `turnaround.md` (2 poses)
-takes ~12 min, `character-sheet.md` (4 poses) takes ~24 min. Tell the
-user the estimate that matches their chosen pack when they kick off.
+| Batch size | Per image | Total |
+|---|---|---|
+| Quick preview (25 poses × 1 variant) | ~5 min | **~2 hours** |
+| Full diversity (25 poses × 5 variants) | ~5 min | **~10 hours** |
+| Curated re-gen (5 poses × 3 variants) | ~5 min | **~1.25 hours** |
 
 ## Tips
 
-- **Run the whole pipeline in one session dir** (`$PIPELINE/`) so checkpoints, picks, and final outputs live together. Easier to revisit later than scattered timestamped dirs.
-- **Don't skip the upscale at stage 2.** Going straight from low-res discovery to seed-hunt costs you identity fidelity — the reference image quality propagates to every view.
-- **Front + back refs are non-negotiable.** Stage 2 always produces both. Stage 3 uses one per pose based on the angle (front ref for front/side poses, back ref for rear poses). If you only have a front pick, generate the back-view variant before promoting.
-- **The seed is the person.** Across stages 1, 2, and inside any single seed-hunt prompt at stage 3, `noise_seed` is what locks the likeness. Never change it accidentally.
-- **Stages 1+2 use persephone, stages 3+4 use flux2-klein.** Different model, different node IDs in the workflow JSON — the model-upscale flow handles both via its dispatch table, so trust it.
-- **Resumability:** if the user pauses between stages, the session dir tells you where you left off — `1-discover/picks/` exists ⇒ stage 1 done, stage 2 not started; both `front_*.png` and `back_*.png` in `2-reference/` ⇒ ready to promote and start stage 3; etc.
-- **Failure recovery:** if any sub-flow batch loses jobs to a ComfyUI restart, that flow's monitoring section tells you how to detect and resubmit. This skill doesn't need to know about queue mechanics.
-- **Custom pose packs:** copy `skills/comfyui/character-pipeline/references/poses/turnaround.md`, edit the entries (each pose is a simple natural-language instruction describing the angle and body position), bump the `poses` count in the frontmatter, and either drop the file alongside the bundled packs or hand Stage 0 an absolute path to it. **Don't add front or back entries** — those are covered by the Stage 2 references. See `skills/comfyui/character-pipeline/references/poses/README.md`.
-- **Prompts are derived, not composed.** Stage 3 doesn't author fresh prompts from the pose pack. Instead it takes the Stage 2 reference prompt and swaps only the view/positioning clause per pose. The identity blurb, wardrobe, lighting, and lens stay verbatim across all poses. The user approves the derived prompts before the sweep.
+- **One good reference is everything.** The quality of the source image directly determines identity preservation across all generated views. Spend time getting this right.
+- **Kontext guidance 2.5 is the sweet spot.** Lower (1.5-2.0) gives more creative freedom but risks identity drift. Higher (3.0-4.0) gives stronger prompt adherence but can look rigid.
+- **Don't change too many things at once.** "Same woman, now smiling, wearing a red dress, in a forest" will struggle. Keep edits focused: one change (pose OR expression OR clothing OR environment) per prompt.
+- **The `FluxKontextImageScale` node is important.** Don't skip it — it optimizes the source image resolution for the Kontext model's latent space.
+- **Euler + simple scheduler** is the proven combo for Kontext. Don't swap to beta or other schedulers without testing.
+- **ModelSamplingFlux** auto-adjusts shift based on resolution. If you change output dimensions, leave this node in place (or bypass with CTRL-B if you want manual control).
+- **Front view re-render** from the source is optional but recommended — it validates the pipeline preserves identity before burning compute on all other poses.
+- **When environment/clothing changes drift identity**, tighten the prompt: add "same face, same hair, same person" more explicitly, or try a higher guidance value.
