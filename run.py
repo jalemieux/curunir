@@ -413,7 +413,11 @@ logger = logging.getLogger(__name__)
 
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-_LOG_DATEFMT = "%H:%M:%S"
+# Full date so the introspect skill can filter the rotating log file by a
+# time window (the flat file spans multiple days; time-only stamps can't be
+# windowed). `docker logs` adds its own dated prefix, so this only affects
+# the file handler's lines in practice.
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 _LOG_MAX_BYTES = 10_000_000
 _LOG_BACKUP_COUNT = 3
 

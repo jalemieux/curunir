@@ -1,28 +1,40 @@
 ---
 name: introspect
-description: "Use when periodically reviewing curunir's own docker logs for regressions, errors, loops, tool-misuse, or context overflows and filing GitHub issues for novel findings. Trigger on a schedule (e.g. hourly via `context/schedules.json`), or when the user asks to scan logs / check on the agent's recent behavior. Dedups against open issues so repeated patterns become comments, not new tickets."
+description: "Use when periodically reviewing curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows and filing GitHub issues for novel findings. Trigger on a schedule (e.g. hourly via `context/schedules.json`), or when the user asks to scan logs / check on the agent's recent behavior. Dedups against open issues so repeated patterns become comments, not new tickets."
 tools: bash
 ---
 
 # Introspect
 
-Self-hosted observability loop. Scan recent docker logs, classify findings, dedup
+Self-hosted observability loop. Scan recent logs, classify findings, dedup
 against open GitHub issues, and file new ones for novel problems.
 
 **Requires:**
 - `gh` CLI authenticated via `GH_TOKEN` (see the `github` skill for details)
-- Access to `docker logs` — either the host's `docker` CLI, or `/var/run/docker.sock` mounted into the container alongside a `docker` client install
+- A readable log source — either the rotating log file at `$LOG_FILE`
+  (default `/app/workspace/curunir.log`, written by `run.py` and persisted on
+  the workspace volume), or `docker logs` access (host `docker` CLI, or
+  `/var/run/docker.sock` mounted in alongside a `docker` client)
 
-If neither is available, log a one-line failure to `context/memory/introspection.md`
+When running inside the curunir container, `$LOG_FILE` is the normal path —
+`docker logs` is not reachable without the socket mounted. If neither source
+is available, log a one-line failure to `context/memory/introspection.md`
 and exit cleanly. Do not invent findings.
 
 ## Inputs
 
 - **Window** — how far back to scan. Default `1h`. Override via the prompt.
-- **Container** — what to scan. Resolution order:
-  1. `$CURUNIR_CONTAINER` env var
-  2. `hostname` self-lookup if running inside the container (returns the container ID, which `docker logs` accepts)
-  3. `docker ps --filter "name=curunir" --format "{{.Names}}" | head -1`
+- **Log source** — where to read logs from. Resolution order:
+  1. **`$LOG_FILE`** (default `/app/workspace/curunir.log`) — if it exists and
+     is non-empty, prefer it. This is the in-container path. Lines look like
+     `2026-05-12 08:30:01 INFO src.agent.agent: ...`. The file rotates at
+     10 MB × 3 backups (`curunir.log`, `curunir.log.1`, …), so a wide window
+     may need the rotated files too (oldest first).
+  2. **`docker logs {container}`** — fallback, for runs that have Docker access
+     (typically a host-side curunir). Resolve the container:
+     1. `$CURUNIR_CONTAINER` env var
+     2. `hostname` self-lookup if inside the container (returns the container ID, which `docker logs` accepts)
+     3. `docker ps --filter "name=curunir" --format "{{.Names}}" | head -1`
 - **Repo** — where to file findings. Resolution order:
   1. `$INTROSPECT_REPO` env var (`owner/name`)
   2. `gh repo view --json nameWithOwner -q .nameWithOwner` from the curunir clone
@@ -32,12 +44,45 @@ and exit cleanly. Do not invent findings.
 
 ### Step 1: Pull logs
 
+Resolve the log source (see **Inputs**), then collect the window into a temp
+file — never read raw logs straight into your context.
+
+**Preferred — log file (`$LOG_FILE`, default `/app/workspace/curunir.log`):**
+
 ```bash
-docker logs --since={window} {container} 2>&1 > /tmp/introspect-logs.txt
+LOG_FILE="${LOG_FILE:-/app/workspace/curunir.log}"
+# Cutoff timestamp matching run.py's "%Y-%m-%d %H:%M:%S" format. Translate the
+# window to a form `date` understands — GNU: "1 hour ago" / "24 hours ago";
+# BSD/macOS: -v-1H / -v-24H. (Container is Linux → the GNU form.)
+SINCE_TS=$(date -u -d "{window} ago" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+        || date -u -v-{window} "+%Y-%m-%d %H:%M:%S")
+# Concatenate rotated files oldest-first so timestamps stay ordered, then keep
+# lines at or after the cutoff. The 19-char stamp is a fixed-width line prefix,
+# so a lexicographic compare on substr($0,1,19) is correct. Untimestamped
+# continuation lines (tracebacks) sort before the cutoff and get dropped — the
+# pattern scan in Step 2 still catches "Traceback"/"ERROR" header lines, which
+# are timestamped, so findings aren't lost.
+ls -1tr "$LOG_FILE".* "$LOG_FILE" 2>/dev/null \
+  | xargs cat 2>/dev/null \
+  | awk -v since="$SINCE_TS" 'substr($0,1,19) >= since' \
+  > /tmp/introspect-logs.txt
 wc -l /tmp/introspect-logs.txt
 ```
 
-If the file is empty or `docker logs` errors, log the failure to the ledger and exit.
+If you need the full context around a windowed finding (e.g. a multi-line
+traceback that got partially trimmed), re-grep the un-windowed `$LOG_FILE` for
+the matching session/timestamp rather than widening the whole scan.
+
+**Fallback — `docker logs` (host-side runs only):**
+
+```bash
+docker logs --since={window} {container} > /tmp/introspect-logs.txt 2>&1
+wc -l /tmp/introspect-logs.txt
+```
+
+If `$LOG_FILE` is missing/empty and `docker logs` errors (or isn't available),
+log the failure to the ledger and exit. If `$LOG_FILE` exists but the windowed
+slice is empty, that's a clean run — emit the `clean` ledger line (Step 6).
 
 ### Step 2: Pattern scan (regex)
 
@@ -164,7 +209,7 @@ if it doesn't exist.
 If the run produced zero findings, still append one line:
 
 ```
-{ISO8601 timestamp} | clean | scan | - | window={window} container={container}
+{ISO8601 timestamp} | clean | scan | - | window={window} source={LOG_FILE or container}
 ```
 
 The clean-run line is intentional — it confirms the loop is alive, not silently broken.
@@ -173,8 +218,8 @@ The clean-run line is intentional — it confirms the loop is alive, not silentl
 
 A chatty hour can produce hundreds of MB of logs. Guard against context blowup:
 
-- Always write `docker logs` output to a file first; never paste raw logs into
-  your context.
+- Always collect the log window into a temp file first (Step 1), whether the
+  source is `$LOG_FILE` or `docker logs`; never paste raw logs into your context.
 - Pattern-scan with `grep` to surface candidate lines before involving an LLM.
 - For Step 3, read chunks of ~30k chars; summarize each chunk to a structured
   finding list before moving to the next.
@@ -183,7 +228,7 @@ A chatty hour can produce hundreds of MB of logs. Guard against context blowup:
 ## Failure modes
 
 - **`gh` not authenticated** — log to ledger as `error`, do not retry. User must set `GH_TOKEN`.
-- **Docker socket unreachable** — log to ledger as `error`. Suggest the user mount `/var/run/docker.sock` or run the skill from the host.
+- **No log source** — `$LOG_FILE` missing/empty *and* `docker logs` unavailable: log to ledger as `error`. Suggest setting `LOG_FILE` (it's set by docker compose) or, for host-side runs, mounting `/var/run/docker.sock`.
 - **Empty log window** — log a `clean` line and exit.
 - **Repo not resolvable** — log to ledger as `error`, do not file anywhere.
 
@@ -193,7 +238,8 @@ Never crash the scheduler tick. Always exit with a ledger entry.
 
 This skill is built to run on a cron via `context/schedules.json`. Example
 entry (disabled by default — flip `enabled` to `true` after confirming
-`GH_TOKEN`, the docker socket, and `INTROSPECT_REPO` are configured):
+`GH_TOKEN` and `INTROSPECT_REPO` are set, and that `$LOG_FILE` is readable —
+docker compose points it at `/app/workspace/curunir.log`):
 
 ```json
 [
@@ -201,7 +247,7 @@ entry (disabled by default — flip `enabled` to `true` after confirming
     "id": "introspect-hourly",
     "cron": "0 * * * *",
     "skill": "introspect",
-    "prompt": "Scan the last hour of docker logs and file github issues for any new problems.",
+    "prompt": "Scan the last hour of curunir's logs and file github issues for any new problems.",
     "enabled": false
   }
 ]
@@ -213,8 +259,10 @@ instructions in-session.
 
 ## Security note
 
-Mounting `/var/run/docker.sock` into the curunir container gives the agent
-root-equivalent control over the host Docker daemon. If that's unacceptable
-for your environment, run the introspect cron on the host instead — point a
+The in-container path reads `$LOG_FILE` and needs no Docker access at all —
+prefer it. The `docker logs` fallback only matters for host-side runs; if you
+ever do mount `/var/run/docker.sock` into the container to enable it, note that
+that gives the agent root-equivalent control over the host Docker daemon. If
+that's unacceptable, run the introspect cron on the host instead — point a
 host-side curunir at the same `INTROSPECT_REPO` and let it shell out to
 `docker logs` directly.
