@@ -124,6 +124,7 @@ cp skills/comfyui/templates/flux-kontext-edit.json "$SESSION/workflow.json"
 | `multi-image-in.json` | Two image inputs feeding a composite (style + subject). | `templates/README.md` |
 | `flux2-klein-seed-hunt.json` | Bulk seed hunting with Flux 2 Klein + dual image reference. | `templates/README.md` |
 | `persephone-flux-model-seed.json` | Model seed discovery — text-to-image front-view character sheets with random seeds. | `templates/README.md` |
+| `sdxl-txt2img.json` | Standard SDXL 1.0 txt2img — dual-CLIP encode (`text_g`/`text_l`), CLIP-skip −2, KSampler. Use the `sdxl-prompting` skill to write the prompt. | `templates/README.md` |
 
 ## 3. Edit the workflow JSON
 

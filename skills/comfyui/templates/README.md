@@ -11,6 +11,7 @@ directory before editing — never edit these in place.
 | `multi-image-in.json` | Two reference images composited. | Same as `flux-redux` |
 | `flux2-klein-seed-hunt.json` | Bulk seed hunting with Flux 2 Klein + dual image reference. | `flux-2-klein-base-9b.safetensors`, `vae/flux2-vae.safetensors`, Klein CLIP, LoRA |
 | `persephone-flux-model-seed.json` | Model seed discovery — pure text-to-image front-view character sheets with random seeds. | `persephoneFluxNSFWSFW_20FP16.safetensors`, `flux_vae.safetensors`, CLIP-L + T5 |
+| `sdxl-txt2img.json` | Standard SDXL 1.0 txt2img — dual-CLIP encode, CLIP-skip -2, KSampler. Pair with the `sdxl-prompting` skill for prompt construction. | any SDXL 1.0 checkpoint (default `epicrealismXL_pureFix.safetensors`) |
 
 Each template's `_meta.editable` block lists the fields the agent
 should expect to touch (prompt, seed, image filenames, dimensions).

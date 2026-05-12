@@ -1,0 +1,151 @@
+{
+  "123": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "t5xxl_fp16.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux"
+    }
+  },
+  "107": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "PROMPT_PLACEHOLDER",
+      "clip": ["123", 0]
+    }
+  },
+  "114": {
+    "class_type": "PulidFluxModelLoader",
+    "inputs": {
+      "pulid_file": "pulid_flux_v0.9.1.safetensors"
+    }
+  },
+  "108": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "119": {
+    "class_type": "PulidFluxEvaClipLoader",
+    "inputs": {}
+  },
+  "122": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "persephoneFluxNSFWSFW_20FP16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "124": {
+    "class_type": "PulidFluxInsightFaceLoader",
+    "inputs": {
+      "provider": "CPU"
+    }
+  },
+  "112": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "guidance": 2.5,
+      "conditioning": ["107", 0]
+    }
+  },
+  "109": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "178": {
+    "class_type": "ApplyPulidFlux",
+    "inputs": {
+      "model": ["122", 0],
+      "pulid_flux": ["114", 0],
+      "eva_clip": ["119", 0],
+      "face_analysis": ["124", 0],
+      "image": ["120", 0],
+      "weight": 1.0,
+      "start_at": 0.0,
+      "end_at": 1.0
+    }
+  },
+  "113": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 768,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "111": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    }
+  },
+  "115": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": ["178", 0],
+      "conditioning": ["112", 0]
+    }
+  },
+  "110": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 28,
+      "denoise": 1.0,
+      "model": ["178", 0]
+    }
+  },
+  "116": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["111", 0],
+      "guider": ["115", 0],
+      "sampler": ["109", 0],
+      "sigmas": ["110", 0],
+      "latent_image": ["113", 0]
+    }
+  },
+  "120": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "FACE_SOURCE_PLACEHOLDER"
+    }
+  },
+  "117": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["116", 0],
+      "vae": ["108", 0]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "OUTPUT_PREFIX_PLACEHOLDER",
+      "images": ["117", 0]
+    }
+  },
+  "_meta": {
+    "name": "pulid-face-inject",
+    "purpose": "Generate body/scene with PuLID face injection. Prompt describes the body, PuLID handles face identity.",
+    "required_models": {
+      "unet": "persephoneFluxNSFWSFW_10Q8GGUF.gguf",
+      "pulid": "pulid_flux_v0.9.1.safetensors",
+      "vae": "ae.safetensors",
+      "clip": ["t5xxl_fp16.safetensors", "clip_l.safetensors"]
+    },
+    "editable": [
+      "107.inputs.text (body/scene prompt)",
+      "120.inputs.image (face reference filename in input/)",
+      "9.inputs.filename_prefix (output filename)",
+      "111.inputs.noise_seed (0 = random)",
+      "113.inputs.width / height (resolution)",
+      "112.inputs.guidance (default 2.5)",
+      "178.inputs.weight (PuLID strength, default 1.0)"
+    ]
+  }
+}
