@@ -19,6 +19,38 @@ class GmailError(Exception):
     """Raised when a Gmail API call fails."""
 
 
+def _outbound_allowlist() -> list[str]:
+    """Recipient allowlist for outbound mail — reuses EMAIL_ALLOWED_SENDERS."""
+    return [s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()]
+
+
+def _check_recipients_allowed(*recipient_fields: str | None) -> None:
+    """Block outbound mail to addresses outside the allowlist.
+
+    Enforcement is gated by EMAIL_RESTRICT_OUTBOUND (default "true"). When the
+    allowlist (EMAIL_ALLOWED_SENDERS) is empty, nothing is restricted — matching
+    the inbound channel, which accepts mail from anyone when no list is set.
+    Matching mirrors the inbound check: an allowlist entry need only be a
+    substring of the recipient (so "Name <addr>" forms pass).
+    """
+    if os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() != "true":
+        return
+    allowed = _outbound_allowlist()
+    if not allowed:
+        return
+    recipients: list[str] = []
+    for field_value in recipient_fields:
+        if not field_value:
+            continue
+        recipients.extend(addr.strip() for addr in field_value.split(",") if addr.strip())
+    blocked = [r for r in recipients if not any(a in r for a in allowed)]
+    if blocked:
+        raise GmailError(
+            f"Outbound email blocked: recipient(s) {blocked} not in EMAIL_ALLOWED_SENDERS "
+            f"({allowed}). Set EMAIL_RESTRICT_OUTBOUND=false to disable this check."
+        )
+
+
 def build_service(service_account_file: str, delegated_user: str):
     """Build a Gmail API service object with domain-wide delegation."""
     credentials = service_account.Credentials.from_service_account_file(
@@ -78,6 +110,7 @@ def send_email(
     attachments: list[str] | None = None,
 ) -> None:
     """Send a new email, optionally with HTML body and/or file attachments."""
+    _check_recipients_allowed(to, cc, bcc)
     try:
         # Build body part
         if body_html:
@@ -124,6 +157,7 @@ def send_reply(
     attachments: list[str] | None = None,
 ) -> None:
     """Send a reply to a message, optionally with file attachments."""
+    _check_recipients_allowed(to)
     try:
         # Get the original message to extract threadId and Message-ID header
         orig = service.users().messages().get(

@@ -212,6 +212,45 @@ def test_send_reply_api_error(mock_service):
         send_reply("to@x.com", "subj", "body", "msg_1", mock_service)
 
 
+def test_send_email_blocked_when_recipient_not_allowed(mock_service, monkeypatch):
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "owner@example.com")
+    with pytest.raises(GmailError, match="Outbound email blocked"):
+        send_email("stranger@evil.com", "subj", "body", mock_service)
+    mock_service.users().messages().send.assert_not_called()
+
+
+def test_send_email_allowed_recipient_passes(mock_service, monkeypatch):
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "owner@example.com")
+    send_email("Owner Name <owner@example.com>", "subj", "body", mock_service)
+    mock_service.users().messages().send.assert_called_once()
+
+
+def test_send_email_cc_bcc_also_checked(mock_service, monkeypatch):
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "owner@example.com")
+    with pytest.raises(GmailError, match="stranger@evil.com"):
+        send_email("owner@example.com", "subj", "body", mock_service, bcc="stranger@evil.com")
+
+
+def test_outbound_restriction_disabled_by_flag(mock_service, monkeypatch):
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "owner@example.com")
+    monkeypatch.setenv("EMAIL_RESTRICT_OUTBOUND", "false")
+    send_email("stranger@evil.com", "subj", "body", mock_service)
+    mock_service.users().messages().send.assert_called_once()
+
+
+def test_outbound_restriction_noop_without_allowlist(mock_service, monkeypatch):
+    monkeypatch.delenv("EMAIL_ALLOWED_SENDERS", raising=False)
+    send_email("anyone@example.com", "subj", "body", mock_service)
+    mock_service.users().messages().send.assert_called_once()
+
+
+def test_send_reply_respects_allowlist(mock_service, monkeypatch):
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "owner@example.com")
+    with pytest.raises(GmailError, match="Outbound email blocked"):
+        send_reply("stranger@evil.com", "subj", "body", "msg_1", mock_service)
+    mock_service.users().messages().send.assert_not_called()
+
+
 def test_thread_modify(mock_service):
     mock_service.users().labels().list().execute.return_value = {
         "labels": [{"id": "Label_99", "name": "agent/processed"}]
