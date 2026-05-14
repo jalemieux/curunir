@@ -1,13 +1,22 @@
 ---
 name: email-send
 description: "Send a NEW outbound email to a recipient who is not already in the active email thread. Do NOT use to reply on an inbound email thread — the email channel replies automatically with your final assistant message."
-disabled: true
 ---
 
 # Sending Email
 
 Send emails via the Gmail API using `src.channels.gmail` through bash.
 The sender address is `$GOOGLE_DELEGATED_USER`, configured at the environment level.
+
+## Recipient allowlist
+
+When `EMAIL_RESTRICT_OUTBOUND` is `true` (the default), `send_email` / `send_reply`
+will **raise `GmailError`** if any `to`/`cc`/`bcc` address isn't in
+`EMAIL_ALLOWED_SENDERS`. In practice this means you can only email the user.
+Don't try to route around it (constructing raw Gmail API calls yourself, etc.) —
+if a send is blocked, that's intentional; report it and stop. To genuinely lift
+the restriction the operator sets `EMAIL_RESTRICT_OUTBOUND=false` in the
+environment.
 
 ## When NOT to use this skill
 

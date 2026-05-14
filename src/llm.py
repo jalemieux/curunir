@@ -16,6 +16,34 @@ log = logging.getLogger(__name__)
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2  # seconds
 
+_QUOTA_MSG = "I've hit my allocated quota — please try again later."
+_RATE_LIMIT_MSG = (
+    "The LLM provider is rate-limiting me right now. Please try again in a minute."
+)
+_QUOTA_SUBSTRINGS = ("key limit", "quota", "monthly limit", "insufficient_quota")
+
+
+def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
+    """Classify an LLM-provider exception into a user-facing category.
+
+    Returns ``(category, user_message)`` for known classes, ``None`` for
+    unknown ones so the caller can re-raise and preserve existing behaviour.
+    Pure detection — no logging, no side effects.
+    """
+    status = getattr(exc, "status_code", None)
+    body = str(exc).lower()
+
+    rate_limit_cls = getattr(litellm, "RateLimitError", None)
+    auth_cls = getattr(litellm, "AuthenticationError", None)
+
+    if auth_cls is not None and isinstance(exc, auth_cls):
+        return "quota_exhausted", _QUOTA_MSG
+    if status == 403 or any(s in body for s in _QUOTA_SUBSTRINGS):
+        return "quota_exhausted", _QUOTA_MSG
+    if (rate_limit_cls is not None and isinstance(exc, rate_limit_cls)) or status == 429:
+        return "rate_limited", _RATE_LIMIT_MSG
+    return None
+
 # In-process cache for describe_image, keyed by SHA-256 of the image bytes so
 # entries stay valid even when the same logical file is re-staged at a new
 # path. Unbounded by design — fine for normal session sizes.
@@ -99,20 +127,22 @@ class LLMResponse:
     text: str | None
     tool_calls: list[dict] | None
     usage: LLMUsage = field(default_factory=LLMUsage)
+    finish_reason: str | None = None
 
 
 async def _consume_stream(
     response_iter,
     on_text_delta: Callable[[str], Awaitable[None]],
-) -> tuple[str, dict[int, dict], LLMUsage]:
+) -> tuple[str, dict[int, dict], LLMUsage, str | None]:
     """Drain a LiteLLM streaming response.
 
-    Returns (full_text, tool_calls_by_index, usage). tool_calls_by_index maps
-    the delta `index` to a dict with keys: id, name, arguments (concatenated).
+    Returns (full_text, tool_calls_by_index, usage, finish_reason). The last
+    non-null finish_reason seen on any chunk wins.
     """
     text_parts: list[str] = []
     tc_by_index: dict[int, dict] = {}
     usage = LLMUsage()
+    finish_reason: str | None = None
 
     async for chunk in response_iter:
         if getattr(chunk, "usage", None):
@@ -126,6 +156,9 @@ async def _consume_stream(
 
         if not chunk.choices:
             continue
+        fr = getattr(chunk.choices[0], "finish_reason", None)
+        if fr:
+            finish_reason = fr
         delta = chunk.choices[0].delta
 
         text_piece = getattr(delta, "content", None)
@@ -148,7 +181,7 @@ async def _consume_stream(
                 if getattr(fn, "arguments", None):
                     entry["arguments"] += fn.arguments
 
-    return "".join(text_parts), tc_by_index, usage
+    return "".join(text_parts), tc_by_index, usage, finish_reason
 
 
 async def call_llm(
@@ -226,7 +259,7 @@ async def call_llm(
                 raise
 
     if streaming:
-        text, tc_by_index, usage = await _consume_stream(response, on_text_delta)
+        text, tc_by_index, usage, finish_reason = await _consume_stream(response, on_text_delta)
         usage.elapsed_sec = time.monotonic() - t0
         if not usage.model:
             usage.model = model
@@ -245,10 +278,11 @@ async def call_llm(
                 for _, entry in sorted(tc_by_index.items())
             ]
 
-        return LLMResponse(text=text or None, tool_calls=tool_calls, usage=usage)
+        return LLMResponse(text=text or None, tool_calls=tool_calls, usage=usage, finish_reason=finish_reason)
 
     elapsed = time.monotonic() - t0
     choice = response.choices[0].message
+    finish_reason = getattr(response.choices[0], "finish_reason", None)
 
     usage = LLMUsage(elapsed_sec=elapsed)
     usage.model = getattr(response, "model", None) or model
@@ -274,7 +308,7 @@ async def call_llm(
             for tc in choice.tool_calls
         ]
 
-    return LLMResponse(text=text, tool_calls=tool_calls, usage=usage)
+    return LLMResponse(text=text, tool_calls=tool_calls, usage=usage, finish_reason=finish_reason)
 
 
 async def describe_image(

@@ -63,6 +63,39 @@ claims. Runs in isolation so it isn't biased by the original reasoning.
 
 ---
 
+## Analyze public companies
+
+**`yfinance`** — Fundamentals, prices, multiples, peers from Yahoo Finance
+(no API key).
+
+> What's Eli Lilly's current P/E and how has it moved over the last 5 years?
+
+**`fred`** — US macro time-series from the St. Louis Fed (interest rates,
+CPI, GDP, unemployment, FX). Requires `FRED_API_KEY`.
+
+> What's the current 10-year Treasury yield, and where is core CPI YoY?
+
+**`sec-edgar`** — Official 10-K, 10-Q, 8-K filings and standardized XBRL
+fundamentals (no API key, but `SEC_USER_AGENT` must be set).
+
+> Pull Eli Lilly's last three 10-Ks and tell me how segment revenue has
+> shifted.
+
+**`financial-analysis`** — Orchestrates the three above into a structured
+analysis: scenario modeling, multiple-based valuation, peer comparables,
+and sensitivity. Delivered as a markdown report inline + PDF attachment.
+
+> Do a financial analysis of Eli Lilly assuming the new drug adds $30B in
+> annual revenue. Show me base/bull/bear scenarios with implied price at
+> peer-set multiples, and which assumptions matter most.
+
+What happens: Curunir loads `financial-analysis`, pulls current financials
+from `yfinance`, cross-checks revenue from `sec-edgar`, picks 3-5 real
+peers (PFE, MRK, NVO, BMY, JNJ), runs the four-framework workflow, and
+attaches the PDF.
+
+---
+
 ## Work with GitHub
 
 **`github`** — Ad-hoc operations: file an issue, list PRs, comment, search

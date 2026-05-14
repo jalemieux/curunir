@@ -200,7 +200,9 @@ _SCHEMAS = [
             "function": {
                 "name": "web_fetch",
                 "description": (
-                    "Fetch a URL and return the extracted text content (no HTML). "
+                    "Fetch a URL and return the extracted text content. "
+                    "Extracts readable text from HTML pages and PDFs. "
+                    "Other binary formats (DOCX, ZIP, images) are not supported. "
                     "Use this instead of curl for reading web pages — it strips "
                     "navigation, scripts, and ads, returning only readable text."
                 ),

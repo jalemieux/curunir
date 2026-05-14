@@ -1,12 +1,18 @@
-"""Tests for ComfyUI skill bundled templates and skill discoverability."""
+"""Tests for ComfyUI workflows sub-flow bundled templates and structure.
+
+`comfyui-workflows` is a sub-flow of the top-level `comfyui` skill (lives at
+`skills/comfyui/workflows/SKILL.md`). It is not auto-discovered; the parent
+`comfyui` skill points at it via `read`.
+"""
 import json
 from pathlib import Path
 
 import pytest
 
-from src.skills import load_registry, load_skill, parse_frontmatter
+from src.skills import load_registry, parse_frontmatter
 
-SKILL_ROOT = Path(__file__).parent.parent / "skills" / "comfyui-workflows"
+SKILLS_DIR = Path(__file__).parent.parent / "skills"
+SKILL_ROOT = SKILLS_DIR / "comfyui" / "workflows"
 TEMPLATE_DIR = SKILL_ROOT / "templates"
 TEMPLATES = ["txt2img.json", "img2img.json", "upscale.json", "controlnet.json"]
 
@@ -15,7 +21,7 @@ def _load_template(name: str) -> dict:
     return json.loads((TEMPLATE_DIR / name).read_text())
 
 
-class TestSkillDiscovery:
+class TestSubSkillStructure:
     def test_skill_md_exists(self):
         assert (SKILL_ROOT / "SKILL.md").is_file()
 
@@ -24,14 +30,11 @@ class TestSkillDiscovery:
         assert fm.get("name") == "comfyui-workflows"
         assert fm.get("description"), "description must be present"
 
-    def test_skill_appears_in_registry(self):
-        registry = load_registry([SKILL_ROOT.parent])
-        assert "comfyui-workflows" in registry
-
-    def test_load_skill_returns_content(self):
-        content = load_skill("comfyui-workflows", [SKILL_ROOT.parent])
-        assert "Skill not found" not in content
-        assert "comfyui-workflows" in content
+    def test_sub_skill_not_in_top_level_registry(self):
+        # Sub-flows are deliberately not discovered as top-level skills.
+        registry = load_registry([SKILLS_DIR])
+        assert "comfyui-workflows" not in registry
+        assert "comfyui" in registry, "parent comfyui skill must still be top-level"
 
     def test_references_exist(self):
         assert (SKILL_ROOT / "references" / "core_nodes.md").is_file()

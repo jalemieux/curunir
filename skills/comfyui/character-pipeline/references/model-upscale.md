@@ -283,4 +283,4 @@ Deliver the upscaled images to the user.
 - **Reference images must exist** — if the original used `front_m2.png` as a reference, that file must still be in ComfyUI's `input/` directory
 - **Steps tradeoff** — 32 steps for persephone, 12 for flux2 klein. More steps = slower but better quality
 - **Don't mix workflow types in one batch** — run separate upscale passes per template type
-- **This is the bridge** between `comfyui-model-seed-hunt` / `comfyui-seed-hunt` (discovery) and final LoRA training reference images
+- **This is the bridge** between `comfyui-model-seed-hunt` / `comfyui-multiview-seed-hunt` (discovery) and final LoRA training reference images
