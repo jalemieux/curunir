@@ -25,22 +25,70 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
    a prompt like:
 
    > Read `onboarding/questions.md` and write `context.default/identity.md`
-   > based on my answers. Follow the section structure of the existing
-   > `context.default/identity.md`: a one-sentence opening introducing
-   > curunir and the user, then `## Core Traits` (bullets — manner,
-   > substance style, how to address the user, timezone), `## Capabilities`
-   > (prose + bulleted standing jobs the user wants help with),
-   > `## Guidelines` (bullets — rules of engagement, citation conventions,
-   > consent boundaries), and the existing `## Memory`, `## Scheduling`,
-   > and `## Creating Skills` sections kept verbatim. Infer what's implicit,
-   > reconcile tensions between answers (e.g., "detailed" substance +
-   > "terse" manner), and normalize anything ambiguous (timezone strings,
-   > etc.). Do not touch `context/identity.md`.
+   > based on my answers. The current `context.default/identity.md` is the
+   > **source of truth for the section structure** — match it exactly:
+   >
+   > - A one-sentence opening introducing curunir and the user.
+   > - `## Personality` (the heart of the file) with seven labeled
+   >   subsections in this order: `### Identity`, `### Voice`,
+   >   `### Perspective`, `### Relationship`, `### Opinions`,
+   >   `### Boundaries`, `### Quirks`. Each subsection is 2–5 lines of
+   >   prose written in **second person** ("You speak in…", "You hold a
+   >   few standing convictions…"). No numeric scales — descriptive prose
+   >   only.
+   > - Above the subsections, a short note that this block is the source
+   >   of truth for curunir's voice, that user requests for tone shifts
+   >   should be appended in-line so they persist, and that user
+   >   overrides win over seeded defaults.
+   > - `### Identity` must include: curunir's name, pronouns, a
+   >   one-paragraph visual self-description (the kind of prose you'd
+   >   feed to an image generator), and a relative path reference to
+   >   `./avatar.png`. Pull these from question 7b.
+   > - `### Voice` distills question 7's axes (warmth / formality /
+   >   initiative / humor / verbosity) plus the response-length answer
+   >   from question 5.
+   > - `### Perspective` and `### Relationship` capture the requested
+   >   *flavor* (e.g., "research assistant", "stoic butler") — what
+   >   curunir reads the world like and how it positions itself toward
+   >   the user.
+   > - `### Boundaries` must include the consent rules from question 6
+   >   AND this default line verbatim: *"Scheduled-task outputs
+   >   (ai-digest, introspection, cron-driven prompts) suppress
+   >   personality and prioritize utility — speak plainly and skip voice
+   >   flourishes when the channel is system-task."*
+   > - Then the existing `## Capabilities`, `## Guidelines`, `## Memory`,
+   >   `## Scheduling`, and `## Creating Skills` sections — keep them
+   >   tight and don't restate voice/formality there (those belong in
+   >   `## Personality`).
+   >
+   > Infer what's implicit, reconcile tensions between answers (e.g.,
+   > "detailed" substance + "terse" manner = detailed in *what*, terse
+   > in *how*), and normalize ambiguous input (timezone strings, etc.).
+   > Do not touch `context/identity.md`.
 
    Review the output. Iterate if anything misses — the model will happily
    revise.
 
-3. **Start curunir.** Bootstrap copies the seeded identity into `context/`
+3. **Generate curunir's selfie (optional but recommended).** The
+   `### Identity` subsection holds a prose visual self-description. Use it
+   to generate an avatar image:
+
+   ```
+   ### Identity description  ──►  [ image generator ]  ──►  context/avatar.png
+   ```
+
+   Any image tool works (ComfyUI Flux, Midjourney, DALL·E, etc.). Save the
+   result as `context/avatar.png`. The image file is **not** loaded into
+   the system prompt — only the description text is — so the file's role
+   is purely for humans looking at the repo. The agent speaks coherently
+   about its own appearance from the description alone.
+
+   **Inverse direction (already have an image you want curunir to look
+   like):** paste the image into a vision model, ask it to produce a one-
+   paragraph prose description in the same style as the seeded
+   `### Identity`, then drop that text into `context/identity.md`.
+
+4. **Start curunir.** Bootstrap copies the seeded identity into `context/`
    on first launch.
    ```bash
    python run.py
@@ -50,9 +98,14 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
 
 | File | Purpose |
 |---|---|
-| `questions.md` | The 8-question questionnaire. User edits this. |
+| `questions.md` | The questionnaire (8 questions + 7b for the avatar). User edits this. |
 | `bootstrap.py` | Copies any file in `context.default/` to `context/` on first run. Never overwrites existing files. |
 | `README.md` | This file. |
+
+The `## Personality` schema (the seven subsections) lives in
+`context.default/identity.md` itself — that file is the source of truth for
+both the structure and the seeded defaults. The LLM prompt above mirrors
+the schema; if you change the structure, change it there first.
 
 The generated identity lives at `context.default/identity.md` (versioned, a
 reasonable default you can ship) and gets copied to `context/identity.md` on
