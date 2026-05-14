@@ -1,7 +1,7 @@
 import pytest
 from datetime import date
 
-from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _update_timeline, _upsert_entry
+from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _update_timeline, _upsert_entry, _update_topic
 
 
 def test_upsert_into_empty_body():
@@ -104,4 +104,47 @@ def test_update_timeline_upserts_same_archive(tmp_path):
     text = (tmp_path / "summaries" / "timeline.md").read_text()
     assert "[first-slug]" not in text
     assert "[second-slug]" in text
+    assert text.count("2026-05-13-foo.md") == 1
+
+
+def test_update_topic_creates_file_with_header(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    _update_topic(tmp_path, "people/anna.md", archive, "foo", date(2026, 5, 13))
+
+    topic = tmp_path / "summaries" / "topics" / "people-anna.md"
+    assert topic.exists()
+    text = topic.read_text()
+    assert text.startswith("# Topic: people-anna")
+    assert "`people/anna.md`" in text
+    assert (
+        "- 2026-05-13 — [foo](../../archives/conversations/2026-05-13-foo.md)"
+        in text
+    )
+
+
+def test_update_topic_link_uses_two_level_relative(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    _update_topic(tmp_path, "projects.md", archive, "foo", date(2026, 5, 13))
+
+    text = (tmp_path / "summaries" / "topics" / "projects.md").read_text()
+    assert "../../archives/conversations/2026-05-13-foo.md" in text
+
+
+def test_update_topic_upserts_same_archive(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    _update_topic(tmp_path, "projects.md", archive, "first", date(2026, 5, 13))
+    _update_topic(tmp_path, "projects.md", archive, "second", date(2026, 5, 13))
+
+    text = (tmp_path / "summaries" / "topics" / "projects.md").read_text()
+    assert "[first]" not in text
+    assert "[second]" in text
     assert text.count("2026-05-13-foo.md") == 1
