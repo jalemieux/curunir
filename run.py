@@ -511,6 +511,7 @@ async def main():
     ws = WebSocketChannel(
         in_queue, host=ws_host, port=ws_port, model=config.model,
         cancel_session=agent.request_cancel,
+        agent=agent, skill_dirs=config.skill_dirs,
     )
     channels["cli"] = ws
 
@@ -539,6 +540,7 @@ async def main():
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
             cancel_session=agent.request_cancel,
+            agent=agent, skill_dirs=config.skill_dirs,
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)

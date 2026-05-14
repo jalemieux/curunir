@@ -356,6 +356,76 @@ async def test_history_request_command_triggers_snapshot(portal_server):
 
 
 @pytest.mark.asyncio
+async def test_slash_command_dispatches_to_handler(portal_server, tmp_path):
+    """/help via slash dispatch produces an agent_message back to the portal,
+    not an in_queue entry."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    class _Agent:
+        def request_cancel(self, sid):
+            return False
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        agent=_Agent(), skill_dirs=[skills_dir],
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "slash", "text": "/help", "session_id": "tab-A"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "agent_message"
+        assert msg["payload"]["session_id"] == "tab-A"
+        assert "Slash commands" in msg["payload"]["content"]
+        assert in_q.empty()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_slash_clear_enqueues_clear_command(portal_server, tmp_path):
+    in_q: asyncio.Queue = asyncio.Queue()
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    class _Agent:
+        def request_cancel(self, sid):
+            return False
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        agent=_Agent(), skill_dirs=[skills_dir],
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "slash", "text": "/clear", "session_id": "tab-A"},
+        })
+        msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
+        assert msg.command == "clear"
+        assert msg.session_id == "tab-A"
+        assert msg.channel == "portal"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_close_4003_terminal_does_not_reconnect(portal_server):
     in_q: asyncio.Queue = asyncio.Queue()
     ch = PortalChannel(
