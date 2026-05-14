@@ -18,11 +18,15 @@ When the user asks "who am I?", "what do you know about me?", or anything
 that requires knowing the owner — **always** read these in order before
 responding:
 
-1. `profile.md` — name, pronouns, family, role, professional background, contact, addresses
-2. `preferences.md` — response style, citation conventions, consent boundaries, tool prefs
-3. `projects.md` — current projects, status, architecture, relationships
-4. `tasks.md` — open items, unresolved questions
-5. `people/*.md` — colleagues, collaborators, stakeholders
+1. `MEMORY.md` — routing table; points at the right index for the question
+2. `preferences.md` — name, age, family, role, working style, tool preferences, communication preferences
+3. `projects.md` — current projects, status, architecture, relationships between them
+4. `tasks.md` — open items / unresolved questions the user is working through
+5. `people/*.md` — colleagues, collaborators, stakeholders the user works with
+
+For questions about past conversations ("what did we discuss about X?"), go through
+the indexes instead: `summaries/topics/<slug>.md` (if X matches a memory file) or
+`summaries/timeline.md` (if you're orienting by time).
 
 A single read on this README is **not** enough. Read the files above before
 saying "I don't know who you are."
@@ -38,6 +42,9 @@ saying "I don't know who you are."
 | `tasks.md` | Open items needing resolution; unresolved questions; TODOs |
 | `people/` | Colleagues, teams, contacts (one file per person, lowercase-hyphenated) |
 | `archives/conversations/YYYY-MM-DD-topic.md` | Dated conversation summaries |
+| `MEMORY.md` | Small always-loaded routing table pointing at indexes |
+| `summaries/timeline.md` | Auto-maintained chronological list of all archived conversations |
+| `summaries/topics/<slug>.md` | Auto-maintained: archives that touched the entity named by `<slug>` |
 
 ## Routing for the extractor
 

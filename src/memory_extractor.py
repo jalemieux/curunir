@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .config import AgentConfig
 from .llm import call_llm
+from .memory_indexer import update_indexes
 from .skills import load_skill
 
 log = logging.getLogger(__name__)
@@ -121,15 +122,31 @@ async def _extract(
     if data is None:
         return None
 
-    # Write facts
+    # Write facts and track which entities they touched
+    touched_files: list[str] = []
     for fact in data.get("facts", []):
-        _write_fact(memory_dir, fact)
+        if _write_fact(memory_dir, fact) is not None:
+            file_rel = fact.get("file")
+            if file_rel:
+                touched_files.append(file_rel)
 
-    # Write conversation summary
+    # Write conversation summary, then update progressive-discovery indexes
     summary = data.get("summary")
-    if summary:
-        return _write_summary(memory_dir, summary, archive_path=archive_path)
-    return None
+    if not summary:
+        return None
+
+    archive = _write_summary(memory_dir, summary, archive_path=archive_path)
+    if archive is not None:
+        try:
+            update_indexes(
+                memory_dir=memory_dir,
+                archive_path=archive,
+                touched_files=touched_files,
+                slug=summary.get("topic_slug", "misc"),
+            )
+        except Exception:
+            log.exception("memory index update failed")
+    return archive
 
 
 def _format_history(history: list[dict]) -> str:
