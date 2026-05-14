@@ -98,7 +98,9 @@ Runs shell commands via `subprocess.run()`. Output is capped at 30,000 chars (~8
 
 ### Web Fetch (`web_fetch.py`)
 
-Fetches a URL with `httpx`, then extracts readable text via `trafilatura`. Output capped at 20,000 chars. Timeout is 30 seconds.
+Fetches a URL with `httpx`, then extracts readable text. HTML responses go through `trafilatura`; PDFs (detected via `Content-Type` or `%PDF-` magic bytes) go through `pypdf`. Output capped at 20,000 chars. Timeout is 30 seconds.
+
+PDF limitations: scanned/image-based PDFs return an explicit OCR-not-supported message (no OCR is performed). Encrypted PDFs are detected and reported; no decryption is attempted.
 
 ### Load Skill (`skill_tool.py`)
 
