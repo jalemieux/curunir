@@ -152,7 +152,15 @@ class Agent:
         self.config = config
         self.sessions: dict[str, list[dict]] = {}
         self.session_archives: dict[str, Path] = {}
-        self.static_prompt = build_static_prompt(config)
+        # Bake the timestamp into the static prompt once at construction.
+        # Auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter)
+        # hash the prefix — a per-call timestamp would invalidate the cache
+        # every iteration of the tool loop.
+        self._boot_time = datetime.now()
+        self.static_prompt = (
+            build_static_prompt(config)
+            + f"\n\nConversation started at: {self._boot_time.isoformat()}"
+        )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
         self.usage_store = usage_store
@@ -262,14 +270,10 @@ class Agent:
         if system_task_prompt:
             # System-initiated task: inject task as a user message so all LLM
             # providers accept the request (some reject system-only conversations).
-            system_prompt = (
-                self.static_prompt
-                + f"\n\nCurrent time: {datetime.now().isoformat()}"
-            )
             history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
-            system_prompt = self.static_prompt + f"\n\nCurrent time: {datetime.now().isoformat()}"
+        system_prompt = self.static_prompt
         _trim_history(history, max_chars=self.config.max_history_chars)
         messages = [{"role": "system", "content": system_prompt}] + history
 
@@ -286,6 +290,7 @@ class Agent:
         # Accumulate LLM usage stats across iterations
         total_prompt_tokens = 0
         total_completion_tokens = 0
+        total_cached_prompt_tokens = 0
         total_llm_elapsed = 0.0
         llm_calls = 0
         t_start = time.monotonic()
@@ -296,9 +301,16 @@ class Agent:
                 return
             wall = time.monotonic() - t_start
             tps = total_completion_tokens / total_llm_elapsed if total_llm_elapsed > 0 else 0.0
+            hit_rate = (
+                total_cached_prompt_tokens / total_prompt_tokens
+                if total_prompt_tokens > 0
+                else 0.0
+            )
             metadata["stats"] = {
                 "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": total_completion_tokens,
+                "cached_prompt_tokens": total_cached_prompt_tokens,
+                "cache_hit_rate": round(hit_rate, 3),
                 "total_tokens": total_prompt_tokens + total_completion_tokens,
                 "llm_calls": llm_calls,
                 "llm_elapsed_sec": round(total_llm_elapsed, 2),
@@ -314,6 +326,7 @@ class Agent:
             the caller should return it to the user.
             """
             nonlocal total_prompt_tokens, total_completion_tokens
+            nonlocal total_cached_prompt_tokens
             nonlocal total_llm_elapsed, llm_calls, messages
             try:
                 resp = await call_llm(
@@ -353,8 +366,22 @@ class Agent:
 
             total_prompt_tokens += resp.usage.prompt_tokens
             total_completion_tokens += resp.usage.completion_tokens
+            total_cached_prompt_tokens += resp.usage.cached_prompt_tokens
             total_llm_elapsed += resp.usage.elapsed_sec
             llm_calls += 1
+
+            if resp.usage.prompt_tokens > 0:
+                cached_pct = round(
+                    100 * resp.usage.cached_prompt_tokens / resp.usage.prompt_tokens
+                )
+                logger.debug(
+                    "[%s] llm usage: prompt=%d completion=%d cached=%d%% elapsed=%.2fs",
+                    sid,
+                    resp.usage.prompt_tokens,
+                    resp.usage.completion_tokens,
+                    cached_pct,
+                    resp.usage.elapsed_sec,
+                )
 
             if self.usage_store is not None:
                 record = UsageRecord(
