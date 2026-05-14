@@ -94,9 +94,9 @@ Manifest auto-built at startup from all `SKILL.md` files and included in the sys
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
 
-### Memory (`src/memory_extractor.py`)
+### Memory (`src/memory_extractor.py`, `src/memory_indexer.py`)
 
-Post-session, `extract_learnings()` calls the LLM with conversation history to extract facts → appends to markdown files in `context/memory/` → stores conversation summary in `context/memory/archives/conversations/`.
+Post-session, `extract_learnings()` calls the LLM with conversation history to extract facts → appends to markdown files in `context/memory/` → stores conversation summary in `context/memory/archives/conversations/`. After the archive write, `update_indexes()` (in `src/memory_indexer.py`) maintains two progressive-discovery indexes: `summaries/timeline.md` (chronological, newest-first) and `summaries/topics/<slug>.md` (one per touched entity — `projects`, `people-anna`, etc.). Indexes upsert by archive path so re-extraction of an in-flight session updates entries in place. `MEMORY.md` is a small static routing table pointing at the indexes; only topical files (`preferences.md`, `projects.md`, etc.) and `README.md`/`MEMORY.md` should be hand-edited.
 
 ### Context Directory (`context/`)
 

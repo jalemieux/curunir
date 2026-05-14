@@ -395,3 +395,58 @@ def test_collect_existing_headings(tmp_path):
 
 def test_collect_existing_headings_missing_dir(tmp_path):
     assert _collect_existing_headings(tmp_path / "does-not-exist") == {}
+
+
+@pytest.mark.asyncio
+async def test_extract_writes_timeline_and_topic_indexes(agent_config):
+    """End-to-end: extraction writes facts, summary, AND progressive-discovery indexes."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    llm_response = LLMResponse(
+        text=json.dumps({
+            "facts": [
+                {"file": "projects.md", "content": "## Curunir\n**Fact:** memory-indexing in flight"},
+                {"file": "people/anna.md", "content": "## Role\n**Fact:** PM"},
+            ],
+            "summary": {
+                "topic_slug": "memory-indexing",
+                "content": "Discussed progressive discovery design.",
+            },
+        }),
+        tool_calls=None,
+    )
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock, return_value=llm_response):
+        archive = await extract_learnings(agent_config, _history(user_count=2))
+
+    assert archive is not None
+    assert archive.exists()
+
+    timeline = (mem_dir / "summaries" / "timeline.md").read_text()
+    assert "[memory-indexing]" in timeline
+
+    projects_topic = (mem_dir / "summaries" / "topics" / "projects.md").read_text()
+    anna_topic = (mem_dir / "summaries" / "topics" / "people-anna.md").read_text()
+    assert "[memory-indexing]" in projects_topic
+    assert "[memory-indexing]" in anna_topic
+
+
+@pytest.mark.asyncio
+async def test_extract_skips_indexes_when_no_summary(agent_config):
+    """If the LLM returns no summary, no archive or indexes are written."""
+    mem_dir = agent_config.context_dir / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "README.md").write_text("# Memory\n")
+
+    llm_response = LLMResponse(
+        text=json.dumps({"facts": [], "summary": None}),
+        tool_calls=None,
+    )
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock, return_value=llm_response):
+        result = await extract_learnings(agent_config, _history(user_count=2))
+
+    assert result is None
+    assert not (mem_dir / "summaries").exists()
