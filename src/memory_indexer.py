@@ -63,3 +63,32 @@ def _is_topic_eligible(rel_path: str) -> bool:
     if p.name in _INDEX_EXCLUDE_FILES:
         return False
     return True
+
+
+_TIMELINE_HEADER = (
+    "# Conversation Timeline\n\n"
+    "Newest first. Each entry links to the archived conversation summary.\n\n"
+)
+
+
+def _entry_line(today: date, slug: str, archive_rel: str) -> str:
+    return f"- {today.isoformat()} — [{slug}]({archive_rel})"
+
+
+def _update_timeline(
+    memory_dir: Path,
+    archive_path: Path,
+    slug: str,
+    today: date,
+) -> None:
+    timeline = memory_dir / "summaries" / "timeline.md"
+    timeline.parent.mkdir(parents=True, exist_ok=True)
+    archive_rel = archive_path.relative_to(memory_dir).as_posix()
+    line = _entry_line(today, slug, archive_rel)
+
+    if not timeline.exists():
+        timeline.write_text(_TIMELINE_HEADER + line + "\n")
+        return
+
+    text = timeline.read_text()
+    timeline.write_text(_upsert_entry(text, line, archive_rel))

@@ -1,6 +1,7 @@
 import pytest
+from datetime import date
 
-from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _upsert_entry
+from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _update_timeline, _upsert_entry
 
 
 def test_upsert_into_empty_body():
@@ -59,3 +60,48 @@ def test_topic_slug_for(rel, expected):
 ])
 def test_is_topic_eligible(rel, expected):
     assert _is_topic_eligible(rel) is expected
+
+
+def test_update_timeline_creates_file_with_header(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    _update_timeline(tmp_path, archive, "foo", date(2026, 5, 13))
+
+    timeline = tmp_path / "summaries" / "timeline.md"
+    assert timeline.exists()
+    text = timeline.read_text()
+    assert text.startswith("# Conversation Timeline")
+    assert "- 2026-05-13 — [foo](archives/conversations/2026-05-13-foo.md)" in text
+
+
+def test_update_timeline_inserts_newest_first(tmp_path):
+    archive_dir = tmp_path / "archives" / "conversations"
+    archive_dir.mkdir(parents=True)
+    old = archive_dir / "2026-05-10-old.md"
+    new = archive_dir / "2026-05-13-new.md"
+    old.write_text("# old\n")
+    new.write_text("# new\n")
+
+    _update_timeline(tmp_path, old, "old", date(2026, 5, 10))
+    _update_timeline(tmp_path, new, "new", date(2026, 5, 13))
+
+    text = (tmp_path / "summaries" / "timeline.md").read_text()
+    new_idx = text.index("[new]")
+    old_idx = text.index("[old]")
+    assert new_idx < old_idx
+
+
+def test_update_timeline_upserts_same_archive(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    _update_timeline(tmp_path, archive, "first-slug", date(2026, 5, 13))
+    _update_timeline(tmp_path, archive, "second-slug", date(2026, 5, 13))
+
+    text = (tmp_path / "summaries" / "timeline.md").read_text()
+    assert "[first-slug]" not in text
+    assert "[second-slug]" in text
+    assert text.count("2026-05-13-foo.md") == 1
