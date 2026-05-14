@@ -3,7 +3,8 @@ import json
 import logging
 import os
 import uuid
-from typing import Callable
+from pathlib import Path
+from typing import Any, Callable
 
 import websockets
 import websockets.exceptions
@@ -14,6 +15,7 @@ from src.channels._attachments import (
     _stage_attachments,
 )
 from src.channels.base import IncomingMessage, OutgoingMessage
+from src.slash_commands import SlashContext, maybe_handle_slash
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,8 @@ class WebSocketChannel:
         model: str = "",
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
+        agent: Any = None,
+        skill_dirs: list[Path] | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
@@ -35,6 +39,8 @@ class WebSocketChannel:
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
+        self.agent = agent
+        self.skill_dirs = skill_dirs or []
         self._connection: websockets.ServerConnection | None = None
 
     async def start(self) -> None:
@@ -134,6 +140,22 @@ class WebSocketChannel:
                         session_id, delivered,
                     )
                     continue
+
+                if data.get("command") == "slash":
+                    ctx = SlashContext(
+                        args="", session_id=session_id, channel="cli",
+                        reply_address={}, agent=self.agent,
+                        skill_dirs=self.skill_dirs,
+                    )
+                    result = await maybe_handle_slash(
+                        data.get("text", ""), None, ctx,
+                    )
+                    if result is not None:
+                        for out in result.outgoing:
+                            await self.send(out)
+                        for inc in result.enqueue:
+                            await self.in_queue.put(inc)
+                        continue
 
                 decoded, err = _decode_attachments(data.get("attachments"))
                 if err is not None:
