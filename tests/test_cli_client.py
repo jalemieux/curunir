@@ -80,8 +80,9 @@ async def test_input_loop_sends_normal_message():
 
 
 @pytest.mark.asyncio
-async def test_input_loop_sends_clear_command():
-    """'/clear' is sent as {"content": "", "command": "clear"}."""
+async def test_input_loop_sends_clear_as_slash_command():
+    """'/clear' is sent as {"command": "slash", "text": "/clear"} — the
+    server's slash dispatcher rewrites it into an internal clear."""
     port = _BASE_PORT + 1
     received: list[dict] = []
 
@@ -97,8 +98,8 @@ async def test_input_loop_sends_clear_command():
         await cli.run("127.0.0.1", port, console=console)
 
     assert len(received) == 1
-    assert received[0]["content"] == ""
-    assert received[0]["command"] == "clear"
+    assert received[0]["command"] == "slash"
+    assert received[0]["text"] == "/clear"
 
 
 @pytest.mark.asyncio
@@ -589,9 +590,9 @@ async def test_clear_command_also_clears_staging(tmp_path):
         await cli.run("127.0.0.1", port, console=console)
 
     assert len(received) == 2
-    # First wire message: the /clear; second: plain text with no attachments.
-    assert received[0]["content"] == ""
-    assert received[0]["command"] == "clear"
+    # First wire message: /clear via slash dispatch; second: plain text with no attachments.
+    assert received[0]["command"] == "slash"
+    assert received[0]["text"] == "/clear"
     assert received[1]["content"] == "after reset"
     assert not received[1].get("attachments")
 

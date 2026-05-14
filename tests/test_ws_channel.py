@@ -702,6 +702,73 @@ async def test_interrupt_command_routes_to_cancel_session_callback():
 
 
 @pytest.mark.asyncio
+async def test_slash_command_dispatches_to_handler(tmp_path):
+    """A {command: slash, text: /help} frame routes through the slash handler
+    and emits an outgoing reply without going through the in_queue.
+    """
+    q = asyncio.Queue()
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    class _Agent:
+        def request_cancel(self, sid):
+            return False
+
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 25,
+        agent=_Agent(), skill_dirs=[skills_dir],
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 25}") as ws:
+            await _read_hello(ws)
+            await ws.send(json.dumps({"command": "slash", "text": "/help"}))
+            raw = await asyncio.wait_for(ws.recv(), timeout=2.0)
+            data = json.loads(raw)
+            assert data["final"] is True
+            assert "Slash commands" in data["content"]
+            assert "/help" in data["content"]
+        # Drain queue — only the disconnect 'extract' should remain.
+        msgs = []
+        while not q.empty():
+            msgs.append(q.get_nowait())
+        assert all(m.command == "extract" for m in msgs)
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_slash_clear_command_enqueues_clear(tmp_path):
+    """/clear via slash dispatch puts an IncomingMessage(command="clear") on the queue."""
+    q = asyncio.Queue()
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    class _Agent:
+        def request_cancel(self, sid):
+            return False
+
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 26,
+        agent=_Agent(), skill_dirs=[skills_dir],
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 26}") as ws:
+            sid = await _read_hello(ws)
+            await ws.send(json.dumps({"command": "slash", "text": "/clear"}))
+            await asyncio.sleep(0.1)
+        msgs = []
+        while not q.empty():
+            msgs.append(q.get_nowait())
+        clear_msgs = [m for m in msgs if m.command == "clear"]
+        assert len(clear_msgs) == 1
+        assert clear_msgs[0].session_id == sid
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
 async def test_process_inbound_attachment_rejection_uses_local_session_id(tmp_uploads):
     """Regression for #98: _process_inbound's rejection path must use the
     per-call session_id, not a stray module-level SESSION_ID name."""

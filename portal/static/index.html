@@ -592,6 +592,23 @@ function send() {
     el.querySelector(".body").innerHTML = "<em>Agent is offline.</em>";
     return;
   }
+
+  // Slash commands (no attachments) get routed through the server-side
+  // slash dispatcher: utility ops like /help and /skills, plus
+  // /<skill-name> to force a specific skill. Echo the slash text locally
+  // so the user sees what they sent.
+  if (content.startsWith("/") && staged.length === 0) {
+    const el = appendMessage("user");
+    el.querySelector(".body").textContent = content;
+    ws.send(JSON.stringify({
+      command: "slash", text: content, session_id: sessionId,
+    }));
+    inputEl.value = "";
+    if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
+    updateComposerMode();
+    return;
+  }
+
   // Optimistic local render
   const el = appendMessage("user");
   el.querySelector(".body").textContent = content;
