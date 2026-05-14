@@ -144,6 +144,8 @@ def update_indexes(
         today: Override for date.today() — for testing.
     """
     today = today or date.today()
+    memory_dir = memory_dir.resolve()
+    archive_path = archive_path.resolve()
     _update_timeline(memory_dir, archive_path, slug, today)
 
     seen: set[str] = set()

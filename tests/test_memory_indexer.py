@@ -203,3 +203,33 @@ def test_update_indexes_defaults_today_to_real_date(tmp_path):
     )
 
     assert (tmp_path / "summaries" / "timeline.md").exists()
+
+
+def test_update_indexes_handles_symlinked_memory_dir(tmp_path):
+    """Regression: memory_dir and archive_path with different symlink resolutions must not break indexing.
+
+    On macOS /tmp is a symlink to /private/tmp; production callers can pass an
+    unresolved memory_dir while archive_path comes back resolved from _safe_path.
+    """
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(real_dir)
+
+    # archive_path uses the real (resolved) location
+    archive = real_dir / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    # memory_dir uses the symlinked (unresolved) location — different string,
+    # same underlying directory. relative_to() would fail without normalization.
+    update_indexes(
+        memory_dir=link_dir,
+        archive_path=archive,
+        touched_files=["projects.md"],
+        slug="foo",
+        today=date(2026, 5, 13),
+    )
+
+    assert (real_dir / "summaries" / "timeline.md").exists()
+    assert (real_dir / "summaries" / "topics" / "projects.md").exists()
