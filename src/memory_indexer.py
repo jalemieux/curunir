@@ -37,3 +37,29 @@ def _upsert_entry(text: str, new_line: str, archive_rel: str) -> str:
 
     suffix = "" if text.endswith("\n") else "\n"
     return text + suffix + new_line.rstrip() + "\n"
+
+
+_INDEX_EXCLUDE_FILES = {"README.md", "MEMORY.md"}
+_INDEX_EXCLUDE_DIRS = {"archives", "summaries"}
+
+
+def _topic_slug_for(rel_path: str) -> str:
+    """Convert 'people/anna.md' -> 'people-anna', 'projects.md' -> 'projects'."""
+    p = Path(rel_path)
+    parts = list(p.parts[:-1]) + [p.stem]
+    return "-".join(parts)
+
+
+def _is_topic_eligible(rel_path: str) -> bool:
+    """Topic indexes anchor to user-managed entities only.
+
+    Skip: README.md, MEMORY.md, anything under archives/ or summaries/.
+    """
+    p = Path(rel_path)
+    if not p.parts:
+        return False
+    if p.parts[0] in _INDEX_EXCLUDE_DIRS:
+        return False
+    if p.name in _INDEX_EXCLUDE_FILES:
+        return False
+    return True
