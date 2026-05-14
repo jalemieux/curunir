@@ -2,10 +2,57 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import litellm
 import pytest
 
 import src.llm as llm_module
-from src.llm import LLMResponse, call_llm, describe_image
+from src.llm import LLMResponse, call_llm, classify_provider_error, describe_image
+
+
+class TestClassifyProviderError:
+    def test_403_with_key_limit_body_is_quota_exhausted(self):
+        exc = litellm.APIError(
+            status_code=403,
+            message="Key limit exceeded (monthly limit)",
+            llm_provider="openrouter",
+            model="test",
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        category, msg = result
+        assert category == "quota_exhausted"
+        assert "usage limit" in msg.lower() or "openrouter" in msg.lower()
+
+    def test_rate_limit_error_is_rate_limited(self):
+        exc = litellm.RateLimitError(
+            message="Too many requests",
+            llm_provider="openrouter",
+            model="test",
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        category, msg = result
+        assert category == "rate_limited"
+        assert "rate" in msg.lower()
+
+    def test_authentication_error_is_quota_exhausted(self):
+        exc = litellm.AuthenticationError(
+            message="Invalid API key",
+            llm_provider="openrouter",
+            model="test",
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        assert result[0] == "quota_exhausted"
+
+    def test_unknown_exception_returns_none(self):
+        assert classify_provider_error(ValueError("nope")) is None
+
+    def test_quota_substring_match_without_status_code(self):
+        exc = RuntimeError("insufficient_quota: please add credits")
+        result = classify_provider_error(exc)
+        assert result is not None
+        assert result[0] == "quota_exhausted"
 
 
 @pytest.mark.asyncio

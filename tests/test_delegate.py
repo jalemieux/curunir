@@ -76,6 +76,44 @@ class TestDelegate:
         result = await exec_delegate({"task": ""}, agent_config)
         assert "error" in result.lower()
 
+    async def test_quota_error_propagates_friendly_message(self, agent_config):
+        """A quota/403 hit inside the sub-agent surfaces as a friendly message
+        instead of a raw exception dump. The sub-agent's own classifier catches
+        it first and returns clean text; ``exec_delegate`` forwards that."""
+        import litellm
+
+        from src.tools.delegate import exec_delegate
+
+        exc = litellm.APIError(
+            status_code=403,
+            message="Key limit exceeded (monthly limit)",
+            llm_provider="openrouter",
+            model="test",
+        )
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=exc):
+            result = await exec_delegate({"task": "do something"}, agent_config)
+        assert "usage limit" in result.lower() or "openrouter" in result.lower()
+        assert "traceback" not in result.lower()
+
+    async def test_quota_error_raised_directly_in_exec_delegate_is_classified(self, agent_config):
+        """If a quota exception escapes Agent.handle (e.g. raised before the agent
+        catches it), ``exec_delegate``'s own classifier wraps it as a friendly
+        'Sub-agent could not run' message rather than the raw ``Sub-agent error:``
+        fallback."""
+        import litellm
+
+        from src.tools.delegate import exec_delegate
+
+        exc = litellm.AuthenticationError(
+            message="Invalid API key",
+            llm_provider="openrouter",
+            model="test",
+        )
+        with patch("src.agent.agent.Agent.handle", new_callable=AsyncMock, side_effect=exc):
+            result = await exec_delegate({"task": "do something"}, agent_config)
+        assert result.startswith("Sub-agent could not run:")
+        assert "usage limit" in result.lower() or "openrouter" in result.lower()
+
     async def test_invalid_image_paths_type_handled(self, agent_config):
         """If LLM sends image_paths as a string instead of list, handle gracefully."""
         from src.tools.delegate import exec_delegate
