@@ -178,7 +178,7 @@ class TestAgentHandle:
             side_effect=exc,
         ):
             result = await agent.handle("hi", "s1")
-        assert "usage limit" in result.lower() or "openrouter" in result.lower()
+        assert "quota" in result.lower()
 
     async def test_request_cancel_returns_false_when_no_session_running(self, agent):
         assert agent.request_cancel("nope") is False
