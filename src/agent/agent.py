@@ -159,7 +159,7 @@ class Agent:
         self._boot_time = datetime.now()
         self.static_prompt = (
             build_static_prompt(config)
-            + f"\n\nCurrent time: {self._boot_time.isoformat()}"
+            + f"\n\nConversation started at: {self._boot_time.isoformat()}"
         )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills

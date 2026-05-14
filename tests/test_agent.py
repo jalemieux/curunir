@@ -619,9 +619,10 @@ class TestSystemPromptCaching:
         assert captured[0] == captured[1], "system prompt mutated between calls"
 
     async def test_system_prompt_carries_boot_timestamp(self, agent):
-        """The static system prompt embeds a Current time line baked in at
-        construction so the prefix is stable yet still orients the model."""
-        assert "Current time:" in agent.static_prompt
+        """The static system prompt embeds a conversation-start timestamp
+        baked in at construction so the prefix is stable yet still orients
+        the model."""
+        assert "Conversation started at:" in agent.static_prompt
         assert agent._boot_time.isoformat() in agent.static_prompt
 
     async def test_system_task_uses_same_static_prompt(self, agent):
