@@ -48,9 +48,11 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
   † planned
 ```
 
-Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM with conversation history and tool schemas, iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel.
+Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel. A scheduler reads cron tasks from `context/schedules.json` and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
 
-Dashed nodes are planned but not yet implemented. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`.
+Ctrl-C while the agent is working triggers a cooperative cancel: the in-flight LLM call and current tool run to completion, any remaining tools in the batch are stubbed with `(interrupted)`, and the turn returns cleanly. Channels deliver the cancel out-of-band (the agent queue is blocked inside `handle()`).
+
+When the main model is text-only, image attachments are routed through `VISION_MODEL` — a vision-capable sidecar that describes each image as text — before reaching the main model. Boot fails fast if `MODEL` lacks vision support and no `VISION_MODEL` is configured.
 
 ## Project Structure
 

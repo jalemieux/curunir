@@ -1,0 +1,166 @@
+{
+  "3": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "A full-body character sheet, front view, facing camera, wide angle full-length shot from head to toe, feet visible standing on a plain floor. A hyper-realistic athletic woman with a sharp jawline and intense eyes. She has a highly defined, toned physique with visible abdominal muscles and muscular thighs. Sun-kissed skin with visible pores. Standing in a neutral, symmetrical pose, centered in frame. Full anatomical nudity, detailed muscular and pelvic anatomy. Plain white background, studio lighting, 8k, highly detailed. Shot on 35mm lens, wide field of view.",
+      "clip": [
+        "150",
+        0
+      ]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": [
+        "150",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "Flux2Scheduler",
+    "inputs": {
+      "steps": 8,
+      "width": 768,
+      "height": 1152
+    }
+  },
+  "99": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "100": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "3",
+        0
+      ],
+      "guider": [
+        "165",
+        0
+      ],
+      "sampler": [
+        "99",
+        0
+      ],
+      "sigmas": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "106",
+        0
+      ]
+    }
+  },
+  "101": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "100",
+        0
+      ],
+      "vae": [
+        "105",
+        0
+      ]
+    }
+  },
+  "103": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "105": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "vae/flux2-vae.safetensors"
+    }
+  },
+  "106": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": 768,
+      "height": 1152,
+      "batch_size": 1
+    }
+  },
+  "117": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "hunt/seed",
+      "images": [
+        "101",
+        0
+      ]
+    }
+  },
+  "150": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "flux2-klein-9b-uncensored/model.safetensors",
+      "type": "flux2",
+      "device": "default"
+    }
+  },
+  "165": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "cfg": 4.0,
+      "model": [
+        "167",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ]
+    }
+  },
+  "167": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "Flux Klein - NSFW v2.safetensors",
+      "strength_model": 0.0,
+      "model": [
+        "103",
+        0
+      ]
+    }
+  },
+  "_meta": {
+    "description": "FLUX.2 Klein text-to-image (no reference images). For Stage 1 discovery \u2014 model seed hunting with Klein instead of Persephone.",
+    "required_models": [
+      "flux-2-klein-base-9b.safetensors",
+      "vae/flux2-vae.safetensors"
+    ],
+    "editable": {
+      "4.text": "Positive prompt",
+      "6.text": "Negative prompt",
+      "3.noise_seed": "Seed (0 = random)",
+      "9.steps": "Sampling steps",
+      "165.cfg": "CFG guidance",
+      "167.strength_model": "LoRA strength (0 = off)",
+      "117.filename_prefix": "Output filename prefix",
+      "106.width": "Width",
+      "106.height": "Height"
+    }
+  }
+}

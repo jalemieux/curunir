@@ -98,7 +98,9 @@ Runs shell commands via `subprocess.run()`. Output is capped at 30,000 chars (~8
 
 ### Web Fetch (`web_fetch.py`)
 
-Fetches a URL with `httpx`, then extracts readable text via `trafilatura`. Output capped at 20,000 chars. Timeout is 30 seconds.
+Fetches a URL with `httpx`, then extracts readable text. HTML responses go through `trafilatura`; PDFs (detected via `Content-Type` or `%PDF-` magic bytes) go through `pypdf`. Output capped at 20,000 chars. Timeout is 30 seconds.
+
+PDF limitations: scanned/image-based PDFs return an explicit OCR-not-supported message (no OCR is performed). Encrypted PDFs are detected and reported; no decryption is attempted.
 
 ### Load Skill (`skill_tool.py`)
 
@@ -133,4 +135,4 @@ Service-specific introspection (hitting a local HTTP API, reading a config a par
 
 Promote a helper to a real tool when *multiple* skills need it, when it has to be awaitable inside the agent loop, or when shelling out becomes awkward (e.g. you need streaming output, or to mutate the agent's `attachments` list).
 
-Example: `skills/comfyui-workflows/scripts/fetch_object_info.py` hits `http://127.0.0.1:8188/object_info` to get node schemas. It stays a per-skill helper rather than a `comfyui_api` tool because only one skill uses it and `bash` + `read` cover the workflow.
+Example: `skills/comfyui/workflows/scripts/fetch_object_info.py` hits `http://127.0.0.1:8188/object_info` to get node schemas. It stays a per-skill helper rather than a `comfyui_api` tool because only one skill uses it and `bash` + `read` cover the workflow.
