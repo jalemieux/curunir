@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from src.agent.agent import Agent
 from src.config import AgentConfig
+from src.llm import classify_provider_error
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> s
         return f"Sub-agent timed out after {_TIMEOUT}s"
     except Exception as e:
         logger.error("Sub-agent %s failed: %s", session_id[:8], e)
+        classified = classify_provider_error(e)
+        if classified is not None:
+            _, user_message = classified
+            return f"Sub-agent could not run: {user_message}"
         return f"Sub-agent error: {e}"
 
 

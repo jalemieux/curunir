@@ -161,6 +161,25 @@ class TestAgentHandle:
             result = await agent.handle("hi", "s1", attachments=attachments)
         assert result == ""
 
+    async def test_quota_exceeded_returns_friendly_message(self, agent):
+        """A 403 quota error from the LLM provider should surface a friendly
+        message instead of bubbling up as a generic processing error."""
+        import litellm
+
+        exc = litellm.APIError(
+            status_code=403,
+            message="Key limit exceeded (monthly limit)",
+            llm_provider="openrouter",
+            model="test",
+        )
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=exc,
+        ):
+            result = await agent.handle("hi", "s1")
+        assert "quota" in result.lower()
+
     async def test_request_cancel_returns_false_when_no_session_running(self, agent):
         assert agent.request_cancel("nope") is False
 

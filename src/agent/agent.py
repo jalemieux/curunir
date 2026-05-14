@@ -12,7 +12,7 @@ from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
-from src.llm import call_llm
+from src.llm import call_llm, classify_provider_error
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
@@ -343,6 +343,13 @@ class Agent:
                         raise
                     logger.error("[%s] context window still exceeded after trim, aborting", sid)
                     return None, "Sorry, the conversation is too long. Please start a new thread."
+            except Exception as e:
+                classified = classify_provider_error(e)
+                if classified is None:
+                    raise
+                category, user_message = classified
+                logger.warning("[%s] provider error: %s", sid, category)
+                return None, user_message
 
             total_prompt_tokens += resp.usage.prompt_tokens
             total_completion_tokens += resp.usage.completion_tokens

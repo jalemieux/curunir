@@ -16,6 +16,34 @@ log = logging.getLogger(__name__)
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2  # seconds
 
+_QUOTA_MSG = "I've hit my allocated quota — please try again later."
+_RATE_LIMIT_MSG = (
+    "The LLM provider is rate-limiting me right now. Please try again in a minute."
+)
+_QUOTA_SUBSTRINGS = ("key limit", "quota", "monthly limit", "insufficient_quota")
+
+
+def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
+    """Classify an LLM-provider exception into a user-facing category.
+
+    Returns ``(category, user_message)`` for known classes, ``None`` for
+    unknown ones so the caller can re-raise and preserve existing behaviour.
+    Pure detection — no logging, no side effects.
+    """
+    status = getattr(exc, "status_code", None)
+    body = str(exc).lower()
+
+    rate_limit_cls = getattr(litellm, "RateLimitError", None)
+    auth_cls = getattr(litellm, "AuthenticationError", None)
+
+    if auth_cls is not None and isinstance(exc, auth_cls):
+        return "quota_exhausted", _QUOTA_MSG
+    if status == 403 or any(s in body for s in _QUOTA_SUBSTRINGS):
+        return "quota_exhausted", _QUOTA_MSG
+    if (rate_limit_cls is not None and isinstance(exc, rate_limit_cls)) or status == 429:
+        return "rate_limited", _RATE_LIMIT_MSG
+    return None
+
 # In-process cache for describe_image, keyed by SHA-256 of the image bytes so
 # entries stay valid even when the same logical file is re-staged at a new
 # path. Unbounded by design — fine for normal session sizes.
