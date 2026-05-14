@@ -262,7 +262,7 @@ async def run(host: str, port: int, console: Console | None = None,
     uri = f"ws://{host}:{port}"
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim] [dim]rev {_detect_version()}[/dim]")
-    console.print("[dim]type /clear, /new, or /reset to reset the session, /verbose to toggle tool output[/dim]")
+    console.print("[dim]type /help for commands, /verbose to toggle tool output[/dim]")
 
     verbose = True
     ready = asyncio.Event()
@@ -629,12 +629,14 @@ async def run(host: str, port: int, console: Console | None = None,
                             console.print("[dim]detached[/dim]")
                         continue
 
-                    if text in ("/clear", "/new"):
+                    if text.startswith("/"):
+                        # Server-side slash dispatch — `/clear`, `/new`,
+                        # `/reset`, `/help`, `/skills`, `/cancel`, plus any
+                        # `/<skill-name>` as a skill-forcing shortcut.
+                        # (`/verbose`, `/attach`, `/detach` are handled above
+                        # — they manipulate CLI-local state.)
                         staging.clear()
-                        payload = {"content": "", "command": "clear"}
-                    elif text == "/reset":
-                        staging.clear()
-                        payload = {"content": "", "command": "reset"}
+                        payload = {"command": "slash", "text": text}
                     else:
                         # Auto-stage any absolute file paths in the message
                         # (e.g. from drag-drop onto the terminal).

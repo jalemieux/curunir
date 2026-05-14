@@ -105,12 +105,21 @@ docker compose up --build
 
 | Input | Effect |
 |---|---|
+| `/help` | Show available commands and skills |
+| `/skills` | List registered skills |
 | `/clear`, `/new`, `/reset` | Reset the session (and trigger memory extraction) |
-| `/verbose` | Toggle live tool-call output |
-| `/attach <path>` / `/detach <i>` | Stage or remove a file for the next message |
+| `/cancel` | Cancel the current agent run |
+| `/<skill-name> [args]` | Force the agent to use a specific skill (e.g. `/identity update my voice`) |
+| `/verbose` | Toggle live tool-call output (CLI-local) |
+| `/attach <path>` / `/detach <i>` | Stage or remove a file for the next message (CLI-local) |
 | **Ctrl-C while the agent is working** | Send an interrupt — the agent finishes the in-flight tool, skips any remaining tools in the batch, and replies `(interrupted)` |
 | Ctrl-C at the prompt | Exit the CLI |
 | Ctrl-D at the prompt | Exit cleanly |
+
+Slash commands have two layers: an explicit registry for utility ops
+(`/help`, `/skills`, `/clear`, `/cancel`), and a fallback that turns any
+`/<skill-name>` into a skill-forcing prompt for the agent. They work
+identically over the CLI WebSocket and the portal browser UI.
 
 #### Email Channel (Gmail)
 
