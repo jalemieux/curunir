@@ -124,3 +124,31 @@ def _update_topic(
 
     text = target.read_text()
     target.write_text(_upsert_entry(text, line, archive_link))
+
+
+def update_indexes(
+    memory_dir: Path,
+    archive_path: Path,
+    touched_files: list[str],
+    slug: str,
+    *,
+    today: date | None = None,
+) -> None:
+    """Update timeline and per-entity topic indexes after an archive is written.
+
+    Args:
+        memory_dir: The context/memory directory.
+        archive_path: Absolute path to the archive file just written.
+        touched_files: Memory-relative paths of files this conversation wrote facts to.
+        slug: Conversation slug (used as the link text in index entries).
+        today: Override for date.today() — for testing.
+    """
+    today = today or date.today()
+    _update_timeline(memory_dir, archive_path, slug, today)
+
+    seen: set[str] = set()
+    for rel in touched_files:
+        if rel in seen or not _is_topic_eligible(rel):
+            continue
+        seen.add(rel)
+        _update_topic(memory_dir, rel, archive_path, slug, today)

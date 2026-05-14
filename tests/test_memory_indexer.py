@@ -1,7 +1,7 @@
 import pytest
 from datetime import date
 
-from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _update_timeline, _upsert_entry, _update_topic
+from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _update_timeline, _upsert_entry, _update_topic, update_indexes
 
 
 def test_upsert_into_empty_body():
@@ -148,3 +148,58 @@ def test_update_topic_upserts_same_archive(tmp_path):
     assert "[first]" not in text
     assert "[second]" in text
     assert text.count("2026-05-13-foo.md") == 1
+
+
+def test_update_indexes_writes_timeline_and_topics(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    update_indexes(
+        memory_dir=tmp_path,
+        archive_path=archive,
+        touched_files=["projects.md", "people/anna.md"],
+        slug="foo",
+        today=date(2026, 5, 13),
+    )
+
+    timeline = (tmp_path / "summaries" / "timeline.md").read_text()
+    projects = (tmp_path / "summaries" / "topics" / "projects.md").read_text()
+    anna = (tmp_path / "summaries" / "topics" / "people-anna.md").read_text()
+    assert "[foo]" in timeline
+    assert "[foo]" in projects
+    assert "[foo]" in anna
+
+
+def test_update_indexes_skips_ineligible_touched_files(tmp_path):
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    update_indexes(
+        memory_dir=tmp_path,
+        archive_path=archive,
+        touched_files=["README.md", "MEMORY.md", "archives/conversations/x.md", "projects.md"],
+        slug="foo",
+        today=date(2026, 5, 13),
+    )
+
+    topics_dir = tmp_path / "summaries" / "topics"
+    written = sorted(p.name for p in topics_dir.iterdir())
+    assert written == ["projects.md"]
+
+
+def test_update_indexes_defaults_today_to_real_date(tmp_path):
+    """today=None should fall back to date.today() without crashing."""
+    archive = tmp_path / "archives" / "conversations" / "2026-05-13-foo.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("# foo\n")
+
+    update_indexes(
+        memory_dir=tmp_path,
+        archive_path=archive,
+        touched_files=[],
+        slug="foo",
+    )
+
+    assert (tmp_path / "summaries" / "timeline.md").exists()
