@@ -150,11 +150,38 @@ For each candidate finding:
 2. Search the open issues for that signature. The signature should appear in
    the issue body inside a `<!-- introspect-sig: {sig} -->` HTML comment so it's
    greppable but not user-visible.
-3. **If matched** — comment instead of creating:
-   ```bash
-   gh issue comment {num} --repo {repo} --body "Re-occurred at $(date -u +%FT%TZ). Session: {session_id}. Excerpt:\n\n\`\`\`\n{trimmed_log}\n\`\`\`"
-   ```
+3. **If matched** — apply the timestamp guard below before commenting.
 4. **If novel** — file a new issue (Step 5).
+
+**Timestamp guard (prevents replay-spam on a fixed bug).** A scheduled rescan
+will keep finding the same in-window log lines until the window rolls past
+them; without a guard, every tick appends a "Re-occurred" comment for an event
+that has not actually re-occurred. Skip the comment when the new finding is not
+strictly newer than what's already recorded on the issue.
+
+```bash
+# `latest` is the most recent log timestamp already cited on the issue —
+# scan fenced excerpts only (the lines between ``` markers) so a human-written
+# date in prose can't be mistaken for a real log timestamp.
+latest=$(gh issue view {num} --repo {repo} --json body,comments \
+    --jq '.body + "\n" + ([.comments[].body] | join("\n"))' \
+  | awk '/^```/{f=!f; next} f' \
+  | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
+  | sort -u | tail -1)
+# `current` is the new finding's log timestamp (the 19-char prefix on its
+# matched line in /tmp/introspect-logs.txt), NOT $(date) — the wallclock at
+# scan time is irrelevant; we're comparing log-event times.
+if [ -n "$latest" ] && [ "$current" \> "$latest" ]; then
+  gh issue comment {num} --repo {repo} --body "Re-occurred at ${current}. Session: {session_id}. Excerpt:\n\n\`\`\`\n{trimmed_log}\n\`\`\`"
+  ledger_action=dup
+else
+  # Same event the issue already records — don't comment.
+  ledger_action=dup-stale
+fi
+```
+
+The `dup-stale` action goes to the ledger (Step 6) so the run still leaves a
+trail; just no GitHub noise.
 
 ### Step 5: File novel findings
 
@@ -203,7 +230,7 @@ per finding to `context/memory/introspection.md`. Create the file with a header
 if it doesn't exist.
 
 ```
-{ISO8601 timestamp} | {category} | {action: new|dup|skipped|error} | {issue_num or "-"} | {short signature}
+{ISO8601 timestamp} | {category} | {action: new|dup|dup-stale|skipped|error} | {issue_num or "-"} | {short signature}
 ```
 
 If the run produced zero findings, still append one line:
