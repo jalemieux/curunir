@@ -1,4 +1,6 @@
-from src.memory_indexer import _upsert_entry
+import pytest
+
+from src.memory_indexer import _is_topic_eligible, _topic_slug_for, _upsert_entry
 
 
 def test_upsert_into_empty_body():
@@ -33,3 +35,27 @@ def test_upsert_replaces_existing_entry_for_same_archive():
     assert "[new-slug]" in out
     assert "[old-slug]" not in out
     assert out.count(rel) == 1
+
+
+@pytest.mark.parametrize("rel,expected", [
+    ("projects.md", "projects"),
+    ("people/anna.md", "people-anna"),
+    ("people/jane-doe.md", "people-jane-doe"),
+    ("core-insights.md", "core-insights"),
+])
+def test_topic_slug_for(rel, expected):
+    assert _topic_slug_for(rel) == expected
+
+
+@pytest.mark.parametrize("rel,expected", [
+    ("projects.md", True),
+    ("people/anna.md", True),
+    ("preferences.md", True),
+    ("README.md", False),
+    ("MEMORY.md", False),
+    ("archives/conversations/2026-05-13-foo.md", False),
+    ("summaries/timeline.md", False),
+    ("summaries/topics/projects.md", False),
+])
+def test_is_topic_eligible(rel, expected):
+    assert _is_topic_eligible(rel) is expected
