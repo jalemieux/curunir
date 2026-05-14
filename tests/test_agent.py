@@ -598,3 +598,123 @@ class TestAgentInit:
         )
         with pytest.raises(FileNotFoundError):
             Agent(config)
+
+
+class TestSystemPromptCaching:
+    async def test_system_prompt_is_stable_across_calls(self, agent):
+        """Auto-cache providers hash the system prefix — it must be byte-identical
+        between calls so the cache hits on the second iteration onward."""
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        captured: list[str] = []
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured.append(messages[0]["content"])
+            return mock_response
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle("first", "s1")
+            await agent.handle("second", "s1")
+
+        assert len(captured) == 2
+        assert captured[0] == captured[1], "system prompt mutated between calls"
+
+    async def test_system_prompt_carries_boot_timestamp(self, agent):
+        """The static system prompt embeds a conversation-start timestamp
+        baked in at construction so the prefix is stable yet still orients
+        the model."""
+        assert "Conversation started at:" in agent.static_prompt
+        assert agent._boot_time.isoformat() in agent.static_prompt
+
+    async def test_system_task_uses_same_static_prompt(self, agent):
+        """Scheduled-task branch must not append a per-call timestamp either."""
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        captured: list[str] = []
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured.append(messages[0]["content"])
+            return mock_response
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle("hi", "s1")
+            await agent.handle("", "sched:x", system_task_prompt="run a check")
+
+        assert len(captured) == 2
+        assert captured[0] == captured[1]
+        assert captured[0] == agent.static_prompt
+
+    async def test_stats_include_cache_hit_rate(self, agent):
+        from src.llm import LLMUsage
+
+        mock_response = LLMResponse(
+            text="ok",
+            tool_calls=None,
+            usage=LLMUsage(
+                prompt_tokens=1000,
+                completion_tokens=10,
+                cached_prompt_tokens=800,
+            ),
+        )
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            await agent.handle("hi", "s1", metadata=metadata)
+
+        stats = metadata["stats"]
+        assert stats["cached_prompt_tokens"] == 800
+        assert stats["cache_hit_rate"] == 0.8
+
+    async def test_cache_hit_rate_zero_when_no_prompt_tokens(self, agent):
+        """No prompt tokens reported → 0.0, not a ZeroDivisionError."""
+        from src.llm import LLMUsage
+
+        mock_response = LLMResponse(
+            text="ok",
+            tool_calls=None,
+            usage=LLMUsage(prompt_tokens=0, completion_tokens=0, cached_prompt_tokens=0),
+        )
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            await agent.handle("hi", "s1", metadata=metadata)
+
+        stats = metadata["stats"]
+        assert stats["cached_prompt_tokens"] == 0
+        assert stats["cache_hit_rate"] == 0.0
+
+    async def test_cache_hit_rate_aggregates_across_iterations(self, agent):
+        """Cache metrics sum across every LLM call in the tool loop."""
+        from src.llm import LLMUsage
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo hi"})},
+            }],
+            usage=LLMUsage(prompt_tokens=500, completion_tokens=5, cached_prompt_tokens=0),
+        )
+        text_response = LLMResponse(
+            text="done",
+            tool_calls=None,
+            usage=LLMUsage(prompt_tokens=500, completion_tokens=5, cached_prompt_tokens=400),
+        )
+
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, text_response],
+        ):
+            await agent.handle("hi", "s1", metadata=metadata)
+
+        stats = metadata["stats"]
+        assert stats["prompt_tokens"] == 1000
+        assert stats["cached_prompt_tokens"] == 400
+        assert stats["cache_hit_rate"] == 0.4
