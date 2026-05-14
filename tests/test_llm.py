@@ -21,7 +21,7 @@ class TestClassifyProviderError:
         assert result is not None
         category, msg = result
         assert category == "quota_exhausted"
-        assert "usage limit" in msg.lower() or "openrouter" in msg.lower()
+        assert "quota" in msg.lower()
 
     def test_rate_limit_error_is_rate_limited(self):
         exc = litellm.RateLimitError(

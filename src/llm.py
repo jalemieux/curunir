@@ -16,10 +16,7 @@ log = logging.getLogger(__name__)
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2  # seconds
 
-_QUOTA_MSG = (
-    "I've hit my LLM provider's usage limit — please check the OpenRouter key "
-    "(https://openrouter.ai/settings/keys) or rotate to a new one."
-)
+_QUOTA_MSG = "I've hit my allocated quota — please try again later."
 _RATE_LIMIT_MSG = (
     "The LLM provider is rate-limiting me right now. Please try again in a minute."
 )

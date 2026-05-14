@@ -92,7 +92,7 @@ class TestDelegate:
         )
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=exc):
             result = await exec_delegate({"task": "do something"}, agent_config)
-        assert "usage limit" in result.lower() or "openrouter" in result.lower()
+        assert "quota" in result.lower()
         assert "traceback" not in result.lower()
 
     async def test_quota_error_raised_directly_in_exec_delegate_is_classified(self, agent_config):
@@ -112,7 +112,7 @@ class TestDelegate:
         with patch("src.agent.agent.Agent.handle", new_callable=AsyncMock, side_effect=exc):
             result = await exec_delegate({"task": "do something"}, agent_config)
         assert result.startswith("Sub-agent could not run:")
-        assert "usage limit" in result.lower() or "openrouter" in result.lower()
+        assert "quota" in result.lower()
 
     async def test_invalid_image_paths_type_handled(self, agent_config):
         """If LLM sends image_paths as a string instead of list, handle gracefully."""
