@@ -699,3 +699,36 @@ async def test_interrupt_command_routes_to_cancel_session_callback():
         assert q.empty()
     finally:
         await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_process_inbound_attachment_rejection_uses_local_session_id(tmp_uploads):
+    """Regression for #98: _process_inbound's rejection path must use the
+    per-call session_id, not a stray module-level SESSION_ID name."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 24,
+                          uploads_dir=str(tmp_uploads))
+
+    sent: list[OutgoingMessage] = []
+    async def _capture(msg: OutgoingMessage) -> None:
+        sent.append(msg)
+    ch.send = _capture  # type: ignore[assignment]
+
+    # Oversized attachment forces _decode_attachments to return an error,
+    # exercising the SESSION_ID-bearing branch from the original bug.
+    bad = {
+        "content": "x",
+        "command": None,
+        "attachments": [{
+            "filename": "huge.png",
+            "mime_type": "image/png",
+            "data": base64.b64encode(b"\x00" * (5 * 1024 * 1024 + 1)).decode(),
+        }],
+    }
+    await ch._process_inbound(bad, "session-abc")
+
+    assert q.empty()
+    assert len(sent) == 1
+    assert sent[0].session_id == "session-abc"
+    assert sent[0].final is True
+    assert "exceeds" in sent[0].content or "5 MB" in sent[0].content
