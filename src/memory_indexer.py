@@ -92,3 +92,35 @@ def _update_timeline(
 
     text = timeline.read_text()
     timeline.write_text(_upsert_entry(text, line, archive_rel))
+
+
+def _topic_relative_archive(archive_path: Path, memory_dir: Path) -> str:
+    """Path from summaries/topics/ up to the archive file (always two levels up)."""
+    archive_rel = archive_path.relative_to(memory_dir).as_posix()
+    return "../../" + archive_rel
+
+
+def _update_topic(
+    memory_dir: Path,
+    entity_rel: str,
+    archive_path: Path,
+    slug: str,
+    today: date,
+) -> None:
+    topic_slug = _topic_slug_for(entity_rel)
+    target = memory_dir / "summaries" / "topics" / f"{topic_slug}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    archive_link = _topic_relative_archive(archive_path, memory_dir)
+    line = _entry_line(today, slug, archive_link)
+
+    if not target.exists():
+        header = (
+            f"# Topic: {topic_slug}\n\n"
+            f"Conversations that touched `{entity_rel}`.\n\n"
+        )
+        target.write_text(header + line + "\n")
+        return
+
+    text = target.read_text()
+    target.write_text(_upsert_entry(text, line, archive_link))
