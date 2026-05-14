@@ -130,6 +130,27 @@ questions.md  ──►  [ LLM ]  ──►  context.default/identity.md
   directly, or delete it and re-run `python run.py` to re-bootstrap from the
   latest `context.default/identity.md`.
 
+## Migrating an existing `context/memory/`
+
+Curunir's memory layout changed in #102: owner identity facts moved to
+`profile.md` and `preferences.md` became working/communication style only.
+If your `context/memory/preferences.md` predates that split it likely holds
+both kinds of fact mixed together.
+
+`scripts/migrate_memory_layout.py` splits the file in place without data
+loss:
+
+```bash
+python scripts/migrate_memory_layout.py --dry-run   # preview the split
+python scripts/migrate_memory_layout.py             # apply
+```
+
+The script asks the LLM only to *classify* each `## Section` as profile or
+preferences — section text is sliced verbatim from the source, never
+rewritten. The original `preferences.md` is backed up to
+`preferences.md.bak.<timestamp>` before anything is overwritten, and the
+script aborts if any section would end up in neither output (or both).
+
 ## Why LLM instead of a template
 
 A template can only mechanically substitute. An LLM can:
