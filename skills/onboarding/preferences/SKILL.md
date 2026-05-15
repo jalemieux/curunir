@@ -46,7 +46,7 @@ context on every turn.
 **Context:** Default reply length. Overridable per-turn by explicit ask.
 ```
 
-Use today's date (UTC) — same source as in the `profile` skill.
+Use today's date in UTC for `<YYYY-MM-DD>`. Run `bash` with `date -u +%Y-%m-%d` and use the output verbatim.
 
 ## Return
 

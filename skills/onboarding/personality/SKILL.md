@@ -1,11 +1,11 @@
 ---
 name: personality
-description: "Use to onboard or refresh the agent's own personality — name and visual self-description, plus voice/boundaries derived from preferences. Triggered by `/personality` or by the `onboarding` orchestrator. Edits the `## Personality` block of `context/identity.md`."
+description: "Use to onboard or refresh the agent's own personality — name and visual self-description, plus a derived voice/stance prose block. Triggered by `/personality` or by the `onboarding` orchestrator. Edits the opening line, `## Identity`, and `## Personality` of `context/identity.md`."
 ---
 
 # Personality
 
-Capture two facts about *how the agent presents itself*: its name and its visual self-image. Then derive voice + boundaries from the preferences answers already in conversation history.
+Capture two facts about *how the agent presents itself*: its name and its visual self-image. Then derive a single `## Personality` block (voice + length + stance) from the preferences and profile already in conversation history, and fill the opening sentence at the top of the file.
 
 ## When to use
 
@@ -23,27 +23,37 @@ Accept short answers. No follow-ups.
 
 ## Derive (no new questions)
 
-Look back at the preferences answers earlier in this same conversation:
+Pull the profile + preferences answers. Default source is the conversation history above (when the `onboarding` orchestrator invoked you, those two steps ran first in this same conversation). If those answers aren't present — e.g. you were invoked standalone via `/personality` — `read` `context/memory/profile.md` and `context/memory/preferences.md` instead. Both files have a stable shape: profile has `## Name` and `## Role / Focus` sections; preferences has `## Communication style` and `## Response length` sections. The `**Fact:**` line under each section holds the value.
 
-- **Communication style answer** → seed for the *voice* portion of `### Voice & Stance`. If the user said "formal and concise," write prose like "You speak formally and concisely. Short, complete sentences. No filler." If they said "casual and warm," seed to match. 2–4 sentences.
-- **Response length answer** → fold into `### Voice & Stance` as a length-default line ("Default to terse / balanced / detailed prose unless the user asks otherwise.")
-- **Stance portion of `### Voice & Stance`** — keep the seed defaults already in `context/identity.md` (how the agent positions toward the user, when it pauses to ask permission). Only adjust if a derivation from preferences explicitly calls for it.
-- **`## Boundaries`** (top-level, separate from `## Personality`) — never edit. These are static verbatim defaults.
+- **Owner's name + role/focus** (from profile) → seeds the opening sentence and informs stance.
+- **Communication style** (from preferences) → register and warmth for the `## Personality` prose.
+- **Response length** (from preferences) → default-length line inside `## Personality`.
+- **Stance** — derive from communication style: "blunt" / "direct" → proactive partner; "formal" / "deferential" → supportive assistant; "warm" → friendly peer. When in doubt, lean partner.
+
+The `## Personality` block is **one prose block, 2–5 sentences, second person, no bullets**. Cover voice (warmth/formality/register), default response length, and stance. Do not duplicate the consent rule — it already lives in `## Guidelines`.
 
 ## Write
 
-Edit `context/identity.md` using `edit` (not `write` — preserve everything outside the `## Personality` block). Replace the `### Identity` subsection with the user's new answers; replace the voice prose inside `### Voice & Stance` with the derived prose while preserving the stance sentences; leave `### Values & Quirks` and the top-level `## Standing Jobs`, `## Boundaries`, `## Capabilities`, `## Guidelines`, `## Memory`, `## Scheduling`, and `## Creating Skills` sections untouched.
+Edit `context/identity.md` with `edit` (not `write` — preserve everything outside the touched lines). Three edits:
 
-Target shape of the `### Identity` block:
+**1. Opening sentence (line 1).** Replace the `<!-- Onboarding fills: one-sentence opening… -->` comment with a single sentence introducing the agent and the user. Format:
 
 ```
-### Identity
+You are <agent name>, <one-clause disposition> for <owner name> — <owner role/focus>.
+```
 
-- **Name:** <user's answer>
+**2. `## Identity` section.** Replace its body with:
+
+```
+- **Name:** <user's answer to question 1>
 - **Pronouns:** it / they (no gendered persona — pick the form that reads cleanest)
-- **Visual self-description:** <user's paragraph>
+- **Visual self-description:** <user's paragraph from question 2>
 - **Avatar file:** `./avatar.png` (relative to this file). The image itself is **not** loaded into the prompt — only this description text is. If the file is absent, the seed image has not yet been generated; see `onboarding/README.md` for the generation step.
 ```
+
+**3. `## Personality` section.** Replace its body with the derived 2–5 sentence prose block.
+
+Do not introduce new `##` sections. Do not touch anything outside the opening line, `## Identity`, and `## Personality`.
 
 ## Return
 
