@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import mimetypes
 import time
 from pathlib import Path
 from typing import Any
@@ -205,6 +206,5 @@ class DeadsimpleClient:
 
 
 def _guess_content_type(filename: str) -> str:
-    import mimetypes
     mime, _ = mimetypes.guess_type(filename)
     return mime or "application/octet-stream"

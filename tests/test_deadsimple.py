@@ -194,14 +194,15 @@ async def test_send_reply_posts_to_reply_endpoint(client):
 @pytest.mark.asyncio
 @respx.mock
 async def test_send_reply_blocked_by_allowlist(restricted_client):
-    respx.post("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply").mock(
-        return_value=httpx.Response(201, json={})
-    )
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={}))
     with pytest.raises(DeadsimpleError) as exc:
         await restricted_client.send_reply(
             in_reply_to="m1", to="evil@evil.com", text_body="hi"
         )
     assert "Outbound" in str(exc.value)
+    assert not route.called
 
 
 @pytest.mark.asyncio
@@ -241,6 +242,9 @@ async def test_send_with_attachments_uses_messages_endpoint(client, tmp_path):
 async def test_send_with_attachments_blocked_by_allowlist(restricted_client, tmp_path):
     f = tmp_path / "doc.txt"
     f.write_bytes(b"x")
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={}))
     with pytest.raises(DeadsimpleError):
         await restricted_client.send_with_attachments(
             in_reply_to="m1",
@@ -249,3 +253,4 @@ async def test_send_with_attachments_blocked_by_allowlist(restricted_client, tmp
             text_body="x",
             attachment_paths=[str(f)],
         )
+    assert not route.called
