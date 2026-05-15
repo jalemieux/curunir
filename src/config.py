@@ -26,9 +26,12 @@ class AgentConfig:
 @dataclass
 class EmailChannelConfig:
     enabled: bool = False
-    service_account_file: str = ""
-    delegated_user: str = ""
+    api_key: str = ""
+    inbox_id: str = ""
+    api_base: str = "https://api.deadsimple.email"
     poll_interval_sec: int = 60
     allowed_senders: list[str] = field(default_factory=list)
-    processed_label: str = "agent/processed"
+    restrict_outbound: bool = True
     attachment_dir: str = "/tmp/attachments"
+    state_file: Path = Path("./context/email_state.json")
+    spam_score_threshold: float = 5.0
