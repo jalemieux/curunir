@@ -1,4 +1,5 @@
 # tests/test_agent.py
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -263,6 +264,7 @@ class TestAgentHandle:
 
     async def test_max_iterations(self, agent_config):
         agent_config.max_iterations = 2
+        agent_config.judge_max_extensions = 0
         agent = Agent(agent_config)
 
         tool_response = LLMResponse(
@@ -275,7 +277,168 @@ class TestAgentHandle:
         )
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response):
             result = await agent.handle("loop forever", "s1")
-        assert "iteration limit" in result.lower()
+        # With judge_max_extensions=0 the judge never runs; the loop falls
+        # through to the no-extensions-left branch and surfaces a stopped-style
+        # message instead of the bare iteration-limit string.
+        assert "stopped" in result.lower()
+
+    async def test_iteration_limit_invokes_judge_and_continues_on_continue(self, agent_config):
+        """When the loop hits max_iterations and the judge says continue,
+        the budget is extended and the loop can finish."""
+        from src.agent.loop_judge import JudgeDecision
+
+        agent_config.max_iterations = 2
+        agent_config.judge_max_extensions = 1
+        agent_config.judge_extension_size = 5
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+        final_response = LLMResponse(text="finally done", tool_calls=None)
+
+        judge_mock = AsyncMock(return_value=JudgeDecision(
+            action="continue", rationale="almost done", summary="kept trying",
+        ))
+
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=[tool_response, tool_response, final_response],
+        ), patch("src.agent.agent.judge_loop_progress", new=judge_mock):
+            result = await agent.handle("do it", "s1", metadata=metadata)
+
+        assert result == "finally done"
+        assert judge_mock.await_count == 1
+        assert "judge_decisions" in metadata
+        assert len(metadata["judge_decisions"]) == 1
+        assert metadata["judge_decisions"][0]["action"] == "continue"
+
+    async def test_iteration_limit_invokes_judge_and_stops_on_stop(self, agent_config):
+        """When the judge says stop, the loop ends with a message built from
+        the judge's rationale + summary, not the bare iteration-limit string."""
+        from src.agent.loop_judge import JudgeDecision
+
+        agent_config.max_iterations = 2
+        agent_config.judge_max_extensions = 1
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+
+        judge_mock = AsyncMock(return_value=JudgeDecision(
+            action="stop",
+            rationale="going in circles",
+            summary="tried X, Y but nothing worked",
+        ))
+
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            return_value=tool_response,
+        ), patch("src.agent.agent.judge_loop_progress", new=judge_mock):
+            result = await agent.handle("loop forever", "s1")
+
+        assert "going in circles" in result
+        assert "tried X" in result
+        # Must not be the legacy bare string
+        assert result.lower() != "iteration limit reached."
+
+    async def test_judge_max_extensions_caps_runaway(self, agent_config):
+        """Even if the judge always says continue, the cap prevents infinite runs."""
+        from src.agent.loop_judge import JudgeDecision
+
+        agent_config.max_iterations = 2
+        agent_config.judge_max_extensions = 1
+        agent_config.judge_extension_size = 2
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_loop",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo loop"})},
+            }],
+        )
+
+        judge_mock = AsyncMock(return_value=JudgeDecision(
+            action="continue",
+            rationale="keep going",
+            summary="partial progress: explored A, B, C",
+        ))
+
+        call_count = 0
+
+        async def fake_call_llm(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return tool_response
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm), \
+             patch("src.agent.agent.judge_loop_progress", new=judge_mock):
+            result = await agent.handle("loop forever", "s1")
+
+        # max_iterations(2) + judge_extension_size(2) * judge_max_extensions(1) = 4
+        assert call_count <= 4
+        # Final message must surface judge's most-recent summary, not legacy string
+        assert "partial progress" in result
+        assert result.lower() != "iteration limit reached."
+
+    async def test_judge_call_aborts_on_cancel(self, agent_config):
+        """Cancel fires while judge is running — handle() returns (interrupted)."""
+        from src.agent.loop_judge import JudgeDecision
+
+        agent_config.max_iterations = 2
+        agent_config.judge_max_extensions = 1
+        agent = Agent(agent_config)
+
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_x",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo x"})},
+            }],
+        )
+
+        judge_started = asyncio.Event()
+        judge_cancelled = False
+
+        async def slow_judge(**kwargs):
+            nonlocal judge_cancelled
+            judge_started.set()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                judge_cancelled = True
+                raise
+            return JudgeDecision(action="continue", rationale="r", summary="s")
+
+        async def trigger_cancel():
+            await judge_started.wait()
+            agent.request_cancel("s1")
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response), \
+             patch("src.agent.agent.judge_loop_progress", new=slow_judge):
+            cancel_task = asyncio.create_task(trigger_cancel())
+            result = await agent.handle("run", "s1")
+            await cancel_task
+
+        assert result == "(interrupted)"
+        assert judge_cancelled
 
     async def test_forwards_on_text_delta_to_call_llm(self, agent):
         mock_response = LLMResponse(text="streamed", tool_calls=None)

@@ -11,6 +11,11 @@ import litellm
 from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
+from src.agent.loop_judge import (
+    JudgeDecision,
+    judge_loop_progress,
+    summarize_recent_iterations,
+)
 from src.config import AgentConfig
 from src.llm import call_llm, classify_provider_error
 from src.skills import parse_frontmatter
@@ -140,6 +145,18 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
     if not tools_str:
         return []
     return [t.strip() for t in tools_str.split(",") if t.strip()]
+
+
+def _content_to_text_summary(content) -> str:
+    """Flatten a message's content (string or multimodal list) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+        return ""
+    return str(content or "")
 
 
 class Agent:
@@ -404,8 +421,63 @@ class Agent:
 
             return resp, None
 
+        # Capture the user request that opened this turn — fed to the judge
+        # if/when the iteration budget runs out.
+        user_request_text = ""
+        for entry in reversed(history):
+            if entry.get("role") == "user":
+                user_request_text = _content_to_text_summary(entry.get("content"))
+                break
+
+        budget = self.config.max_iterations
+        extensions_used = 0
+        last_judge_decision: JudgeDecision | None = None
+
+        async def _run_judge_with_cancel() -> JudgeDecision | None:
+            """Invoke the judge while watching the cancel event.
+
+            Returns None if cancellation fired before/during the judge call;
+            otherwise returns the judge's decision.
+            """
+            if cancel_event.is_set():
+                return None
+            judge_model = self.config.judge_model or self.config.model
+            transcript = summarize_recent_iterations(
+                history, last_n=self.config.judge_transcript_last_n,
+            )
+            judge_task = asyncio.create_task(judge_loop_progress(
+                model=judge_model,
+                api_base=self.config.api_base,
+                openrouter_provider=self.config.openrouter_provider,
+                user_request=user_request_text,
+                recent_transcript=transcript,
+                iterations_so_far=iteration,
+                extension_number=extensions_used,
+                tokens_so_far=total_prompt_tokens + total_completion_tokens,
+            ))
+            cancel_wait = asyncio.create_task(cancel_event.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {judge_task, cancel_wait},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                for t in (judge_task, cancel_wait):
+                    if not t.done():
+                        t.cancel()
+            if cancel_wait in done and judge_task not in done:
+                # Drain the cancelled judge task so its CancelledError
+                # is observed and doesn't leak as an unhandled exception.
+                try:
+                    await judge_task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
+                return None
+            return judge_task.result()
+
         try:
-            for iteration in range(self.config.max_iterations):
+            iteration = 0
+            while True:
                 if cancel_event.is_set():
                     logger.info("[%s] interrupted by user after %d iteration(s)", sid, iteration)
                     history.append({"role": "assistant", "content": "(interrupted)"})
@@ -415,6 +487,81 @@ class Agent:
                     if system_task_prompt:
                         self.sessions.pop(session_id, None)
                     return "(interrupted)"
+
+                # Budget exhausted: invoke judge or surface final summary.
+                if iteration >= budget:
+                    if extensions_used >= self.config.judge_max_extensions:
+                        logger.warning(
+                            "[%s] iteration limit reached (budget=%d, extensions=%d/%d)",
+                            sid, budget, extensions_used,
+                            self.config.judge_max_extensions,
+                        )
+                        if last_judge_decision is not None:
+                            final = (
+                                f"I stopped before finishing. {last_judge_decision.rationale}\n\n"
+                                f"What I attempted:\n{last_judge_decision.summary}"
+                            )
+                        else:
+                            final = (
+                                "I stopped before finishing. The agent reached its "
+                                "iteration limit and the safety judge was not configured "
+                                "to grant more iterations."
+                            )
+                        history.append({"role": "assistant", "content": final})
+                        _finalize_stats()
+                        if metadata and "stats" in metadata:
+                            metadata["stats"]["iterations"] = iteration
+                        if system_task_prompt:
+                            self.sessions.pop(session_id, None)
+                        return final
+
+                    decision = await _run_judge_with_cancel()
+                    if decision is None:
+                        logger.info("[%s] judge cancelled by user", sid)
+                        history.append({"role": "assistant", "content": "(interrupted)"})
+                        _finalize_stats()
+                        if metadata and "stats" in metadata:
+                            metadata["stats"]["iterations"] = iteration
+                        if system_task_prompt:
+                            self.sessions.pop(session_id, None)
+                        return "(interrupted)"
+
+                    last_judge_decision = decision
+                    if metadata is not None:
+                        metadata.setdefault("judge_decisions", []).append({
+                            "action": decision.action,
+                            "rationale": decision.rationale,
+                            "summary": decision.summary,
+                            "iteration": iteration,
+                            "extension_number": extensions_used,
+                        })
+
+                    if decision.action == "continue":
+                        budget += self.config.judge_extension_size
+                        extensions_used += 1
+                        logger.info(
+                            "[%s] judge: continue (ext %d/%d) — %s",
+                            sid, extensions_used,
+                            self.config.judge_max_extensions,
+                            decision.rationale,
+                        )
+                        # Loop back to top to start the next iteration.
+                        continue
+
+                    # stop
+                    logger.info("[%s] judge: stop — %s", sid, decision.rationale)
+                    final = (
+                        f"I stopped before finishing. {decision.rationale}\n\n"
+                        f"What I attempted:\n{decision.summary}"
+                    )
+                    history.append({"role": "assistant", "content": final})
+                    _finalize_stats()
+                    if metadata and "stats" in metadata:
+                        metadata["stats"]["iterations"] = iteration
+                    if system_task_prompt:
+                        self.sessions.pop(session_id, None)
+                    return final
+
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 response, err = await _call_and_record()
                 if err is not None:
@@ -501,6 +648,7 @@ class Agent:
 
                     _trim_history(history, max_chars=self.config.max_history_chars)
                     messages = [{"role": "system", "content": system_prompt}] + history
+                    iteration += 1
                     continue
 
                 # No tool calls — final response, exit the loop.
@@ -527,14 +675,6 @@ class Agent:
                     return ""
                 logger.warning("[%s] LLM returned empty response", sid)
                 return "Error: LLM returned empty response."
-
-            logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
-            _finalize_stats()
-            if metadata and "stats" in metadata:
-                metadata["stats"]["iterations"] = self.config.max_iterations
-            if system_task_prompt:
-                self.sessions.pop(session_id, None)
-            return "Iteration limit reached."
         finally:
             self._running_sessions.discard(session_id)
             cancel_event.clear()
