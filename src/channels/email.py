@@ -115,8 +115,16 @@ class EmailChannel:
             logger.exception("Failed to fetch detail for %s", summary.get("message_id"))
             return
 
+        thread_id = detail.get("thread_id", "")
+        attachments = await self._process_attachments(detail, thread_id)
+
         body = detail.get("text_body") or self._strip_html(detail.get("html_body", "")) or ""
         content = f"[channel: email, from: {sender}]\n{body}" if sender else body
+        if attachments:
+            content += "\n\nAttachments:\n"
+            for att in attachments:
+                size_kb = max(att["size"] // 1024, 1)
+                content += f"- {att['filename']} ({att['mime_type']}, {size_kb}KB) -> {att['path']}\n"
 
         subject = detail.get("subject", "") or ""
         reply_subject = subject if subject.lower().startswith(_RE_PREFIX_RE) else f"Re: {subject}"
@@ -124,17 +132,55 @@ class EmailChannel:
         incoming = IncomingMessage(
             content=content,
             channel="email",
-            session_id=detail.get("thread_id", ""),
+            session_id=thread_id,
             reply_address={
                 "to": sender,
                 "subject": reply_subject,
                 "in_reply_to": detail["message_id"],
             },
-            attachments=None,  # Task 9 fills this in.
+            attachments=attachments,
         )
         await self.in_queue.put(incoming)
         logger.info("Queued email from %s (thread %s): %s",
                     sender, incoming.session_id, subject)
+
+    async def _process_attachments(
+        self, detail: dict[str, Any], thread_id: str
+    ) -> list[dict] | None:
+        raw = detail.get("attachments") or []
+        if not raw:
+            return None
+        out_dir = Path(self.attachment_dir).resolve() / thread_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest: list[dict] = []
+        for att in raw:
+            att_id = att.get("attachment_id")
+            fname_raw = att.get("filename", "")
+            if not att_id or not fname_raw:
+                continue
+            fname = _normalize_unicode_whitespace(fname_raw)
+            mime = att.get("content_type") or "application/octet-stream"
+            declared_size = int(att.get("size") or 0)
+            reason = _validate_attachment_metadata(mime, declared_size)
+            if reason:
+                logger.warning("Dropping email attachment %s: %s", fname, reason)
+                continue
+            dest = out_dir / fname
+            try:
+                await self.client.download_attachment(detail["message_id"], att_id, dest)
+            except DeadsimpleError:
+                logger.exception("Failed to download attachment %s", fname)
+                continue
+            if not dest.is_file():
+                continue
+            manifest.append({
+                "filename": fname,
+                "path": str(dest),
+                "mime_type": mime,
+                "size": dest.stat().st_size,
+            })
+        return manifest or None
 
     @staticmethod
     def _parse_ts(s: str) -> datetime | None:
