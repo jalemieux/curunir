@@ -65,7 +65,15 @@ class EmailChannel:
             await asyncio.sleep(self.poll_interval)
 
     async def _poll_once(self) -> None:
-        """Walk pages newest-first until we hit the watermark, process new inbound."""
+        """Walk pages until we hit a page entirely ≤ watermark, process new inbound.
+
+        The deadsimple list endpoint does not guarantee strict newest-first
+        ordering — the watermark message itself can appear at index 0 with
+        newer messages further down. So sort each page locally by
+        (created_at, message_id) descending and only terminate pagination
+        when the entire sorted page is ≤ watermark (a within-page miss is
+        not enough).
+        """
         cursor: str | None = None
         new_messages: list[dict[str, Any]] = []
         max_seen: tuple[datetime, str] | None = None
@@ -73,19 +81,23 @@ class EmailChannel:
         while True:
             page = await self.client.list_messages(limit=50, cursor=cursor)
             data = page["messages"]
-            stop = False
+            keyed: list[tuple[datetime, str, dict[str, Any]]] = []
             for m in data:
                 ts = self._parse_ts(m.get("created_at", ""))
                 if ts is None:
                     continue
-                mid = m.get("message_id", "")
+                keyed.append((ts, m.get("message_id", ""), m))
+            keyed.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+            page_had_new = False
+            for ts, mid, m in keyed:
                 if not self.state.is_after_watermark(ts, mid):
-                    stop = True
-                    break
+                    continue
+                page_had_new = True
                 if max_seen is None or (ts, mid) > max_seen:
                     max_seen = (ts, mid)
                 new_messages.append(m)
-            if stop or not page.get("next_cursor"):
+            if not page.get("next_cursor") or not page_had_new:
                 break
             cursor = page["next_cursor"]
 
