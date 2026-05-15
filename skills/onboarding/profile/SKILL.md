@@ -48,7 +48,7 @@ read into context on every turn.
 **Context:** Anchors the kinds of tasks this assistant is for.
 ```
 
-Use today's date (UTC) for `<YYYY-MM-DD>`. Get it from the `## System` block of your system prompt — there's a "Conversation started at" timestamp; pick the date prefix.
+Use today's date in UTC for `<YYYY-MM-DD>`. Run `bash` with `date -u +%Y-%m-%d` and use the output verbatim.
 
 ## Return
 

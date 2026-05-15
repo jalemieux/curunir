@@ -26,7 +26,7 @@ If `.onboarded` does NOT exist, proceed to the full flow.
 
 1. **Profile.** Run `load_skill` with `name=profile`. Follow its instructions to completion — it will ask 2 questions and write `context/memory/profile.md`.
 2. **Preferences.** Run `load_skill` with `name=preferences`. Follow it to completion — 2 questions, writes `context/memory/preferences.md`.
-3. **Personality.** Run `load_skill` with `name=personality`. Follow it to completion — 2 questions, edits `context/identity.md`. The personality skill will also derive the voice portion of `### Voice & Stance` from the preferences answers earlier in this conversation.
+3. **Personality.** Run `load_skill` with `name=personality`. Follow it to completion — 2 questions, edits `context/identity.md`. The personality skill also fills the opening sentence and derives the `### Personality` block from the profile + preferences answers earlier in this conversation.
 4. **Marker.** After all three writes succeed, use `bash` to run `touch context/.onboarded`. (Or use `write` to create the file with empty content — either works.)
 5. **Confirm.** Reply: "All set. You can re-run any section anytime with `/profile`, `/preferences`, or `/personality`."
 
