@@ -108,7 +108,6 @@ docker compose up --build
 | `/help` | Show available commands and skills |
 | `/skills` | List registered skills |
 | `/clear`, `/new`, `/reset` | Reset the session (and trigger memory extraction) |
-| `/cancel` | Cancel the current agent run |
 | `/<skill-name> [args]` | Force the agent to use a specific skill (e.g. `/identity update my voice`) |
 | `/verbose` | Toggle live tool-call output (CLI-local) |
 | `/attach <path>` / `/detach <i>` | Stage or remove a file for the next message (CLI-local) |
@@ -117,9 +116,15 @@ docker compose up --build
 | Ctrl-D at the prompt | Exit cleanly |
 
 Slash commands have two layers: an explicit registry for utility ops
-(`/help`, `/skills`, `/clear`, `/cancel`), and a fallback that turns any
+(`/help`, `/skills`, `/clear`), and a fallback that turns any
 `/<skill-name>` into a skill-forcing prompt for the agent. They work
-identically over the CLI WebSocket and the portal browser UI.
+identically over the CLI WebSocket and the portal browser UI. Channels
+forward slash text to `agent_worker` as `command="slash"` messages —
+dispatch happens there so channels stay ignorant of the skill registry.
+Cancellation is the only slash-adjacent action handled channel-side, as
+an out-of-band `{"command": "interrupt"}` frame (bound to Ctrl-C in the
+CLI), because the agent worker is blocked during a turn and can't drain
+the queue in time.
 
 #### Email Channel (Gmail)
 

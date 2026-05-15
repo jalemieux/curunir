@@ -1,7 +1,7 @@
 """Tests for src/slash_commands.py — the two-layer slash command dispatcher.
 
-Layer 1: explicit intercepted registry (help, skills, clear, cancel) for
-utility commands.
+Layer 1: explicit intercepted registry (help, skills, clear) for utility
+commands.
 Layer 2: skill-forcing fallback that rewrites unknown `/<name>` to a
 synthetic user prompt when *name* matches a registered skill, else replies
 with a polite error.
@@ -9,7 +9,7 @@ with a polite error.
 
 import pytest
 
-from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.base import IncomingMessage
 from src.slash_commands import SlashContext, SlashResult, maybe_handle_slash
 
 
@@ -22,23 +22,12 @@ def _write_skill(skills_dir, name: str, description: str = "test skill") -> None
     )
 
 
-class _FakeAgent:
-    def __init__(self, deliver: bool = True) -> None:
-        self.cancelled: list[str] = []
-        self._deliver = deliver
-
-    def request_cancel(self, session_id: str) -> bool:
-        self.cancelled.append(session_id)
-        return self._deliver
-
-
-def _ctx(tmp_skills, agent=None) -> SlashContext:
+def _ctx(tmp_skills) -> SlashContext:
     return SlashContext(
         args="",
         session_id="cli",
         channel="cli",
         reply_address={},
-        agent=agent or _FakeAgent(),
         skill_dirs=[tmp_skills],
     )
 
@@ -57,7 +46,7 @@ async def test_empty_returns_none(tmp_skills):
 
 @pytest.mark.asyncio
 async def test_attachments_falls_through(tmp_skills):
-    """v1: slash commands don't take attachments — channel proceeds normally."""
+    """v1: slash commands don't take attachments — caller proceeds normally."""
     result = await maybe_handle_slash(
         "/help",
         [{"filename": "a.png", "mime_type": "image/png", "size": 1, "path": "/tmp/a"}],
@@ -90,11 +79,33 @@ async def test_help_lists_intercepted_and_skills(tmp_skills):
     assert len(result.outgoing) == 1
     body = result.outgoing[0].content
     # Intercepted commands
-    for name in ("cancel", "clear", "help", "skills"):
+    for name in ("clear", "help", "skills"):
         assert name in body, f"expected /{name} in help table:\n{body}"
     # Skills from the registry
     assert "yfinance" in body
     assert "fred" in body
+    # Cancellation hint — slash can't cancel; the channel does it out-of-band.
+    assert "Ctrl-C" in body or "stop button" in body
+
+
+@pytest.mark.asyncio
+async def test_help_omits_cancel_command(tmp_skills):
+    """Regression: /cancel was removed from the intercepted registry because
+    it can't work through the queue (agent_worker is blocked during a turn).
+    /help should not advertise it as a command."""
+    result = await maybe_handle_slash("/help", None, _ctx(tmp_skills))
+    body = result.outgoing[0].content
+    assert "/cancel" not in body
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_unknown_command(tmp_skills):
+    """/cancel is no longer intercepted; it falls through to the unknown
+    command handler (or skill-forcing, if a skill happens to be named that)."""
+    result = await maybe_handle_slash("/cancel", None, _ctx(tmp_skills))
+    assert result is not None
+    assert len(result.outgoing) == 1
+    assert "Unknown command" in result.outgoing[0].content
 
 
 @pytest.mark.asyncio
@@ -132,29 +143,6 @@ async def test_new_and_reset_alias_clear(tmp_skills):
         assert result.handled is True
         assert len(result.enqueue) == 1
         assert result.enqueue[0].command == "clear"
-
-
-@pytest.mark.asyncio
-async def test_cancel_calls_request_cancel(tmp_skills):
-    agent = _FakeAgent(deliver=True)
-    result = await maybe_handle_slash("/cancel", None, _ctx(tmp_skills, agent=agent))
-    assert result is not None
-    assert result.handled is True
-    assert agent.cancelled == ["cli"]
-    assert len(result.outgoing) == 1
-    assert result.outgoing[0].content  # non-empty ack
-
-
-@pytest.mark.asyncio
-async def test_cancel_no_running_agent(tmp_skills):
-    """When request_cancel returns False, the user gets a helpful note."""
-    agent = _FakeAgent(deliver=False)
-    result = await maybe_handle_slash("/cancel", None, _ctx(tmp_skills, agent=agent))
-    assert result is not None
-    assert result.handled is True
-    assert agent.cancelled == ["cli"]
-    assert len(result.outgoing) == 1
-    assert "no" in result.outgoing[0].content.lower()
 
 
 @pytest.mark.asyncio
@@ -205,8 +193,7 @@ async def test_outgoing_uses_context_channel_and_session(tmp_skills):
     """Outgoing replies carry the channel + session from SlashContext."""
     ctx = SlashContext(
         args="", session_id="tab-A", channel="portal",
-        reply_address={"thread": "x"},
-        agent=_FakeAgent(), skill_dirs=[tmp_skills],
+        reply_address={"thread": "x"}, skill_dirs=[tmp_skills],
     )
     result = await maybe_handle_slash("/nope", None, ctx)
     assert result is not None
@@ -221,7 +208,7 @@ async def test_enqueue_uses_context_channel_and_session(tmp_skills):
     _write_skill(tmp_skills, "foo")
     ctx = SlashContext(
         args="", session_id="tab-A", channel="portal",
-        reply_address={"x": 1}, agent=_FakeAgent(), skill_dirs=[tmp_skills],
+        reply_address={"x": 1}, skill_dirs=[tmp_skills],
     )
     result = await maybe_handle_slash("/foo do thing", None, ctx)
     assert result is not None
