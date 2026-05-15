@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: "Use when asked to research a topic, produce a research report, investigate something requiring multiple sources, or conduct a comprehensive analysis. Trigger phrases include 'research X', 'research this', 'look into', 'investigate', 'deep research', or any request for a written report on a topic. The word 'deep' is not required."
+description: "Use when asked to research a topic, produce a research report, investigate something requiring multiple sources, or conduct a comprehensive analysis. Trigger phrases include 'research X', 'research this', 'look into', 'investigate', 'deep research', or any request for a written report on a topic. The word 'deep' is not required. Do NOT use for investment requests whose deliverable is a buy/sell/hold recommendation or a ranking of investable names (stocks, ETFs, sectors, commodities, crypto) by return potential — even when phrased as 'investment research' or 'research the top N …'; defer to investment-memo for those."
 tools: attach
 ---
 
