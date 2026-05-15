@@ -48,7 +48,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
   † planned
 ```
 
-Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel. A scheduler reads cron tasks from `context/schedules.json` and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
+Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. When the iteration budget runs out, an LLM-as-judge (`src/agent/loop_judge.py`) inspects a compact transcript of the recent iterations and decides whether to grant more iterations or stop with a user-facing summary; the number of extensions is hard-capped to prevent runaway loops. Replies are routed back to the originating channel. A scheduler reads cron tasks from `context/schedules.json` and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
 
 Ctrl-C while the agent is working triggers a cooperative cancel: the in-flight LLM call and current tool run to completion, any remaining tools in the batch are stubbed with `(interrupted)`, and the turn returns cleanly. Channels deliver the cancel out-of-band (the agent queue is blocked inside `handle()`).
 
@@ -239,8 +239,12 @@ Configuration is handled via `src/config.py`:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `model` | `anthropic/claude-sonnet-4-20250514` | LLM model (any LiteLLM-supported model) |
-| `max_iterations` | `75` | Max tool-calling rounds per turn |
+| `max_iterations` | `75` | Max tool-calling rounds per turn before invoking the loop judge |
 | `max_history_chars` | `250000` | Conversation history limit; lower for small-context models |
+| `judge_model` | `None` | Model for the iteration-limit judge; falls back to `model` if unset (set a cheap model to reduce cost) |
+| `judge_max_extensions` | `2` | Hard cap on how many times the judge may extend the iteration budget per turn |
+| `judge_extension_size` | `25` | Iterations granted on each judge "continue" decision |
+| `judge_transcript_last_n` | `10` | Number of recent iterations summarized for the judge |
 | `identity_file` | `./context/identity.md` | Path to persona file |
 | `context_dir` | `./context` | Path to context directory (memory, etc.) |
 | `skill_dirs` | `[./skills, ./context/skills]` | Directories scanned for skills in priority order (first-seen wins on name collision) |
