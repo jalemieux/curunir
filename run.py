@@ -473,6 +473,10 @@ async def main():
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
+    judge_model = os.environ.get("JUDGE_MODEL")
+    judge_max_extensions = os.environ.get("JUDGE_MAX_EXTENSIONS")
+    judge_extension_size = os.environ.get("JUDGE_EXTENSION_SIZE")
+    judge_transcript_last_n = os.environ.get("JUDGE_TRANSCRIPT_LAST_N")
     config = AgentConfig(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
@@ -482,6 +486,10 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
+        **({"judge_model": judge_model} if judge_model else {}),
+        **({"judge_max_extensions": int(judge_max_extensions)} if judge_max_extensions else {}),
+        **({"judge_extension_size": int(judge_extension_size)} if judge_extension_size else {}),
+        **({"judge_transcript_last_n": int(judge_transcript_last_n)} if judge_transcript_last_n else {}),
     )
     config.main_model_supports_vision = _detect_vision_support(config.model)
     if not config.main_model_supports_vision:

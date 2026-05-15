@@ -21,6 +21,10 @@ class AgentConfig:
     tts_voice: str = "alloy"
     vision_model: str | None = None
     main_model_supports_vision: bool = False
+    judge_model: str | None = None
+    judge_max_extensions: int = 2
+    judge_extension_size: int = 25
+    judge_transcript_last_n: int = 10
 
 
 @dataclass
