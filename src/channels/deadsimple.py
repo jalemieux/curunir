@@ -1,0 +1,99 @@
+"""HTTP client for deadsimple.email's REST API.
+
+Scope: only the endpoints the email channel needs. Auth, 429 retry, and
+outbound-recipient allowlisting live here so the channel layer stays
+focused on translating between deadsimple messages and curunir messages.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+import time
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class DeadsimpleError(Exception):
+    """Raised when a deadsimple API call fails."""
+
+
+class DeadsimpleClient:
+    def __init__(
+        self,
+        api_key: str,
+        api_base: str,
+        inbox_id: str,
+        allowed_recipients: list[str],
+        restrict_outbound: bool,
+        timeout_sec: float = 30.0,
+    ):
+        self.api_key = api_key
+        self.api_base = api_base.rstrip("/")
+        self.inbox_id = inbox_id
+        self.allowed_recipients = allowed_recipients
+        self.restrict_outbound = restrict_outbound
+        self._http = httpx.AsyncClient(timeout=timeout_sec)
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    def _headers(self, idempotency_key: str | None = None) -> dict[str, str]:
+        h = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
+        if idempotency_key:
+            h["Idempotency-Key"] = idempotency_key
+        return h
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict | None = None,
+        params: dict | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """One-shot request with a single 429 retry honoring X-RateLimit-Reset."""
+        url = f"{self.api_base}{path}"
+        for attempt in (0, 1):
+            try:
+                resp = await self._http.request(
+                    method,
+                    url,
+                    headers=self._headers(idempotency_key),
+                    json=json_body,
+                    params=params,
+                )
+            except httpx.HTTPError as e:
+                raise DeadsimpleError(f"HTTP error on {method} {path}: {e}") from e
+
+            if resp.status_code == 429 and attempt == 0:
+                reset = resp.headers.get("X-RateLimit-Reset")
+                delay = max(1.0, float(reset) - time.time()) if reset else 5.0
+                logger.warning("deadsimple 429 on %s %s, sleeping %.1fs", method, path, delay)
+                await asyncio.sleep(min(delay, 60.0))
+                continue
+
+            if resp.status_code >= 400:
+                raise DeadsimpleError(
+                    f"deadsimple {method} {path} returned {resp.status_code}: {resp.text[:500]}"
+                )
+
+            if not resp.content:
+                return {}
+            try:
+                return resp.json()
+            except ValueError as e:
+                raise DeadsimpleError(f"non-JSON response from {method} {path}: {e}") from e
+
+        raise DeadsimpleError(f"giving up on {method} {path} after 429 retry")
+
+    # --- public methods (filled in by later tasks) ---
+
+    async def validate_inbox(self) -> dict[str, Any]:
+        """Confirm the configured inbox exists and is accessible. Returns inbox JSON."""
+        return await self._request("GET", f"/v1/inboxes/{self.inbox_id}")
