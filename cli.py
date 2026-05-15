@@ -631,10 +631,11 @@ async def run(host: str, port: int, console: Console | None = None,
 
                     if text.startswith("/"):
                         # Server-side slash dispatch — `/clear`, `/new`,
-                        # `/reset`, `/help`, `/skills`, `/cancel`, plus any
+                        # `/reset`, `/help`, `/skills`, plus any
                         # `/<skill-name>` as a skill-forcing shortcut.
                         # (`/verbose`, `/attach`, `/detach` are handled above
-                        # — they manipulate CLI-local state.)
+                        # — they manipulate CLI-local state. Cancellation is
+                        # Ctrl-C, which sends `{"command": "interrupt"}`.)
                         staging.clear()
                         payload = {"command": "slash", "text": text}
                     else:
