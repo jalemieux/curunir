@@ -1,109 +1,62 @@
-"""Email channel — polls Gmail via service account, processes inbound messages, sends replies."""
+"""Email channel — polls deadsimple.email for new messages, queues IncomingMessage,
+sends replies into the same thread."""
 
 import asyncio
 import logging
-import os
-import re
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-from src.channels import gmail
 from src.channels._attachments import (
     _normalize_unicode_whitespace,
     _validate_attachment_metadata,
 )
+from src.channels._email_state import EmailState
 from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.deadsimple import DeadsimpleClient, DeadsimpleError
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
 
-
-def _parse_retry_after(error_text: str) -> int | None:
-    """Extract seconds to wait from a Gmail 429 'Retry after <timestamp>' message."""
-    match = re.search(r'Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)', error_text)
-    if not match:
-        return None
-    try:
-        retry_at = datetime.fromisoformat(match.group(1).replace('Z', '+00:00'))
-        delta = (retry_at - datetime.now(timezone.utc)).total_seconds()
-        return max(int(delta) + 1, 5)
-    except (ValueError, OverflowError):
-        return None
+_REPLY_PREFIXES = ("re:", "fw:", "fwd:")
 
 
 class EmailChannel:
     def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
         self.in_queue = in_queue
         self.config = config
-        self.service = gmail.build_service(config.service_account_file, config.delegated_user)
+        self.client = DeadsimpleClient(
+            api_key=config.api_key,
+            api_base=config.api_base,
+            inbox_id=config.inbox_id,
+            allowed_recipients=config.allowed_senders,
+            restrict_outbound=config.restrict_outbound,
+        )
         self.poll_interval = config.poll_interval_sec
         self.allowed_senders = config.allowed_senders
-        self.processed_label = config.processed_label
         self.attachment_dir = config.attachment_dir
-        self.last_seen: dict[str, str] = {}
-
-    async def _ensure_label(self) -> None:
-        """Ensure the processed label exists in Gmail, creating it if missing."""
-        labels = await asyncio.to_thread(gmail.labels_list, self.service)
-        if not any(label.get("name") == self.processed_label for label in labels):
-            await asyncio.to_thread(gmail.labels_create, self.processed_label, self.service)
+        self.spam_score_threshold = config.spam_score_threshold
+        self.state = EmailState.load(config.state_file)
 
     async def start(self) -> None:
-        """Bootstrap label, enter polling loop."""
-        backoff = 30
-        while True:
-            try:
-                await self._ensure_label()
-                break
-            except gmail.GmailError as e:
-                cause = e.__cause__
-                if isinstance(cause, gmail.HttpError) and cause.resp.status == 429:
-                    retry_after = _parse_retry_after(str(cause))
-                    wait = retry_after if retry_after else backoff
-                    logger.warning("Gmail rate-limited, retrying email channel init in %ds", wait)
-                    await asyncio.sleep(wait)
-                    backoff = min(backoff * 2, 300)
-                else:
-                    logger.error("Email channel failed to start: %s", e)
-                    return
-            except Exception:
-                logger.exception("Email channel failed to start")
-                return
-        logger.info("Email channel started, polling every %ds", self.poll_interval)
+        """Validate inbox, initialize watermark if needed, enter polling loop."""
+        try:
+            inbox = await self.client.validate_inbox()
+        except DeadsimpleError as e:
+            logger.error("Email channel failed to start (invalid inbox): %s", e)
+            return
+
+        email_addr = (inbox.get("data") or inbox).get("email", "<unknown>")
+        logger.info("Email channel started, inbox=%s, polling every %ds",
+                    email_addr, self.poll_interval)
+
+        if self.state.watermark_created_at is None:
+            self.state.set_watermark(datetime.now(timezone.utc), "")
+            self.state.save()
+
         await self._poll_loop()
 
-    async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply in the original thread, with optional attachments."""
-        # Skip streaming deltas and tool-call markers — email is not a
-        # streaming medium; only the final composed reply should be sent.
-        if not msg.final or not msg.content:
-            return
-        attachment_paths = [att["path"] for att in msg.attachments] if msg.attachments else None
-        logger.info("Sending reply to %s (thread %s, %d attachment(s))",
-                     msg.reply_address.get("to"), msg.session_id,
-                     len(attachment_paths) if attachment_paths else 0)
-        try:
-            await asyncio.to_thread(
-                gmail.send_reply,
-                to=msg.reply_address["to"],
-                subject=msg.reply_address["subject"],
-                body=msg.content,
-                reply_to_message_id=msg.reply_address["in_reply_to"],
-                service=self.service,
-                attachments=attachment_paths,
-            )
-        except gmail.GmailError:
-            logger.exception("Failed to send reply for thread %s", msg.session_id)
-            return
-        try:
-            await asyncio.to_thread(
-                gmail.thread_modify, msg.session_id,
-                add_label=self.processed_label, service=self.service,
-            )
-        except gmail.GmailError:
-            logger.exception("Failed to label thread %s after send", msg.session_id)
-
     async def _poll_loop(self) -> None:
-        """Poll for new messages on an interval."""
         while True:
             try:
                 await self._poll_once()
@@ -112,138 +65,165 @@ class EmailChannel:
             await asyncio.sleep(self.poll_interval)
 
     async def _poll_once(self) -> None:
-        """Run one poll cycle: search for unprocessed threads and process new messages."""
-        query = f"in:inbox -label:{self.processed_label}"
-        threads = await asyncio.to_thread(gmail.search, query, self.service)
+        """Walk pages newest-first until we hit the watermark, process new inbound."""
+        cursor: str | None = None
+        new_messages: list[dict[str, Any]] = []
+        max_seen: tuple[datetime, str] | None = None
 
-        for thread_summary in threads:
-            thread_id = thread_summary["id"]
-
-            try:
-                thread = await asyncio.to_thread(gmail.thread_get, thread_id, self.service)
-            except gmail.GmailError:
-                logger.exception("Failed to fetch thread %s", thread_id)
-                continue
-
-            messages = thread.get("messages", [])
-            new_messages = self._new_messages(messages, self.last_seen.get(thread_id))
-
-            # Mark thread as seen up to latest message, even if none are queued
-            if messages:
-                self.last_seen[thread_id] = messages[-1]["id"]
-
-            for message in new_messages:
-
-                sender = message.get("from", "")
-                if self.allowed_senders and not any(
-                    allowed in sender for allowed in self.allowed_senders
-                ):
-                    logger.info("Skipping email from %s (not in allowed_senders)", sender)
+        while True:
+            page = await self.client.list_messages(limit=50, cursor=cursor)
+            data = page.get("data", [])
+            stop = False
+            for m in data:
+                ts = self._parse_ts(m.get("created_at", ""))
+                if ts is None:
                     continue
+                mid = m.get("message_id", "")
+                if not self.state.is_after_watermark(ts, mid):
+                    stop = True
+                    break
+                if max_seen is None or (ts, mid) > max_seen:
+                    max_seen = (ts, mid)
+                new_messages.append(m)
+            if stop or not page.get("next_cursor"):
+                break
+            cursor = page["next_cursor"]
 
-                subject = message.get("subject", "")
-                reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+        # Oldest first into the queue.
+        for summary in reversed(new_messages):
+            await self._handle_summary(summary)
 
-                attachments = await self._process_attachments(thread_id, message)
-                logger.info("Attachments for msg %s: %s",
-                            message["id"],
-                            [a["path"] for a in attachments] if attachments else None)
+        if max_seen is not None:
+            self.state.set_watermark(*max_seen)
+            self.state.save()
 
-                body = message.get("body", "")
-                content = f"[channel: email, from: {sender}]\n{body}" if sender else body
-                if attachments:
-                    content += "\n\nAttachments:\n"
-                    for att in attachments:
-                        size_kb = att["size"] // 1024
-                        content += f"- {att['filename']} ({att['mime_type']}, {size_kb}KB) -> {att['path']}\n"
-
-                incoming = IncomingMessage(
-                    content=content,
-                    channel="email",
-                    session_id=thread_id,
-                    reply_address={
-                        "to": sender,
-                        "subject": reply_subject,
-                        "in_reply_to": message["id"],
-                    },
-                    attachments=attachments if attachments else None,
-                )
-                await self.in_queue.put(incoming)
-                logger.info("Queued email from %s (thread %s): %s", sender, thread_id, subject)
-
-    @staticmethod
-    def _new_messages(messages: list[dict], last_seen_id: str | None) -> list[dict]:
-        """Return messages after last_seen_id, or only the latest if not seen before."""
-        if last_seen_id is None:
-            # First encounter — only process the most recent message
-            return messages[-1:] if messages else []
-
-        found = False
-        new = []
-        for msg in messages:
-            if found:
-                new.append(msg)
-            elif msg["id"] == last_seen_id:
-                found = True
-        return new
-
-    async def _process_attachments(self, thread_id: str, message: dict) -> list[dict] | None:
-        """Download and build attachment manifest if message has attachments."""
-        raw_attachments = message.get("attachments", [])
-        if not raw_attachments:
-            return None
-
-        out_dir = os.path.join(os.path.abspath(self.attachment_dir), thread_id)
-        os.makedirs(out_dir, exist_ok=True)
+    async def _handle_summary(self, summary: dict[str, Any]) -> None:
+        if summary.get("direction") != "inbound":
+            return
+        if summary.get("is_spam") or float(summary.get("spam_score") or 0) >= self.spam_score_threshold:
+            logger.info("Dropping spam message %s (score=%s)",
+                         summary.get("message_id"), summary.get("spam_score"))
+            return
+        sender = summary.get("from_email", "")
+        if self.allowed_senders and not any(a in sender for a in self.allowed_senders):
+            logger.info("Skipping email from %s (not in allowed_senders)", sender)
+            return
 
         try:
-            await asyncio.to_thread(
-                gmail.download_attachments, thread_id, message, out_dir, self.service,
-            )
-        except gmail.GmailError:
-            logger.exception("Failed to download attachments for thread %s", thread_id)
+            detail = await self.client.get_message(summary["message_id"])
+        except DeadsimpleError:
+            logger.exception("Failed to fetch detail for %s", summary.get("message_id"))
+            return
+
+        thread_id = detail.get("thread_id", "")
+        attachments = await self._process_attachments(detail, thread_id)
+
+        body = detail.get("text_body") or self._strip_html(detail.get("html_body", "")) or ""
+        content = f"[channel: email, from: {sender}]\n{body}" if sender else body
+        if attachments:
+            content += "\n\nAttachments:\n"
+            for att in attachments:
+                size_kb = max(att["size"] // 1024, 1)
+                content += f"- {att['filename']} ({att['mime_type']}, {size_kb}KB) -> {att['path']}\n"
+
+        subject = detail.get("subject", "") or ""
+        reply_subject = subject if subject.lower().startswith(_REPLY_PREFIXES) else f"Re: {subject}"
+
+        incoming = IncomingMessage(
+            content=content,
+            channel="email",
+            session_id=thread_id,
+            reply_address={
+                "to": sender,
+                "subject": reply_subject,
+                "in_reply_to": detail["message_id"],
+            },
+            attachments=attachments,
+        )
+        await self.in_queue.put(incoming)
+        logger.info("Queued email from %s (thread %s): %s",
+                    sender, incoming.session_id, subject)
+
+    async def _process_attachments(
+        self, detail: dict[str, Any], thread_id: str
+    ) -> list[dict] | None:
+        raw = detail.get("attachments") or []
+        if not raw:
             return None
+        out_dir = Path(self.attachment_dir).resolve() / thread_id
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Rename downloaded files to normalize Unicode whitespace (e.g. \u202f)
-        # to regular spaces. LLMs convert exotic whitespace to regular spaces
-        # when generating tool calls, causing file-not-found errors.
-        self._normalize_filenames(out_dir)
-
-        # Files are saved with their original filename (no prefix).
-        downloaded = os.listdir(out_dir)
-        logger.debug("Attachment dir %s: %d file(s) %s", out_dir, len(downloaded), downloaded)
-
-        manifest = []
-        for att in raw_attachments:
-            fname = _normalize_unicode_whitespace(att["filename"])
-            if fname not in downloaded:
-                logger.warning("Attachment not found on disk: %s (dir contains: %s)", fname, downloaded)
+        manifest: list[dict] = []
+        for att in raw:
+            att_id = att.get("attachment_id")
+            fname_raw = att.get("filename", "")
+            if not att_id or not fname_raw:
                 continue
-            full_path = os.path.join(out_dir, fname)
-            if not os.path.isfile(full_path):
-                logger.warning("Attachment matched but not a file: %s", full_path)
-                continue
-            mime = att.get("mimeType", "application/octet-stream")
-            size = att.get("size") or os.path.getsize(full_path)
-            reason = _validate_attachment_metadata(mime, size)
+            fname = _normalize_unicode_whitespace(fname_raw)
+            mime = att.get("content_type") or "application/octet-stream"
+            declared_size = int(att.get("size") or 0)
+            reason = _validate_attachment_metadata(mime, declared_size)
             if reason:
                 logger.warning("Dropping email attachment %s: %s", fname, reason)
                 continue
+            dest = out_dir / fname
+            try:
+                await self.client.download_attachment(detail["message_id"], att_id, dest)
+            except DeadsimpleError:
+                logger.exception("Failed to download attachment %s", fname)
+                continue
+            if not dest.is_file():
+                continue
             manifest.append({
                 "filename": fname,
-                "path": full_path,
+                "path": str(dest),
                 "mime_type": mime,
-                "size": size,
+                "size": dest.stat().st_size,
             })
         return manifest or None
 
     @staticmethod
-    def _normalize_filenames(directory: str) -> None:
-        """Rename files to replace Unicode whitespace with regular spaces."""
-        for name in os.listdir(directory):
-            normalized = _normalize_unicode_whitespace(name)
-            if normalized != name:
-                old = os.path.join(directory, name)
-                new = os.path.join(directory, normalized)
-                os.rename(old, new)
-                logger.info("Renamed attachment: %r -> %r", name, normalized)
+    def _parse_ts(s: str) -> datetime | None:
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _strip_html(html: str) -> str:
+        """Crude HTML-to-text fallback used only when text_body is empty."""
+        import re as _re
+        return _re.sub(r"<[^>]+>", "", html).strip()
+
+    async def send(self, msg: OutgoingMessage) -> None:
+        """Send a reply via deadsimple. Routes to /reply for text-only, /messages when attaching."""
+        if not msg.final or not msg.content:
+            return
+        in_reply_to = msg.reply_address.get("in_reply_to")
+        to = msg.reply_address.get("to")
+        subject = msg.reply_address.get("subject")
+        if not in_reply_to or not to:
+            logger.error("Email send missing in_reply_to or to (got %s)", msg.reply_address)
+            return
+
+        attachments = msg.attachments or []
+        try:
+            if attachments:
+                paths = [a["path"] for a in attachments if a.get("path")]
+                await self.client.send_with_attachments(
+                    in_reply_to=in_reply_to,
+                    to=to,
+                    subject=subject or "",
+                    text_body=msg.content,
+                    attachment_paths=paths,
+                )
+            else:
+                await self.client.send_reply(
+                    in_reply_to=in_reply_to,
+                    to=to,
+                    text_body=msg.content,
+                )
+        except DeadsimpleError:
+            logger.exception("Failed to send reply for thread %s", msg.session_id)
