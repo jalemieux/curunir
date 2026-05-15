@@ -239,6 +239,45 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
 
 
 @pytest.mark.asyncio
+async def test_poll_once_handles_api_returning_messages_out_of_order(email_config, in_queue):
+    """Live deadsimple API does NOT guarantee strict newest-first ordering.
+
+    Reproducer for the case where the watermark message (a previous outbound
+    reply) is returned at index 0 even though a newer inbound message exists
+    later in the same page. The poll must sort locally and not bail out on
+    the first message ≤ watermark.
+    """
+    client = AsyncMock()
+    # Watermark is the previous outbound reply (m_wm) at 06:05:24. The API
+    # returns it first, then a NEWER inbound (m_new) at 06:16, then an older
+    # inbound (m_old) at 06:05. Strict newest-first would have m_new at idx 0.
+    client.list_messages.return_value = {
+        "messages": [
+            _msg("m_wm", ts="2026-05-15T06:05:24Z", direction="outbound",
+                 from_email="bot@x.com"),
+            _msg("m_new", ts="2026-05-15T06:16:41Z"),
+            _msg("m_old", ts="2026-05-15T06:05:06Z"),
+        ],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda mid: _detail(mid, text_body=f"body of {mid}")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(
+        datetime(2026, 5, 15, 6, 5, 24, tzinfo=timezone.utc), "m_wm",
+    )
+
+    await ch._poll_once()
+
+    queued = [in_queue.get_nowait() for _ in range(in_queue.qsize())]
+    # m_new is the only message strictly after the watermark; m_wm matches it
+    # exactly (skipped) and m_old is older (skipped).
+    assert [m.reply_address["in_reply_to"] for m in queued] == ["m_new"]
+    # Watermark advances to the newest message we saw.
+    assert ch.state.watermark_message_id == "m_new"
+
+
+@pytest.mark.asyncio
 async def test_poll_once_does_not_advance_watermark_on_empty_batch(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {"messages": [], "next_cursor": None}
