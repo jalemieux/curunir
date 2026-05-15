@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +39,12 @@ class EmailState:
         self.watermark_message_id = message_id
 
     def is_after_watermark(self, created_at: datetime, message_id: str) -> bool:
-        """True iff (created_at, message_id) sorts strictly after the watermark."""
+        """True iff (created_at, message_id) sorts strictly after the watermark.
+
+        Both datetimes must be timezone-aware (the deadsimple API returns UTC
+        ISO 8601). Mixing naive and aware datetimes raises TypeError at the
+        comparison.
+        """
         if self.watermark_created_at is None:
             return True
         return (created_at, message_id) > (self.watermark_created_at, self.watermark_message_id)
