@@ -140,3 +140,71 @@ class DeadsimpleClient:
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(r.content)
+
+    def _check_recipients_allowed(self, *recipients: str | None) -> None:
+        if not self.restrict_outbound or not self.allowed_recipients:
+            return
+        flat: list[str] = []
+        for r in recipients:
+            if not r:
+                continue
+            flat.extend(addr.strip() for addr in r.split(",") if addr.strip())
+        blocked = [r for r in flat if not any(a in r for a in self.allowed_recipients)]
+        if blocked:
+            raise DeadsimpleError(
+                f"Outbound email blocked: recipient(s) {blocked} not in allowlist "
+                f"({self.allowed_recipients}). Set EMAIL_RESTRICT_OUTBOUND=false to disable."
+            )
+
+    async def send_reply(
+        self, *, in_reply_to: str, to: str, text_body: str
+    ) -> dict[str, Any]:
+        """Threaded reply, server auto-sets In-Reply-To/References. No attachments supported."""
+        self._check_recipients_allowed(to)
+        return await self._request(
+            "POST",
+            f"/v1/inboxes/{self.inbox_id}/messages/{in_reply_to}/reply",
+            json_body={"text_body": text_body},
+            idempotency_key=f"reply-{in_reply_to}",
+        )
+
+    async def send_with_attachments(
+        self,
+        *,
+        in_reply_to: str,
+        to: str,
+        subject: str,
+        text_body: str,
+        attachment_paths: list[str],
+    ) -> dict[str, Any]:
+        """Send via /messages with explicit threading + inline base64 attachments."""
+        self._check_recipients_allowed(to)
+        atts: list[dict[str, Any]] = []
+        for p in attachment_paths:
+            path = Path(p)
+            data = base64.b64encode(path.read_bytes()).decode("ascii")
+            atts.append({
+                "filename": path.name,
+                "content_type": _guess_content_type(path.name),
+                "data": data,
+            })
+        body = {
+            "to": [to],
+            "subject": subject,
+            "text_body": text_body,
+            "in_reply_to": in_reply_to,
+            "references": [in_reply_to],
+            "attachments": atts,
+        }
+        return await self._request(
+            "POST",
+            f"/v1/inboxes/{self.inbox_id}/messages",
+            json_body=body,
+            idempotency_key=f"send-attach-{in_reply_to}",
+        )
+
+
+def _guess_content_type(filename: str) -> str:
+    import mimetypes
+    mime, _ = mimetypes.guess_type(filename)
+    return mime or "application/octet-stream"

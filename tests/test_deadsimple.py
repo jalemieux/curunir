@@ -161,3 +161,91 @@ async def test_download_attachment_raises_when_url_fetch_fails(client, tmp_path)
 
     with pytest.raises(DeadsimpleError):
         await client.download_attachment("m1", "a1", tmp_path / "out.pdf")
+
+
+@pytest.fixture
+def restricted_client():
+    return DeadsimpleClient(
+        api_key="dse_test",
+        api_base="https://api.deadsimple.email",
+        inbox_id="inbox-uuid-1",
+        allowed_recipients=["alice@example.com"],
+        restrict_outbound=True,
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_reply_posts_to_reply_endpoint(client):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m2"}}))
+    await client.send_reply(
+        in_reply_to="m1", to="alice@example.com", text_body="Hi back"
+    )
+    assert route.called
+    req = route.calls.last.request
+    assert req.headers["idempotency-key"] == "reply-m1"
+    import json as _json
+    parsed = _json.loads(req.content.decode())
+    assert parsed["text_body"] == "Hi back"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_reply_blocked_by_allowlist(restricted_client):
+    respx.post("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    with pytest.raises(DeadsimpleError) as exc:
+        await restricted_client.send_reply(
+            in_reply_to="m1", to="evil@evil.com", text_body="hi"
+        )
+    assert "Outbound" in str(exc.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_with_attachments_uses_messages_endpoint(client, tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"hello")
+
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m9"}}))
+
+    await client.send_with_attachments(
+        in_reply_to="m1",
+        to="alice@example.com",
+        subject="Re: hi",
+        text_body="see attached",
+        attachment_paths=[str(f)],
+    )
+    assert route.called
+    req = route.calls.last.request
+    import json as _json
+    parsed = _json.loads(req.content.decode())
+    assert parsed["to"] == ["alice@example.com"]
+    assert parsed["subject"] == "Re: hi"
+    assert parsed["in_reply_to"] == "m1"
+    assert parsed["references"] == ["m1"]
+    assert len(parsed["attachments"]) == 1
+    att = parsed["attachments"][0]
+    assert att["filename"] == "doc.txt"
+    import base64 as _b64
+    assert _b64.b64decode(att["data"]) == b"hello"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_with_attachments_blocked_by_allowlist(restricted_client, tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"x")
+    with pytest.raises(DeadsimpleError):
+        await restricted_client.send_with_attachments(
+            in_reply_to="m1",
+            to="evil@evil.com",
+            subject="re",
+            text_body="x",
+            attachment_paths=[str(f)],
+        )
