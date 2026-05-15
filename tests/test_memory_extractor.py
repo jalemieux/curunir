@@ -281,7 +281,6 @@ async def test_prompt_includes_existing_headings(agent_config):
     mem_dir = agent_config.context_dir / "memory"
     mem_dir.mkdir(parents=True)
     (mem_dir / "README.md").write_text("# Memory\n")
-    (mem_dir / "MEMORY.md").write_text("- index entry\n")
     (mem_dir / "tasks.md").write_text(
         "## Adobe Agentic Role\nfact1\n\n## X Listener\nfact2\n"
     )
@@ -376,7 +375,6 @@ def test_collect_existing_headings(tmp_path):
     mem_dir = tmp_path / "memory"
     mem_dir.mkdir()
     (mem_dir / "README.md").write_text("# README\n## ignore me\n")
-    (mem_dir / "MEMORY.md").write_text("- index\n## also ignore\n")
     (mem_dir / "tasks.md").write_text("## Topic A\nbody\n\n## Topic B\nbody\n")
     (mem_dir / "people").mkdir()
     (mem_dir / "people" / "alice.md").write_text("## Alice\nbio\n")
@@ -389,7 +387,6 @@ def test_collect_existing_headings(tmp_path):
     assert headings.get("tasks.md") == ["Topic A", "Topic B"]
     assert headings.get("people/alice.md") == ["Alice"]
     assert "README.md" not in headings
-    assert "MEMORY.md" not in headings
     assert not any("archives" in k for k in headings)
 
 
