@@ -375,13 +375,19 @@ async def test_send_uses_reply_endpoint_when_no_attachments(email_config, in_que
     client = AsyncMock()
     ch, _ = _make_channel(in_queue, email_config, client=client)
     msg = _outgoing(
-        "Hi back",
+        "# Hi\n\nHi back",
         reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
     )
     await ch.send(msg)
-    client.send_reply.assert_awaited_once_with(
-        in_reply_to="m1", to="alice@example.com", text_body="Hi back"
-    )
+    client.send_reply.assert_awaited_once()
+    kwargs = client.send_reply.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m1"
+    assert kwargs["to"] == "alice@example.com"
+    # text_body is the original markdown — fallback for plain-text clients.
+    assert kwargs["text_body"] == "# Hi\n\nHi back"
+    # html_body is the rendered HTML — present and non-empty, contains <h1>.
+    assert kwargs["html_body"]
+    assert "<h1>Hi</h1>" in kwargs["html_body"]
     client.send_with_attachments.assert_not_called()
 
 
@@ -392,18 +398,20 @@ async def test_send_uses_messages_endpoint_when_attachments_present(email_config
     f = tmp_path / "doc.txt"
     f.write_bytes(b"x")
     msg = _outgoing(
-        "see attached",
+        "see **attached**",
         reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
         attachments=[{"filename": "doc.txt", "path": str(f), "mime_type": "text/plain", "size": 1}],
     )
     await ch.send(msg)
-    client.send_with_attachments.assert_awaited_once_with(
-        in_reply_to="m1",
-        to="alice@example.com",
-        subject="Re: hi",
-        text_body="see attached",
-        attachment_paths=[str(f)],
-    )
+    client.send_with_attachments.assert_awaited_once()
+    kwargs = client.send_with_attachments.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m1"
+    assert kwargs["to"] == "alice@example.com"
+    assert kwargs["subject"] == "Re: hi"
+    assert kwargs["text_body"] == "see **attached**"
+    assert kwargs["attachment_paths"] == [str(f)]
+    assert kwargs["html_body"]
+    assert "<strong>attached</strong>" in kwargs["html_body"]
     client.send_reply.assert_not_called()
 
 

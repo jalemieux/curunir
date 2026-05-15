@@ -12,6 +12,7 @@ from src.channels._attachments import (
     _validate_attachment_metadata,
 )
 from src.channels._email_state import EmailState
+from src.channels._html import render_markdown
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.deadsimple import DeadsimpleClient, DeadsimpleError
 from src.config import EmailChannelConfig
@@ -221,6 +222,7 @@ class EmailChannel:
             return
 
         attachments = msg.attachments or []
+        html_body = render_markdown(msg.content)
         try:
             if attachments:
                 paths = [a["path"] for a in attachments if a.get("path")]
@@ -229,6 +231,7 @@ class EmailChannel:
                     to=to,
                     subject=subject or "",
                     text_body=msg.content,
+                    html_body=html_body,
                     attachment_paths=paths,
                 )
             else:
@@ -236,6 +239,7 @@ class EmailChannel:
                     in_reply_to=in_reply_to,
                     to=to,
                     text_body=msg.content,
+                    html_body=html_body,
                 )
         except DeadsimpleError:
             logger.exception("Failed to send reply for thread %s", msg.session_id)

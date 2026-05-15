@@ -170,14 +170,22 @@ class DeadsimpleClient:
             )
 
     async def send_reply(
-        self, *, in_reply_to: str, to: str, text_body: str
+        self,
+        *,
+        in_reply_to: str,
+        to: str,
+        text_body: str,
+        html_body: str | None = None,
     ) -> dict[str, Any]:
         """Threaded reply, server auto-sets In-Reply-To/References. No attachments supported."""
         self._check_recipients_allowed(to)
+        body: dict[str, Any] = {"text_body": text_body}
+        if html_body:
+            body["html_body"] = html_body
         return await self._request(
             "POST",
             f"/v1/inboxes/{self.inbox_id}/messages/{in_reply_to}/reply",
-            json_body={"text_body": text_body},
+            json_body=body,
             idempotency_key=f"reply-{in_reply_to}",
         )
 
@@ -189,6 +197,7 @@ class DeadsimpleClient:
         subject: str,
         text_body: str,
         attachment_paths: list[str],
+        html_body: str | None = None,
     ) -> dict[str, Any]:
         """Send via /messages with explicit threading + inline base64 attachments."""
         self._check_recipients_allowed(to)
@@ -201,7 +210,7 @@ class DeadsimpleClient:
                 "content_type": _guess_content_type(path.name),
                 "data": data,
             })
-        body = {
+        body: dict[str, Any] = {
             "to": [to],
             "subject": subject,
             "text_body": text_body,
@@ -209,6 +218,8 @@ class DeadsimpleClient:
             "references": [in_reply_to],
             "attachments": atts,
         }
+        if html_body:
+            body["html_body"] = html_body
         return await self._request(
             "POST",
             f"/v1/inboxes/{self.inbox_id}/messages",
