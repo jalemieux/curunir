@@ -267,6 +267,22 @@ class Agent:
         """
         history = self.sessions.setdefault(session_id, [])
 
+        # Onboarding gate: first user turn of a fresh session, no .onboarded
+        # marker, not a scheduled task → rewrite the message into an
+        # instruction that kicks off the onboarding orchestrator. Mid-flow
+        # turns have non-empty history and pass through unchanged.
+        if (
+            system_task_prompt is None
+            and len(history) == 0
+            and not (self.config.context_dir / ".onboarded").exists()
+        ):
+            message = (
+                "The user has just connected and isn't onboarded yet. "
+                "Open with a one-line preamble like 'Since you're new, "
+                "let's get you set up — about a minute.' Then use the "
+                "`onboarding` skill to walk them through it."
+            )
+
         if system_task_prompt:
             # System-initiated task: inject task as a user message so all LLM
             # providers accept the request (some reject system-only conversations).
