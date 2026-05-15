@@ -2,7 +2,7 @@
 
 ## Identity
 
-<!-- Onboarding fills from the `personality` skill: name, pronouns (default `it / they`), one-paragraph visual self-description, and an `**Avatar file:** ./avatar.png` line noting that the image itself is not loaded into the prompt — only the description text is. -->
+<!-- Onboarding fills from the `personality` skill: the agent's name. -->
 
 ## Personality
 

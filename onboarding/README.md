@@ -39,11 +39,7 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
    > - **Opening sentence** — one sentence introducing the agent and
    >   the user. Agent name and disposition from q7/q7b; user's name
    >   from q1; user's domain from q2.
-   > - **`### Identity`** — name (q7b), pronouns (q7b), a one-paragraph
-   >   visual self-description (q7b — the kind of prose you'd feed to
-   >   an image generator), and a `**Avatar file:** ./avatar.png` line
-   >   noting that the image itself is not loaded into the prompt,
-   >   only the description text is.
+   > - **`### Identity`** — the agent's name (q7b).
    > - **`### Voice & Stance`** — 4–8 lines of second-person prose
    >   covering four things together: (a) how the agent speaks,
    >   distilled from q5 (response length) and q7's axes (warmth /
@@ -72,26 +68,7 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
    Review the output. Iterate if anything misses — the model will happily
    revise.
 
-3. **Generate curunir's selfie (optional but recommended).** The
-   `### Identity` subsection holds a prose visual self-description. Use it
-   to generate an avatar image:
-
-   ```
-   ### Identity description  ──►  [ image generator ]  ──►  context/avatar.png
-   ```
-
-   Any image tool works (ComfyUI Flux, Midjourney, DALL·E, etc.). Save the
-   result as `context/avatar.png`. The image file is **not** loaded into
-   the system prompt — only the description text is — so the file's role
-   is purely for humans looking at the repo. The agent speaks coherently
-   about its own appearance from the description alone.
-
-   **Inverse direction (already have an image you want curunir to look
-   like):** paste the image into a vision model, ask it to produce a one-
-   paragraph prose description in the same style as the seeded
-   `### Identity`, then drop that text into `context/identity.md`.
-
-4. **Start curunir.** Bootstrap copies the seeded identity into `context/`
+3. **Start curunir.** Bootstrap copies the seeded identity into `context/`
    on first launch.
    ```bash
    python run.py
@@ -101,7 +78,7 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
 
 | File | Purpose |
 |---|---|
-| `questions.md` | The questionnaire (8 questions + 7b for the avatar). User edits this. |
+| `questions.md` | The questionnaire (8 questions + 7b for the agent's name). User edits this. |
 | `bootstrap.py` | Copies any file in `context.default/` to `context/` on first run. Never overwrites existing files. |
 | `README.md` | This file. |
 
