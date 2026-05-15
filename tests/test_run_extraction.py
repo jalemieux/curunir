@@ -228,6 +228,45 @@ async def test_slash_clear_loops_through_in_queue(agent_config, memory_dir):
 
 
 @pytest.mark.asyncio
+async def test_slash_malformed_frame_is_dropped(agent_config, memory_dir, caplog):
+    """A `command="slash"` message with text that isn't a real slash command
+    (empty, missing the leading `/`, or just `/`) is logged and dropped —
+    NOT silently coerced into a chat turn."""
+    import logging
+    import run as run_module
+
+    agent = Agent(agent_config)
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+
+    # All three malformed variants.
+    for content in ("", "hello no slash", "/"):
+        await in_q.put(IncomingMessage(
+            content=content, channel="cli", session_id="cli",
+            reply_address={}, command="slash",
+        ))
+
+    # Drive the worker long enough to process all three.
+    task = asyncio.create_task(run_module.agent_worker(agent, in_q, out_q))
+    with caplog.at_level(logging.WARNING, logger="run"):
+        for _ in range(50):
+            if in_q.empty():
+                break
+            await asyncio.sleep(0.01)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # Nothing leaked to out_queue; agent.handle() was never reached.
+    assert out_q.empty()
+    # Three drop warnings logged.
+    drops = [r for r in caplog.records if "malformed slash" in r.message]
+    assert len(drops) == 3
+
+
+@pytest.mark.asyncio
 async def test_extract_command_records_path(agent_config, memory_dir):
     """extract command records the archive path for future reuse."""
     archives = memory_dir / "archives" / "conversations"

@@ -318,15 +318,20 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 skill_dirs=agent.config.skill_dirs,
             )
             result = await maybe_handle_slash(msg.content, None, ctx)
-            if result is not None:
-                for out in result.outgoing:
-                    await out_queue.put(out)
-                for inc in result.enqueue:
-                    await in_queue.put(inc)
+            if result is None:
+                # Malformed slash frame from the client (empty text, no
+                # leading slash, or bare "/"). Drop it loudly rather than
+                # silently coercing it into a chat turn.
+                logger.warning(
+                    "Dropping malformed slash frame on session %s: %r",
+                    msg.session_id, msg.content,
+                )
                 continue
-            # Not actually a slash command (empty or attachments) — fall
-            # through and treat the content as a normal user turn.
-            msg.command = None
+            for out in result.outgoing:
+                await out_queue.put(out)
+            for inc in result.enqueue:
+                await in_queue.put(inc)
+            continue
 
         # Control commands: drop or summarize the session before it's gone,
         # then ack with an empty reply so the channel can render UI feedback.
