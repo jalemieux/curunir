@@ -72,7 +72,7 @@ class EmailChannel:
 
         while True:
             page = await self.client.list_messages(limit=50, cursor=cursor)
-            data = page.get("data", [])
+            data = page["messages"]
             stop = False
             for m in data:
                 ts = self._parse_ts(m.get("created_at", ""))

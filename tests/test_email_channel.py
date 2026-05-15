@@ -56,7 +56,7 @@ def test_constructor(email_config, in_queue):
 async def test_start_validates_inbox_then_initializes_watermark(email_config, in_queue):
     client = AsyncMock()
     client.validate_inbox.return_value = {"data": {"inbox_id": "inbox-uuid-1", "email": "bot@deadsimple.email"}}
-    client.list_messages.return_value = {"data": [], "next_cursor": None}
+    client.list_messages.return_value = {"messages": [], "next_cursor": None}
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
 
@@ -125,7 +125,7 @@ def _detail(message_id, *, text_body="hi body", thread_id="t1", subject="hi",
 async def test_poll_once_skips_outbound_messages(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [
+        "messages": [
             _msg("m1", ts="2026-05-14T15:31:00Z", direction="outbound"),
         ],
         "next_cursor": None,
@@ -143,7 +143,7 @@ async def test_poll_once_skips_outbound_messages(email_config, in_queue):
 async def test_poll_once_drops_spam(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [
+        "messages": [
             _msg("m1", ts="2026-05-14T15:31:00Z", is_spam=True),
             _msg("m2", ts="2026-05-14T15:32:00Z", spam_score=6.0),
         ],
@@ -160,7 +160,7 @@ async def test_poll_once_drops_spam(email_config, in_queue):
 async def test_poll_once_drops_disallowed_sender(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [
+        "messages": [
             _msg("m1", ts="2026-05-14T15:31:00Z", from_email="stranger@nope.com"),
         ],
         "next_cursor": None,
@@ -176,7 +176,7 @@ async def test_poll_once_drops_disallowed_sender(email_config, in_queue):
 async def test_poll_once_queues_inbound_and_advances_watermark(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [
+        "messages": [
             _msg("m2", ts="2026-05-14T15:32:00Z"),
             _msg("m1", ts="2026-05-14T15:31:00Z"),
         ],
@@ -211,7 +211,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
     # page2 deliberately has next_cursor set so the watermark-stop logic must
     # fire; if it didn't, side_effect would raise StopIteration on a third fetch.
     page1 = {
-        "data": [
+        "messages": [
             _msg("m4", ts="2026-05-14T15:34:00Z"),
             _msg("m3", ts="2026-05-14T15:33:00Z"),
             _msg("m2", ts="2026-05-14T15:32:00Z"),
@@ -219,7 +219,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
         "next_cursor": "cur-1",
     }
     page2 = {
-        "data": [
+        "messages": [
             _msg("m1", ts="2026-05-14T15:31:00Z"),  # at watermark -- stop here
         ],
         "next_cursor": "cur-2",  # not None: loop must stop via watermark, not cursor exhaustion
@@ -241,7 +241,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
 @pytest.mark.asyncio
 async def test_poll_once_does_not_advance_watermark_on_empty_batch(email_config, in_queue):
     client = AsyncMock()
-    client.list_messages.return_value = {"data": [], "next_cursor": None}
+    client.list_messages.return_value = {"messages": [], "next_cursor": None}
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
     original = datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc)
@@ -256,7 +256,7 @@ async def test_poll_once_does_not_advance_watermark_on_empty_batch(email_config,
 async def test_poll_once_downloads_attachments(email_config, in_queue, tmp_path):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
         "next_cursor": None,
     }
     client.get_message.return_value = _detail(
@@ -290,7 +290,7 @@ async def test_poll_once_downloads_attachments(email_config, in_queue, tmp_path)
 async def test_poll_once_skips_failed_attachment_but_keeps_message(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
-        "data": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
         "next_cursor": None,
     }
     client.get_message.return_value = _detail("m1", attachments=[

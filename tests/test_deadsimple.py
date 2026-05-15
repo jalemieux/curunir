@@ -81,19 +81,23 @@ class _AsyncNoop:
 @pytest.mark.asyncio
 @respx.mock
 async def test_list_messages_single_page(client):
+    """Real deadsimple v0.1.0 envelope: {data: {messages, count}, meta}."""
     respx.get("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages").mock(
         return_value=httpx.Response(200, json={
-            "data": [
-                {"message_id": "m1", "thread_id": "t1", "direction": "inbound",
-                 "from_email": "a@x.com", "subject": "hi", "created_at": "2026-05-14T15:30:00Z"},
-                {"message_id": "m2", "thread_id": "t2", "direction": "outbound",
-                 "from_email": "bot@x.com", "subject": "re: hi", "created_at": "2026-05-14T15:29:00Z"},
-            ],
-            "next_cursor": None,
+            "data": {
+                "messages": [
+                    {"message_id": "m1", "thread_id": "t1", "direction": "inbound",
+                     "from_email": "a@x.com", "subject": "hi", "created_at": "2026-05-14T15:30:00Z"},
+                    {"message_id": "m2", "thread_id": "t2", "direction": "outbound",
+                     "from_email": "bot@x.com", "subject": "re: hi", "created_at": "2026-05-14T15:29:00Z"},
+                ],
+                "count": 2,
+            },
+            "meta": {"timestamp": "2026-05-14T15:30:00Z", "request_id": "rq-1"},
         })
     )
     page = await client.list_messages(limit=50)
-    assert len(page["data"]) == 2
+    assert len(page["messages"]) == 2
     assert page["next_cursor"] is None
 
 
@@ -101,12 +105,27 @@ async def test_list_messages_single_page(client):
 @respx.mock
 async def test_list_messages_passes_cursor(client):
     route = respx.get("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages").mock(
-        return_value=httpx.Response(200, json={"data": [], "next_cursor": None})
+        return_value=httpx.Response(200, json={"data": {"messages": [], "count": 0}})
     )
     await client.list_messages(limit=20, cursor="cur-abc")
     sent = route.calls.last.request
     assert sent.url.params["limit"] == "20"
     assert sent.url.params["cursor"] == "cur-abc"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_messages_legacy_list_envelope(client):
+    """Defensive: client also accepts a top-level data-as-list shape."""
+    respx.get("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages").mock(
+        return_value=httpx.Response(200, json={
+            "data": [{"message_id": "m1", "created_at": "2026-05-14T15:30:00Z"}],
+            "next_cursor": "cur-x",
+        })
+    )
+    page = await client.list_messages(limit=50)
+    assert len(page["messages"]) == 1
+    assert page["next_cursor"] == "cur-x"
 
 
 @pytest.mark.asyncio

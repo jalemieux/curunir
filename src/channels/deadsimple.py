@@ -98,13 +98,27 @@ class DeadsimpleClient:
         return await self._request("GET", f"/v1/inboxes/{self.inbox_id}")
 
     async def list_messages(self, *, limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
-        """Single page of messages, newest-first per the API's default ordering."""
+        """Single page of messages, newest-first.
+
+        Normalizes the API envelope to {"messages": [...], "next_cursor": str | None}.
+        The deadsimple v0.1.0 API returns {"data": {"messages": [...], "count": N}, "meta": ...};
+        we accept that and a couple of plausible alternatives so the channel doesn't have to
+        re-shape responses.
+        """
         params: dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
-        return await self._request(
+        resp = await self._request(
             "GET", f"/v1/inboxes/{self.inbox_id}/messages", params=params
         )
+        body = resp.get("data", resp)
+        if isinstance(body, list):
+            messages = body
+            next_cursor = resp.get("next_cursor") or resp.get("cursor")
+        else:
+            messages = body.get("messages") or body.get("items") or []
+            next_cursor = body.get("next_cursor") or body.get("cursor")
+        return {"messages": messages, "next_cursor": next_cursor}
 
     async def get_message(self, message_id: str) -> dict[str, Any]:
         """Full message detail: text_body, html_body, attachments[], etc."""
