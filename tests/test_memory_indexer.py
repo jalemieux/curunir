@@ -53,7 +53,6 @@ def test_topic_slug_for(rel, expected):
     ("people/anna.md", True),
     ("preferences.md", True),
     ("README.md", False),
-    ("MEMORY.md", False),
     ("archives/conversations/2026-05-13-foo.md", False),
     ("summaries/timeline.md", False),
     ("summaries/topics/projects.md", False),
@@ -179,7 +178,7 @@ def test_update_indexes_skips_ineligible_touched_files(tmp_path):
     update_indexes(
         memory_dir=tmp_path,
         archive_path=archive,
-        touched_files=["README.md", "MEMORY.md", "archives/conversations/x.md", "projects.md"],
+        touched_files=["README.md", "archives/conversations/x.md", "projects.md"],
         slug="foo",
         today=date(2026, 5, 13),
     )

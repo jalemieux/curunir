@@ -235,7 +235,7 @@ def _replace_section(text: str, heading: str, new_block: str) -> str | None:
 def _collect_existing_headings(memory_dir) -> dict[str, list[str]]:
     """Map each tracked memory file's relative path to its list of H2 headings.
 
-    Excludes `archives/`, `README.md`, and `MEMORY.md`.
+    Excludes `archives/` and `README.md`.
     """
     memory_dir = Path(memory_dir)
     if not memory_dir.exists():
@@ -246,7 +246,7 @@ def _collect_existing_headings(memory_dir) -> dict[str, list[str]]:
         rel = path.relative_to(memory_dir)
         if rel.parts and rel.parts[0] == "archives":
             continue
-        if rel.name in ("README.md", "MEMORY.md"):
+        if rel.name == "README.md":
             continue
         try:
             text = path.read_text()
