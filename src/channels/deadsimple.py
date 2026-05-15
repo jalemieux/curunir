@@ -97,3 +97,19 @@ class DeadsimpleClient:
     async def validate_inbox(self) -> dict[str, Any]:
         """Confirm the configured inbox exists and is accessible. Returns inbox JSON."""
         return await self._request("GET", f"/v1/inboxes/{self.inbox_id}")
+
+    async def list_messages(self, *, limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+        """Single page of messages, newest-first per the API's default ordering."""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request(
+            "GET", f"/v1/inboxes/{self.inbox_id}/messages", params=params
+        )
+
+    async def get_message(self, message_id: str) -> dict[str, Any]:
+        """Full message detail: text_body, html_body, attachments[], etc."""
+        resp = await self._request(
+            "GET", f"/v1/inboxes/{self.inbox_id}/messages/{message_id}"
+        )
+        return resp.get("data", resp)
