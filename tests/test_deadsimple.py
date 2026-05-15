@@ -126,3 +126,38 @@ async def test_get_message_returns_detail(client):
     msg = await client.get_message("m1")
     assert msg["message_id"] == "m1"
     assert msg["text_body"] == "Hello there"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_attachment_writes_bytes(client, tmp_path):
+    respx.get(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/attachments/a1"
+    ).mock(return_value=httpx.Response(200, json={
+        "data": {"download_url": "https://signed.example.com/file.pdf?token=xyz"}
+    }))
+    respx.get("https://signed.example.com/file.pdf").mock(
+        return_value=httpx.Response(200, content=b"PDF-BYTES-HERE")
+    )
+
+    dest = tmp_path / "report.pdf"
+    await client.download_attachment("m1", "a1", dest)
+
+    assert dest.exists()
+    assert dest.read_bytes() == b"PDF-BYTES-HERE"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_attachment_raises_when_url_fetch_fails(client, tmp_path):
+    respx.get(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/attachments/a1"
+    ).mock(return_value=httpx.Response(200, json={
+        "data": {"download_url": "https://signed.example.com/file.pdf"}
+    }))
+    respx.get("https://signed.example.com/file.pdf").mock(
+        return_value=httpx.Response(403, text="expired")
+    )
+
+    with pytest.raises(DeadsimpleError):
+        await client.download_attachment("m1", "a1", tmp_path / "out.pdf")

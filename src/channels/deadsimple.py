@@ -113,3 +113,30 @@ class DeadsimpleClient:
             "GET", f"/v1/inboxes/{self.inbox_id}/messages/{message_id}"
         )
         return resp.get("data", resp)
+
+    async def download_attachment(
+        self, message_id: str, attachment_id: str, dest: Path
+    ) -> None:
+        """Two-step download: ask for a signed URL, GET the bytes, write to dest."""
+        resp = await self._request(
+            "GET",
+            f"/v1/inboxes/{self.inbox_id}/messages/{message_id}/attachments/{attachment_id}",
+        )
+        data = resp.get("data", resp)
+        url = data.get("download_url") or data.get("url")
+        if not url:
+            raise DeadsimpleError(
+                f"attachment {attachment_id} response missing download_url: {data}"
+            )
+
+        try:
+            r = await self._http.get(url)
+        except httpx.HTTPError as e:
+            raise DeadsimpleError(f"attachment fetch failed: {e}") from e
+        if r.status_code >= 400:
+            raise DeadsimpleError(
+                f"attachment fetch returned {r.status_code} for {attachment_id}"
+            )
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(r.content)
