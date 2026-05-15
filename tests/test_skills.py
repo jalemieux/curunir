@@ -150,3 +150,39 @@ class TestMultipleDirs:
         sys_dir.mkdir()
         result = load_skill("nope", [sys_dir, tmp_path / "missing"])
         assert "not found" in result.lower()
+
+
+def _write_nested_skill(parent, *path_parts, description="nested"):
+    """Create skills/<parent>/.../SKILL.md at arbitrary nesting depth."""
+    d = parent
+    for part in path_parts:
+        d = d / part
+        d.mkdir(exist_ok=True)
+    name = path_parts[-1]
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n"
+    )
+    return d / "SKILL.md"
+
+
+class TestNestedDiscovery:
+    def test_nested_skill_is_discovered(self, tmp_path):
+        _write_nested_skill(tmp_path, "onboarding", "profile", description="profile sub-skill")
+        registry = load_registry([tmp_path])
+        assert "profile" in registry
+        assert registry["profile"].description == "profile sub-skill"
+
+    def test_top_level_and_nested_coexist(self, tmp_path):
+        _write_skill(tmp_path, "top", "a top-level skill")
+        _write_nested_skill(tmp_path, "onboarding", "preferences", description="prefs")
+        registry = load_registry([tmp_path])
+        assert "top" in registry
+        assert "preferences" in registry
+
+    def test_parent_and_child_both_register(self, tmp_path):
+        """A parent SKILL.md and a sibling subdir SKILL.md both show up."""
+        _write_skill(tmp_path, "onboarding", "orchestrator")
+        _write_nested_skill(tmp_path, "onboarding", "profile", description="prof")
+        registry = load_registry([tmp_path])
+        assert "onboarding" in registry
+        assert "profile" in registry

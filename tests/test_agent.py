@@ -46,6 +46,7 @@ class TestAgentHandle:
         assert mock_call.call_count == 1
 
     async def test_session_persistence(self, agent):
+        (agent.config.context_dir / ".onboarded").touch()
         response1 = LLMResponse(text="First", tool_calls=None)
         response2 = LLMResponse(text="Second", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[response1, response2]):
@@ -57,6 +58,7 @@ class TestAgentHandle:
         assert history[1]["content"] == "First"
 
     async def test_separate_sessions(self, agent):
+        (agent.config.context_dir / ".onboarded").touch()
         mock_response = LLMResponse(text="Reply", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             await agent.handle("msg1", "session-a")
@@ -359,6 +361,7 @@ class TestAgentHandle:
         assert result == "ok"
 
     async def test_accepts_list_content_and_forwards_to_llm(self, agent):
+        (agent.config.context_dir / ".onboarded").touch()
         captured: dict = {}
 
         async def fake_call_llm(model, messages, tools, **kwargs):
@@ -577,6 +580,7 @@ class TestSystemTaskMode:
 
     async def test_normal_handle_unchanged(self, agent):
         """Ensure regular user messages still work as before."""
+        (agent.config.context_dir / ".onboarded").touch()
         mock_response = LLMResponse(text="Hello!", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             result = await agent.handle("hi", "normal-session")
@@ -584,6 +588,55 @@ class TestSystemTaskMode:
         history = agent.sessions["normal-session"]
         assert history[0]["role"] == "user"
         assert history[0]["content"] == "hi"
+
+
+class TestOnboardingGate:
+    """Hard gate fires on first un-onboarded turn; passes through otherwise."""
+
+    async def test_gate_fires_when_no_marker_and_empty_history(self, agent):
+        """First user message + no .onboarded → message rewritten to onboarding directive."""
+        mock_response = LLMResponse(text="welcome", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hi", "s1")
+        # Inspect the user message that was sent to the LLM.
+        messages = mock_llm.call_args[0][1]
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert "isn't onboarded yet" in user_msgs[0]["content"]
+        assert "`onboarding` skill" in user_msgs[0]["content"]
+
+    async def test_gate_stays_quiet_when_marker_exists(self, agent):
+        """If .onboarded exists, user's first message passes through unchanged."""
+        (agent.config.context_dir / ".onboarded").touch()
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hi", "s1")
+        user_msgs = [m for m in mock_llm.call_args[0][1] if m["role"] == "user"]
+        assert user_msgs[0]["content"] == "hi"
+
+    async def test_gate_stays_quiet_when_history_nonempty(self, agent):
+        """Second turn — history non-empty — even without marker, passes through."""
+        # Seed history with one prior turn pair so len(history) > 0 at gate time.
+        agent.sessions["s1"] = [
+            {"role": "user", "content": "earlier"},
+            {"role": "assistant", "content": "earlier reply"},
+        ]
+        mock_response = LLMResponse(text="next", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("follow-up question", "s1")
+        user_msgs = [m for m in mock_llm.call_args[0][1] if m["role"] == "user"]
+        # Latest user message preserved verbatim.
+        assert user_msgs[-1]["content"] == "follow-up question"
+
+    async def test_gate_stays_quiet_for_system_task(self, agent):
+        """Scheduled tasks must not be hijacked by the gate."""
+        mock_response = LLMResponse(text="done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("", "sched:job:1", system_task_prompt="Do the digest.")
+        user_msgs = [m for m in mock_llm.call_args[0][1] if m["role"] == "user"]
+        assert "## Scheduled Task" in user_msgs[0]["content"]
+        assert "Do the digest." in user_msgs[0]["content"]
+        assert "onboarded" not in user_msgs[0]["content"].lower()
 
 
 class TestAgentInit:

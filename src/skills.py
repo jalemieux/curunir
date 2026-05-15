@@ -27,7 +27,7 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
         if not skills_dir.exists():
             continue
 
-        for skill_file in sorted(skills_dir.glob("*/SKILL.md")):
+        for skill_file in sorted(skills_dir.rglob("SKILL.md")):
             fm = parse_frontmatter(skill_file.read_text())
             if "name" not in fm or "description" not in fm:
                 continue
