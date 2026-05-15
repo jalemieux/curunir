@@ -248,3 +248,58 @@ async def test_poll_once_does_not_advance_watermark_on_empty_batch(email_config,
     await ch._poll_once()
     assert ch.state.watermark_created_at == original
     assert ch.state.watermark_message_id == "msg-old"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_downloads_attachments(email_config, in_queue, tmp_path):
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "data": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail(
+        "m1", thread_id="t1",
+        attachments=[
+            {"attachment_id": "a1", "filename": "report.pdf",
+             "content_type": "application/pdf", "size": 1024},
+        ],
+    )
+    async def fake_download(message_id, attachment_id, dest):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"PDF")
+    client.download_attachment.side_effect = fake_download
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    incoming = in_queue.get_nowait()
+    assert incoming.attachments is not None and len(incoming.attachments) == 1
+    att = incoming.attachments[0]
+    assert att["filename"] == "report.pdf"
+    assert att["mime_type"] == "application/pdf"
+    assert att["size"] == 3   # actual on-disk bytes
+    assert Path(att["path"]).read_bytes() == b"PDF"
+    # Body content lists the attachment.
+    assert "report.pdf" in incoming.content
+
+
+@pytest.mark.asyncio
+async def test_poll_once_skips_failed_attachment_but_keeps_message(email_config, in_queue):
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "data": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail("m1", attachments=[
+        {"attachment_id": "a1", "filename": "broken.pdf",
+         "content_type": "application/pdf", "size": 1024},
+    ])
+    client.download_attachment.side_effect = DeadsimpleError("expired URL")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    incoming = in_queue.get_nowait()
+    assert incoming.attachments is None  # download failed → no manifest entry
