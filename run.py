@@ -6,6 +6,7 @@ import json
 import logging
 import logging.handlers
 import os
+from pathlib import Path
 
 import httpx
 import litellm
@@ -518,17 +519,24 @@ async def main():
     # Email channel (conditional)
     email_config = EmailChannelConfig(
         enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
-        service_account_file=os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
-        delegated_user=os.environ.get("GOOGLE_DELEGATED_USER", ""),
-        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "300")),
+        api_key=os.environ.get("DEADSIMPLE_API_KEY", ""),
+        inbox_id=os.environ.get("DEADSIMPLE_INBOX_ID", ""),
+        api_base=os.environ.get("DEADSIMPLE_API_BASE", "https://api.deadsimple.email"),
+        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
-        processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
+        restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
         attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
+        state_file=Path(os.environ.get("EMAIL_STATE_FILE", "./context/email_state.json")),
+        spam_score_threshold=float(os.environ.get("EMAIL_SPAM_SCORE_THRESHOLD", "5.0")),
     )
     if email_config.enabled:
-        email_channel = EmailChannel(in_queue, email_config)
-        channels["email"] = email_channel
-        logger.info("Email channel enabled for %s (poll every %ds)", email_config.delegated_user, email_config.poll_interval_sec)
+        if not email_config.api_key or not email_config.inbox_id:
+            logger.error("EMAIL_ENABLED=true but DEADSIMPLE_API_KEY or DEADSIMPLE_INBOX_ID is unset; skipping email channel")
+        else:
+            email_channel = EmailChannel(in_queue, email_config)
+            channels["email"] = email_channel
+            logger.info("Email channel enabled for inbox %s (poll every %ds)",
+                        email_config.inbox_id, email_config.poll_interval_sec)
 
     # Portal channel (conditional)
     portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
