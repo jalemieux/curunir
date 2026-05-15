@@ -159,7 +159,12 @@ docker compose exec postgres psql -U postgres -d portal   # ad-hoc SQL
 ## Running the portal natively (alternative)
 
 If you'd rather run the portal app outside Docker (e.g. for IDE debugging),
-keep Postgres in Docker and run uvicorn from your venv:
+keep Postgres in Docker and run uvicorn from your venv.
+
+> **Quick setup:** `./setup-local-dev.sh` from the repo root creates both
+> venvs, installs dependencies, and scaffolds `portal/.env` in one step.
+
+The manual steps: keep Postgres in Docker and run uvicorn from your venv:
 
 ```bash
 # From repo root with curunir venv active
