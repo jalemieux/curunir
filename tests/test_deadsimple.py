@@ -76,3 +76,53 @@ class _AsyncNoop:
 
     async def __call__(self, delay: float):
         self.calls.append(delay)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_messages_single_page(client):
+    respx.get("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages").mock(
+        return_value=httpx.Response(200, json={
+            "data": [
+                {"message_id": "m1", "thread_id": "t1", "direction": "inbound",
+                 "from_email": "a@x.com", "subject": "hi", "created_at": "2026-05-14T15:30:00Z"},
+                {"message_id": "m2", "thread_id": "t2", "direction": "outbound",
+                 "from_email": "bot@x.com", "subject": "re: hi", "created_at": "2026-05-14T15:29:00Z"},
+            ],
+            "next_cursor": None,
+        })
+    )
+    page = await client.list_messages(limit=50)
+    assert len(page["data"]) == 2
+    assert page["next_cursor"] is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_messages_passes_cursor(client):
+    route = respx.get("https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages").mock(
+        return_value=httpx.Response(200, json={"data": [], "next_cursor": None})
+    )
+    await client.list_messages(limit=20, cursor="cur-abc")
+    sent = route.calls.last.request
+    assert sent.url.params["limit"] == "20"
+    assert sent.url.params["cursor"] == "cur-abc"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_message_returns_detail(client):
+    respx.get(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1"
+    ).mock(return_value=httpx.Response(200, json={
+        "data": {
+            "message_id": "m1", "thread_id": "t1", "direction": "inbound",
+            "from_email": "a@x.com", "subject": "hi",
+            "text_body": "Hello there", "html_body": "<p>Hello</p>",
+            "attachments": [],
+            "created_at": "2026-05-14T15:30:00Z",
+        }
+    }))
+    msg = await client.get_message("m1")
+    assert msg["message_id"] == "m1"
+    assert msg["text_body"] == "Hello there"
