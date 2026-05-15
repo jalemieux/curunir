@@ -121,18 +121,20 @@ Slash commands have two layers: an explicit registry for utility ops
 `/<skill-name>` into a skill-forcing prompt for the agent. They work
 identically over the CLI WebSocket and the portal browser UI.
 
-#### Email Channel (Gmail)
+#### Email Channel (deadsimple.email)
 
-The email channel connects to Gmail via a Google Workspace service account with domain-wide delegation. No OAuth token management or external CLI tools — just a JSON key file.
+The email channel uses [deadsimple.email](https://deadsimple.email) — an HTTP API for sending and receiving mail. Create an inbox and an API key in the deadsimple dashboard, then set:
 
 ```bash
 EMAIL_ENABLED=true
-GOOGLE_SERVICE_ACCOUNT_FILE=./secrets/service-account.json
-GOOGLE_DELEGATED_USER=bot@yourdomain.com
+DEADSIMPLE_API_KEY=dse_your_api_key
+DEADSIMPLE_INBOX_ID=<inbox-uuid>
 EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
-See **[docs/gmail-setup.md](docs/gmail-setup.md)** for the full GCP and Workspace Admin setup walkthrough.
+The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The polling watermark is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
+
+See `.env.example` for the full list of email-related variables.
 
 #### Portal Channel (hosted web UI)
 
