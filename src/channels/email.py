@@ -4,8 +4,6 @@ sends replies into the same thread."""
 import asyncio
 import logging
 from datetime import datetime, timezone
-
-_RE_PREFIX_RE = ("re:", "fw:", "fwd:")
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +17,8 @@ from src.channels.deadsimple import DeadsimpleClient, DeadsimpleError
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
+
+_REPLY_PREFIXES = ("re:", "fw:", "fwd:")
 
 
 class EmailChannel:
@@ -127,7 +127,7 @@ class EmailChannel:
                 content += f"- {att['filename']} ({att['mime_type']}, {size_kb}KB) -> {att['path']}\n"
 
         subject = detail.get("subject", "") or ""
-        reply_subject = subject if subject.lower().startswith(_RE_PREFIX_RE) else f"Re: {subject}"
+        reply_subject = subject if subject.lower().startswith(_REPLY_PREFIXES) else f"Re: {subject}"
 
         incoming = IncomingMessage(
             content=content,

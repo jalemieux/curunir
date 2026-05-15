@@ -207,7 +207,9 @@ async def test_poll_once_queues_inbound_and_advances_watermark(email_config, in_
 async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
     """Pagination terminates the moment we cross the watermark."""
     client = AsyncMock()
-    # First page has m4, m3, m2; second would have m1 (already seen).
+    # First page has m4, m3, m2; second has m1 (at watermark -- stop here).
+    # page2 deliberately has next_cursor set so the watermark-stop logic must
+    # fire; if it didn't, side_effect would raise StopIteration on a third fetch.
     page1 = {
         "data": [
             _msg("m4", ts="2026-05-14T15:34:00Z"),
@@ -220,7 +222,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
         "data": [
             _msg("m1", ts="2026-05-14T15:31:00Z"),  # at watermark -- stop here
         ],
-        "next_cursor": None,
+        "next_cursor": "cur-2",  # not None: loop must stop via watermark, not cursor exhaustion
     }
     client.list_messages.side_effect = [page1, page2]
     client.get_message.side_effect = lambda mid: _detail(mid, text_body=f"body of {mid}")
@@ -232,7 +234,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
 
     queued = [in_queue.get_nowait() for _ in range(in_queue.qsize())]
     assert [m.reply_address["in_reply_to"] for m in queued] == ["m2", "m3", "m4"]
-    # Walked two pages.
+    # Walked exactly two pages; watermark stop prevented a third fetch.
     assert client.list_messages.call_count == 2
 
 
