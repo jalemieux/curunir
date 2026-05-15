@@ -5,26 +5,15 @@ description: "Send a NEW outbound email to a recipient who is not already in the
 
 # Sending Email
 
-Send emails via the Gmail API using `src.channels.gmail` through bash.
-The sender address is `$GOOGLE_DELEGATED_USER`, configured at the environment level.
+Send emails via the deadsimple.email API using `src.channels.deadsimple` through bash. The sending inbox and API key come from environment variables (`DEADSIMPLE_INBOX_ID`, `DEADSIMPLE_API_KEY`), so snippets read them at runtime.
 
 ## Recipient allowlist
 
-When `EMAIL_RESTRICT_OUTBOUND` is `true` (the default), `send_email` / `send_reply`
-will **raise `GmailError`** if any `to`/`cc`/`bcc` address isn't in
-`EMAIL_ALLOWED_SENDERS`. In practice this means you can only email the user.
-Don't try to route around it (constructing raw Gmail API calls yourself, etc.) —
-if a send is blocked, that's intentional; report it and stop. To genuinely lift
-the restriction the operator sets `EMAIL_RESTRICT_OUTBOUND=false` in the
-environment.
+When `EMAIL_RESTRICT_OUTBOUND` is `true` (the default), `send_email` will **raise `DeadsimpleError`** if any `to`/`cc`/`bcc` address isn't in `EMAIL_ALLOWED_SENDERS`. In practice this means you can only email the user. Don't try to route around it — if a send is blocked, that's intentional; report it and stop. To genuinely lift the restriction the operator sets `EMAIL_RESTRICT_OUTBOUND=false` in the environment.
 
 ## When NOT to use this skill
 
-If the current conversation arrived over the email channel (the user message
-begins with `[channel: email, ...]`), the email channel will automatically send
-your final assistant message as a reply in that thread. Do **not** also call
-`send_reply` from this skill — you will send two emails. Just write your reply
-as your normal final response; the channel delivers it.
+If the current conversation arrived over the email channel (the user message begins with `[channel: email, ...]`), the email channel will automatically send your final assistant message as a reply in that thread. Do **not** also call `send_email` from this skill — you will send two emails. Just write your reply as your normal final response; the channel delivers it.
 
 Use this skill only for:
 - Sending a new email to a different recipient (not the inbound sender)
@@ -34,11 +23,22 @@ Use this skill only for:
 
 ```bash
 python3 -c "
-from src.channels.gmail import build_service, send_email
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-send_email(to='recipient@example.com', subject='Subject line', body='Plain text body here', service=service)
-print('Sent.')
+import asyncio
+from src.channels.deadsimple import build_client_from_env
+
+async def main():
+    client = build_client_from_env()
+    try:
+        await client.send_email(
+            to='recipient@example.com',
+            subject='Subject line',
+            text_body='Plain text body here',
+        )
+        print('Sent.')
+    finally:
+        await client.aclose()
+
+asyncio.run(main())
 "
 ```
 
@@ -48,17 +48,23 @@ Provide both plain text and HTML — the recipient's client chooses which to dis
 
 ```bash
 python3 -c "
-from src.channels.gmail import build_service, send_email
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-send_email(
-    to='recipient@example.com',
-    subject='Subject line',
-    body='Plain text fallback',
-    body_html='<h1>Hello</h1><p>Rich content here</p>',
-    service=service,
-)
-print('Sent.')
+import asyncio
+from src.channels.deadsimple import build_client_from_env
+
+async def main():
+    client = build_client_from_env()
+    try:
+        await client.send_email(
+            to='recipient@example.com',
+            subject='Subject line',
+            text_body='Plain text fallback',
+            html_body='<h1>Hello</h1><p>Rich content here</p>',
+        )
+        print('Sent.')
+    finally:
+        await client.aclose()
+
+asyncio.run(main())
 "
 ```
 
@@ -68,13 +74,24 @@ For long content, write to a temp file first, then read it in:
 
 ```bash
 python3 -c "
-from src.channels.gmail import build_service, send_email
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-with open('/tmp/email-body.txt') as f:
-    body = f.read()
-send_email(to='recipient@example.com', subject='Subject line', body=body, service=service)
-print('Sent.')
+import asyncio
+from src.channels.deadsimple import build_client_from_env
+
+async def main():
+    client = build_client_from_env()
+    try:
+        with open('/tmp/email-body.txt') as f:
+            body = f.read()
+        await client.send_email(
+            to='recipient@example.com',
+            subject='Subject line',
+            text_body=body,
+        )
+        print('Sent.')
+    finally:
+        await client.aclose()
+
+asyncio.run(main())
 "
 ```
 
@@ -82,18 +99,24 @@ print('Sent.')
 
 ```bash
 python3 -c "
-from src.channels.gmail import build_service, send_email
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-send_email(
-    to='one@example.com,two@example.com',
-    cc='cc@example.com',
-    bcc='bcc@example.com',
-    subject='Subject line',
-    body='Content',
-    service=service,
-)
-print('Sent.')
+import asyncio
+from src.channels.deadsimple import build_client_from_env
+
+async def main():
+    client = build_client_from_env()
+    try:
+        await client.send_email(
+            to=['one@example.com', 'two@example.com'],
+            cc=['cc@example.com'],
+            bcc=['bcc@example.com'],
+            subject='Subject line',
+            text_body='Content',
+        )
+        print('Sent.')
+    finally:
+        await client.aclose()
+
+asyncio.run(main())
 "
 ```
 
@@ -101,43 +124,28 @@ print('Sent.')
 
 ```bash
 python3 -c "
-from src.channels.gmail import build_service, send_email
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-send_email(
-    to='recipient@example.com',
-    subject='Report attached',
-    body='See attached.',
-    attachments=['/path/to/report.pdf', '/path/to/data.csv'],
-    service=service,
-)
-print('Sent.')
-"
-```
+import asyncio
+from src.channels.deadsimple import build_client_from_env
 
-## Replying to a Thread
+async def main():
+    client = build_client_from_env()
+    try:
+        await client.send_email(
+            to='recipient@example.com',
+            subject='Report attached',
+            text_body='See attached.',
+            attachment_paths=['/path/to/report.pdf', '/path/to/data.csv'],
+        )
+        print('Sent.')
+    finally:
+        await client.aclose()
 
-When replying to an existing email thread, use `send_reply` with the original message ID:
-
-```bash
-python3 -c "
-from src.channels.gmail import build_service, send_reply
-import os
-service = build_service(os.environ['GOOGLE_SERVICE_ACCOUNT_FILE'], os.environ['GOOGLE_DELEGATED_USER'])
-send_reply(
-    to='recipient@example.com',
-    subject='Re: Original subject',
-    body='Reply content',
-    reply_to_message_id='MESSAGE_ID',
-    service=service,
-)
-print('Sent.')
+asyncio.run(main())
 "
 ```
 
 ## Tips
 
 - Always let the script read env vars at runtime — never hardcode credentials or addresses.
-- For reports or long-form content, write the body to a temp file and read it in
-  to avoid shell quoting issues.
-- Quote string arguments carefully when embedding in `python3 -c`.
+- For reports or long-form content, write the body to a temp file and read it in to avoid shell quoting issues.
+- Replies inside an email-channel thread are handled automatically; use this skill only for new outbound mail.

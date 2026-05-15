@@ -93,8 +93,6 @@ class DeadsimpleClient:
 
         raise DeadsimpleError(f"giving up on {method} {path} after 429 retry")
 
-    # --- public methods (filled in by later tasks) ---
-
     async def validate_inbox(self) -> dict[str, Any]:
         """Confirm the configured inbox exists and is accessible. Returns inbox JSON."""
         return await self._request("GET", f"/v1/inboxes/{self.inbox_id}")
@@ -204,7 +202,77 @@ class DeadsimpleClient:
             idempotency_key=f"send-attach-{in_reply_to}",
         )
 
+    async def send_email(
+        self,
+        *,
+        to: str | list[str],
+        subject: str,
+        text_body: str,
+        html_body: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        attachment_paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Send a new (cold) outbound email — no threading headers.
+
+        Used by skills that send mail outside of a reply context (CLI sessions,
+        scheduled tasks). For threaded replies inside the email channel, use
+        send_reply() or send_with_attachments() instead.
+        """
+        to_list = [to] if isinstance(to, str) else list(to)
+        self._check_recipients_allowed(*to_list, *(cc or []), *(bcc or []))
+
+        body: dict[str, Any] = {"to": to_list, "subject": subject, "text_body": text_body}
+        if html_body:
+            body["html_body"] = html_body
+        if cc:
+            body["cc"] = cc
+        if bcc:
+            body["bcc"] = bcc
+        if attachment_paths:
+            atts: list[dict[str, Any]] = []
+            for p in attachment_paths:
+                path = Path(p)
+                data = base64.b64encode(path.read_bytes()).decode("ascii")
+                atts.append({
+                    "filename": path.name,
+                    "content_type": _guess_content_type(path.name),
+                    "data": data,
+                })
+            body["attachments"] = atts
+
+        return await self._request(
+            "POST",
+            f"/v1/inboxes/{self.inbox_id}/messages",
+            json_body=body,
+        )
+
 
 def _guess_content_type(filename: str) -> str:
     mime, _ = mimetypes.guess_type(filename)
     return mime or "application/octet-stream"
+
+
+def build_client_from_env() -> "DeadsimpleClient":
+    """Build a DeadsimpleClient from env vars — convenience for one-shot scripts.
+
+    Reads DEADSIMPLE_API_KEY, DEADSIMPLE_INBOX_ID, optional DEADSIMPLE_API_BASE,
+    EMAIL_ALLOWED_SENDERS, and EMAIL_RESTRICT_OUTBOUND. Raises DeadsimpleError
+    if api_key or inbox_id is missing.
+    """
+    import os
+    api_key = os.environ.get("DEADSIMPLE_API_KEY", "").strip()
+    inbox_id = os.environ.get("DEADSIMPLE_INBOX_ID", "").strip()
+    if not api_key or not inbox_id:
+        raise DeadsimpleError(
+            "DEADSIMPLE_API_KEY and DEADSIMPLE_INBOX_ID must be set in the environment"
+        )
+    return DeadsimpleClient(
+        api_key=api_key,
+        api_base=os.environ.get("DEADSIMPLE_API_BASE", "https://api.deadsimple.email"),
+        inbox_id=inbox_id,
+        allowed_recipients=[
+            s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()
+        ],
+        restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
+    )

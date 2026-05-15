@@ -254,3 +254,85 @@ async def test_send_with_attachments_blocked_by_allowlist(restricted_client, tmp
             attachment_paths=[str(f)],
         )
     assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_email_posts_with_to_subject_text(client):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m9"}}))
+    await client.send_email(
+        to="alice@example.com", subject="Hi", text_body="hello"
+    )
+    assert route.called
+    req = route.calls.last.request
+    import json as _json
+    parsed = _json.loads(req.content.decode())
+    assert parsed["to"] == ["alice@example.com"]
+    assert parsed["subject"] == "Hi"
+    assert parsed["text_body"] == "hello"
+    assert "in_reply_to" not in parsed
+    assert "references" not in parsed
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_email_with_cc_bcc_html_attachments(client, tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"data")
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m9"}}))
+    await client.send_email(
+        to=["alice@example.com", "carol@example.com"],
+        subject="Hi",
+        text_body="hello",
+        html_body="<p>hello</p>",
+        cc=["bob@example.com"],
+        bcc=["dan@example.com"],
+        attachment_paths=[str(f)],
+    )
+    req = route.calls.last.request
+    import json as _json
+    parsed = _json.loads(req.content.decode())
+    assert parsed["to"] == ["alice@example.com", "carol@example.com"]
+    assert parsed["cc"] == ["bob@example.com"]
+    assert parsed["bcc"] == ["dan@example.com"]
+    assert parsed["html_body"] == "<p>hello</p>"
+    assert len(parsed["attachments"]) == 1
+    assert parsed["attachments"][0]["filename"] == "doc.txt"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_email_blocked_by_allowlist(restricted_client):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={}))
+    with pytest.raises(DeadsimpleError):
+        await restricted_client.send_email(
+            to="evil@evil.com", subject="x", text_body="x"
+        )
+    assert not route.called
+
+
+def test_build_client_from_env_raises_on_missing_creds(monkeypatch):
+    from src.channels.deadsimple import build_client_from_env, DeadsimpleError
+    monkeypatch.delenv("DEADSIMPLE_API_KEY", raising=False)
+    monkeypatch.delenv("DEADSIMPLE_INBOX_ID", raising=False)
+    with pytest.raises(DeadsimpleError):
+        build_client_from_env()
+
+
+def test_build_client_from_env_constructs_client(monkeypatch):
+    from src.channels.deadsimple import build_client_from_env
+    monkeypatch.setenv("DEADSIMPLE_API_KEY", "dse_xyz")
+    monkeypatch.setenv("DEADSIMPLE_INBOX_ID", "inbox-1")
+    monkeypatch.setenv("EMAIL_ALLOWED_SENDERS", "a@x.com,b@x.com")
+    monkeypatch.setenv("EMAIL_RESTRICT_OUTBOUND", "false")
+    c = build_client_from_env()
+    assert c.api_key == "dse_xyz"
+    assert c.inbox_id == "inbox-1"
+    assert c.allowed_recipients == ["a@x.com", "b@x.com"]
+    assert c.restrict_outbound is False
