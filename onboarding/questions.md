@@ -62,10 +62,10 @@ Do not do any of these.
 Pick one of the suggested flavors or describe your own. Sample response shown
 for the prompt _"I'm running late for a 3pm meeting"_:
 
-> Your answer here populates the `## Personality` block in `identity.md` —
-> specifically `### Voice`, `### Perspective`, and `### Relationship`. The
-> axes below map into `### Voice`; the chosen flavor (or your own
-> description) maps into `### Perspective` and `### Relationship`.
+> Your answer here populates `### Voice & Stance` in `identity.md`. The
+> axes below shape *how* the agent speaks; the chosen flavor (or your own
+> description) shapes the disposition it brings to your domain and how it
+> positions itself toward you.
 
 | Flavor | Vibe | Sample response |
 |---|---|---|

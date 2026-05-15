@@ -25,13 +25,14 @@ Accept short answers. No follow-ups.
 
 Look back at the preferences answers earlier in this same conversation:
 
-- **Communication style answer** → seed for `### Voice`. If the user said "formal and concise," write voice prose like "You speak formally and concisely. Short, complete sentences. No filler." If they said "casual and warm," seed voice prose to match. Keep it 2–4 sentences.
-- **Response length answer** → fold into `### Voice` as a length-default line ("Default to terse / balanced / detailed prose unless the user asks otherwise.")
-- **`### Boundaries`** — keep the seed defaults from `context/identity.md` (consent on irreversible actions, scheduled-task plain voice, no professional medical/legal/tax advice). Do NOT delete these — only add a one-line acknowledgement of the user's communication preferences if it's load-bearing.
+- **Communication style answer** → seed for the *voice* portion of `### Voice & Stance`. If the user said "formal and concise," write prose like "You speak formally and concisely. Short, complete sentences. No filler." If they said "casual and warm," seed to match. 2–4 sentences.
+- **Response length answer** → fold into `### Voice & Stance` as a length-default line ("Default to terse / balanced / detailed prose unless the user asks otherwise.")
+- **Stance portion of `### Voice & Stance`** — keep the seed defaults already in `context/identity.md` (how the agent positions toward the user, when it pauses to ask permission). Only adjust if a derivation from preferences explicitly calls for it.
+- **`## Boundaries`** (top-level, separate from `## Personality`) — never edit. These are static verbatim defaults.
 
 ## Write
 
-Edit `context/identity.md` using `edit` (not `write` — preserve everything outside the `## Personality` block). Replace the `### Identity` subsection inside `## Personality` with the user's new answers; replace `### Voice` with the derived prose; leave `### Perspective`, `### Opinions`, `### Boundaries`, `### Quirks` untouched unless a derivation explicitly asked you to touch them.
+Edit `context/identity.md` using `edit` (not `write` — preserve everything outside the `## Personality` block). Replace the `### Identity` subsection with the user's new answers; replace the voice prose inside `### Voice & Stance` with the derived prose while preserving the stance sentences; leave `### Values & Quirks` and the top-level `## Standing Jobs`, `## Boundaries`, `## Capabilities`, `## Guidelines`, `## Memory`, `## Scheduling`, and `## Creating Skills` sections untouched.
 
 Target shape of the `### Identity` block:
 
