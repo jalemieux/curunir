@@ -3,6 +3,7 @@ python-dotenv
 rich
 prompt_toolkit
 httpx
+markdown-it-py
 trafilatura
 pypdf
 python-docx

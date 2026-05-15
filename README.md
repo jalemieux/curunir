@@ -138,7 +138,7 @@ DEADSIMPLE_INBOX_ID=<inbox-uuid>
 EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
-The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The polling watermark is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
+The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Each reply is sent as multipart/alternative — the agent's markdown becomes the plain-text body, and `src/channels/_html.py` renders the same markdown to an HTML body (with inline styles for headings, links, and code blocks) for clients that prefer HTML. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The polling watermark is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
 
 See `.env.example` for the full list of email-related variables.
 
