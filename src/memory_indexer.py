@@ -39,7 +39,7 @@ def _upsert_entry(text: str, new_line: str, archive_rel: str) -> str:
     return text + suffix + new_line.rstrip() + "\n"
 
 
-_INDEX_EXCLUDE_FILES = {"README.md", "MEMORY.md"}
+_INDEX_EXCLUDE_FILES = {"README.md"}
 _INDEX_EXCLUDE_DIRS = {"archives", "summaries"}
 
 
@@ -53,7 +53,7 @@ def _topic_slug_for(rel_path: str) -> str:
 def _is_topic_eligible(rel_path: str) -> bool:
     """Topic indexes anchor to user-managed entities only.
 
-    Skip: README.md, MEMORY.md, anything under archives/ or summaries/.
+    Skip: README.md, anything under archives/ or summaries/.
     """
     p = Path(rel_path)
     if not p.parts:
