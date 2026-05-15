@@ -58,6 +58,7 @@ class TestAgentHandle:
         assert history[1]["content"] == "First"
 
     async def test_separate_sessions(self, agent):
+        (agent.config.context_dir / ".onboarded").touch()
         mock_response = LLMResponse(text="Reply", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             await agent.handle("msg1", "session-a")
