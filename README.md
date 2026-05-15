@@ -12,6 +12,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 - **Skills are prompts.** Complex workflows are captured as markdown instructions the agent loads on demand. Markdown instructions that reference the base tools and any CLI tools available in the container.
 - **Context rot is real.** Drift and noise degrade model performance. The system prompt stays minimal — identity, skill manifest, timestamp — and skills are loaded only when needed.
 - **Memory is markdown.** Frontier models are very good at reading multi-layered structured markdown files. In our experimentation, this produced better results than sophisticated vector-based RAG pipelines.
+- **Conversational onboarding** — first-run setup runs inside the agent (6 prompts: profile, preferences, personality). Slash commands `/onboarding`, `/profile`, `/preferences`, `/personality` are available afterwards to refresh any section.
 
 ## Architecture
 
