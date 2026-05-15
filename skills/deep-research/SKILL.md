@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: "Use when asked to research a topic in depth, produce a research report, or investigate something requiring multiple sources. Trigger: user asks for deep research, comprehensive analysis, or a written report on a topic."
+description: "Use when asked to research a topic, produce a research report, investigate something requiring multiple sources, or conduct a comprehensive analysis. Trigger phrases include 'research X', 'research this', 'look into', 'investigate', 'deep research', or any request for a written report on a topic. The word 'deep' is not required."
 tools: attach
 ---
 
@@ -48,16 +48,34 @@ For each sub-question:
 
 ### Step 4 — Synthesize report
 
-Compile findings into a structured report. Tag each source with its origin (`[Reddit]`, `[X/Twitter]`, `[LinkedIn]`, `[Web]`):
+Compile findings into a structured report. The first page sets the frame — readers should know what they're looking at, who it's for, what question it answers, and whether it's been verified, before the first finding.
 
-```
+**Use this exact header template:**
+
+```markdown
+# {Descriptive title — long-form, not a slug}
+## {Optional subtitle framing the question or angle}
+
+**Date:** {Month DD, YYYY}
+
+**Prepared for:** {user's name from identity context}
+
+**Subject:** {One- to two-sentence framing of what the report investigates — the hypothesis, question, or scope}
+
+**Status:** Draft — not yet independently fact-checked
+
+## Executive Summary
+
+{3–5 short paragraphs. Lead with what the report addresses and the headline finding in one sentence. Then: the strongest evidence for the answer, the strongest evidence against, key caveats or open questions, and a bottom-line "so what". Front-load the most important caveat — if the headline number comes from a narrow sub-population, a small sample, or a single source, say so here, not buried later.}
+
 ## Key Findings
-- [3-5 bullet summary]
 
-## [Sub-question 1 heading]
+- [3-5 bullet summary of the most load-bearing facts]
+
+## {Sub-question 1 heading}
 [Findings with inline source citations]
 
-## [Sub-question 2 heading]
+## {Sub-question 2 heading}
 [Findings with inline source citations]
 
 ...
@@ -67,9 +85,58 @@ Compile findings into a structured report. Tag each source with its origin (`[Re
 - [Title](URL) — [X/Twitter] what was found here
 ```
 
-### Step 5 — Deliver
+**Title guidance.** The H1 should read like a magazine cover, not a filename: `"Retatrutide: Blockbuster or Bust? Investment Analysis for Eli Lilly (LLY)"` beats `"Retatrutide Research"`. The filename slug is separate (see Step 5).
 
-Write to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`, convert to PDF:
+**Prepared for.** Pull the user's name from `context/identity.md` or memory. If you don't know it, omit the line rather than guess.
+
+**Subject vs. title.** Title is the headline; Subject is the one-sentence framing of what's being investigated (e.g., "Eli Lilly's investigational triple-agonist drug retatrutide — bull case, bear case, and potential impact on LLY stock"). They are not the same.
+
+**Status line.** Start as `Draft — not yet independently fact-checked`. If the report is later updated with fact-check corrections (see below), change to `Fact-checked {YYYY-MM-DD} — corrections incorporated` and update the Date line to reflect the revision: `Date: May 4, 2026 (updated May 11, 2026 — fact-checked, corrected & expanded)`.
+
+### Step 5 — Fact-check the draft (default, not optional)
+
+Write the draft to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`, then **run an independent fact-check before delivering**. Research without verification is just plausible-sounding prose. The whole point of the structured header is that "Status: Fact-checked" actually means something — which requires actually doing it.
+
+Load `fact-checker` and follow its delegation pattern (the fact-checker skill explains why a fresh context window is the entire mechanism — you can't check yourself):
+
+```python
+delegate(task="""
+Fact-check the research report below. Load the `fact-checker` skill and follow the
+"Sub-agent workflow" section exactly. Return the structured report as your final response.
+
+<<<CONTENT_TO_FACT_CHECK
+[paste the full draft markdown content here]
+CONTENT_TO_FACT_CHECK>>>
+""")
+```
+
+For very large drafts (>50KB), write the content to disk first and tell the sub-agent the path.
+
+When the sub-agent returns the verdicts report:
+
+1. Apply each ❌ Contradicted and ⚠️ Partially accurate correction inline in the body — don't leave wrong numbers in the prose.
+2. Update the **Date** line: `{original date} (updated {same or later date} — fact-checked, corrected & expanded)`.
+3. Update the **Status** line: `Fact-checked {YYYY-MM-DD} — corrections incorporated`.
+4. Append a `## Fact-Check Addendum` section after Sources, summarizing what changed:
+
+```markdown
+## Fact-Check Addendum ({Month DD, YYYY})
+
+The following corrections were incorporated based on independent fact-checking:
+
+| # | Issue | Correction |
+|---|---|---|
+| 1 | {What was wrong or unclear} | {What was changed} |
+| 2 | ... | ... |
+```
+
+**Skip the fact-check only if** the user explicitly opts out ("skip fact-check", "quick summary, no verification"), or the topic is purely sentiment/opinion where there are no verifiable factual claims (e.g., "research how developers feel about X"). In the skip case, leave the Status line as `Draft — not independently fact-checked`.
+
+**If `delegate` times out** (`Sub-agent timed out after 300s`), don't retry — the report is too broad to verify in one pass. Deliver the draft as-is, set Status to `Draft — fact-check timed out; scoped follow-up recommended`, and tell the user in the text reply.
+
+### Step 6 — Deliver
+
+Convert the final (fact-checked) markdown to PDF:
 
 ```bash
 pandoc {file}.md -o {file}.pdf
@@ -77,9 +144,7 @@ pandoc {file}.md -o {file}.pdf
 
 Attach the **PDF**: `attach(path="{file}.pdf")`. If PDF conversion fails, attach the `.md` instead. Never convert to HTML or other formats.
 
-Reply with a concise summary (key findings + bullets) as your text response. The full report is the attachment.
-
-In the same reply, mention that the report can be independently fact-checked via the `fact-checker` skill if accuracy matters. Do not run it automatically — let the user decide.
+Reply with a concise summary (key findings + bullets) as your text response. The full report is the attachment. If the fact-check surfaced material corrections, mention that in one line so the user knows the addendum is worth a glance.
 
 ## Examples
 
@@ -144,3 +209,9 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 - **Treating social opinions as facts** — Reddit/X posts are signal about sentiment, not authoritative sources. Cross-reference with web sources.
 - **Not loading prerequisite skills** — load each skill before using its API patterns. The agent needs the skill's instructions to call APIs correctly.
 - **Using curl to read web pages** — dumps raw HTML into context, causing context drift. Use `WebFetch` with a targeted prompt for page content. Reserve curl for JSON API endpoints only.
+- **Filename slug as the H1** — the slug is for the file, not the reader. The H1 inside the document should be a long-form descriptive title.
+- **Burying the caveat** — if the headline number depends on a narrow sub-population, small sample, or single source, that caveat belongs in the Executive Summary, not three sections later.
+- **Skipping the header block** — Date / Prepared for / Subject / Status is not optional decoration; it tells the reader what they're holding before they read a word of the body.
+- **Header lines without blank lines between them** — markdown collapses consecutive lines into one paragraph. Each `**Field:**` line in the header needs a blank line before the next, or pandoc renders them as one run-on sentence.
+- **Skipping the fact-check pass** — it's the default, not optional decoration. The only valid reasons to skip are (a) the user explicitly opted out, or (b) the topic has no verifiable claims (pure sentiment/opinion). Otherwise: delegate to `fact-checker`, apply corrections, append the addendum.
+- **Fact-checking yourself instead of delegating** — your context is already anchored on the same sources and framing you used to write the report. Always use `delegate` so the fact-checker gets a fresh window.
