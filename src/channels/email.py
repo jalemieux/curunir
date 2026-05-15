@@ -198,5 +198,32 @@ class EmailChannel:
         return _re.sub(r"<[^>]+>", "", html).strip()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Stubbed until Task 10."""
-        return
+        """Send a reply via deadsimple. Routes to /reply for text-only, /messages when attaching."""
+        if not msg.final or not msg.content:
+            return
+        in_reply_to = msg.reply_address.get("in_reply_to")
+        to = msg.reply_address.get("to")
+        subject = msg.reply_address.get("subject")
+        if not in_reply_to or not to:
+            logger.error("Email send missing in_reply_to or to (got %s)", msg.reply_address)
+            return
+
+        attachments = msg.attachments or []
+        try:
+            if attachments:
+                paths = [a["path"] for a in attachments if a.get("path")]
+                await self.client.send_with_attachments(
+                    in_reply_to=in_reply_to,
+                    to=to,
+                    subject=subject or "",
+                    text_body=msg.content,
+                    attachment_paths=paths,
+                )
+            else:
+                await self.client.send_reply(
+                    in_reply_to=in_reply_to,
+                    to=to,
+                    text_body=msg.content,
+                )
+        except DeadsimpleError:
+            logger.exception("Failed to send reply for thread %s", msg.session_id)

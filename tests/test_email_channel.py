@@ -303,3 +303,76 @@ async def test_poll_once_skips_failed_attachment_but_keeps_message(email_config,
     await ch._poll_once()
     incoming = in_queue.get_nowait()
     assert incoming.attachments is None  # download failed → no manifest entry
+
+
+from src.channels.base import OutgoingMessage
+
+
+def _outgoing(content, *, reply_address, attachments=None, final=True):
+    return OutgoingMessage(
+        content=content,
+        channel="email",
+        session_id="t1",
+        reply_address=reply_address,
+        attachments=attachments,
+        final=final,
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_skips_streaming_deltas(email_config, in_queue):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    msg = _outgoing("partial", reply_address={"to": "a@x.com", "subject": "re", "in_reply_to": "m1"}, final=False)
+    await ch.send(msg)
+    client.send_reply.assert_not_called()
+    client.send_with_attachments.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_uses_reply_endpoint_when_no_attachments(email_config, in_queue):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    msg = _outgoing(
+        "Hi back",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+    )
+    await ch.send(msg)
+    client.send_reply.assert_awaited_once_with(
+        in_reply_to="m1", to="alice@example.com", text_body="Hi back"
+    )
+    client.send_with_attachments.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_uses_messages_endpoint_when_attachments_present(email_config, in_queue, tmp_path):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"x")
+    msg = _outgoing(
+        "see attached",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+        attachments=[{"filename": "doc.txt", "path": str(f), "mime_type": "text/plain", "size": 1}],
+    )
+    await ch.send(msg)
+    client.send_with_attachments.assert_awaited_once_with(
+        in_reply_to="m1",
+        to="alice@example.com",
+        subject="Re: hi",
+        text_body="see attached",
+        attachment_paths=[str(f)],
+    )
+    client.send_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_logs_and_returns_on_deadsimple_error(email_config, in_queue, caplog):
+    client = AsyncMock()
+    client.send_reply.side_effect = DeadsimpleError("rate limited")
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    msg = _outgoing(
+        "hi",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+    )
+    await ch.send(msg)  # does not raise
