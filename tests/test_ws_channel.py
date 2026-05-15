@@ -702,68 +702,48 @@ async def test_interrupt_command_routes_to_cancel_session_callback():
 
 
 @pytest.mark.asyncio
-async def test_slash_command_dispatches_to_handler(tmp_path):
-    """A {command: slash, text: /help} frame routes through the slash handler
-    and emits an outgoing reply without going through the in_queue.
-    """
+async def test_slash_frame_enqueued_as_command_slash():
+    """Slash frames are forwarded onto the in_queue as IncomingMessage with
+    command="slash" and the raw text as content. The channel does not
+    interpret slash — agent_worker dispatches it."""
     q = asyncio.Queue()
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-
-    class _Agent:
-        def request_cancel(self, sid):
-            return False
-
-    ch = WebSocketChannel(
-        q, host=TEST_HOST, port=TEST_PORT + 25,
-        agent=_Agent(), skill_dirs=[skills_dir],
-    )
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 25)
     task = await _start_channel(ch)
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 25}") as ws:
-            await _read_hello(ws)
+            sid = await _read_hello(ws)
             await ws.send(json.dumps({"command": "slash", "text": "/help"}))
-            raw = await asyncio.wait_for(ws.recv(), timeout=2.0)
-            data = json.loads(raw)
-            assert data["final"] is True
-            assert "Slash commands" in data["content"]
-            assert "/help" in data["content"]
-        # Drain queue — only the disconnect 'extract' should remain.
+            await asyncio.sleep(0.1)
         msgs = []
         while not q.empty():
             msgs.append(q.get_nowait())
-        assert all(m.command == "extract" for m in msgs)
+        slash_msgs = [m for m in msgs if m.command == "slash"]
+        assert len(slash_msgs) == 1
+        assert slash_msgs[0].content == "/help"
+        assert slash_msgs[0].session_id == sid
+        assert slash_msgs[0].channel == "cli"
     finally:
         await _stop_channel(task)
 
 
 @pytest.mark.asyncio
-async def test_slash_clear_command_enqueues_clear(tmp_path):
-    """/clear via slash dispatch puts an IncomingMessage(command="clear") on the queue."""
+async def test_slash_frame_preserves_arbitrary_text():
+    """The channel forwards the raw slash text verbatim — including args and
+    unknown command names — leaving interpretation to the dispatcher."""
     q = asyncio.Queue()
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-
-    class _Agent:
-        def request_cancel(self, sid):
-            return False
-
-    ch = WebSocketChannel(
-        q, host=TEST_HOST, port=TEST_PORT + 26,
-        agent=_Agent(), skill_dirs=[skills_dir],
-    )
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 26)
     task = await _start_channel(ch)
     try:
         async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 26}") as ws:
-            sid = await _read_hello(ws)
-            await ws.send(json.dumps({"command": "slash", "text": "/clear"}))
+            await _read_hello(ws)
+            await ws.send(json.dumps({"command": "slash", "text": "/foo bar baz"}))
             await asyncio.sleep(0.1)
         msgs = []
         while not q.empty():
             msgs.append(q.get_nowait())
-        clear_msgs = [m for m in msgs if m.command == "clear"]
-        assert len(clear_msgs) == 1
-        assert clear_msgs[0].session_id == sid
+        slash_msgs = [m for m in msgs if m.command == "slash"]
+        assert len(slash_msgs) == 1
+        assert slash_msgs[0].content == "/foo bar baz"
     finally:
         await _stop_channel(task)
 

@@ -3,34 +3,33 @@
 Two layers:
 
 1. Intercepted registry (`INTERCEPTED`) — explicit handlers for utility
-   commands that don't need the LLM (`/help`, `/skills`, `/clear`, `/cancel`,
-   plus `/new` and `/reset` aliases). Each handler returns a `SlashResult`
-   describing the outgoing replies and/or `IncomingMessage`s the channel
+   commands that don't need the LLM (`/help`, `/skills`, `/clear`, plus
+   `/new` and `/reset` aliases). Each handler returns a `SlashResult`
+   describing the outgoing replies and/or `IncomingMessage`s the caller
    should enqueue.
 2. Skill-forcing fallback — anything not intercepted is looked up against
    the live skill registry. A match rewrites the text into a synthetic
    user prompt (`"Use the `<name>` skill. {args}"`) and enqueues it; a miss
    returns a polite "unknown command" message.
 
-`maybe_handle_slash()` is the single entry point. Channels call it BEFORE
-enqueuing user input. Email is excluded — slash semantics don't fit threaded
-mail and the false-positive risk is high.
+`maybe_handle_slash()` is the single entry point. It is called from
+`agent_worker` after a `command="slash"` message is dequeued — channels
+are dumb about slash and just forward the raw text. Cancellation is
+handled separately as an out-of-band `interrupt` frame at the channel
+layer (the agent_worker is blocked inside `handle()` during a turn, so a
+queue-based `/cancel` would arrive too late to matter).
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable
 
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.skills import load_registry
 
 logger = logging.getLogger(__name__)
-
-
-class _CancelCapable(Protocol):
-    def request_cancel(self, session_id: str) -> bool: ...
 
 
 @dataclass
@@ -39,7 +38,6 @@ class SlashContext:
     session_id: str
     channel: str
     reply_address: dict
-    agent: _CancelCapable
     skill_dirs: list[Path]
 
 
@@ -56,8 +54,15 @@ _HELP: dict[str, str] = {
     "help": "show this help",
     "skills": "list available skills",
     "clear": "wipe conversation history (aliases: /new, /reset)",
-    "cancel": "stop the agent's current turn",
 }
+
+# Footer for /help: how to stop a turn in flight. Slash can't do this — the
+# agent_worker is blocked while a turn runs, so a queued /cancel would arrive
+# too late. Cancellation lives in the channel as an out-of-band frame.
+_CANCEL_HINT = (
+    "To stop the agent mid-turn, press Ctrl-C in the CLI or use the stop "
+    "button in the portal."
+)
 
 
 def _out(ctx: SlashContext, content: str) -> OutgoingMessage:
@@ -87,7 +92,7 @@ async def _help(ctx: SlashContext) -> SlashResult:
         "| Command | What it does |",
         "|---------|--------------|",
     ]
-    for name in ("help", "skills", "clear", "cancel"):
+    for name in ("help", "skills", "clear"):
         lines.append(f"| `/{name}` | {_HELP[name]} |")
 
     registry = load_registry(ctx.skill_dirs)
@@ -101,6 +106,9 @@ async def _help(ctx: SlashContext) -> SlashResult:
         lines.append("|-------|-------------|")
         for skill in sorted(registry.values(), key=lambda s: s.name):
             lines.append(f"| `/{skill.name}` | {skill.description} |")
+
+    lines.append("")
+    lines.append(_CANCEL_HINT)
 
     return SlashResult(handled=True, outgoing=[_out(ctx, "\n".join(lines))])
 
@@ -124,22 +132,12 @@ async def _clear(ctx: SlashContext) -> SlashResult:
     return SlashResult(handled=True, enqueue=[_inc(ctx, "", command="clear")])
 
 
-async def _cancel(ctx: SlashContext) -> SlashResult:
-    delivered = bool(ctx.agent and ctx.agent.request_cancel(ctx.session_id))
-    if delivered:
-        msg = "Interrupt requested — finishing current step, then stopping."
-    else:
-        msg = "No agent run in progress to cancel."
-    return SlashResult(handled=True, outgoing=[_out(ctx, msg)])
-
-
 INTERCEPTED: dict[str, Callable[[SlashContext], Awaitable[SlashResult]]] = {
     "help": _help,
     "skills": _skills,
     "clear": _clear,
     "new": _clear,
     "reset": _clear,
-    "cancel": _cancel,
 }
 
 
@@ -151,16 +149,16 @@ async def maybe_handle_slash(
     """Dispatch `text` if it looks like a slash command.
 
     Returns:
-        - `None`: not a slash command (or attachments present). Channel should
-          proceed with normal enqueue.
-        - `SlashResult`: the channel should send each `outgoing` message and
-          put each `enqueue` message on the in-queue.
+        - `None`: not a slash command (or attachments present). Caller should
+          treat the message as a normal user turn.
+        - `SlashResult`: caller should send each `outgoing` message and put
+          each `enqueue` message on the in-queue.
     """
     if not text or not text.startswith("/"):
         return None
     if attachments:
         # v1: slash commands don't accept attachments. Fall through so the
-        # channel enqueues the literal text and the agent can see it.
+        # caller treats the literal text as a normal user turn.
         logger.info("Slash command with attachments — falling through to agent")
         return None
 
@@ -176,7 +174,6 @@ async def maybe_handle_slash(
         session_id=ctx.session_id,
         channel=ctx.channel,
         reply_address=ctx.reply_address,
-        agent=ctx.agent,
         skill_dirs=ctx.skill_dirs,
     )
 

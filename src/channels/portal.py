@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import random
-from pathlib import Path
 from typing import Any
 
 import websockets
@@ -26,7 +25,6 @@ from src.channels._attachments import (
     _stage_attachments,
 )
 from src.channels.base import IncomingMessage, OutgoingMessage
-from src.slash_commands import SlashContext, maybe_handle_slash
 
 
 logger = logging.getLogger(__name__)
@@ -53,8 +51,6 @@ class PortalChannel:
         history_provider: "callable[[str], list[dict]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
-        agent: Any = None,
-        skill_dirs: list[Path] | None = None,
     ):
         self.in_queue = in_queue
         self.url = url
@@ -64,8 +60,6 @@ class PortalChannel:
             os.getcwd(), "context", "uploads"
         )
         self.cancel_session = cancel_session
-        self.agent = agent
-        self.skill_dirs = skill_dirs or []
         self._connection: Any = None
         self._terminate = False
 
@@ -140,18 +134,16 @@ class PortalChannel:
             return
 
         if payload.get("command") == "slash":
-            ctx = SlashContext(
-                args="", session_id=session_id, channel="portal",
-                reply_address={}, agent=self.agent,
-                skill_dirs=self.skill_dirs,
-            )
-            result = await maybe_handle_slash(payload.get("text", ""), None, ctx)
-            if result is not None:
-                for out in result.outgoing:
-                    await self.send(out)
-                for inc in result.enqueue:
-                    await self.in_queue.put(inc)
-                return
+            # Channels don't interpret slash — agent_worker does.
+            # Forward the raw text on the queue with command=slash.
+            await self.in_queue.put(IncomingMessage(
+                content=payload.get("text", ""),
+                channel="portal",
+                session_id=session_id,
+                reply_address={},
+                command="slash",
+            ))
+            return
 
         decoded, err = _decode_attachments(payload.get("attachments"))
         if err is not None:

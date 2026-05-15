@@ -6,6 +6,7 @@ import json
 import logging
 import logging.handlers
 import os
+from pathlib import Path
 
 import httpx
 import litellm
@@ -21,6 +22,7 @@ from src.config import AgentConfig, EmailChannelConfig
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
+from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
 
 
@@ -303,6 +305,34 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 [(a.get("filename"), a.get("mime_type"), a.get("size")) for a in msg.attachments],
             )
 
+        # Slash commands arrive from channels as opaque text. Dispatch here
+        # so channels stay ignorant of skills; outgoing replies go to
+        # out_queue, and any synthetic prompts (e.g. /clear, /<skill>) loop
+        # back through in_queue and hit the appropriate branch next iter.
+        if msg.command == "slash":
+            ctx = SlashContext(
+                args="",
+                session_id=msg.session_id,
+                channel=msg.channel,
+                reply_address=msg.reply_address,
+                skill_dirs=agent.config.skill_dirs,
+            )
+            result = await maybe_handle_slash(msg.content, None, ctx)
+            if result is None:
+                # Malformed slash frame from the client (empty text, no
+                # leading slash, or bare "/"). Drop it loudly rather than
+                # silently coercing it into a chat turn.
+                logger.warning(
+                    "Dropping malformed slash frame on session %s: %r",
+                    msg.session_id, msg.content,
+                )
+                continue
+            for out in result.outgoing:
+                await out_queue.put(out)
+            for inc in result.enqueue:
+                await in_queue.put(inc)
+            continue
+
         # Control commands: drop or summarize the session before it's gone,
         # then ack with an empty reply so the channel can render UI feedback.
         if msg.command in ("clear", "reset"):
@@ -511,24 +541,30 @@ async def main():
     ws = WebSocketChannel(
         in_queue, host=ws_host, port=ws_port, model=config.model,
         cancel_session=agent.request_cancel,
-        agent=agent, skill_dirs=config.skill_dirs,
     )
     channels["cli"] = ws
 
     # Email channel (conditional)
     email_config = EmailChannelConfig(
         enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
-        service_account_file=os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
-        delegated_user=os.environ.get("GOOGLE_DELEGATED_USER", ""),
-        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "300")),
+        api_key=os.environ.get("DEADSIMPLE_API_KEY", ""),
+        inbox_id=os.environ.get("DEADSIMPLE_INBOX_ID", ""),
+        api_base=os.environ.get("DEADSIMPLE_API_BASE", "https://api.deadsimple.email"),
+        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
-        processed_label=os.environ.get("EMAIL_PROCESSED_LABEL", "agent/processed"),
+        restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
         attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
+        state_file=Path(os.environ.get("EMAIL_STATE_FILE", "./context/email_state.json")),
+        spam_score_threshold=float(os.environ.get("EMAIL_SPAM_SCORE_THRESHOLD", "5.0")),
     )
     if email_config.enabled:
-        email_channel = EmailChannel(in_queue, email_config)
-        channels["email"] = email_channel
-        logger.info("Email channel enabled for %s (poll every %ds)", email_config.delegated_user, email_config.poll_interval_sec)
+        if not email_config.api_key or not email_config.inbox_id:
+            logger.error("EMAIL_ENABLED=true but DEADSIMPLE_API_KEY or DEADSIMPLE_INBOX_ID is unset; skipping email channel")
+        else:
+            email_channel = EmailChannel(in_queue, email_config)
+            channels["email"] = email_channel
+            logger.info("Email channel enabled for inbox %s (poll every %ds)",
+                        email_config.inbox_id, email_config.poll_interval_sec)
 
     # Portal channel (conditional)
     portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
@@ -540,7 +576,6 @@ async def main():
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
             cancel_session=agent.request_cancel,
-            agent=agent, skill_dirs=config.skill_dirs,
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)

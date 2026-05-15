@@ -356,20 +356,13 @@ async def test_history_request_command_triggers_snapshot(portal_server):
 
 
 @pytest.mark.asyncio
-async def test_slash_command_dispatches_to_handler(portal_server, tmp_path):
-    """/help via slash dispatch produces an agent_message back to the portal,
-    not an in_queue entry."""
+async def test_slash_frame_enqueued_as_command_slash(portal_server):
+    """Slash frames from the portal are forwarded onto the in_queue as
+    IncomingMessage with command="slash" and the raw text as content.
+    The channel does not interpret slash — agent_worker dispatches it."""
     in_q: asyncio.Queue = asyncio.Queue()
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-
-    class _Agent:
-        def request_cancel(self, sid):
-            return False
-
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        agent=_Agent(), skill_dirs=[skills_dir],
     )
     task = asyncio.create_task(ch.start())
     try:
@@ -378,12 +371,11 @@ async def test_slash_command_dispatches_to_handler(portal_server, tmp_path):
             "type": "user_message",
             "payload": {"command": "slash", "text": "/help", "session_id": "tab-A"},
         })
-        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
-        msg = json.loads(raw)
-        assert msg["type"] == "agent_message"
-        assert msg["payload"]["session_id"] == "tab-A"
-        assert "Slash commands" in msg["payload"]["content"]
-        assert in_q.empty()
+        msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
+        assert msg.command == "slash"
+        assert msg.content == "/help"
+        assert msg.session_id == "tab-A"
+        assert msg.channel == "portal"
     finally:
         task.cancel()
         try:
@@ -393,30 +385,26 @@ async def test_slash_command_dispatches_to_handler(portal_server, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slash_clear_enqueues_clear_command(portal_server, tmp_path):
+async def test_slash_frame_preserves_arbitrary_text(portal_server):
+    """The channel forwards the raw slash text verbatim — including args."""
     in_q: asyncio.Queue = asyncio.Queue()
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-
-    class _Agent:
-        def request_cancel(self, sid):
-            return False
-
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        agent=_Agent(), skill_dirs=[skills_dir],
     )
     task = asyncio.create_task(ch.start())
     try:
         await portal_server["accept"]()
         await portal_server["send"]({
             "type": "user_message",
-            "payload": {"command": "slash", "text": "/clear", "session_id": "tab-A"},
+            "payload": {
+                "command": "slash", "text": "/foo bar baz",
+                "session_id": "tab-B",
+            },
         })
         msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
-        assert msg.command == "clear"
-        assert msg.session_id == "tab-A"
-        assert msg.channel == "portal"
+        assert msg.command == "slash"
+        assert msg.content == "/foo bar baz"
+        assert msg.session_id == "tab-B"
     finally:
         task.cancel()
         try:
