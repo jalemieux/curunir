@@ -9,6 +9,7 @@ venv/
 
 # Environment
 .env
+.env.*
 client_secret*.json
 
 # Logs
@@ -23,6 +24,9 @@ client_secret*.json
 *.swp
 *.swo
 
+# Claude Code local project files
+.claude/
+
 # Worktrees
 .worktrees/
 tmp/
@@ -32,6 +36,7 @@ secrets/
 
 # Context directory (instance-specific, synced via rsync)
 context/
+context.backup/
 workspace/
 landing_pages
 
