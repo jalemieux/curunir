@@ -16,20 +16,39 @@ This skill is the **orchestrator** — it does not re-implement research, data
 fetching, or fact-checking. It loads the underlying skills, sequences them,
 applies the right outline template, and gates delivery on fact-check.
 
-## Prerequisite skills
+## Skills this memo composes
 
-Always load (in this order):
+The orchestrator loads only **`deep-research`** — enough to frame the
+research phase and brief the sub-agents. The other skills run inside
+sub-agents, which load them themselves:
 
-1. `deep-research` — drives the research phase
-2. `financial-analysis` — drives the financial layer (which itself pulls in
-   `yfinance`, `fred`, `sec-edgar` as needed)
-3. `reddit-research` — community sentiment
-4. `xai-search` — X/Twitter real-time sentiment
-5. `fact-checker` — **never** loaded inline; always invoked via `delegate`
-   from Step 6 with a fresh context window
+- `deep-research` — research phase
+- `financial-analysis` — financial layer; pulls in `yfinance`, `fred`,
+  `sec-edgar` as needed
+- `reddit-research` + `xai-search` — community and X/Twitter sentiment.
+  Sentiment is part of every memo even when the request doesn't mention it.
+- `fact-checker` — never loaded inline; always invoked via `delegate` with
+  a fresh context window (Step 6)
 
-Sentiment is part of every memo — load `reddit-research` and `xai-search`
-even when the request doesn't mention sentiment.
+## Delegation model
+
+`delegate` is **synchronous** — it buys no parallelism and no speedup. Its
+only value is **context isolation**: a sub-agent burns through raw tool
+output (web-fetch bodies, JSON dumps, search hits) in its own context
+window and returns a compact digest, keeping that noise out of yours.
+Decide where to delegate on that basis, not by rote.
+
+The research, financial, and sentiment phases each generate far more raw
+output than the digest you need back — they are the natural things to
+delegate. A trivial lookup (one ticker's `profile`/`multiples`, resolving a
+ticker symbol) is a couple of small `bash` calls — run it inline; a
+sub-agent there saves no context and costs a whole agent loop.
+
+Each sub-agent runs under a hard ~300s timeout. The real judgment call is
+sizing: a single delegate spanning research **and** a 10-ticker financial
+pull **and** sentiment will exceed 300s and lose everything it gathered.
+Keep each delegate to one coherent chunk of work; if one times out, narrow
+the scope rather than retrying it unchanged.
 
 ## Workflow
 
@@ -255,6 +274,12 @@ fact-check timed out, confidence drops.
   "no signal" is itself a finding.
 - **Fact-checking yourself.** Always `delegate`. Your reasoning is anchored
   on the same framing you used to write.
+- **One mega-delegate for the whole memo.** Research + financials +
+  sentiment in a single `delegate` exceeds the 300s budget and loses all of
+  it on timeout. Delegate bulky phases separately — see "Delegation model".
+- **Delegating trivial lookups.** A sub-agent to fetch one ticker's
+  multiples or resolve a symbol saves no context and costs a full agent
+  loop. Inline it.
 - **Inventing a verdict for steelman/strawman requests.** The framing is
   the deliverable; a verdict would defeat the purpose.
 - **Treating Reddit/X opinions as facts.** Sentiment is signal, not a
