@@ -103,6 +103,45 @@ async def test_show_signin_link_requires_csrf(client):
 
 
 @pytest.mark.asyncio
+async def test_show_container_token_renders_token_for_existing_user(client):
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("target@example.com")
+    csrf_token = csrf.issue_csrf(admin_id)
+
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-container-token",
+        data={"csrf": csrf_token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    assert target.container_token in resp.text
+
+
+@pytest.mark.asyncio
+async def test_show_container_token_requires_csrf(client):
+    _, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("target@example.com")
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-container-token",
+        data={"csrf": "wrong"},
+        cookies=cookies,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_show_container_token_unknown_user_404(client):
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    csrf_token = csrf.issue_csrf(admin_id)
+    resp = await client.post(
+        "/admin/users/999999/show-container-token",
+        data={"csrf": csrf_token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_admin_email_compare_case_insensitive(client, monkeypatch):
     from portal.config import settings
     monkeypatch.setattr(settings, "admin_emails", "Admin@Example.Com")
