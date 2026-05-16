@@ -1,7 +1,13 @@
 # tests/test_skills.py
 import logging
 
-from src.skills import build_skill_manifest, load_registry, load_skill, parse_frontmatter
+from src.skills import (
+    build_skill_manifest,
+    load_registry,
+    load_skill,
+    parse_frontmatter,
+    portal_skill_list,
+)
 
 
 class TestParseFrontmatter:
@@ -186,3 +192,75 @@ class TestNestedDiscovery:
         registry = load_registry([tmp_path])
         assert "onboarding" in registry
         assert "profile" in registry
+
+
+def _write_portal_skill(parent, name, description, summary=None, icon=None):
+    """Create skills/<name>/SKILL.md with optional portal_* frontmatter."""
+    d = parent / name
+    d.mkdir()
+    lines = [f"name: {name}", f"description: {description}"]
+    if summary is not None:
+        lines.append(f'portal_summary: "{summary}"')
+    if icon is not None:
+        lines.append(f'portal_icon: "{icon}"')
+    (d / "SKILL.md").write_text(
+        "---\n" + "\n".join(lines) + f"\n---\n# {name}\n"
+    )
+    return d / "SKILL.md"
+
+
+class TestPortalMetadata:
+    def test_portal_fields_parsed_into_skill(self, tmp_path):
+        _write_portal_skill(tmp_path, "memo", "agent desc",
+                            summary="User-facing line", icon="📊")
+        skill = load_registry([tmp_path])["memo"]
+        assert skill.portal_summary == "User-facing line"
+        assert skill.portal_icon == "📊"
+
+    def test_portal_fields_default_none(self, tmp_path):
+        _write_skill(tmp_path, "plain", "agent desc")
+        skill = load_registry([tmp_path])["plain"]
+        assert skill.portal_summary is None
+        assert skill.portal_icon is None
+
+
+class TestPortalSkillList:
+    def test_only_skills_with_summary_appear(self, tmp_path):
+        _write_portal_skill(tmp_path, "shown", "d", summary="visible")
+        _write_skill(tmp_path, "hidden", "d")
+        result = portal_skill_list([tmp_path])
+        names = [s["name"] for s in result]
+        assert names == ["shown"]
+
+    def test_blank_summary_excluded(self, tmp_path):
+        _write_portal_skill(tmp_path, "blank", "d", summary="")
+        assert portal_skill_list([tmp_path]) == []
+
+    def test_disabled_skill_excluded(self, tmp_path):
+        d = tmp_path / "off"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            '---\nname: off\ndescription: d\n'
+            'portal_summary: "x"\ndisabled: true\n---\n'
+        )
+        assert portal_skill_list([tmp_path]) == []
+
+    def test_display_name_derived_from_name(self, tmp_path):
+        _write_portal_skill(tmp_path, "investment-memo", "d", summary="s")
+        assert portal_skill_list([tmp_path])[0]["display_name"] == "Investment memo"
+
+    def test_icon_defaults_to_lightning(self, tmp_path):
+        _write_portal_skill(tmp_path, "noicon", "d", summary="s")
+        assert portal_skill_list([tmp_path])[0]["icon"] == "⚡"
+
+    def test_entries_sorted_by_name(self, tmp_path):
+        _write_portal_skill(tmp_path, "zeta", "d", summary="s")
+        _write_portal_skill(tmp_path, "alpha", "d", summary="s")
+        assert [s["name"] for s in portal_skill_list([tmp_path])] == ["alpha", "zeta"]
+
+    def test_entry_shape(self, tmp_path):
+        _write_portal_skill(tmp_path, "memo", "d", summary="A memo", icon="📊")
+        assert portal_skill_list([tmp_path]) == [
+            {"name": "memo", "display_name": "Memo",
+             "summary": "A memo", "icon": "📊"}
+        ]
