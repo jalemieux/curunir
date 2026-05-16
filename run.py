@@ -22,6 +22,7 @@ from src.config import AgentConfig, EmailChannelConfig
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
+from src.skills import portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
 
@@ -575,6 +576,7 @@ async def main():
             url=portal_url,
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
+            skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
             cancel_session=agent.request_cancel,
         )
         channels["portal"] = portal_channel
