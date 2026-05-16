@@ -13,6 +13,8 @@ class Skill:
     name: str
     description: str
     path: Path
+    portal_summary: str | None = None
+    portal_icon: str | None = None
 
 
 def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
@@ -47,6 +49,8 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
                 name=name,
                 description=fm["description"],
                 path=skill_file,
+                portal_summary=fm.get("portal_summary") or None,
+                portal_icon=fm.get("portal_icon") or None,
             )
     return registry
 
@@ -68,6 +72,33 @@ def build_skill_manifest(skill_dirs: list[Path]) -> str:
     for skill in sorted(registry.values(), key=lambda s: s.name):
         lines.append(f"| {skill.name} | {skill.description} |")
     return "\n".join(lines)
+
+
+def _display_name(name: str) -> str:
+    """Derive a user-facing label: 'investment-memo' -> 'Investment memo'."""
+    words = name.replace("-", " ").replace("_", " ")
+    return words[:1].upper() + words[1:]
+
+
+def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
+    """User-facing skills for the portal picker.
+
+    Returns only skills that opted in with a non-empty `portal_summary`,
+    sorted by name. Each entry: {name, display_name, summary, icon}.
+    """
+    registry = load_registry(skill_dirs)
+    out = []
+    for skill in registry.values():
+        if not skill.portal_summary:
+            continue
+        out.append({
+            "name": skill.name,
+            "display_name": _display_name(skill.name),
+            "summary": skill.portal_summary,
+            "icon": skill.portal_icon or "⚡",
+        })
+    out.sort(key=lambda s: s["name"])
+    return out
 
 
 def load_skill(name: str, skill_dirs: list[Path]) -> str:
