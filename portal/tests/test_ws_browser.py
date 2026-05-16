@@ -96,6 +96,30 @@ def test_user_message_with_no_agent_replies_offline(sync_client):
         assert reply["final"] is True
 
 
+def test_history_request_with_no_agent_does_not_reply_offline(sync_client):
+    """A control frame (history_request) that fails to forward must NOT
+    produce an 'Agent offline.' chat bubble — otherwise it lingers in the
+    transcript after the agent reconnects."""
+    user = _create_user(sync_client, "ctrl@example.com")
+    cookie = auth.sign_session(user.id)
+    with sync_client.websocket_connect(
+        "/ws/browser",
+        cookies={auth.SESSION_COOKIE: cookie},
+        headers=GOOD_ORIGIN,
+    ) as ws:
+        _status = ws.receive_text()
+        ws.send_text(json.dumps({
+            "content": "",
+            "command": "history_request",
+            "session_id": "tab-1",
+        }))
+        # Follow with a real message; its reply is the next frame, proving
+        # no bubble was emitted for the history_request.
+        ws.send_text(json.dumps({"content": "hi", "session_id": "tab-1"}))
+        reply = json.loads(ws.receive_text())
+        assert reply["content"] == "Agent offline."
+
+
 def test_browser_frame_binds_session_on_routing_table(sync_client):
     """First inbound frame with session_id should bind the ws → session
     so that later agent traffic for that session lands on this socket."""

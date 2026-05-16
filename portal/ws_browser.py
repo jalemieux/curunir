@@ -90,12 +90,20 @@ async def ws_browser(ws: WebSocket) -> None:
             wrapped = json.dumps({"type": "user_message", "payload": payload})
             ok = await routing.forward_to_agent(user.id, wrapped)
             if not ok:
-                await ws.send_text(json.dumps({
-                    "content": "Agent offline.",
-                    "final": True,
-                    "delta": False,
-                    "session_id": session_id,
-                }))
+                # Only surface a chat-bubble error for user-visible message
+                # frames. Control frames (history_request, skills_request,
+                # clear, interrupt) are bootstrap/housekeeping traffic — a
+                # failed one must not leave a stale "Agent offline." bubble
+                # in the transcript once the agent reconnects. The browser's
+                # offline modal already communicates the disconnected state.
+                command = payload.get("command")
+                if command in (None, "slash"):
+                    await ws.send_text(json.dumps({
+                        "content": "Agent offline.",
+                        "final": True,
+                        "delta": False,
+                        "session_id": session_id,
+                    }))
     except WebSocketDisconnect:
         pass
     finally:
