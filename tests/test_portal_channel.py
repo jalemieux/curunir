@@ -533,3 +533,60 @@ async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server
         reply_address={}, final=True,
     ))
     assert len(ch._outbound) == 1
+
+
+@pytest.mark.asyncio
+async def test_skills_request_invokes_provider_and_sends_snapshot(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    fake_skills = [
+        {"name": "memo", "display_name": "Memo",
+         "summary": "A memo", "icon": "📊"},
+    ]
+
+    def provider() -> list[dict]:
+        return fake_skills
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        skills_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({"type": "skills_request"})
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "skills_snapshot"
+        assert msg["skills"] == fake_skills
+        assert msg["session_id"] == PORTAL_SESSION_ID
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_skills_request_command_triggers_snapshot(portal_server):
+    """Browser-driven: a user_message with command=skills_request and a
+    session_id triggers a skills_snapshot tagged with that session."""
+    in_q: asyncio.Queue = asyncio.Queue()
+
+    def provider() -> list[dict]:
+        return []
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        skills_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "skills_request", "session_id": "tab-S"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "skills_snapshot"
+        assert msg["session_id"] == "tab-S"
+        assert msg["skills"] == []
+    finally:
+        task.cancel()

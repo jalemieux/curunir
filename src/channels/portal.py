@@ -61,6 +61,7 @@ class PortalChannel:
         url: str,
         token: str,
         history_provider: "callable[[str], list[dict]] | None" = None,
+        skills_provider: "callable[[], list[dict]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
     ):
@@ -68,6 +69,7 @@ class PortalChannel:
         self.url = url
         self.token = token
         self.history_provider = history_provider or (lambda _sid: [])
+        self.skills_provider = skills_provider or (lambda: [])
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -137,6 +139,8 @@ class PortalChannel:
                 await self._handle_user_message(msg.get("payload") or {})
             elif mtype == "history_request":
                 await self._handle_history_request(msg.get("payload") or {})
+            elif mtype == "skills_request":
+                await self._handle_skills_request(msg.get("payload") or {})
             else:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
@@ -151,6 +155,10 @@ class PortalChannel:
             return
         if payload.get("command") == "history_request":
             await self._handle_history_request({"session_id": session_id})
+            return
+
+        if payload.get("command") == "skills_request":
+            await self._handle_skills_request({"session_id": session_id})
             return
 
         if payload.get("command") == "slash":
@@ -202,6 +210,20 @@ class PortalChannel:
             }))
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during history snapshot send")
+
+    async def _handle_skills_request(self, payload: dict) -> None:
+        if self._connection is None:
+            return
+        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        skills = self.skills_provider()
+        try:
+            await self._connection.send(json.dumps({
+                "type": "skills_snapshot",
+                "session_id": session_id,
+                "skills": skills,
+            }))
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("Portal closed during skills snapshot send")
 
     async def _flush_outbound(self, ws) -> None:
         """Replay buffered frames over a freshly-opened socket, in order.
