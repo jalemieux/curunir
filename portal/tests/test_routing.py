@@ -152,3 +152,21 @@ async def test_unregister_agent_only_clears_if_same_socket():
     await rt.register_agent(2, b)  # kicks a
     await rt.unregister_agent(2, a)  # stale unregister of a
     assert rt.agent_for(2) is b
+
+
+@pytest.mark.asyncio
+async def test_online_agent_user_ids_reports_connected_agents():
+    rt = RoutingTable()
+    await rt.register_agent(1, FakeWS())
+    await rt.register_agent(2, FakeWS())
+    await rt.add_browser(3, FakeWS())  # browser only, no agent
+    assert rt.online_agent_user_ids() == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_online_agent_user_ids_excludes_disconnected_agent():
+    rt = RoutingTable()
+    agent = FakeWS()
+    await rt.register_agent(5, agent)
+    await rt.unregister_agent(5, agent)
+    assert rt.online_agent_user_ids() == set()
