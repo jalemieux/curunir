@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from portal import auth, csrf, db, email_send
 from portal.config import settings
 from portal.db import User
+from portal.routing import routing
 
 
 logger = logging.getLogger(__name__)
@@ -33,19 +34,24 @@ def _signin_link(token: str) -> str:
     return f"{settings.portal_base_url.rstrip('/')}/sign-in?token={token}"
 
 
+async def _render_admin(request: Request, user: User, **extra):
+    """Render admin.html with the shared context. `extra` overrides defaults
+    (e.g. the new_* fields shown after a create/show action)."""
+    ctx = {
+        "users": await db.list_users(),
+        "csrf_token": csrf.issue_csrf(user.id),
+        "online_ids": routing.online_agent_user_ids(),
+        "new_container_token": None,
+        "new_signin_link": None,
+        "new_user_email": None,
+    }
+    ctx.update(extra)
+    return templates.TemplateResponse(request, "admin.html", ctx)
+
+
 @router.get("", response_class=HTMLResponse)
 async def admin_index(request: Request, user: User = Depends(admin_user)):
-    users = await db.list_users()
-    return templates.TemplateResponse(
-        request, "admin.html",
-        {
-            "users": users,
-            "csrf_token": csrf.issue_csrf(user.id),
-            "new_container_token": None,
-            "new_signin_link": None,
-            "new_user_email": None,
-        },
-    )
+    return await _render_admin(request, user)
 
 
 @router.post("/users", response_class=HTMLResponse)
@@ -59,16 +65,11 @@ async def admin_create_user(
     new_user = await db.create_user(email)
     signin_link = _signin_link(new_user.sign_in_token)
     await email_send.send_signin_email(new_user.email, signin_link)
-    users = await db.list_users()
-    return templates.TemplateResponse(
-        request, "admin.html",
-        {
-            "users": users,
-            "csrf_token": csrf.issue_csrf(user.id),
-            "new_container_token": new_user.container_token,
-            "new_signin_link": signin_link,
-            "new_user_email": new_user.email,
-        },
+    return await _render_admin(
+        request, user,
+        new_container_token=new_user.container_token,
+        new_signin_link=signin_link,
+        new_user_email=new_user.email,
     )
 
 
@@ -97,16 +98,10 @@ async def admin_show_signin_link(
     target = await db.get_user_by_id(user_id)
     if target is None:
         raise HTTPException(404)
-    users = await db.list_users()
-    return templates.TemplateResponse(
-        request, "admin.html",
-        {
-            "users": users,
-            "csrf_token": csrf.issue_csrf(user.id),
-            "new_container_token": None,
-            "new_signin_link": _signin_link(target.sign_in_token),
-            "new_user_email": target.email,
-        },
+    return await _render_admin(
+        request, user,
+        new_signin_link=_signin_link(target.sign_in_token),
+        new_user_email=target.email,
     )
 
 
@@ -121,16 +116,10 @@ async def admin_show_container_token(
     target = await db.get_user_by_id(user_id)
     if target is None:
         raise HTTPException(404)
-    users = await db.list_users()
-    return templates.TemplateResponse(
-        request, "admin.html",
-        {
-            "users": users,
-            "csrf_token": csrf.issue_csrf(user.id),
-            "new_container_token": target.container_token,
-            "new_signin_link": None,
-            "new_user_email": target.email,
-        },
+    return await _render_admin(
+        request, user,
+        new_container_token=target.container_token,
+        new_user_email=target.email,
     )
 
 

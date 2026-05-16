@@ -106,6 +106,13 @@ class RoutingTable:
         route = self._routes.get(user_id)
         return route.agent_ws if route else None
 
+    def online_agent_user_ids(self) -> set[int]:
+        """User ids that currently have a connected agent socket."""
+        return {
+            uid for uid, route in self._routes.items()
+            if route.agent_ws is not None
+        }
+
     def browsers_for(self, user_id: int) -> list[Sender]:
         """All browser sockets for the user (regardless of session binding)."""
         route = self._routes.get(user_id)
