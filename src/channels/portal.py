@@ -6,6 +6,12 @@ messages and history snapshots back. Reconnects with exponential
 backoff on retryable failures. Auth failure (4003) and replaced
 (4002) are terminal.
 
+Outbound agent_message frames sent while disconnected (or that fail
+mid-send) are buffered and replayed in order on the next successful
+connect, so a brief socket blip doesn't silently swallow a reply.
+History snapshots and streaming deltas are not buffered — both are
+regenerable.
+
 Enabled when both CURUNIR_PORTAL_URL and CURUNIR_PORTAL_TOKEN are set.
 """
 
@@ -14,6 +20,7 @@ import json
 import logging
 import os
 import random
+from collections import deque
 from typing import Any
 
 import websockets
@@ -34,6 +41,11 @@ PORTAL_SESSION_ID = "portal"  # Legacy fallback when the portal omits session_id
 _BACKOFF_INITIAL = 1.0
 _BACKOFF_MAX = 30.0
 _TERMINAL_CODES = {4002, 4003}
+
+# How many outbound frames to hold while disconnected. A full agent reply
+# (text + attachments) is one frame, so this is generous; the oldest frames
+# are dropped first if it overflows.
+_OUTBOUND_BUFFER_MAX = 64
 
 
 def _backoff_with_jitter(attempt: int) -> float:
@@ -62,6 +74,9 @@ class PortalChannel:
         self.cancel_session = cancel_session
         self._connection: Any = None
         self._terminate = False
+        # Serialized agent_message frames that couldn't be sent because the
+        # socket was down; flushed (in order) on the next successful connect.
+        self._outbound: deque[str] = deque(maxlen=_OUTBOUND_BUFFER_MAX)
 
     async def start(self) -> None:
         attempt = 0
@@ -73,8 +88,13 @@ class PortalChannel:
                     max_size=32 * 1024 * 1024,
                 ) as ws:
                     logger.info("PortalChannel connected to %s", self.url)
-                    self._connection = ws
                     attempt = 0
+                    # Drain anything buffered while disconnected before we
+                    # publish the connection — keeps _connection None so any
+                    # concurrent send() appends behind the backlog rather than
+                    # racing ahead of it.
+                    await self._flush_outbound(ws)
+                    self._connection = ws
                     await self._read_loop(ws)
             except websockets.exceptions.InvalidStatus as e:
                 code = getattr(e.response, "status_code", None)
@@ -183,10 +203,24 @@ class PortalChannel:
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during history snapshot send")
 
+    async def _flush_outbound(self, ws) -> None:
+        """Replay buffered frames over a freshly-opened socket, in order.
+
+        Pops each frame only after it's sent, so a mid-flush disconnect
+        leaves the remainder buffered for the next reconnect. Concurrent
+        send() calls (which see _connection still None) append behind us.
+        """
+        if self._outbound:
+            logger.info("PortalChannel: flushing %d buffered outbound frame(s)",
+                        len(self._outbound))
+        while self._outbound:
+            await ws.send(self._outbound[0])
+            self._outbound.popleft()
+
     async def send(self, msg: OutgoingMessage) -> None:
-        if self._connection is None:
-            logger.info("PortalChannel: no portal connection; dropping outbound")
-            return
+        # Enrich first so a buffered frame is fully self-contained (file
+        # content inlined, paths normalized) — don't want to re-read disk
+        # on flush, the file may be gone by then.
         if msg.attachments:
             _enrich_attachments(msg.attachments, os.getcwd())
 
@@ -203,8 +237,24 @@ class PortalChannel:
                 "stats": msg.stats,
             },
         }
+        frame = json.dumps(wrapped)
+
+        if self._connection is None:
+            if msg.delta:
+                # Streaming deltas are ephemeral UI updates; the final
+                # message carries the full content, so drop them silently.
+                return
+            self._outbound.append(frame)
+            logger.info("PortalChannel: no connection; buffered outbound "
+                        "(%d queued)", len(self._outbound))
+            return
         try:
-            await self._connection.send(json.dumps(wrapped))
+            await self._connection.send(frame)
         except websockets.exceptions.ConnectionClosed:
-            logger.warning("Portal connection closed while sending; dropped")
             self._connection = None
+            if msg.delta:
+                logger.warning("Portal closed while sending delta; dropped")
+                return
+            self._outbound.append(frame)
+            logger.warning("Portal closed while sending; buffered outbound "
+                           "(%d queued)", len(self._outbound))
