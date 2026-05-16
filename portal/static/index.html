@@ -310,6 +310,33 @@ body.dragging .drop-hint { display: flex; }
   40% { opacity: 1; transform: translateY(-2px); }
 }
 @media (max-width: 480px) { .composer-hint { display: none; } }
+
+/* === Offline modal === */
+/* Shown whenever the agent is not online (offline or reconnecting). Grays
+   out and blocks the whole UI until the agent connects. */
+#offline-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+}
+#offline-overlay[hidden] { display: none; }
+#offline-card {
+  background: var(--bg);
+  border: 1px solid var(--border-strong); border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.3);
+  padding: 28px 32px; max-width: 320px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.offline-spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: offline-spin 0.8s linear infinite;
+}
+@keyframes offline-spin { to { transform: rotate(360deg); } }
+#offline-title { font-weight: 700; font-size: 15px; }
+#offline-sub { color: var(--hint); font-size: 13px; line-height: 1.5; }
 /* === Skills picker === */
 #skills-btn {
   height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
@@ -408,7 +435,7 @@ body.dragging .drop-hint { display: flex; }
          accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,text/plain,text/markdown,text/csv,application/json,.md,.txt,.csv,.json,.yaml,.yml,.log,.xml,.toml,.ini">
   <div id="staged" class="staged-list"></div>
   <div id="composer">
-    <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
+    <textarea id="input" rows="1" placeholder="What would you like to do?"></textarea>
     <div class="composer-row">
       <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
       <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
@@ -418,6 +445,16 @@ body.dragging .drop-hint { display: flex; }
     <div class="drop-hint">Drop files to attach</div>
   </div>
 </footer>
+
+<div id="offline-overlay">
+  <div id="offline-card" role="alertdialog" aria-live="polite"
+       aria-label="Agent offline">
+    <div class="offline-spinner"></div>
+    <div id="offline-title">Connecting to your agent…</div>
+    <div id="offline-sub">Your agent is offline. This screen will clear
+      automatically once it reconnects.</div>
+  </div>
+</div>
 
 <div id="skills-overlay" hidden>
   <div id="skills-panel" role="dialog" aria-label="Skills" aria-modal="true">
@@ -472,6 +509,9 @@ const skillsListEl = document.getElementById("skills-list");
 const skillsConfigEl = document.getElementById("skills-config");
 const hljsLight = document.getElementById("hljs-light");
 const hljsDark = document.getElementById("hljs-dark");
+const offlineOverlay = document.getElementById("offline-overlay");
+const offlineTitle = document.getElementById("offline-title");
+const offlineSub = document.getElementById("offline-sub");
 
 // === State ===
 // One session_id per browser tab. Persisted in sessionStorage so a tab
@@ -526,6 +566,25 @@ function setStatus(state) {
     inProgressMsg = null;
   }
   updateComposerMode();
+  updateOfflineModal(state);
+}
+
+// === Offline modal ===
+// The agent is a separate process that dials the portal; it may connect a
+// moment after the browser does. Until it's online, gray out and block the
+// whole UI so the user can't type into a void.
+function updateOfflineModal(state) {
+  offlineOverlay.hidden = state === "online";
+  if (state === "reconnecting") {
+    offlineTitle.textContent = "Connecting to your agent…";
+    offlineSub.textContent =
+      "This screen will clear automatically once it connects.";
+  } else if (state === "offline") {
+    offlineTitle.textContent = "Agent offline";
+    offlineSub.textContent =
+      "Your agent isn't connected right now. This screen will clear "
+      + "automatically once it reconnects.";
+  }
 }
 
 // === Composer mode (send / stop) ===
@@ -841,11 +900,9 @@ function closeSkills() {
 // send the same {command:"slash"} frame a typed slash would produce.
 function launchSkill(slashText) {
   closeSkills();
-  if (!agentOnline) {
-    const el = appendMessage("assistant");
-    el.querySelector(".body").innerHTML = "<em>Agent is offline.</em>";
-    return;
-  }
+  // Offline is handled by the blocking modal — no-op rather than leaving a
+  // stale bubble that lingers after the agent reconnects.
+  if (!agentOnline) return;
   const el = appendMessage("user");
   setUserBody(el.querySelector(".body"), slashText);
   ws.send(JSON.stringify({
@@ -871,11 +928,9 @@ document.addEventListener("keydown", (e) => {
 function send() {
   const content = inputEl.value.trim();
   if (!content && staged.length === 0) return;
-  if (!agentOnline) {
-    const el = appendMessage("assistant");
-    el.querySelector(".body").innerHTML = "<em>Agent is offline.</em>";
-    return;
-  }
+  // Offline is handled by the blocking modal — no-op rather than leaving a
+  // stale bubble that lingers after the agent reconnects.
+  if (!agentOnline) return;
 
   // Slash commands (no attachments) get routed through the server-side
   // slash dispatcher: utility ops like /help and /skills, plus
