@@ -18,11 +18,13 @@ When the user asks "who am I?", "what do you know about me?", or anything
 that requires knowing the owner — **always** read these in order before
 responding:
 
-1. `profile.md` — owner identity facts (name, pronouns, family, role, contact)
-2. `preferences.md` — working style, tool preferences, communication preferences
-3. `projects.md` — current projects, status, architecture, relationships between them
-4. `tasks.md` — open items / unresolved questions the user is working through
-5. `people/*.md` — colleagues, collaborators, stakeholders the user works with
+1. `profile.md`
+2. `preferences.md`
+3. `projects.md`
+4. `tasks.md`
+5. `people/*.md`
+
+See the Taxonomy table below for what each file holds.
 
 For questions about past conversations ("what did we discuss about X?"), go through
 the indexes instead: `summaries/topics/<slug>.md` (if X matches a memory file) or
