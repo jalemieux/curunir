@@ -160,3 +160,30 @@ def test_history_snapshot_routes_by_session_id(sync_client, monkeypatch):
 
     targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
     assert any(sid == "tab-Z" and p == snapshot for sid, p in targets)
+
+
+def test_skills_snapshot_routes_by_session_id(sync_client, monkeypatch):
+    user = _create_user(sync_client, "skillsnap@example.com")
+    captured = []
+
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
+        return 1
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        snapshot = {
+            "type": "skills_snapshot",
+            "session_id": "tab-K",
+            "skills": [{"name": "memo", "display_name": "Memo",
+                        "summary": "A memo", "icon": "📊"}],
+        }
+        ws.send_text(json.dumps(snapshot))
+        ws.close()
+
+    targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
+    assert any(sid == "tab-K" and p == snapshot for sid, p in targets)
