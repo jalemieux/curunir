@@ -11,12 +11,12 @@ tools: attach
 Produce a structured investment memo combining **deep research**, **financial
 analysis**, **social sentiment**, and an **independent fact-check** under a
 single directional view. The output is a PDF attachment with a memo-style
-header (Date, Prepared for, Prepared by, Thesis, Status) and a section
-outline that adapts to the request's shape.
+header (Date, Prepared for, Prepared by, Thesis, Status) and a body whose
+structure follows the analysis, not a fixed template.
 
 This skill is the **orchestrator** — it does not re-implement research, data
 fetching, or fact-checking. It loads the underlying skills, sequences them,
-applies the right outline template, and gates delivery on fact-check.
+frames the analytical work, and gates delivery on fact-check.
 
 ## Skills this memo composes
 
@@ -54,13 +54,22 @@ the scope rather than retrying it unchanged.
 
 ## Workflow
 
-### Step 1 — Frame the question and detect shape
+### Step 1 — Frame the question
 
 Before fetching anything, write down (mentally or in scratchpad):
 
 - **The instrument(s)** — ticker, ETF, commodity proxy, crypto symbol,
   private name. If private/non-public, note that the financial layer will
   be thin and the memo will lean harder on the research/sentiment layers.
+- **Define the universe — and own the definition.** When the request
+  names a category ("gold miners", "biotech longs"), every name you
+  analyze or rank must genuinely belong to that category. A royalty/
+  streaming company is not a miner; an ETF is not a single stock; a
+  mid-tier is not a top-10 producer. If you filter the set for practical
+  reasons — tradability, ADR availability, liquidity — that is a judgment
+  call you must **surface, not bury**: state the filter explicitly in the
+  memo, and still name the true category members it excluded, one line
+  each. Never silently swap a real member out for a more convenient name.
 - **What the request is asking for** — argue a thesis? decide a position?
   steelman/strawman? rank a sector?
 - **Verdict mode** — does the request *imply a decision*? Examples:
@@ -68,17 +77,16 @@ Before fetching anything, write down (mentally or in scratchpad):
     "buy/avoid/pass", "kill this trade", "pitch X".
   - No verdict: "steelman the bear case", "strawman the bull thesis",
     "lay out the cases", "thesis on X" (open framing).
-- **Shape** — pick exactly one. Each shape has an outline template in
-  `references/`. Read the matching template before drafting (Step 5).
 
-| Shape | When | Template |
-|---|---|---|
-| **Single-name** | One instrument is the subject ("thesis on NVDA", "is LLY a buy") | `references/shape-single-name.md` |
-| **Sector / peer ranking** | Multiple instruments compared and ranked ("top 10 gold miners", "best biotech longs") | `references/shape-sector-peer.md` |
-| **Catalyst** | One event drives the memo, may touch multiple tickers ("retatrutide blockbuster", "who wins from rate cuts") | `references/shape-catalyst.md` |
-
-If the request is ambiguous about shape, ask one clarifying question. Don't
-guess between shapes — they produce visibly different memos.
+**Analytical lens.** Most requests fall into one of three shapes — a
+**single name** (one instrument is the subject), a **sector ranking**
+(multiple names compared and ranked), or a **catalyst** (one event drives
+the memo across one or more names). This is a lens, not a template: it
+tells you which moves to emphasize — a ranking leans on per-name
+comparison, a catalyst on the event and its winners and losers — but the
+memo's sections still emerge from the analysis (Step 5), never from a
+fixed skeleton. If the request is genuinely ambiguous about what it
+wants, ask one clarifying question.
 
 ### Step 2 — Research phase (deep-research)
 
@@ -142,9 +150,9 @@ This becomes the **Sentiment & Positioning** section of the memo.
 
 ### Step 5 — Assemble the draft
 
-Open `references/shape-{single-name,sector-peer,catalyst}.md` for the
-section outline. Every memo, regardless of shape, opens with the **shared
-header**:
+The memo has two parts: a fixed **shared header** (below) and a body whose
+structure **emerges from the analysis** — there is no section skeleton to
+fill in. Every memo, regardless of shape, opens with the shared header:
 
 ```markdown
 # {Long-form descriptive title — magazine-cover style, includes ticker(s)}
@@ -179,8 +187,30 @@ missing, what has to be true for the thesis to play out, what would invalidate
 it. Cite load-bearing facts inline with URLs.}
 ```
 
-After the shared header, the body follows the shape's outline. Write the
-markdown to `workspace/memos/{ticker-or-slug}-{YYYY-MM-DD}.md`.
+After the shared header, write the body. It has no prescribed section
+outline — structure it however the analysis demands — but it must cover
+every one of these analytical moves:
+
+- **The setup** — the business, instrument, or event, and why it matters now.
+- **The bull case** — the strongest evidence for the directional view.
+- **The bear case** — what would invalidate the thesis.
+- **What the market is missing** — the non-consensus angle, if any.
+- **The load-bearing numbers** — valuation, peers, catalyst dates, each
+  with a source and an as-of date.
+- **Per-name coverage** (ranking shape) — for *every* ranked name, cover
+  its **major projects, pipeline, and catalysts**. A multi-billion-dollar
+  asset must not go unmentioned because a name got a thin paragraph.
+- **The verdict** — only if verdict-mode is on (see Verdict logic).
+
+**Comparison tables.** A ranking usually benefits from a comparison
+table — but build it *after* you have chosen the names. The table
+displays the names you selected; it does not select them. If a name
+lacks a metric (state-owned, foreign-listed, no public multiples), leave
+the cell blank or mark it n/a — never drop a real category member
+because a column would be empty. Keep any table to roughly five or six
+columns so it fits a typeset page (see Step 7).
+
+Write the markdown to `workspace/memos/{ticker-or-slug}-{YYYY-MM-DD}.md`.
 
 **Honesty rules** (lifted from `financial-analysis` — non-negotiable):
 
@@ -197,6 +227,12 @@ markdown to `workspace/memos/{ticker-or-slug}-{YYYY-MM-DD}.md`.
 After the markdown draft is complete, before rendering the PDF, delegate
 the fact-check to a fresh sub-agent. You cannot fact-check yourself — your
 context is anchored on the same sources you used to write.
+
+**The fact-check verifies stated claims — not omissions or category
+errors.** It will catch a wrong number; it will not catch a missing
+asset, a name that doesn't belong in the category, or a silently
+narrowed universe. Completeness and universe-integrity are *your* job
+(Steps 1 and 5) — do not rely on this pass to save them.
 
 ```python
 delegate(task="""
@@ -235,15 +271,21 @@ complete.
 
 ### Step 7 — Deliver
 
-Convert the fact-checked markdown to PDF:
+Convert the fact-checked markdown to PDF with plain pandoc — the same
+LaTeX-via-pandoc path `deep-research` uses, which produces a cleanly
+typeset document:
 
 ```bash
-pandoc workspace/memos/{slug}-{date}.md \
-  -o workspace/memos/{slug}-{date}.pdf
+pandoc workspace/memos/{slug}-{date}.md -o workspace/memos/{slug}-{date}.pdf
 ```
 
+Do **not** render via HTML, headless Chromium, weasyprint, or a CSS
+stylesheet — that route produces a cheap-looking web-page printout
+instead of a typeset memo. If a comparison table is too wide to fit the
+page, the fix is a narrower table (Step 5), not a different renderer.
+
 Attach the PDF: `attach(path="workspace/memos/{slug}-{date}.pdf")`. If
-pandoc fails, attach the `.md` as fallback. Never convert to HTML.
+pandoc fails, attach the `.md` as fallback.
 
 In the text reply, post the **Executive Summary** verbatim plus one line on
 whether the fact-check found material corrections. The full memo is the
@@ -269,9 +311,20 @@ fact-check timed out, confidence drops.
 
 ## Common mistakes
 
-- **Skipping shape detection.** Single-name and sector outlines are visibly
-  different; squeezing a sector ranking into a single-name skeleton produces
-  a shapeless memo. Read the template before drafting.
+- **Silently redefining the universe.** Swapping the category the user
+  named ("miners") for a more convenient set ("Western-tradable names")
+  without disclosing it. State every filter; list the true members you
+  dropped.
+- **Mixing instrument categories in one ranking.** A royalty/streaming
+  company in a "miners" list, an ETF among single stocks. The ranked set
+  must match the named category.
+- **Missing a ranked name's major assets.** Every name in a ranking gets
+  its major projects, pipeline, and catalysts covered — a thin paragraph
+  is no excuse to omit a multi-billion-dollar asset.
+- **Letting a table's columns decide who's eligible.** Build the table
+  after choosing the names; blank cells are fine, dropped names are not.
+- **Rendering the PDF via HTML/Chromium/CSS.** Use plain pandoc (LaTeX) —
+  the HTML route looks cheap. Narrow a wide table instead.
 - **Skipping sentiment because "the name is boring".** Always include —
   "no signal" is itself a finding.
 - **Fact-checking yourself.** Always `delegate`. Your reasoning is anchored
