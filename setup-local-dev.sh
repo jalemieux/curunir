@@ -40,6 +40,26 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *deps])
 PY
 echo "    deps installed"
 
+echo "==> PDF toolchain (report attachments)"
+# deep-research / investment-memo render markdown reports to PDF via pandoc.
+# pandoc's default engine is pdflatex; the Docker image ships texlive for it.
+# Match that locally, or PDF attachments silently fall back to .md.
+if command -v pandoc >/dev/null 2>&1 && command -v pdflatex >/dev/null 2>&1; then
+  echo "    pandoc + pdflatex present"
+elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  command -v pandoc >/dev/null 2>&1 \
+    || brew install pandoc \
+    || echo "    warning: 'brew install pandoc' failed — install it manually"
+  command -v pdflatex >/dev/null 2>&1 \
+    || brew install --cask basictex \
+    || echo "    warning: 'brew install --cask basictex' failed (needs sudo) — install it manually"
+  echo "    done — basictex puts pdflatex in /Library/TeX/texbin; open a new shell to pick it up"
+else
+  echo "    skipped — install pandoc + a LaTeX engine manually:"
+  echo "      Debian/Ubuntu: apt-get install pandoc texlive-latex-recommended lmodern"
+  echo "      macOS:         brew install pandoc && brew install --cask basictex"
+fi
+
 echo "==> portal/.env"
 if [ -f portal/.env ]; then
   echo "    exists — leaving as-is"
