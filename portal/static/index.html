@@ -198,9 +198,33 @@ main {
   background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: 4px;
   padding: 3px 8px; font-size: 11px; color: var(--accent);
 }
-.attachment.downloadable { cursor: pointer; }
-.attachment.downloadable:hover { color: var(--hover-fg); border-color: var(--accent); }
-.attachments { display: flex; flex-wrap: wrap; gap: 4px; }
+.attachment-card {
+  display: inline-flex; align-items: center; gap: 11px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 10px 13px;
+  min-width: 290px; max-width: 380px;
+  transition: border-color .12s, background .12s;
+}
+.attachment-card.downloadable { cursor: pointer; }
+.attachment-card.downloadable:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.attachment-card .badge {
+  width: 34px; height: 34px; border-radius: 7px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.attachment-card .meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.attachment-card .fname {
+  font-size: 13px; font-weight: 600; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.attachment-card .fsub { font-size: 11px; color: var(--hint); margin-top: 1px; }
+.attachment-card .dl { color: var(--hint); flex: none; }
+.attachment-card.downloadable:hover .dl { color: var(--accent); }
+.attachments { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .msg.user .body .attachments { margin-bottom: 6px; }
 .msg.assistant .attachments { margin-top: 6px; }
 
@@ -658,20 +682,44 @@ function renderAgentChunk(m) {
   scrollToBottom();
 }
 
+// Feather-style line icons for the attachment card (no emoji).
+const DOC_ICON =
+  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" ' +
+  'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 ' +
+  '2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const DL_ICON =
+  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" ' +
+  'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>' +
+  '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" ' +
+  'y2="3"/></svg>';
+
 function renderAttachments(parent, atts) {
   if (!atts || !atts.length) return;
   const wrap = document.createElement("div");
   wrap.className = "attachments";
   for (const a of atts) {
-    const chip = document.createElement("span");
-    chip.className = "attachment";
-    chip.textContent = `📄 ${a.filename || a.path || "file"}`;
-    if (typeof a.data === "string") {
-      chip.classList.add("downloadable");
-      chip.title = "Download";
-      chip.onclick = () => downloadAttachment(a);
+    const name = a.filename || a.path || "file";
+    const ext = name.includes(".") ? name.split(".").pop().toUpperCase() : "";
+    const downloadable = typeof a.data === "string";
+    const card = document.createElement("span");
+    card.className = "attachment-card";
+    card.innerHTML =
+      '<span class="badge">' + DOC_ICON + '</span>' +
+      '<span class="meta"><span class="fname"></span>' +
+      '<span class="fsub"></span></span>' +
+      (downloadable ? '<span class="dl">' + DL_ICON + '</span>' : '');
+    card.querySelector(".fname").textContent = name;
+    card.querySelector(".fsub").textContent = downloadable
+      ? (ext ? ext + " · click to download" : "Click to download")
+      : (ext ? ext + " file" : "Attachment");
+    if (downloadable) {
+      card.classList.add("downloadable");
+      card.title = "Download";
+      card.onclick = () => downloadAttachment(a);
     }
-    wrap.appendChild(chip);
+    wrap.appendChild(card);
   }
   // User attachments live inside the bubble (above the text) so they read as
   // part of the message, not orphaned beneath it. Assistant artifacts stay
