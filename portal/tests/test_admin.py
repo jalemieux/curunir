@@ -148,3 +148,38 @@ async def test_admin_email_compare_case_insensitive(client, monkeypatch):
     _, cookies = await _signed_cookie_for("admin@example.com")
     resp = await client.get("/admin", cookies=cookies)
     assert resp.status_code == 200
+
+
+class _FakeAgent:
+    """Sender-shaped stand-in for a connected curunir container."""
+    async def send_text(self, data: str) -> None:
+        pass
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        pass
+
+
+def _row_for(html: str, email: str) -> str:
+    """Return the <tr>...</tr> fragment containing the given email."""
+    rows = html.split("<tr")
+    return next(r for r in rows if email in r)
+
+
+@pytest.mark.asyncio
+async def test_admin_index_shows_agent_connection_status(client):
+    from portal.routing import routing
+
+    connected = await db.create_user("connected@example.com")
+    offline = await db.create_user("offline@example.com")
+    _, cookies = await _signed_cookie_for("admin@example.com")
+
+    agent = _FakeAgent()
+    await routing.register_agent(connected.id, agent)
+    try:
+        resp = await client.get("/admin", cookies=cookies)
+    finally:
+        await routing.unregister_agent(connected.id, agent)
+
+    assert resp.status_code == 200
+    assert "online" in _row_for(resp.text, "connected@example.com")
+    assert "offline" in _row_for(resp.text, "offline@example.com")
