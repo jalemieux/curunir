@@ -34,3 +34,6 @@ secrets/
 context/
 workspace/
 landing_pages
+
+# Brainstorming visual companion
+.superpowers/
