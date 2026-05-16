@@ -448,3 +448,88 @@ async def test_close_4002_replaced_terminal(portal_server):
     finally:
         if not task.done():
             task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_outbound_buffered_while_disconnected_is_replayed_on_reconnect():
+    """A reply sent while the socket is down — between a drop and the next
+    reconnect — is buffered and delivered once the channel reconnects,
+    instead of being silently swallowed (the original 1006-blip bug).
+    """
+    received: asyncio.Queue = asyncio.Queue()
+    connections: list = []
+    second_connected = asyncio.Event()
+
+    async def handler(ws):
+        connections.append(ws)
+        if len(connections) == 1:
+            # First connection: drop it with a retryable close code.
+            await ws.close(code=1011, reason="bounce")
+            return
+        second_connected.set()
+        try:
+            async for raw in ws:
+                await received.put(raw)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
+    server = await websockets.serve(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    url = f"ws://127.0.0.1:{port}/ws/agent"
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url=url, token="t")
+    task = asyncio.create_task(ch.start())
+    try:
+        # Wait until the first connection has been made and dropped, so the
+        # channel is in reconnect backoff with _connection is None.
+        for _ in range(500):
+            if connections and ch._connection is None:
+                break
+            await asyncio.sleep(0.01)
+        assert ch._connection is None
+
+        await ch.send(OutgoingMessage(
+            content="buffered hi", channel="portal",
+            session_id="tab-7", reply_address={}, final=True,
+        ))
+        assert len(ch._outbound) == 1  # buffered, not dropped
+
+        await asyncio.wait_for(second_connected.wait(), timeout=5.0)
+        raw = await asyncio.wait_for(received.get(), timeout=5.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "agent_message"
+        assert msg["payload"]["content"] == "buffered hi"
+        assert msg["payload"]["session_id"] == "tab-7"
+        assert len(ch._outbound) == 0  # flushed on reconnect
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server):
+    """Deltas are ephemeral UI updates — the final message carries the full
+    content — so a delta sent while disconnected is dropped, not queued.
+    """
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    # Never started → _connection is None.
+    await ch.send(OutgoingMessage(
+        content="partial", channel="portal", session_id="s",
+        reply_address={}, final=False, delta=True,
+    ))
+    assert len(ch._outbound) == 0
+    # A final message in the same state IS buffered.
+    await ch.send(OutgoingMessage(
+        content="all of it", channel="portal", session_id="s",
+        reply_address={}, final=True,
+    ))
+    assert len(ch._outbound) == 1
