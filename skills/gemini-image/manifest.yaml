@@ -1,0 +1,9 @@
+name: gemini-image
+
+cli: [curl, jq, base64]
+
+secrets:
+  - name: GEMINI_API_KEY
+    required: true
+    description: "Gemini API key for text-to-image generation via Gemini 2.5 Flash Image"
+    url: "https://aistudio.google.com/apikey"
