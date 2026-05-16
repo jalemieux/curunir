@@ -108,6 +108,10 @@ main {
   margin-left: 80px;
   white-space: pre-wrap;
 }
+.msg.user .body code.slash-cmd {
+  background: var(--code-bg); padding: 1px 6px; border-radius: 4px;
+  font-size: 12.5px; font-weight: 600;
+}
 .msg.assistant .body { padding: 2px 0; }
 .msg.assistant .body > p { margin: 0 0 8px; }
 .msg.assistant .body > p:last-child { margin-bottom: 0; }
@@ -284,12 +288,15 @@ body.dragging .drop-hint { display: flex; }
 @media (max-width: 480px) { .composer-hint { display: none; } }
 /* === Skills picker === */
 #skills-btn {
-  background: transparent; border: 0; color: var(--header-text);
-  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
-  font-size: 16px; padding: 6px; box-sizing: content-box;
-  display: inline-flex; align-items: center; justify-content: center;
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--accent); font-family: inherit; font-size: 13px;
+  font-weight: 600; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: background .12s, color .12s, border-color .12s;
 }
-#skills-btn:hover { color: var(--accent); background: var(--hover-bg); }
+#skills-btn:hover { border-color: var(--accent); background: var(--hover-bg); }
+#skills-btn .glyph { font-size: 12px; }
 #skills-overlay {
   position: fixed; inset: 0; z-index: 50;
   background: color-mix(in srgb, #000 38%, transparent);
@@ -379,7 +386,7 @@ body.dragging .drop-hint { display: flex; }
   <div id="composer">
     <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
     <div class="composer-row">
-      <button id="skills-btn" title="Browse skills" aria-label="Browse skills">⚡</button>
+      <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
       <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline · drop or paste files to attach</span>
       <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
@@ -392,7 +399,7 @@ body.dragging .drop-hint { display: flex; }
   <div id="skills-panel" role="dialog" aria-label="Skills" aria-modal="true">
     <div class="skills-grab"></div>
     <div class="skills-head">
-      <span class="skills-title">⚡ Skills</span>
+      <span class="skills-title">✦ Skills</span>
       <button id="skills-close" aria-label="Close">✕</button>
     </div>
     <input id="skills-search" type="text" placeholder="Search skills…"
@@ -567,10 +574,26 @@ function onServerMessage(msg) {
   renderAgentChunk(msg);
 }
 
+// Render a user message body. Slash commands (/preferences, /investment-memo)
+// get the bold-monospace pill that slash-help output uses; anything else is
+// plain text.
+function setUserBody(bodyEl, content) {
+  const text = content || "";
+  if (/^\/[A-Za-z][\w-]*/.test(text.trimStart())) {
+    bodyEl.textContent = "";
+    const code = document.createElement("code");
+    code.className = "slash-cmd";
+    code.textContent = text.trim();
+    bodyEl.appendChild(code);
+  } else {
+    bodyEl.textContent = text;
+  }
+}
+
 function renderHistoryEntry(m) {
   if (m.role === "user") {
     const el = appendMessage("user");
-    el.querySelector(".body").textContent = m.content || "";
+    setUserBody(el.querySelector(".body"), m.content || "");
     renderAttachments(el, m.attachments);
   } else if (m.role === "assistant") {
     const el = appendMessage("assistant");
@@ -776,7 +799,7 @@ function launchSkill(slashText) {
     return;
   }
   const el = appendMessage("user");
-  el.querySelector(".body").textContent = slashText;
+  setUserBody(el.querySelector(".body"), slashText);
   ws.send(JSON.stringify({
     command: "slash", text: slashText, session_id: sessionId,
   }));
@@ -812,7 +835,7 @@ function send() {
   // so the user sees what they sent.
   if (content.startsWith("/") && staged.length === 0) {
     const el = appendMessage("user");
-    el.querySelector(".body").textContent = content;
+    setUserBody(el.querySelector(".body"), content);
     ws.send(JSON.stringify({
       command: "slash", text: content, session_id: sessionId,
     }));
