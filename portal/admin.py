@@ -110,6 +110,30 @@ async def admin_show_signin_link(
     )
 
 
+@router.post("/users/{user_id}/show-container-token", response_class=HTMLResponse)
+async def admin_show_container_token(
+    request: Request,
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    target = await db.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(404)
+    users = await db.list_users()
+    return templates.TemplateResponse(
+        request, "admin.html",
+        {
+            "users": users,
+            "csrf_token": csrf.issue_csrf(user.id),
+            "new_container_token": target.container_token,
+            "new_signin_link": None,
+            "new_user_email": target.email,
+        },
+    )
+
+
 @router.post("/users/{user_id}/regenerate-sign-in")
 async def admin_regenerate_sign_in(
     user_id: int,

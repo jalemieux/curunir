@@ -27,7 +27,7 @@
     </div>
     {% endif %}
     {% if new_container_token %}
-    <div style="margin-top:8px;">Container token (shown once — set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
+    <div style="margin-top:8px;">Container token (set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
       <code>{{ new_container_token }}</code>
     </div>
     {% endif %}
@@ -59,6 +59,10 @@
         <form class="inline" method="post" action="/admin/users/{{ u.id }}/regenerate-sign-in">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
           <button>rotate sign-in</button>
+        </form>
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}/show-container-token">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <button>show container token</button>
         </form>
         <form class="inline" method="post" action="/admin/users/{{ u.id }}/regenerate-container">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
