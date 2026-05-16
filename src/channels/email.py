@@ -1,9 +1,13 @@
 """Email channel — polls Gmail via service account, processes inbound messages, sends replies."""
 
 import asyncio
+import errno
+import http.client
 import logging
 import os
 import re
+import socket
+import ssl
 from datetime import datetime, timezone
 
 from src.channels import gmail
@@ -15,6 +19,47 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
+
+# Transient HTTPS socket churn beneath googleapiclient — expected, self-heals on
+# the next poll cycle. Classified out of ERROR so introspect doesn't file noise.
+_TRANSIENT_POLL_ERRORS = (
+    BrokenPipeError,
+    ConnectionError,
+    ssl.SSLError,
+    socket.timeout,
+    TimeoutError,
+    http.client.RemoteDisconnected,
+)
+
+_TRANSIENT_POLL_ERRNOS = {
+    errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN, errno.ENETRESET,
+    errno.ECONNABORTED, errno.ECONNRESET, errno.ECONNREFUSED, errno.EPIPE,
+    errno.ETIMEDOUT,
+}
+
+
+def _is_transient_poll_error(exc: BaseException) -> bool:
+    """True if exc — or any link in its __cause__/__context__ chain — is a
+    transient network error: a known socket/SSL exception, an OSError with a
+    network errno, or a 5xx/429 Gmail HttpError.
+
+    The chain walk matters: a transient error is not always the final caught
+    exception (e.g. ENETUNREACH raised while handling a RemoteDisconnected).
+    """
+    seen: set[int] = set()
+    link: BaseException | None = exc
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if isinstance(link, _TRANSIENT_POLL_ERRORS):
+            return True
+        if isinstance(link, OSError) and link.errno in _TRANSIENT_POLL_ERRNOS:
+            return True
+        if isinstance(link, gmail.HttpError):
+            status = getattr(link.resp, "status", None)
+            if status is not None and (status >= 500 or status == 429):
+                return True
+        link = link.__cause__ or link.__context__
+    return False
 
 
 def _parse_retry_after(error_text: str) -> int | None:
@@ -107,8 +152,12 @@ class EmailChannel:
         while True:
             try:
                 await self._poll_once()
-            except Exception:
-                logger.exception("Error during email poll")
+            except Exception as exc:
+                if _is_transient_poll_error(exc):
+                    logger.warning("Transient email poll error (will retry): %s: %s",
+                                   type(exc).__name__, exc)
+                else:
+                    logger.exception("Error during email poll")
             await asyncio.sleep(self.poll_interval)
 
     async def _poll_once(self) -> None:

@@ -107,6 +107,19 @@ the first line of the stack/error (strip timestamps, paths under `/app/`,
 session IDs, hex IDs). The signature is what dedup keys on — it must be stable
 across runs.
 
+**Pin the log level into the signature.** A signature must only match lines at
+the *same* severity. If a finding is `ERROR`-level, encode that in the signature
+(e.g. `error:email-poll:level=ERROR:...`) so a later fix that *downgrades* the
+line to `WARNING` does not keep re-matching the old issue.
+
+**Excluded — healed transient paths.** Lines logged at `WARNING` by
+`src.channels.email` containing `Transient email poll error` are **not**
+findings. They are the expected, self-healing path: a transient HTTPS socket
+error (broken pipe, SSL EOF, network-errno `OSError`, 5xx) that the next poll
+cycle recovers from. Drop them from the candidate set. Only an `ERROR`-level
+email poll line, or a sustained burst of these `WARNING`s (many per hour —
+which would indicate a real connectivity regression, see Step 3), counts.
+
 ### Step 3: Behavioral scan (LLM judgment)
 
 Pattern-grep catches hard failures. Behavioral problems need judgment.
@@ -183,6 +196,15 @@ fi
 The `dup-stale` action goes to the ledger (Step 6) so the run still leaves a
 trail; just no GitHub noise.
 
+**Close-out — a fixed issue that has stopped recurring.** If an open issue's
+signature no longer matches *anything* in the window — and the fix that
+addressed it has landed — post a one-line "no further occurrences in last
+{window}" comment and close the issue (`gh issue close {num} --repo {repo}`).
+Concrete case: the email-poll transient-error issue (#127) — once its fix is
+deployed, transient socket churn logs at `WARNING` (excluded above) and no
+`ERROR`-level email poll line should appear; on the first such clean run, close
+it. Ledger this as `closed`.
+
 ### Step 5: File novel findings
 
 Use the `github` skill's issue-create pattern. Body must include the signature comment.
@@ -230,7 +252,7 @@ per finding to `context/memory/introspection.md`. Create the file with a header
 if it doesn't exist.
 
 ```
-{ISO8601 timestamp} | {category} | {action: new|dup|dup-stale|skipped|error} | {issue_num or "-"} | {short signature}
+{ISO8601 timestamp} | {category} | {action: new|dup|dup-stale|closed|skipped|error} | {issue_num or "-"} | {short signature}
 ```
 
 If the run produced zero findings, still append one line:

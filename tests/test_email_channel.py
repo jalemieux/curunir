@@ -1,9 +1,14 @@
 import asyncio
+import errno
+import http.client
+import logging
 import os
+import ssl
 import tempfile
 from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
+from googleapiclient.errors import HttpError
 
 from src.channels.email import EmailChannel
 from src.channels.gmail import GmailError
@@ -626,3 +631,91 @@ async def test_send_skips_streaming_deltas(email_config, in_queue):
 
     mock_gmail.send_reply.assert_not_called()
     mock_gmail.thread_modify.assert_not_called()
+
+
+def _http_error(status):
+    """Build a googleapiclient HttpError with the given HTTP status."""
+    resp = MagicMock()
+    resp.status = status
+    return HttpError(resp, b"{}")
+
+
+def _chained_enetunreach():
+    """OSError(ENETUNREACH) chained off a RemoteDisconnected, as seen on #127."""
+    try:
+        raise http.client.RemoteDisconnected(
+            "Remote end closed connection without response"
+        )
+    except http.client.RemoteDisconnected as ctx:
+        exc = OSError(errno.ENETUNREACH, "Network is unreachable")
+        exc.__context__ = ctx
+        return exc
+
+
+def _bare_enetunreach():
+    """Plain OSError(ENETUNREACH) with no exception chain."""
+    return OSError(errno.ENETUNREACH, "Network is unreachable")
+
+
+async def _run_poll_loop_once(ch, exc):
+    """Drive _poll_loop so _poll_once raises `exc`, then break out via cancel."""
+    with patch.object(ch, "_poll_once", new_callable=AsyncMock) as mock_poll, \
+         patch("src.channels.email.asyncio.sleep", new_callable=AsyncMock):
+        mock_poll.side_effect = [exc, asyncio.CancelledError()]
+        with pytest.raises(asyncio.CancelledError):
+            await ch._poll_loop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [
+    BrokenPipeError(errno.EPIPE, "Broken pipe"),
+    ssl.SSLError("UNEXPECTED_EOF_WHILE_READING"),
+    _http_error(503),
+    _bare_enetunreach(),
+])
+async def test_poll_loop_logs_transient_errors_as_warning(email_config, in_queue, caplog, exc):
+    """Transient socket/HTTP errors are logged at WARNING, one line, no traceback."""
+    ch = _make_channel(in_queue, email_config)
+    with caplog.at_level(logging.WARNING, logger="src.channels.email"):
+        await _run_poll_loop_once(ch, exc)
+
+    records = [r for r in caplog.records if r.name == "src.channels.email"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert records[0].exc_info is None
+    assert "Transient email poll error" in records[0].getMessage()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("make_exc", [_chained_enetunreach, _bare_enetunreach])
+async def test_poll_loop_logs_chained_transient_error_as_warning(
+    email_config, in_queue, caplog, make_exc
+):
+    """A transient error anywhere in the __cause__/__context__ chain → WARNING.
+
+    ENETUNREACH is a plain OSError (not a ConnectionError subclass), so the
+    classifier must inspect errno and walk the chain — see #127."""
+    ch = _make_channel(in_queue, email_config)
+    with caplog.at_level(logging.WARNING, logger="src.channels.email"):
+        await _run_poll_loop_once(ch, make_exc())
+
+    records = [r for r in caplog.records if r.name == "src.channels.email"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [
+    ValueError("nope"),
+    OSError(errno.ENOENT, "No such file"),
+])
+async def test_poll_loop_logs_unknown_errors_as_error(email_config, in_queue, caplog, exc):
+    """Unknown errors — including non-network-errno OSError — keep ERROR + traceback."""
+    ch = _make_channel(in_queue, email_config)
+    with caplog.at_level(logging.WARNING, logger="src.channels.email"):
+        await _run_poll_loop_once(ch, exc)
+
+    records = [r for r in caplog.records if r.name == "src.channels.email"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert records[0].exc_info is not None
