@@ -653,6 +653,11 @@ function connect() {
       command: "history_request",
       session_id: sessionId,
     }));
+    // Fetch the skill list now so the empty-state starters are ready on
+    // first paint (the skills picker also requests this lazily).
+    ws.send(JSON.stringify({
+      command: "skills_request", session_id: sessionId,
+    }));
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -673,6 +678,7 @@ function onServerMessage(msg) {
     messagesEl.innerHTML = "";
     inProgressMsg = null;
     for (const m of msg.messages) renderHistoryEntry(m);
+    if (!msg.messages.length) renderEmptyState();
     updateComposerMode();
     return;
   }
@@ -681,6 +687,9 @@ function onServerMessage(msg) {
     if (!skillsOverlay.hidden) {
       renderSkillsList(skillsCache, skillsSearch.value);
     }
+    // If the empty state is showing, it may have rendered before skills
+    // arrived — rebuild it now so the starter rows appear.
+    if (messagesEl.querySelector(".empty-state")) renderEmptyState();
     return;
   }
   // Otherwise: an OutgoingMessage payload.
@@ -837,6 +846,8 @@ function downloadAttachment(a) {
 }
 
 function appendMessage(role, thinking = false) {
+  const es = messagesEl.querySelector(".empty-state");
+  if (es) es.remove();
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   const bodyHtml = thinking
@@ -1137,6 +1148,7 @@ function startNew() {
   renderStaged();
   inputEl.value = "";
   inputEl.style.height = "";
+  renderEmptyState();
   inputEl.focus();
 }
 
