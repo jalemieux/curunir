@@ -281,6 +281,22 @@ footer {
   transition: border-color 120ms ease, background 120ms ease;
 }
 #composer:focus-within { border-color: var(--accent); }
+/* Collapse handle — a small chevron tab on the composer's top edge that
+   shrinks the textarea to a single line so the messages area reclaims the
+   space. Clicking the textarea (focus) expands it again. */
+#collapse-handle {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  width: 46px; height: 20px; border-radius: 10px;
+  background: var(--bubble); border: 1px solid var(--border-strong);
+  color: var(--header-text); cursor: pointer; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; font-family: inherit;
+  transition: color .12s, border-color .12s;
+}
+#collapse-handle:hover { color: var(--accent); border-color: var(--accent); }
+#composer.collapsed #input {
+  min-height: 0; height: 26px !important; overflow: hidden;
+}
 body.dragging #composer {
   border-color: var(--accent);
   border-style: dashed;
@@ -471,6 +487,8 @@ body.dragging .drop-hint { display: flex; }
          accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,text/plain,text/markdown,text/csv,application/json,.md,.txt,.csv,.json,.yaml,.yml,.log,.xml,.toml,.ini">
   <div id="staged" class="staged-list"></div>
   <div id="composer">
+    <button id="collapse-handle" type="button" title="Collapse input"
+            aria-label="Collapse input">⌄</button>
     <textarea id="input" rows="1" placeholder="What would you like to do?"></textarea>
     <div class="composer-row">
       <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
@@ -529,6 +547,8 @@ const SKILLS_CONFIG = [
 // === Elements ===
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("input");
+const composerEl = document.getElementById("composer");
+const collapseHandle = document.getElementById("collapse-handle");
 const sendBtn = document.getElementById("send-btn");
 const attachBtn = document.getElementById("attach-btn");
 const fileInput = document.getElementById("file-input");
@@ -1190,12 +1210,30 @@ document.addEventListener("keydown", (e) => {
     interrupt();
   }
 });
-inputEl.addEventListener("input", () => {
+function autosizeInput() {
+  if (composerEl.classList.contains("collapsed")) return;
   inputEl.style.height = "auto";
   inputEl.style.height = Math.min(
     Math.max(inputEl.scrollHeight, 60),
     window.innerHeight * 0.3
   ) + "px";
+}
+inputEl.addEventListener("input", autosizeInput);
+
+// Collapse handle: toggle the composer down to a single line so the user can
+// read long messages. Focusing the textarea always expands it again.
+function setCollapsed(collapsed) {
+  composerEl.classList.toggle("collapsed", collapsed);
+  collapseHandle.textContent = collapsed ? "⌃" : "⌄";
+  collapseHandle.title = collapsed ? "Expand input" : "Collapse input";
+  collapseHandle.setAttribute("aria-label", collapseHandle.title);
+  if (!collapsed) { inputEl.style.height = ""; autosizeInput(); }
+}
+collapseHandle.addEventListener("click", () => {
+  setCollapsed(!composerEl.classList.contains("collapsed"));
+});
+inputEl.addEventListener("focus", () => {
+  if (composerEl.classList.contains("collapsed")) setCollapsed(false);
 });
 attachBtn.onclick = () => fileInput.click();
 fileInput.onchange = async () => {
