@@ -860,6 +860,53 @@ function scrollToBottom() {
   });
 }
 
+// === Empty-state conversation starters ===
+// Rendered into #messages when a conversation has no messages yet: a static
+// greeting plus one starter per portal-enabled skill. Rebuilt in place on
+// every call, so a late skills_snapshot can refresh the rows. A starter
+// click drops `/<skill> ` into the composer via fillComposer — it does NOT
+// send; the skills all need a subject the user must still type.
+function renderEmptyState() {
+  const existing = messagesEl.querySelector(".empty-state");
+  if (existing) existing.remove();
+
+  const wrap = document.createElement("div");
+  wrap.className = "empty-state";
+
+  const greeting = document.createElement("div");
+  greeting.className = "es-greeting";
+  greeting.textContent = "What would you like to do?";
+  wrap.appendChild(greeting);
+
+  const skills = skillsCache || [];
+  if (skills.length) {
+    const list = document.createElement("div");
+    list.className = "es-list";
+    for (const s of skills) {
+      const row = document.createElement("div");
+      row.className = "es-starter";
+      row.innerHTML =
+        '<span class="es-arrow">→</span>' +
+        '<span class="es-text"></span>';
+      row.querySelector(".es-text").textContent = s.summary;
+      row.addEventListener("click", () => fillComposer("/" + s.name + " "));
+      list.appendChild(row);
+    }
+    wrap.appendChild(list);
+  }
+  messagesEl.appendChild(wrap);
+}
+
+// Drop text into the composer, focus it, and place the caret at the end.
+// Fires the existing `input` handler so the textarea autosizes. Used by the
+// empty-state starters; deliberately does not send.
+function fillComposer(text) {
+  inputEl.value = text;
+  inputEl.focus();
+  inputEl.setSelectionRange(text.length, text.length);
+  inputEl.dispatchEvent(new Event("input"));
+}
+
 // === Skills picker ===
 function renderSkillsList(skills, filter = "") {
   if (!skills.length) {
