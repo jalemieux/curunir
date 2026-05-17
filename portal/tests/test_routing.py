@@ -155,6 +155,24 @@ async def test_unregister_agent_only_clears_if_same_socket():
 
 
 @pytest.mark.asyncio
+async def test_stale_unregister_does_not_broadcast_offline():
+    """A superseded agent socket tearing down (e.g. the old socket after a
+    1006 reconnect) must not broadcast offline — the newer socket is live and
+    already announced online. Broadcasting offline here leaves the browser
+    stuck on the offline modal while the agent is actually connected."""
+    rt = RoutingTable()
+    browser = FakeWS()
+    await rt.add_browser(1, browser)
+    a, b = FakeWS(), FakeWS()
+    await rt.register_agent(1, a)   # online
+    await rt.register_agent(1, b)   # kicks a; agent still online via b
+    browser.sent.clear()
+    await rt.unregister_agent(1, a)  # stale teardown of the old socket
+    statuses = [json.loads(s) for s in browser.sent]
+    assert {"type": "agent_status", "status": "offline"} not in statuses
+
+
+@pytest.mark.asyncio
 async def test_online_agent_user_ids_reports_connected_agents():
     rt = RoutingTable()
     await rt.register_agent(1, FakeWS())
