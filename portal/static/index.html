@@ -272,12 +272,15 @@ body.dragging .drop-hint { display: flex; }
   display: flex; align-items: center; gap: 8px;
 }
 #attach-btn {
-  background: transparent; border: 0; color: var(--header-text);
-  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
-  font-size: 16px; padding: 6px; box-sizing: content-box;
-  display: inline-flex; align-items: center; justify-content: center;
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--accent); font-family: inherit; font-size: 13px;
+  font-weight: 600; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: background .12s, color .12s, border-color .12s;
 }
-#attach-btn:hover { color: var(--accent); background: var(--hover-bg); }
+#attach-btn:hover { border-color: var(--accent); background: var(--hover-bg); }
+#attach-btn .glyph { font-size: 16px; line-height: 1; }
 .composer-hint {
   color: var(--hint); font-size: 11px;
   flex: 1; text-align: right; margin-right: 4px;
@@ -438,7 +441,7 @@ body.dragging .drop-hint { display: flex; }
     <textarea id="input" rows="1" placeholder="What would you like to do?"></textarea>
     <div class="composer-row">
       <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
-      <button id="attach-btn" title="Attach files" aria-label="Attach files">📎</button>
+      <button id="attach-btn" title="Attach files" aria-label="Attach files"><span class="glyph">+</span>Attach</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline · drop or paste files to attach</span>
       <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
     </div>
