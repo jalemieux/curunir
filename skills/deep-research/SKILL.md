@@ -97,7 +97,7 @@ Compile findings into a structured report. The first page sets the frame — rea
 
 ### Step 5 — Fact-check the draft (default, not optional)
 
-Write the draft to `workspace/reports/{topic-slug}-{YYYY-MM-DD}.md`, then **run an independent fact-check before delivering**. Research without verification is just plausible-sounding prose. The whole point of the structured header is that "Status: Fact-checked" actually means something — which requires actually doing it.
+Write the draft to `workspace/generated/{topic-slug}-{YYYY-MM-DD}.md`, then **run an independent fact-check before delivering**. Research without verification is just plausible-sounding prose. The whole point of the structured header is that "Status: Fact-checked" actually means something — which requires actually doing it.
 
 Load `fact-checker` and follow its delegation pattern (the fact-checker skill explains why a fresh context window is the entire mechanism — you can't check yourself):
 
@@ -112,7 +112,7 @@ CONTENT_TO_FACT_CHECK>>>
 """)
 ```
 
-For very large drafts (>50KB), write the content to disk first and tell the sub-agent the path.
+For very large drafts (>50KB), write the content to `workspace/scratch/` first and tell the sub-agent the path.
 
 When the sub-agent returns the verdicts report:
 
