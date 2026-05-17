@@ -85,9 +85,12 @@ If none fit, describe your own along these axes:
 
  Research assistant, formal, deferential,terse
 
-### 7b. What should curunir call itself?
+### 7b. What should the agent call itself?
 The agent's own name. Loaded into the system prompt every turn so it
-can talk coherently about itself. Default: `curunir`.
+can talk coherently about itself. Pick something distinct — if you leave
+this blank the agent goes unnamed and refers to itself generically as
+"the assistant". Do **not** name it after the `curunir` framework; that
+makes the agent and the codebase indistinguishable in conversation.
 
 _Answer:_ curunir
 
