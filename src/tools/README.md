@@ -28,11 +28,11 @@ _register(schema, opt_in=True)    # opt-in tool — only available when a skill 
 
 **`get_tool_schemas(names)`** is the public API:
 - `get_tool_schemas()` — returns all default tool schemas (excludes opt-in).
-- `get_tool_schemas(["glob", "read", "attach"])` — returns exactly those tools from either pool.
+- `get_tool_schemas(["glob", "read", "to_audio"])` — returns exactly those tools from either pool.
 
 ### Default Tools
 
-`glob`, `grep`, `read`, `edit`, `write`, `bash`, `load_skill`, `web_fetch`, `delegate`, `schedule`
+`glob`, `grep`, `read`, `edit`, `write`, `bash`, `load_skill`, `web_fetch`, `delegate`, `schedule`, `attach`
 
 ### Opt-in Tools
 
@@ -75,12 +75,12 @@ When a skill's SKILL.md contains frontmatter like:
 
 ```yaml
 ---
-name: reporter
-tools: attach
+name: narrator
+tools: to_audio
 ---
 ```
 
-Loading this skill via `load_skill` causes the agent to parse the frontmatter, find `tools: attach`, and add `attach` to the session's available tools. The tool schemas are refreshed so the LLM can see and call `attach` for the remainder of that session.
+Loading this skill via `load_skill` causes the agent to parse the frontmatter, find `tools: to_audio`, and add `to_audio` to the session's available tools. The tool schemas are refreshed so the LLM can see and call `to_audio` for the remainder of that session.
 
 ## Individual Tool Details
 

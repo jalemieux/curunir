@@ -66,9 +66,9 @@ Channels implement a protocol: `async start()` to listen, `async send(msg)` to r
 
 ### Tools (`src/tools/`)
 
-**Default tools:** glob, grep, read, edit, write, bash, load_skill, web_fetch, delegate, schedule
+**Default tools:** glob, grep, read, edit, write, bash, load_skill, web_fetch, delegate, schedule, attach
 
-**Opt-in tools** (unlocked when a skill requests them): attach
+**Opt-in tools** (unlocked when a skill requests them): to_audio
 
 - Schemas registered in `schemas.py` via `_register()`
 - Dispatch in `dispatcher.py` routes by name to executor functions
