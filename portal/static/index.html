@@ -99,7 +99,7 @@ main {
   padding: 14px;
   max-width: 720px; width: 100%; margin: 0 auto;
 }
-.msg { margin-bottom: 14px; line-height: 1.6; }
+.msg { margin-bottom: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .msg .role { display: none; }
 .msg.user .body {
   background: var(--bubble);
@@ -229,7 +229,7 @@ main {
   display: inline-flex; align-items: center; gap: 11px;
   background: var(--bg); border: 1px solid var(--border-strong);
   border-radius: 10px; padding: 10px 13px;
-  min-width: 290px; max-width: 380px;
+  min-width: min(290px, 100%); max-width: 380px;
   transition: border-color .12s, background .12s;
 }
 .attachment-card.downloadable { cursor: pointer; }
@@ -252,7 +252,7 @@ main {
 .attachment-card .dl { color: var(--hint); flex: none; }
 .attachment-card.downloadable:hover .dl { color: var(--accent); }
 .attachment-image {
-  display: block; max-width: 320px; max-height: 320px;
+  display: block; max-width: min(320px, 100%); max-height: 320px;
   border-radius: 10px; border: 1px solid var(--border-strong);
   cursor: pointer; transition: border-color .12s;
 }
@@ -361,7 +361,12 @@ body.dragging .drop-hint { display: flex; }
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
 }
-@media (max-width: 480px) { .composer-hint { display: none; } }
+@media (max-width: 480px) {
+  .composer-hint { display: none; }
+  /* The 80px desktop indent eats ~20% of a phone screen; shrink it so user
+     bubbles (and their attachments) have room to breathe. */
+  .msg.user .body { margin-left: 36px; }
+}
 
 /* === Offline modal === */
 /* Shown whenever the agent is not online (offline or reconnecting). Grays
