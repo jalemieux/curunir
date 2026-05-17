@@ -1,14 +1,14 @@
 # Memory System
 
-This directory is Curunir's persistent memory. It holds three kinds of
+This directory is the assistant's persistent memory. It holds three kinds of
 information, kept in separate files so they don't bleed into each other:
 
 1. **Owner facts** (`profile.md`) — who the user is.
 2. **Owner preferences** (`preferences.md`) — how the user wants to work.
-3. **Curunir's own realizations** (`core-insights.md`) — what curunir has
-   learned about itself.
+3. **The assistant's own realizations** (`core-insights.md`) — what the
+   assistant has learned about itself.
 
-Curunir's seeded persona — voice, perspective, boundaries, self-image — is
+The assistant's seeded persona — voice, perspective, boundaries, self-image — is
 **not** in memory. It lives in `../identity.md` and is loaded into the
 system prompt every turn.
 
@@ -39,7 +39,7 @@ saying "I don't know who you are."
 |---|---|
 | `profile.md` | Owner identity facts: name, pronouns, family, role, contact, addresses, medical notes |
 | `preferences.md` | Owner's working style: response length, citation conventions, consent boundaries, tool prefs |
-| `core-insights.md` | Curunir's own accumulated realizations about how it operates |
+| `core-insights.md` | The assistant's own accumulated realizations about how it operates |
 | `projects.md` | Current projects with status, architecture, relationships |
 | `tasks.md` | Open items needing resolution; unresolved questions; TODOs |
 | `people/` | Colleagues, teams, contacts (one file per person, lowercase-hyphenated) |
@@ -58,9 +58,9 @@ about*:
   change, a medical note) → `profile.md`.
 - **About how the owner wants to work** (a tone shift, a new citation
   preference, a consent rule) → `preferences.md`.
-- **About curunir itself** (a recurring failure mode, a validated approach,
-  a shift in self-perception) → `core-insights.md`.
-- **About curunir's voice or persona** as a durable change → append to the
+- **About the assistant itself** (a recurring failure mode, a validated
+  approach, a shift in self-perception) → `core-insights.md`.
+- **About the assistant's voice or persona** as a durable change → append to the
   relevant subsection in `../identity.md`, not memory.
 
 ## Workflow
