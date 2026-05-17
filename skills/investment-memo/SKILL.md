@@ -210,7 +210,7 @@ the cell blank or mark it n/a — never drop a real category member
 because a column would be empty. Keep any table to roughly five or six
 columns so it fits a typeset page (see Step 7).
 
-Write the markdown to `workspace/reports/{ticker-or-slug}-{YYYY-MM-DD}.md`.
+Write the markdown to `workspace/generated/{ticker-or-slug}-{YYYY-MM-DD}.md`.
 
 **Honesty rules** (lifted from `financial-analysis` — non-negotiable):
 
@@ -246,7 +246,7 @@ CONTENT_TO_FACT_CHECK>>>
 """)
 ```
 
-For drafts >50KB, write to `workspace/fact-check/memo-{slug}-{date}.md`
+For drafts >50KB, write to `workspace/scratch/memo-{slug}-{date}.md`
 first and give the sub-agent the path.
 
 When the sub-agent returns:
@@ -276,7 +276,7 @@ LaTeX-via-pandoc path `deep-research` uses, which produces a cleanly
 typeset document:
 
 ```bash
-pandoc workspace/reports/{slug}-{date}.md -o workspace/reports/{slug}-{date}.pdf
+pandoc workspace/generated/{slug}-{date}.md -o workspace/generated/{slug}-{date}.pdf
 ```
 
 Do **not** render via HTML, headless Chromium, weasyprint, or a CSS
@@ -284,7 +284,7 @@ stylesheet — that route produces a cheap-looking web-page printout
 instead of a typeset memo. If a comparison table is too wide to fit the
 page, the fix is a narrower table (Step 5), not a different renderer.
 
-Attach the PDF: `attach(path="workspace/reports/{slug}-{date}.pdf")`. If
+Attach the PDF: `attach(path="workspace/generated/{slug}-{date}.pdf")`. If
 pandoc fails, attach the `.md` as fallback.
 
 In the text reply, post the **Executive Summary** verbatim plus one line on

@@ -122,6 +122,24 @@ Records file metadata (path, MIME type, size) into the `attachments` list that t
 
 Rewrites text into a spoken-word script via the configured LLM, then calls OpenAI's TTS API (`tts-1` by default) to synthesize an MP3 written to `{config.attachment_dir}/audio/`. Registers the file on the response's `attachments` list so the email and portal channels deliver it alongside the text reply. Voice and model are tunable via the `TTS_VOICE` / `TTS_MODEL` env vars or per-call args. Requires `OPENAI_API_KEY`. Wire it into a skill by adding `tools: to_audio` to the SKILL.md frontmatter.
 
+## Output Path Convention
+
+The file tools (`write`, `bash`, `edit`, …) have **no default output path** — the
+caller always supplies it. So the convention lives in skill instructions, not in
+tool code. Skill authors writing files to disk should follow it:
+
+- **`workspace/generated/`** — generated deliverables meant for the user (research
+  reports, investment memos, financial analyses, exported PDFs). Flat directory;
+  filenames are slug- and date-prefixed (`{slug}-{YYYY-MM-DD}.md`) so a single
+  listing stays browsable. This is the one canonical home for generated output.
+- **`workspace/scratch/`** — transient/intermediate files that are not deliverables
+  (oversized drafts staged for a sub-agent, fact-check inputs). Safe to delete.
+- **`context/input/`** — the drop-zone for *user-supplied* input files. Never write
+  generated output here; it would conflate input with output.
+
+`workspace/` is the gitignored persistence volume, so both `generated/` and
+`scratch/` survive across requests without any Docker mount or `.gitignore` change.
+
 ## Adding a New Tool
 
 1. **Define the schema** in `schemas.py` — add an OpenAI-format function dict to `_SCHEMAS` (or `_OPT_IN_SCHEMAS` for opt-in tools).
