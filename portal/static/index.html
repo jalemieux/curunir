@@ -251,6 +251,12 @@ main {
 .attachment-card .fsub { font-size: 11px; color: var(--hint); margin-top: 1px; }
 .attachment-card .dl { color: var(--hint); flex: none; }
 .attachment-card.downloadable:hover .dl { color: var(--accent); }
+.attachment-image {
+  display: block; max-width: 320px; max-height: 320px;
+  border-radius: 10px; border: 1px solid var(--border-strong);
+  cursor: pointer; transition: border-color .12s;
+}
+.attachment-image:hover { border-color: var(--accent); }
 .attachments { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .msg.user .body .attachments { margin-bottom: 6px; }
 .msg.assistant .attachments { margin-top: 6px; }
@@ -799,8 +805,19 @@ function renderAttachments(parent, atts) {
   wrap.className = "attachments";
   for (const a of atts) {
     const name = a.filename || a.path || "file";
+    const hasData = typeof a.data === "string";
+    if (hasData && typeof a.mime_type === "string" && a.mime_type.startsWith("image/")) {
+      const img = document.createElement("img");
+      img.className = "attachment-image";
+      img.src = "data:" + a.mime_type + ";base64," + a.data;
+      img.alt = name;
+      img.title = name + " · click to download";
+      img.onclick = () => downloadAttachment(a);
+      wrap.appendChild(img);
+      continue;
+    }
     const ext = name.includes(".") ? name.split(".").pop().toUpperCase() : "";
-    const downloadable = typeof a.data === "string";
+    const downloadable = hasData;
     const card = document.createElement("span");
     card.className = "attachment-card";
     card.innerHTML =
