@@ -4,8 +4,8 @@ background, contact, addresses, medical notes. Anything that would still be
 true in six months and is **about the user**.
 
 Working style and communication preferences live in `preferences.md`.
-Curunir's own personality and self-image live in `../identity.md`.
-Curunir's accumulated realizations about itself live in `core-insights.md`.
+The assistant's own personality and self-image live in `../identity.md`.
+The assistant's accumulated realizations about itself live in `core-insights.md`.
 -->
 
 # Owner Profile
