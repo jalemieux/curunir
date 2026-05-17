@@ -67,11 +67,24 @@ class RoutingTable:
         await self._broadcast_status(user_id, "online")
 
     async def unregister_agent(self, user_id: int, ws: Sender) -> None:
+        """Tear down an agent socket. Broadcasts offline only if `ws` was
+        the *current* agent socket.
+
+        A stale socket (one already superseded by a reconnect) can finish
+        teardown long after the new socket registered — uvicorn may take up
+        to its ws-ping timeout to notice an abruptly-dropped peer. In that
+        case the route already points at the live socket; broadcasting
+        offline would leave the browser stuck on the offline modal while the
+        agent is actually connected.
+        """
+        cleared = False
         async with self._lock:
             route = self._routes.get(user_id)
             if route is not None and route.agent_ws is ws:
                 route.agent_ws = None
-        await self._broadcast_status(user_id, "offline")
+                cleared = True
+        if cleared:
+            await self._broadcast_status(user_id, "offline")
 
     async def add_browser(self, user_id: int, ws: Sender) -> None:
         async with self._lock:
