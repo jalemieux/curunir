@@ -162,7 +162,7 @@ fill in. Every memo, regardless of shape, opens with the shared header:
 
 **Prepared for:** {user's name from context/identity.md — omit line if unknown}
 
-**Prepared by:** {agent's name from context/identity.md, or "Curunir Investment Research"}
+**Prepared by:** {agent's name from context/identity.md — omit line if unknown}
 
 **Subject:** {One- to two-sentence framing — instrument(s), hypothesis, scope}
 
