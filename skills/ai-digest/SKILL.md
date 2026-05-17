@@ -139,6 +139,9 @@ done
 The append-only ledger is what step 3 reads next time. If the file doesn't
 exist yet, create it with the header `# AI digest URL ledger — one ISO-date + URL per line`.
 
+The digest is delivered via chat/email — no deliverable file is written. If a
+run is ever asked to save the digest to disk, write it to `workspace/generated/`.
+
 ## Output checklist
 
 Before sending the digest, confirm in your reasoning:
