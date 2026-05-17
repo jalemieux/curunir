@@ -75,12 +75,24 @@ curunir/
 ├── portal/                 # Standalone FastAPI portal app (separate project)
 ├── eval/                   # LLM-graded eval suites and harness
 ├── onboarding/             # First-run identity scaffolding
-├── context/
+├── context/                # Inputs supplied to the agent (mounted/configured)
 │   ├── identity.md         # Assistant persona and instructions
 │   ├── memory/             # Persistent markdown memory store
+│   ├── input/              # Drop-zone for user-supplied input files
 │   └── schedules.json      # Cron tasks evaluated by scheduler
+├── workspace/              # Gitignored runtime volume — outputs the agent produces
+│   ├── generated/          # Generated deliverables (research reports, memos, PDFs)
+│   └── scratch/            # Transient/intermediate files (safe to delete)
 └── Dockerfile              # Container with Python 3.12, ripgrep, git
 ```
+
+The directory split tracks file provenance: `context/` holds everything
+supplied **to** the agent (persona, memory, scheduled tasks, user-dropped
+input files), while `workspace/` is the gitignored runtime volume holding
+everything the agent **produces** — generated deliverables under
+`generated/` and transient working files under `scratch/`. Skills writing
+files to disk follow this convention; see `src/tools/README.md` for the
+full output-path rules.
 
 ## Quick Start
 
