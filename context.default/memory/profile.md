@@ -1,14 +1,7 @@
-<!--
-Owner identity facts only — name, pronouns, family, role, professional
-background, contact, addresses, medical notes. Anything that would still be
-true in six months and is **about the user**.
-
-Working style and communication preferences live in `preferences.md`.
-Your own personality and self-image live in `../identity.md`.
-Your accumulated realizations about yourself live in `core-insights.md`.
--->
-
 # Owner Profile
+
+Durable facts about the user — name, family, role, contact, addresses, medical
+notes. Working style lives in `preferences.md`; the agent's persona in `../identity.md`.
 
 ## Identity
 
