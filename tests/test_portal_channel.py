@@ -608,8 +608,7 @@ async def test_duplicate_interrupt_not_deduped():
 async def test_skills_request_invokes_provider_and_sends_snapshot(portal_server):
     in_q: asyncio.Queue = asyncio.Queue()
     fake_skills = [
-        {"name": "memo", "display_name": "Memo",
-         "summary": "A memo", "icon": "📊"},
+        {"name": "memo", "display_name": "Memo", "summary": "A memo"},
     ]
 
     def provider() -> list[dict]:

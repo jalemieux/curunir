@@ -194,15 +194,13 @@ class TestNestedDiscovery:
         assert "profile" in registry
 
 
-def _write_portal_skill(parent, name, description, summary=None, icon=None):
+def _write_portal_skill(parent, name, description, summary=None):
     """Create skills/<name>/SKILL.md with optional portal_* frontmatter."""
     d = parent / name
     d.mkdir()
     lines = [f"name: {name}", f"description: {description}"]
     if summary is not None:
         lines.append(f'portal_summary: "{summary}"')
-    if icon is not None:
-        lines.append(f'portal_icon: "{icon}"')
     (d / "SKILL.md").write_text(
         "---\n" + "\n".join(lines) + f"\n---\n# {name}\n"
     )
@@ -212,16 +210,14 @@ def _write_portal_skill(parent, name, description, summary=None, icon=None):
 class TestPortalMetadata:
     def test_portal_fields_parsed_into_skill(self, tmp_path):
         _write_portal_skill(tmp_path, "memo", "agent desc",
-                            summary="User-facing line", icon="📊")
+                            summary="User-facing line")
         skill = load_registry([tmp_path])["memo"]
         assert skill.portal_summary == "User-facing line"
-        assert skill.portal_icon == "📊"
 
     def test_portal_fields_default_none(self, tmp_path):
         _write_skill(tmp_path, "plain", "agent desc")
         skill = load_registry([tmp_path])["plain"]
         assert skill.portal_summary is None
-        assert skill.portal_icon is None
 
 
 class TestPortalSkillList:
@@ -249,18 +245,13 @@ class TestPortalSkillList:
         _write_portal_skill(tmp_path, "investment-memo", "d", summary="s")
         assert portal_skill_list([tmp_path])[0]["display_name"] == "Investment memo"
 
-    def test_icon_defaults_to_lightning(self, tmp_path):
-        _write_portal_skill(tmp_path, "noicon", "d", summary="s")
-        assert portal_skill_list([tmp_path])[0]["icon"] == "⚡"
-
     def test_entries_sorted_by_name(self, tmp_path):
         _write_portal_skill(tmp_path, "zeta", "d", summary="s")
         _write_portal_skill(tmp_path, "alpha", "d", summary="s")
         assert [s["name"] for s in portal_skill_list([tmp_path])] == ["alpha", "zeta"]
 
     def test_entry_shape(self, tmp_path):
-        _write_portal_skill(tmp_path, "memo", "d", summary="A memo", icon="📊")
+        _write_portal_skill(tmp_path, "memo", "d", summary="A memo")
         assert portal_skill_list([tmp_path]) == [
-            {"name": "memo", "display_name": "Memo",
-             "summary": "A memo", "icon": "📊"}
+            {"name": "memo", "display_name": "Memo", "summary": "A memo"}
         ]

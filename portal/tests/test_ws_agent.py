@@ -180,7 +180,7 @@ def test_skills_snapshot_routes_by_session_id(sync_client, monkeypatch):
             "type": "skills_snapshot",
             "session_id": "tab-K",
             "skills": [{"name": "memo", "display_name": "Memo",
-                        "summary": "A memo", "icon": "📊"}],
+                        "summary": "A memo"}],
         }
         ws.send_text(json.dumps(snapshot))
         ws.close()
