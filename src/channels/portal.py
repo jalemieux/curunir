@@ -12,14 +12,23 @@ connect, so a brief socket blip doesn't silently swallow a reply.
 History snapshots and streaming deltas are not buffered — both are
 regenerable.
 
+Inbound chat-content `user_message` frames are deduplicated within a
+short time window: the portal/network layer sometimes delivers the
+same frame 2–3 times, and each duplicate would otherwise run a full
+agent turn. An identical frame for the same session seen within
+`_DEDUP_WINDOW_SEC` is dropped. Control frames (interrupt, history,
+skills) are not deduped.
+
 Enabled when both CURUNIR_PORTAL_URL and CURUNIR_PORTAL_TOKEN are set.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import random
+import time
 from collections import deque
 from typing import Any
 
@@ -46,6 +55,14 @@ _TERMINAL_CODES = {4002, 4003}
 # (text + attachments) is one frame, so this is generous; the oldest frames
 # are dropped first if it overflows.
 _OUTBOUND_BUFFER_MAX = 64
+
+# Inbound dedup: an identical content frame for the same session seen
+# within this window is treated as a duplicate and dropped. The observed
+# duplicates land within ~0–2s of each other; a 5s window stays well clear
+# of a user legitimately retyping the same message minutes later.
+_DEDUP_WINDOW_SEC = 5.0
+# How many recent content-frame hashes to retain for the dedup check.
+_DEDUP_HISTORY_MAX = 32
 
 
 def _backoff_with_jitter(attempt: int) -> float:
@@ -79,6 +96,9 @@ class PortalChannel:
         # Serialized agent_message frames that couldn't be sent because the
         # socket was down; flushed (in order) on the next successful connect.
         self._outbound: deque[str] = deque(maxlen=_OUTBOUND_BUFFER_MAX)
+        # (monotonic_ts, frame_hash) of recently-seen content frames, for
+        # time-windowed inbound dedup. See _is_duplicate.
+        self._recent: deque[tuple[float, str]] = deque(maxlen=_DEDUP_HISTORY_MAX)
 
     async def start(self) -> None:
         attempt = 0
@@ -184,6 +204,13 @@ class PortalChannel:
             ))
             return
 
+        if self._is_duplicate(payload):
+            logger.info(
+                "PortalChannel: dropped duplicate user_message (session %s)",
+                session_id,
+            )
+            return
+
         manifest = (
             _stage_attachments(decoded, session_id, self.uploads_dir)
             if decoded else None
@@ -196,6 +223,26 @@ class PortalChannel:
             command=payload.get("command") or None,
             attachments=manifest,
         ))
+
+    def _is_duplicate(self, payload: dict) -> bool:
+        """True if this content frame was already seen within the dedup window.
+
+        The portal/network layer occasionally delivers the same `user_message`
+        frame 2–3 times; without this check each copy runs a full agent turn.
+        The payload carries `session_id`, `content`, and `attachments`, so an
+        identical resend hashes identically. Entries older than the window are
+        pruned so a legitimate later resend of the same text is not dropped.
+        """
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        now = time.monotonic()
+        while self._recent and now - self._recent[0][0] > _DEDUP_WINDOW_SEC:
+            self._recent.popleft()
+        if any(h == digest for _, h in self._recent):
+            return True
+        self._recent.append((now, digest))
+        return False
 
     async def _handle_history_request(self, payload: dict) -> None:
         if self._connection is None:
