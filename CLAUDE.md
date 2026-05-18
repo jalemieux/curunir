@@ -85,8 +85,13 @@ Each skill is a directory with a `SKILL.md` file using YAML frontmatter:
 name: my-skill
 description: When to use this skill
 tools: attach  # Optional: comma-separated opt-in tools
+beta: true     # Optional: keep in registry but omit from the system-prompt catalog
 ---
 ```
+
+`beta: true` skills stay loadable (`load_skill`, `/skill-name`) but are
+excluded from the manifest, so the agent won't route to them on its own —
+use it to trial a new skill before GA without bloating the catalog.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
