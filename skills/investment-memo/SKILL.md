@@ -2,7 +2,6 @@
 name: investment-memo
 description: "Use when asked to build, back, pitch, or stress-test an investment thesis on any investable subject — public equity, ETF, sector, commodity, crypto, or private name. Also use for any request that produces buy/sell/hold recommendations or ranks investable names by return potential. Trigger phrases: 'investment thesis on X', 'investment memo', 'investment research on X', 'should I buy/short X', 'is X a buy', 'bull case', 'bear case', 'base case', 'steelman/strawman this trade', 'pitch X', 'kill this trade', 'top N [sector] to own', 'top N [sector] by potential/upside', 'recommendations on [stocks/sector]', 'rank/screen [names] by upside/potential', 'which [stocks] to buy', 'who wins from [catalyst]', 'is the trade crowded', 'blockbuster analysis', 'long/short X'. Use this — not deep-research — whenever the deliverable is a recommendation or ranking of investables, even if the request says 'research'. Produces a fact-checked PDF memo that composes deep research, financial analysis, and social sentiment under a directional view."
 portal_summary: "Fact-checked investment memo on any stock, sector, or asset"
-portal_icon: "📊"
 tools: attach
 ---
 

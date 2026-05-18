@@ -2,7 +2,6 @@
 name: fact-checker
 description: "Use when asked to fact-check, verify, or independently audit a research report, article, summary, or set of claims — especially the output of a prior research session. Trigger phrases: 'fact-check this', 'verify these claims', 'is this accurate', 'audit this research', 'check this for errors'."
 portal_summary: "Independently verify the claims in a report or article"
-portal_icon: "✅"
 ---
 
 # Fact Checker
