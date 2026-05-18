@@ -12,6 +12,7 @@ import pytest
 import websockets
 
 from src.channels.base import OutgoingMessage
+from src.channels import portal as portal_mod
 from src.channels.portal import PORTAL_SESSION_ID, PortalChannel
 
 
@@ -533,6 +534,74 @@ async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server
         reply_address={}, final=True,
     ))
     assert len(ch._outbound) == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_user_message_within_window_enqueued_once():
+    """Two identical content frames back-to-back → exactly one
+    IncomingMessage enqueued; the second is dropped as a duplicate."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    payload = {"content": "hello", "session_id": "tab-A"}
+    await ch._handle_user_message(dict(payload))
+    await ch._handle_user_message(dict(payload))
+    assert in_q.qsize() == 1
+    msg = in_q.get_nowait()
+    assert msg.content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_user_message_after_window_both_enqueued(monkeypatch):
+    """Identical content sent after the dedup window elapses is treated as
+    a fresh message — both frames are enqueued."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    payload = {"content": "hello", "session_id": "tab-A"}
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(portal_mod.time, "monotonic", lambda: clock["now"])
+
+    await ch._handle_user_message(dict(payload))
+    clock["now"] += portal_mod._DEDUP_WINDOW_SEC + 1.0
+    await ch._handle_user_message(dict(payload))
+    assert in_q.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_different_content_within_window_both_enqueued():
+    """Distinct messages within the window are not deduped."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    await ch._handle_user_message({"content": "hello", "session_id": "tab-A"})
+    await ch._handle_user_message({"content": "goodbye", "session_id": "tab-A"})
+    assert in_q.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_same_content_different_sessions_both_enqueued():
+    """Session id is part of the dedup hash, so identical text on two
+    different sessions within the window is not deduped."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    await ch._handle_user_message({"content": "hello", "session_id": "tab-A"})
+    await ch._handle_user_message({"content": "hello", "session_id": "tab-B"})
+    assert in_q.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_interrupt_not_deduped():
+    """Control frames bypass dedup — a duplicate interrupt still cancels
+    each time (dropping one could leave a session running)."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen: list[str] = []
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t",
+        cancel_session=lambda sid: (seen.append(sid) or True),
+    )
+    payload = {"command": "interrupt", "session_id": "tab-A"}
+    await ch._handle_user_message(dict(payload))
+    await ch._handle_user_message(dict(payload))
+    assert seen == ["tab-A", "tab-A"]
 
 
 @pytest.mark.asyncio
