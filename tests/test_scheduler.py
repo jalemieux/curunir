@@ -12,6 +12,9 @@ from src.scheduler import (
     _is_due,
     _update_last_run,
     _update_task_fields,
+    SYSTEM_JOBS,
+    _SYSTEM_JOB_LAST_RUN,
+    register_system_job,
 )
 
 
@@ -268,3 +271,90 @@ class TestCheckAndFire:
         assert "t1" in fired
         assert "t2" in fired
         assert mock_agent.handle.call_count == 2
+
+
+class FakeSystemJob:
+    """Minimal duck-typed system job for scheduler tests."""
+
+    def __init__(self, job_id="sysjob", cron="* * * * *"):
+        self.id = job_id
+        self.cron = cron
+        self.run = AsyncMock()
+
+
+@pytest.fixture
+def clean_system_jobs():
+    """Isolate the module-global system-job registry per test."""
+    SYSTEM_JOBS.clear()
+    _SYSTEM_JOB_LAST_RUN.clear()
+    yield
+    SYSTEM_JOBS.clear()
+    _SYSTEM_JOB_LAST_RUN.clear()
+
+
+class TestSystemJobs:
+    async def test_registered_system_job_fires(
+        self, schedule_file, agent_config, clean_system_jobs
+    ):
+        job = FakeSystemJob()
+        register_system_job(job)
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+
+        fired = await _check_and_fire(mock_agent)
+        await asyncio.sleep(0)
+
+        assert "sysjob" in fired
+        job.run.assert_awaited_once_with(mock_agent)
+
+    async def test_user_tasks_still_fire_alongside_system_jobs(
+        self, schedule_file, agent_config, clean_system_jobs
+    ):
+        schedule_file.write_text(json.dumps([
+            {"id": "t1", "cron": "* * * * *", "prompt": "p", "skill": None,
+             "enabled": True, "last_run": 0},
+        ]))
+        job = FakeSystemJob()
+        register_system_job(job)
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+
+        fired = await _check_and_fire(mock_agent)
+        await asyncio.sleep(0)
+
+        assert "t1" in fired
+        assert "sysjob" in fired
+        mock_agent.handle.assert_called_once()
+        job.run.assert_awaited_once()
+
+    async def test_in_memory_last_run_prevents_double_fire(
+        self, schedule_file, agent_config, clean_system_jobs
+    ):
+        job = FakeSystemJob()
+        register_system_job(job)
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+
+        fired1 = await _check_and_fire(mock_agent)
+        # Second tick in the same minute — must not re-fire.
+        fired2 = await _check_and_fire(mock_agent)
+        await asyncio.sleep(0)
+
+        assert fired1 == ["sysjob"]
+        assert fired2 == []
+        job.run.assert_awaited_once()
+
+    async def test_not_yet_due_system_job_does_not_fire(
+        self, schedule_file, agent_config, clean_system_jobs
+    ):
+        # Hourly job whose last_run was just set → not due.
+        job = FakeSystemJob(cron="0 * * * *")
+        register_system_job(job)
+        _SYSTEM_JOB_LAST_RUN["sysjob"] = int(time.time())
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+
+        fired = await _check_and_fire(mock_agent)
+
+        assert fired == []
+        job.run.assert_not_awaited()
