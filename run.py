@@ -21,7 +21,8 @@ from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
-from src.scheduler import run_scheduler
+from src.reengagement import ReengagementConfig, ReengagementJob, record_interaction
+from src.scheduler import register_system_job, run_scheduler
 from src.skills import portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
@@ -407,6 +408,14 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
 
+        # A genuine owner turn just completed (control commands `continue`
+        # earlier and never reach here). Record it so the re-engagement job
+        # knows the owner is active and re-arms its nudge series.
+        try:
+            record_interaction(agent.config)
+        except Exception:
+            logger.exception("Failed to record interaction for re-engagement")
+
         # llama.cpp exposes per-request server stats over HTTP — fold them in
         # alongside the agent's own stats so the UI can show both.
         if agent.config.api_base and metadata.get("stats"):
@@ -581,6 +590,17 @@ async def main():
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
+
+    # Re-engagement nudge: a code-registered scheduler job that emails the
+    # owner after a stretch of inactivity. Opt-in (REENGAGEMENT_ENABLED).
+    reengagement_config = ReengagementConfig.from_env()
+    if reengagement_config.enabled:
+        register_system_job(ReengagementJob(reengagement_config))
+        logger.info(
+            "Re-engagement nudges enabled (cron %s, owner %s)",
+            reengagement_config.cron,
+            reengagement_config.owner_email or "<unset>",
+        )
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
 
