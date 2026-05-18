@@ -118,3 +118,63 @@ async def test_router_dispatches_multiple_messages():
     cli_channel.send.assert_called_once_with(msg1)
     slack_channel.send.assert_called_once_with(msg2)
 
+
+
+# --- agent_worker activity recording ---
+
+
+async def _run_worker_until_reply(agent, msg):
+    """Feed one message through agent_worker, return the first outgoing message."""
+    from run import agent_worker
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    await in_q.put(msg)
+    task = asyncio.create_task(agent_worker(agent, in_q, out_q))
+    try:
+        out = await asyncio.wait_for(out_q.get(), timeout=2)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    return out
+
+
+def _worker_agent(agent_config):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        config=agent_config,
+        handle=AsyncMock(return_value="reply"),
+        sessions={},
+        session_archives={},
+    )
+
+
+async def test_agent_worker_records_activity_after_normal_turn(agent_config):
+    from src.reengagement import load_activity
+
+    agent = _worker_agent(agent_config)
+    msg = IncomingMessage(
+        content="hello", channel="cli", session_id="cli", reply_address={}
+    )
+    await _run_worker_until_reply(agent, msg)
+
+    activity = load_activity(agent_config)
+    assert activity.get("last_interaction_at") is not None
+    assert activity.get("created_at") is not None
+
+
+async def test_agent_worker_skips_activity_for_control_command(agent_config):
+    agent = _worker_agent(agent_config)
+    msg = IncomingMessage(
+        content="", channel="cli", session_id="cli", reply_address={},
+        command="clear",
+    )
+    await _run_worker_until_reply(agent, msg)
+
+    # Control commands `continue` before agent.handle — no interaction recorded.
+    assert not (agent_config.context_dir / "activity.json").exists()
+    agent.handle.assert_not_called()

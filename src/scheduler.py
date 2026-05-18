@@ -15,6 +15,33 @@ from src.skills import load_skill
 logger = logging.getLogger(__name__)
 
 
+# --- system jobs ----------------------------------------------------------
+# Code-registered jobs (e.g. the re-engagement nudge). Unlike user tasks in
+# schedules.json, these are infrastructure: the LLM `schedule` tool cannot
+# see, edit, or disable them. Each job is a duck-typed object exposing:
+#   .id   — str, unique
+#   .cron — str, croniter expression
+#   async .run(agent) — performs the job
+# `last_run` is held in memory only — system jobs need no on-disk state.
+SYSTEM_JOBS: list = []
+_SYSTEM_JOB_LAST_RUN: dict[str, float] = {}
+
+
+def register_system_job(job) -> None:
+    """Register a code-defined job into the shared scheduler tick."""
+    SYSTEM_JOBS.append(job)
+    logger.info("Registered system job: %s (cron %s)", job.id, job.cron)
+
+
+async def _run_system_job(job, agent) -> None:
+    """Run one system job, swallowing exceptions so the tick stays alive."""
+    try:
+        await job.run(agent)
+        logger.info("System job completed: %s", job.id)
+    except Exception as e:
+        logger.error("System job failed: %s — %s", job.id, e)
+
+
 def _schedule_path(config):
     return config.context_dir / "schedules.json"
 
@@ -128,6 +155,18 @@ async def _check_and_fire(agent) -> list[str]:
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
         asyncio.create_task(_run_task(agent, agent.config, task_id, session_id, prompt))
         fired.append(task_id)
+
+    # Code-registered system jobs share the same croniter due-check. Their
+    # last_run is in-memory; marking it before dispatch prevents a same-tick
+    # double fire while a slow job is still running.
+    for job in SYSTEM_JOBS:
+        marker = {"cron": job.cron, "last_run": _SYSTEM_JOB_LAST_RUN.get(job.id, 0)}
+        if not _is_due(marker, now):
+            continue
+        _SYSTEM_JOB_LAST_RUN[job.id] = int(now)
+        logger.info("Firing system job: %s", job.id)
+        asyncio.create_task(_run_system_job(job, agent))
+        fired.append(job.id)
 
     return fired
 
