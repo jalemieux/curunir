@@ -49,6 +49,24 @@ saying "I don't know who you are."
 | `workspace/generated/` | Generated deliverables (research reports, memos, financial analyses, exported PDFs) — *not* memory; documents go here, never into this memory directory |
 | `context/input/` | Drop-zone for user-supplied input files — *not* memory |
 
+
+## Workflow
+
+1. **Orient** — read this README.
+2. **Pull context** — for any owner-related question, read `profile.md` and `preferences.md` minimum; add `projects.md` if the question touches work.
+3. **Search** — use `grep` across the directory for specific names, projects, or dates.
+4. **Update** — when you learn something new, append to the right file per the routing table above.
+5. **Register** — if you create a *new* file in this directory (e.g. `recipes.md`), you **must**, in the same turn, add a row for it to the Taxonomy table above, and add it to the "Where to look first" list if it answers a recurring owner question. A new file that isn't registered in this README is invisible to future reads — it can only be found by `grep`. Creating the file and registering it are one step, not two.
+
+## Best Practice
+
+The memory system is only as useful as its discoverability. **A memory file
+that is not listed in the Taxonomy table above does not exist** as far as
+future reads are concerned — the agent orients off this README, not a
+directory listing. So whenever you create a new memory file, register it
+here in the same turn. Read multiple files when answering identity
+questions — the README is an index, not the answer.
+
 ## Routing for the extractor
 
 When extracting a new fact from a conversation, route by *what the fact is
@@ -62,17 +80,10 @@ about*:
   a shift in self-perception) → `core-insights.md`.
 - **About your own voice or persona** as a durable change → append to the
   relevant subsection in `../identity.md`, not memory.
+- **A fact that fits none of the above** → route it to a new root-level
+  topical file (e.g. `recipes.md`). When you do, you **must** also add a
+  row for that file to the Taxonomy table above and, if it answers a
+  recurring owner question, to the "Where to look first" list. A new file
+  that isn't registered in this README is invisible to the agent — it can
+  only be found by `grep`. Registering it is not optional.
 
-## Workflow
-
-1. **Orient** — read this README.
-2. **Pull context** — for any owner-related question, read `profile.md` and `preferences.md` minimum; add `projects.md` if the question touches work.
-3. **Search** — use `grep` across the directory for specific names, projects, or dates.
-4. **Update** — when you learn something new, append to the right file per the routing table above. Update this taxonomy if you create a new file or category.
-
-## Best Practice
-
-The memory system is only as useful as its discoverability. **Always update
-this taxonomy when creating new memory files or categories.** Read multiple
-files when answering identity questions — the README is an index, not the
-answer.
