@@ -31,10 +31,14 @@ class TestParseFrontmatter:
         assert result["description"] == "Use when: user asks"
 
 
-def _write_skill(parent, name, description, disabled=False):
+def _write_skill(parent, name, description, disabled=False, beta=False):
     d = parent / name
     d.mkdir()
-    extra = "disabled: true\n" if disabled else ""
+    extra = ""
+    if disabled:
+        extra += "disabled: true\n"
+    if beta:
+        extra += "beta: true\n"
     (d / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: {description}\n{extra}---\n# {name}\n"
     )
@@ -90,6 +94,33 @@ class TestDisabledFlag:
     def test_disabled_excluded_from_registry(self, tmp_path):
         _write_skill(tmp_path, "gone", "x", disabled=True)
         assert load_registry([tmp_path]) == {}
+
+
+class TestBetaFlag:
+    def test_beta_excluded_from_manifest(self, tmp_path):
+        _write_skill(tmp_path, "alpha", "alpha desc")
+        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+        manifest = build_skill_manifest([tmp_path])
+        assert "alpha" in manifest
+        assert "newthing" not in manifest
+
+    def test_beta_still_in_registry(self, tmp_path):
+        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+        registry = load_registry([tmp_path])
+        assert "newthing" in registry
+        assert registry["newthing"].beta is True
+
+    def test_beta_still_loadable(self, tmp_path):
+        path = _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+        assert load_skill("newthing", [tmp_path]) == path.read_text()
+
+    def test_beta_defaults_false(self, tmp_path):
+        _write_skill(tmp_path, "plain", "agent desc")
+        assert load_registry([tmp_path])["plain"].beta is False
+
+    def test_only_beta_skill_yields_empty_manifest(self, tmp_path):
+        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+        assert build_skill_manifest([tmp_path]) == ""
 
 
 class TestMultipleDirs:
