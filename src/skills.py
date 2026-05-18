@@ -14,6 +14,7 @@ class Skill:
     description: str
     path: Path
     portal_summary: str | None = None
+    beta: bool = False
 
 
 def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
@@ -22,6 +23,8 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
     On name collision, first-seen wins — so passing [system_dir, user_dir]
     makes system skills shadow user skills. Missing dirs are silently skipped.
     Skills with `disabled: true` or missing `name`/`description` are excluded.
+    Skills with `beta: true` are kept in the registry but flagged so that
+    `build_skill_manifest` omits them from the agent's system prompt.
     """
     registry: dict[str, Skill] = {}
     for skills_dir in skill_dirs:
@@ -49,25 +52,32 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
                 description=fm["description"],
                 path=skill_file,
                 portal_summary=fm.get("portal_summary") or None,
+                beta=fm.get("beta", "").lower() in _TRUTHY,
             )
     return registry
 
 
 def build_skill_manifest(skill_dirs: list[Path]) -> str:
-    """Return markdown table of enabled skills (name + description)."""
+    """Return markdown table of catalog skills (name + description).
+
+    Skills flagged `beta: true` are omitted — they stay in the registry
+    (loadable, slash-forceable) but the agent won't route to them on its own.
+    """
     registry = load_registry(skill_dirs)
-    if not registry:
-        logger.info("no skills found in %s", [str(d) for d in skill_dirs])
+    catalog = [s for s in registry.values() if not s.beta]
+    if not catalog:
+        logger.info("no catalog skills found in %s", [str(d) for d in skill_dirs])
         return ""
 
-    logger.info("discovered %d skills: %s", len(registry), ", ".join(registry))
+    logger.info("manifest lists %d skills: %s",
+                len(catalog), ", ".join(s.name for s in catalog))
 
     lines = [
         "## Available Skills",
         "| Skill | When to Use |",
         "|-------|-------------|",
     ]
-    for skill in sorted(registry.values(), key=lambda s: s.name):
+    for skill in sorted(catalog, key=lambda s: s.name):
         lines.append(f"| {skill.name} | {skill.description} |")
     return "\n".join(lines)
 
