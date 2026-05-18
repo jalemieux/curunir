@@ -1,5 +1,6 @@
 ---
 name: medical-research
+portal_summary: "Look up drugs, symptoms, lab results, and clinical trials from authoritative NIH/FDA sources"
 description: "Use for any medical, health, or wellness question — drugs, supplements, vitamins, vaccines, symptoms, conditions, diagnoses, lab/blood-test results, prognosis, treatments, procedures, clinical trials, adverse events, recalls, drug interactions, pill identification. Trigger phrases: 'look up drug X', 'is X safe' (during pregnancy / with Y / to take), 'has X been recalled', 'side effects of X', 'side effects of the X vaccine', 'are there clinical trials for X', 'what could be causing X', 'symptoms X Y Z what is this', 'differential diagnosis', 'could this be X', 'what do these lab results mean', 'interpret my blood work', 'is this TSH level normal', 'my CBC shows X', 'prognosis for X', 'what is condition X', 'how does X treatment work', 'what to expect from procedure X', 'should I be worried about X', 'drug interaction', 'pill identifier', 'what does the package insert say for X'."
 ---
 
