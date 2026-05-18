@@ -101,8 +101,9 @@ Sub-questions for an investment memo always include some version of:
 - **What are the load-bearing numbers** — revenue, margin, market size,
   peer multiples, catalyst dates. These feed Step 3.
 
-Cite every claim with a URL inline as you research. The memo will need
-these for the fact-checker.
+Capture a source URL for every claim as you research — keep a running
+list. The memo cites them with numbered inline markers (see Step 5) and
+the fact-checker needs them.
 
 ### Step 3 — Financial phase (financial-analysis)
 
@@ -183,7 +184,7 @@ Hold** + confidence (Low / Medium / High) + the 1–2 risks-that-would-flip-it.}
 
 {2–4 paragraphs. The fuller argument: setup, why now, what the market is
 missing, what has to be true for the thesis to play out, what would invalidate
-it. Cite load-bearing facts inline with URLs.}
+it. Cite load-bearing facts inline with numbered markers (see Inline citations).}
 ```
 
 After the shared header, write the body. It has no prescribed section
@@ -209,11 +210,31 @@ the cell blank or mark it n/a — never drop a real category member
 because a column would be empty. Keep any table to roughly five or six
 columns so it fits a typeset page (see Step 7).
 
+**Inline citations and the Sources section.** The memo ends with a
+`## Sources` section, and every claim in the body carries a clickable
+numbered marker that jumps to it — same convention as `deep-research`
+(see its "Inline citations" block). In short:
+
+- Body marker, immediately after the claim: `…peak sales near $5B.^[[2]](#src-2)^`
+- Sources entry, anchored by number:
+
+  ```markdown
+  ## Sources
+
+  1. []{#src-1}[Title](URL) — what was found here
+  2. []{#src-2}[Title](URL) — what was found here
+  ```
+
+Number in first-appearance order, reuse a number when a source recurs,
+repeat the marker for multiple sources on one claim. Every marker needs
+exactly one matching `#src-N` anchor. The `## Fact-Check Addendum` (Step 6)
+goes *after* this `## Sources` section.
+
 Write the markdown to `workspace/generated/{ticker-or-slug}-{YYYY-MM-DD}.md`.
 
 **Honesty rules** (lifted from `financial-analysis` — non-negotiable):
 
-- Cite every number with source and as-of date. No floating numbers.
+- Cite every number with a numbered marker, source, and as-of date. No floating numbers.
 - Flag estimates and user-supplied assumptions.
 - Acknowledge what you don't know — stale guidance, imperfect peers, no
   public financials. A confident-sounding number with hidden weakness is
@@ -340,6 +361,12 @@ fact-check timed out, confidence drops.
   citation for a number.
 - **Floating numbers.** Every number gets a source and an as-of date in
   the Assumptions block.
+- **Bare URLs instead of numbered markers.** Claims cite sources with
+  `^[[N]](#src-N)^` markers resolving to the `## Sources` list — not raw
+  inline URLs and not nothing.
+- **Marker/anchor mismatch.** Every `^[[N]](#src-N)^` marker needs exactly
+  one matching `[]{#src-N}` anchor in Sources, and every Sources entry must
+  be cited. A marker with no anchor renders as a dead link in the PDF.
 - **Attaching .md instead of .pdf.** Always render PDF first; only fall
   back if pandoc fails.
 - **Forgetting `attach()`.** The PDF must be attached, not just written
