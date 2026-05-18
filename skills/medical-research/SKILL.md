@@ -300,7 +300,7 @@ When presenting evidence, always classify:
 
 - Use tables for drug profiles, trial listings, and adverse event rankings
 - Quantify everything possible — avoid vague language
-- Include source URLs for every data point so the user can verify
+- Cite every data point with a numbered inline marker resolving to the `## Sources` list (see Inline citations under Delivery) — including inside tables, so the user can verify any value with one click
 - Flag confidence level of evidence explicitly
 - Always close with: what to discuss with the doctor, and specific questions to ask
 
@@ -308,7 +308,7 @@ When presenting evidence, always classify:
 
 The deliverable is a written report, not just a chat reply. Don't wait to be asked, and don't ask which format to use.
 
-1. Write the full report as markdown to `workspace/generated/{topic-slug}-{YYYY-MM-DD}.md` (e.g. `metformin-safety-2026-05-18.md`, `cbc-results-2026-05-18.md`). The H1 inside the document should be a descriptive title, not the filename slug. Include the disclaimer from the top of this skill.
+1. Write the full report as markdown to `workspace/generated/{topic-slug}-{YYYY-MM-DD}.md` (e.g. `metformin-safety-2026-05-18.md`, `cbc-results-2026-05-18.md`). The H1 inside the document should be a descriptive title, not the filename slug. Include the disclaimer from the top of this skill. End the document with a `## Sources` section (see Inline citations below).
 2. Convert it to PDF with pandoc — already installed in the environment:
 
    ```bash
@@ -321,9 +321,32 @@ The deliverable is a written report, not just a chat reply. Don't wait to be ask
 
 **Header block.** Open the document with Date / Prepared for / Subject lines, each separated by a blank line — markdown collapses consecutive lines into one paragraph, and pandoc will render them as a run-on sentence otherwise.
 
+**Inline citations.** Every data point — drug-label fact, FAERS count, trial detail, lab reference range, PubMed finding — carries a clickable numbered marker that jumps to the matching entry in a `## Sources` section at the end of the document, like a research paper, so the reader can verify any claim with one click. Two pieces of plain markdown that survive `pandoc … -o … .pdf` with no extra flags or packages:
+
+- **In the body** (including inside table cells), place the marker immediately after the claim, no space before it:
+
+  ```markdown
+  Metformin's labeled boxed warning is for lactic acidosis.^[[1]](#src-1)^
+  ```
+
+  `^…^` makes it superscript; `[[1]](#src-1)` is a link with visible text `[1]` pointing at anchor `src-1`.
+
+- **In the Sources list**, each numbered entry begins with an empty anchor span `[]{#src-N}` matching its number:
+
+  ```markdown
+  ## Sources
+
+  1. []{#src-1}DailyMed — Metformin SPL package insert. <https://dailymed.nlm.nih.gov/...>
+  2. []{#src-2}openFDA FAERS — metformin adverse event report counts. <https://api.fda.gov/...>
+  ```
+
+Number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.^[[1]](#src-1)^ ^[[3]](#src-3)^`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
+
 ## Anti-Patterns (Delivery)
 
 - **Pip-installing a PDF library** — pandoc is already in the environment. Use it. Never install packages at runtime to produce the attachment.
 - **Attaching `.md` instead of `.pdf`** — always convert to PDF first; only fall back to `.md` if pandoc fails.
 - **Forgetting `attach()`** — the report file must be attached, not just written to disk.
 - **Filename slug as the H1** — the slug is for the file; the H1 should be a descriptive long-form title.
+- **Bare URLs instead of numbered markers** — data points cite sources with `^[[N]](#src-N)^` markers resolving to the `## Sources` list, not raw inline URLs scattered through the prose and tables.
+- **Marker/anchor mismatch** — every `^[[N]](#src-N)^` marker needs exactly one matching `[]{#src-N}` anchor in Sources, and every Sources entry must be cited. A marker with no anchor renders as a dead link in the PDF.
