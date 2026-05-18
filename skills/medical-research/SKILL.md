@@ -303,3 +303,27 @@ When presenting evidence, always classify:
 - Include source URLs for every data point so the user can verify
 - Flag confidence level of evidence explicitly
 - Always close with: what to discuss with the doctor, and specific questions to ask
+
+## Delivery
+
+The deliverable is a written report, not just a chat reply. Don't wait to be asked, and don't ask which format to use.
+
+1. Write the full report as markdown to `workspace/generated/{topic-slug}-{YYYY-MM-DD}.md` (e.g. `metformin-safety-2026-05-18.md`, `cbc-results-2026-05-18.md`). The H1 inside the document should be a descriptive title, not the filename slug. Include the disclaimer from the top of this skill.
+2. Convert it to PDF with pandoc — already installed in the environment:
+
+   ```bash
+   pandoc workspace/generated/{topic-slug}-{YYYY-MM-DD}.md -o workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf
+   ```
+
+   Never `pip install` a PDF library — pandoc is the tool. Do not render via HTML, headless Chromium, or CSS.
+3. Attach the **PDF**: `attach(path="workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf")`. If pandoc fails, attach the `.md` as a fallback.
+4. Reply with a concise summary (key findings + the doctor questions) as your text response. The full report is the attachment.
+
+**Header block.** Open the document with Date / Prepared for / Subject lines, each separated by a blank line — markdown collapses consecutive lines into one paragraph, and pandoc will render them as a run-on sentence otherwise.
+
+## Anti-Patterns (Delivery)
+
+- **Pip-installing a PDF library** — pandoc is already in the environment. Use it. Never install packages at runtime to produce the attachment.
+- **Attaching `.md` instead of `.pdf`** — always convert to PDF first; only fall back to `.md` if pandoc fails.
+- **Forgetting `attach()`** — the report file must be attached, not just written to disk.
+- **Filename slug as the H1** — the slug is for the file; the H1 should be a descriptive long-form title.
