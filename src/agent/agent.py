@@ -8,6 +8,7 @@ from pathlib import Path
 
 import litellm
 
+from src.agent import conversation_store
 from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
@@ -150,8 +151,11 @@ class Agent:
         usage_store: "UsageStore | None" = None,
     ):
         self.config = config
+        # Active sessions only — past conversations live on disk in
+        # context/conversations/ and are lazy-loaded on access. The archive
+        # path for memory extraction is tracked per-conversation on disk
+        # (conversation_store metadata), not in memory.
         self.sessions: dict[str, list[dict]] = {}
-        self.session_archives: dict[str, Path] = {}
         # Bake the timestamp into the static prompt once at construction.
         # Auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter)
         # hash the prefix — a per-call timestamp would invalidate the cache
@@ -187,16 +191,33 @@ class Agent:
             base = base + extra
         return base
 
+    def _load_history(self, session_id: str) -> list[dict]:
+        """Conversation history for a session.
+
+        Returns the in-memory history for an active session, else lazily
+        reads the persisted transcript from context/conversations/, else an
+        empty list. A pure read — does not populate self.sessions.
+        """
+        if session_id in self.sessions:
+            return self.sessions[session_id]
+        record = conversation_store.load(self.config.context_dir, session_id)
+        return record["history"] if record else []
+
+    def conversations_snapshot(self) -> list[dict]:
+        """Metadata-only summaries of every persisted conversation, newest first."""
+        return conversation_store.list_conversations(self.config.context_dir)
+
     def history_snapshot(self, session_id: str = "portal") -> list[dict]:
         """Return a chat-shaped projection of conversation history for the portal.
 
-        Walks self.sessions[session_id] once. Includes user turns and assistant
+        Reads the session's history — from memory if active, otherwise lazily
+        from the persisted transcript. Includes user turns and assistant
         turns; tool internals are summarized as one-liners (e.g. "bash: ls -la").
         Capped at 200 messages or 100 KB serialized.
         """
         import json as _json
 
-        history = self.sessions.get(session_id, [])
+        history = self._load_history(session_id)
         out: list[dict] = []
         for entry in history:
             role = entry.get("role")
@@ -265,6 +286,13 @@ class Agent:
             attachments: Optional list that will be populated with any files
                          the agent attaches during this request via the attach tool.
         """
+        # Lazy-load a persisted transcript when resuming a conversation that
+        # is not currently in memory — agent.sessions holds active sessions
+        # only, so a past conversation must be rehydrated on first access.
+        if session_id not in self.sessions:
+            record = conversation_store.load(self.config.context_dir, session_id)
+            if record is not None:
+                self.sessions[session_id] = record["history"]
         history = self.sessions.setdefault(session_id, [])
 
         # Onboarding gate: first user turn of a fresh session, no .onboarded
