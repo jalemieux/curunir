@@ -116,6 +116,12 @@ See [`onboarding/README.md`](onboarding/README.md) for the user-facing flow and 
 
 Cron tasks in `context/schedules.json` evaluated every second via croniter. When due, agent processes the task prompt via `handle()` in system-task mode.
 
+The same tick also fires **code-registered system jobs** (`SYSTEM_JOBS`) — infrastructure the LLM `schedule` tool cannot see, edit, or disable. Their `last_run` is held in memory only. `register_system_job()` adds one at startup.
+
+### Re-engagement nudges (`src/reengagement.py`)
+
+A proactive email nudge after owner inactivity, built as a system job (`ReengagementJob`). `agent_worker` calls `record_interaction()` after a genuine owner turn, recording `created_at` / `last_interaction_at` / `nudges_sent` in `context/activity.json`. The job's pure `should_nudge()` predicate picks a series from account age — **activation** (≤14d, thresholds 2/5/10) or **re-engagement** (>14d, thresholds 7/14/21) — and the job calls the LLM only to write the email body; gating and the send (`DeadsimpleClient.send_email`) are plain Python. Opt-in via `REENGAGEMENT_ENABLED` (default off).
+
 ## Testing Patterns
 
 All tests are async (pytest-asyncio). Key fixtures in `tests/conftest.py`: `tmp_context`, `tmp_skills`, `agent_config`.

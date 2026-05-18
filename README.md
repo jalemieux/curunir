@@ -68,7 +68,8 @@ curunir/
 │   ├── config.py           # AgentConfig dataclass
 │   ├── llm.py              # LLM interface (LiteLLM)
 │   ├── memory_extractor.py # Post-session memory extraction
-│   ├── scheduler.py        # Cron task runner (context/schedules.json)
+│   ├── scheduler.py        # Cron task runner (schedules.json + code-registered system jobs)
+│   ├── reengagement.py     # Re-engagement nudge system job + activity store
 │   ├── usage_store.py      # SQLite per-call token/cost ledger
 │   └── skills.py           # Skill manifest and loader
 ├── skills/                 # Drop-in skills (each a dir with SKILL.md)
@@ -79,7 +80,8 @@ curunir/
 │   ├── identity.md         # Assistant persona and instructions
 │   ├── memory/             # Persistent markdown memory store
 │   ├── input/              # Drop-zone for user-supplied input files
-│   └── schedules.json      # Cron tasks evaluated by scheduler
+│   ├── schedules.json      # Cron tasks evaluated by scheduler
+│   └── activity.json       # Owner-interaction store for re-engagement nudges
 ├── workspace/              # Gitignored runtime volume — outputs the agent produces
 │   ├── generated/          # Generated deliverables (research reports, memos, PDFs)
 │   └── scratch/            # Transient/intermediate files (safe to delete)
@@ -271,6 +273,7 @@ Useful operational env vars:
 
 - `LOG_FILE` — path to a rotating log file (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill can read agent activity.
 - `LOG_LEVEL=DEBUG` — verbose agent tracing.
+- `REENGAGEMENT_ENABLED=true` — opt into proactive inactivity nudge emails to the owner (off by default; needs the email channel configured). Tune with `REENGAGEMENT_CRON`, `ACTIVATION_THRESHOLDS`, `REENGAGEMENT_THRESHOLDS`.
 
 Per-call token usage and cost are persisted to `context/usage.db` (SQLite). Inspect with:
 
