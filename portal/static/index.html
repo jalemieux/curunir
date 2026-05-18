@@ -67,7 +67,56 @@ body {
   background: var(--bg); color: var(--fg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 14px;
+  display: flex;
+}
+/* The chat column (header + messages + composer). On mobile it is the only
+   visible region; on desktop it sits to the right of the sidebar. */
+#app {
+  flex: 1; min-width: 0; height: 100dvh;
   display: flex; flex-direction: column;
+}
+/* Desktop-only conversation sidebar — hidden on mobile per #164. */
+#sidebar { display: none; }
+.sidebar-head {
+  padding: 12px 14px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--header-text); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#conversation-list { flex: 1; overflow-y: auto; }
+.conv-row {
+  position: relative; padding: 9px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.conv-row:hover { background: var(--bubble); }
+.conv-row.active {
+  background: var(--bubble);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.conv-title {
+  font-size: 13px; font-weight: 600; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding-right: 18px;
+}
+.conv-meta { font-size: 11px; color: var(--header-text); }
+.conv-del {
+  position: absolute; right: 6px; top: 7px;
+  width: 18px; height: 18px; padding: 0; line-height: 1;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--header-text); font-size: 13px; opacity: 0;
+}
+.conv-row:hover .conv-del { opacity: 0.55; }
+.conv-del:hover { opacity: 1; color: var(--accent); }
+.conv-empty {
+  padding: 14px; font-size: 12px; color: var(--header-text);
+}
+@media (min-width: 768px) {
+  #sidebar {
+    display: flex; flex-direction: column;
+    width: 264px; flex-shrink: 0; height: 100dvh;
+    border-right: 1px solid var(--border);
+  }
 }
 header {
   padding: 8px 14px; border-bottom: 1px solid var(--border);
@@ -478,6 +527,11 @@ body.dragging .drop-hint { display: flex; }
 </style>
 </head>
 <body>
+<aside id="sidebar">
+  <div class="sidebar-head">Conversations</div>
+  <div id="conversation-list"></div>
+</aside>
+<div id="app">
 <header>
   <div><strong>Curunir</strong></div>
   <div class="header-right">
@@ -504,6 +558,7 @@ body.dragging .drop-hint { display: flex; }
     <div class="drop-hint">Drop files to attach</div>
   </div>
 </footer>
+</div>
 
 <div id="offline-overlay">
   <div id="offline-card" role="alertdialog" aria-live="polite"
@@ -561,6 +616,7 @@ const stagedEl = document.getElementById("staged");
 const statusDot = document.querySelector("#status .dot");
 const statusText = document.getElementById("status-text");
 const newBtn = document.getElementById("new-btn");
+const conversationListEl = document.getElementById("conversation-list");
 const themeBtn = document.getElementById("theme-btn");
 const skillsBtn = document.getElementById("skills-btn");
 const skillsOverlay = document.getElementById("skills-overlay");
@@ -575,16 +631,15 @@ const offlineTitle = document.getElementById("offline-title");
 const offlineSub = document.getElementById("offline-sub");
 
 // === State ===
-// One session_id per browser tab. Persisted in sessionStorage so a tab
-// reload keeps the same id (and therefore replays its own history),
-// while a new tab mints a fresh id and starts a clean conversation.
-// The portal binds this id to the ws on the first frame we send and
-// only routes that session's traffic back here — that's what kills
-// the cross-tab bleed introduced by multi-session support.
-let sessionId = sessionStorage.getItem("curunir-session-id");
+// The active conversation's session_id. Persisted in localStorage (not
+// sessionStorage) so a reload reopens the same conversation; the sidebar
+// lets the user switch between conversations or start new ones. The portal
+// binds this id to the ws on each frame we send and only routes that
+// session's traffic back here.
+let sessionId = localStorage.getItem("curunir-session-id");
 if (!sessionId) {
   sessionId = crypto.randomUUID();
-  sessionStorage.setItem("curunir-session-id", sessionId);
+  localStorage.setItem("curunir-session-id", sessionId);
 }
 let ws = null;
 let agentOnline = false;
@@ -592,6 +647,8 @@ let staged = []; // {filename, mime_type, data (base64), size}
 let inProgressMsg = null; // current assistant DOM node
 // Cached skills_snapshot for this tab; null until first fetch returns.
 let skillsCache = null;
+// Latest conversations_snapshot — drives the sidebar list.
+let conversations = [];
 let backoff = 1000;
 
 // === Markdown setup ===
@@ -689,6 +746,8 @@ function connect() {
     ws.send(JSON.stringify({
       command: "skills_request", session_id: sessionId,
     }));
+    // Pull the conversation list for the sidebar.
+    requestConversations();
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -721,6 +780,11 @@ function onServerMessage(msg) {
     // If the empty state is showing, it may have rendered before skills
     // arrived — rebuild it now so the starter rows appear.
     if (messagesEl.querySelector(".empty-state")) renderEmptyState();
+    return;
+  }
+  if (msg.type === "conversations_snapshot") {
+    conversations = msg.conversations || [];
+    renderConversations();
     return;
   }
   // Otherwise: an OutgoingMessage payload.
@@ -806,6 +870,9 @@ function renderAgentChunk(m) {
     removeThinking(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
+    // The turn just completed — refresh the sidebar so a brand-new
+    // conversation appears and titles/timestamps stay current.
+    requestConversations();
   }
   updateComposerMode();
   scrollToBottom();
@@ -1181,9 +1248,94 @@ function renderStaged() {
 }
 
 // === New conversation ===
+// === Conversation sidebar ===
+function requestConversations() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    command: "conversations_request", session_id: sessionId,
+  }));
+}
+
+function relativeTime(iso) {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  const d = Math.floor(h / 24);
+  if (d < 7) return d + "d ago";
+  return new Date(iso).toLocaleDateString();
+}
+
+function renderConversations() {
+  conversationListEl.innerHTML = "";
+  if (!conversations.length) {
+    const empty = document.createElement("div");
+    empty.className = "conv-empty";
+    empty.textContent = "No conversations yet.";
+    conversationListEl.appendChild(empty);
+    return;
+  }
+  for (const c of conversations) {
+    const row = document.createElement("div");
+    row.className = "conv-row" + (c.session_id === sessionId ? " active" : "");
+    row.innerHTML =
+      '<div class="conv-title"></div>' +
+      '<div class="conv-meta"></div>' +
+      '<button class="conv-del" title="Delete conversation" ' +
+      'aria-label="Delete conversation">✕</button>';
+    row.querySelector(".conv-title").textContent =
+      c.title || "New conversation";
+    row.querySelector(".conv-meta").textContent = relativeTime(c.updated_at);
+    row.addEventListener("click", () => switchConversation(c.session_id));
+    row.querySelector(".conv-del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteConversation(c.session_id);
+    });
+    conversationListEl.appendChild(row);
+  }
+}
+
+function switchConversation(id) {
+  if (id === sessionId) return;
+  sessionId = id;
+  localStorage.setItem("curunir-session-id", sessionId);
+  messagesEl.innerHTML = "";
+  inProgressMsg = null;
+  staged = [];
+  renderStaged();
+  // Re-bind the socket to this session and pull its transcript; the
+  // history_snapshot handler renders the messages.
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      content: "", command: "history_request", session_id: sessionId,
+    }));
+  }
+  renderConversations();
+  inputEl.focus();
+}
+
+function deleteConversation(id) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // The `clear` command is the server-side delete: it summarizes the
+  // conversation into memory, then removes its transcript file.
+  ws.send(JSON.stringify({ content: "", command: "clear", session_id: id }));
+  conversations = conversations.filter(c => c.session_id !== id);
+  renderConversations();
+  // Deleting the conversation you're in drops you into a fresh one.
+  if (id === sessionId) startNew();
+}
+
 function startNew() {
-  if (!agentOnline) return;
-  ws.send(JSON.stringify({ content: "", command: "clear", session_id: sessionId }));
+  // Mint a fresh conversation id — no `clear` frame, so the prior
+  // conversation is kept and stays in the sidebar. The new conversation
+  // joins the list once its first message is sent.
+  sessionId = crypto.randomUUID();
+  localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
   inProgressMsg = null;
   staged = [];
@@ -1191,6 +1343,7 @@ function startNew() {
   inputEl.value = "";
   inputEl.style.height = "";
   renderEmptyState();
+  renderConversations();
   inputEl.focus();
 }
 
