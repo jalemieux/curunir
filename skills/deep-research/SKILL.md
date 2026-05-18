@@ -74,16 +74,16 @@ Compile findings into a structured report. The first page sets the frame — rea
 - [3-5 bullet summary of the most load-bearing facts]
 
 ## {Sub-question 1 heading}
-[Findings with inline source citations]
+[Findings — every claim carries a numbered citation marker; see Inline citations below]
 
 ## {Sub-question 2 heading}
-[Findings with inline source citations]
+[Findings — every claim carries a numbered citation marker]
 
 ...
 
 ## Sources
-- [Title](URL) — [Reddit] what was found here
-- [Title](URL) — [X/Twitter] what was found here
+1. []{#src-1}[Title](URL) — [Reddit] what was found here
+2. []{#src-2}[Title](URL) — [X/Twitter] what was found here
 ```
 
 **Title guidance.** The H1 should read like a magazine cover, not a filename: `"Retatrutide: Blockbuster or Bust? Investment Analysis for Eli Lilly (LLY)"` beats `"Retatrutide Research"`. The filename slug is separate (see Step 5).
@@ -93,6 +93,27 @@ Compile findings into a structured report. The first page sets the frame — rea
 **Subject vs. title.** Title is the headline; Subject is the one-sentence framing of what's being investigated (e.g., "Eli Lilly's investigational triple-agonist drug retatrutide — bull case, bear case, and potential impact on LLY stock"). They are not the same.
 
 **Status line.** Start as `Draft — not yet independently fact-checked`. If the report is later updated with fact-check corrections (see below), change to `Fact-checked {YYYY-MM-DD} — corrections incorporated` and update the Date line to reflect the revision: `Date: May 4, 2026 (updated May 11, 2026 — fact-checked, corrected & expanded)`.
+
+**Inline citations.** Every claim in the body carries a clickable numbered marker that jumps to the matching entry in the `## Sources` list — like a research paper, so the reader can verify any fact with one click. The mechanism is two pieces of plain markdown that survive `pandoc … -o … .pdf` with no extra flags or packages:
+
+- **In the body**, place the marker immediately after the claim (no space before it):
+
+  ```markdown
+  Retatrutide produced 24.2% mean weight loss at 48 weeks.^[[1]](#src-1)^
+  ```
+
+  `^…^` makes it superscript; `[[1]](#src-1)` is a link whose visible text is `[1]` pointing at the anchor `src-1`.
+
+- **In the Sources list**, each numbered entry begins with an empty anchor span `[]{#src-N}` matching its number:
+
+  ```markdown
+  ## Sources
+
+  1. []{#src-1}[Title](URL) — [Reddit] what was found here
+  2. []{#src-2}[Title](URL) — [X/Twitter] what was found here
+  ```
+
+Rules: number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.^[[1]](#src-1)^ ^[[3]](#src-3)^`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
 
 ### Step 5 — Fact-check the draft (default, not optional)
 
@@ -196,14 +217,15 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 
 - Run multiple focused searches per sub-question rather than one broad search.
 - Use `freshness=pw` or `freshness=pm` when recency matters (Brave).
-- Cite every claim with a source URL inline.
+- Cite every claim with a numbered citation marker inline (see Inline citations); collect the targets in the `## Sources` list.
 - Social sources (Reddit, X) are qualitative signal, not authoritative facts.
 
 ## Common Mistakes
 
 - **One big search instead of targeted queries** — decompose into sub-questions, search each separately.
 - **Search snippets without full content** — snippets are too shallow. Use `web_fetch` to read promising pages.
-- **Missing source citations** — every claim needs an inline URL.
+- **Missing source citations** — every claim needs an inline numbered marker (`^[[N]](#src-N)^`), not a bare URL and not nothing.
+- **Marker/anchor mismatch** — every `^[[N]](#src-N)^` marker must have exactly one matching `[]{#src-N}` anchor in the Sources list, and every Sources entry must be cited at least once. A marker pointing at a missing anchor renders as a dead link in the PDF.
 - **Attaching .md instead of .pdf** — always convert to PDF first. Only fall back to .md if pandoc fails.
 - **Forgetting `attach()`** — the report file must be attached, not just written.
 - **Using all sources on every topic** — match sources to the topic. A technical deep-dive doesn't need LinkedIn; a company analysis doesn't need Reddit.
