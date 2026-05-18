@@ -12,6 +12,7 @@ import httpx
 import litellm
 from dotenv import load_dotenv
 
+from src.agent import conversation_store
 from src.agent.agent import Agent
 from src.channels.base import OutgoingMessage
 from src.channels.email import EmailChannel
@@ -201,12 +202,26 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
     return blocks
 
 
-async def _extract_and_record(agent: Agent, session_id: str, history: list[dict]):
-    """Extract learnings for a session and record the archive path for reuse."""
-    archive_path = agent.session_archives.get(session_id)
-    written = await extract_learnings(agent.config, history, archive_path=archive_path)
-    if written is not None:
-        agent.session_archives[session_id] = written
+async def _extract_conversation(agent: Agent, session_id: str) -> None:
+    """Run memory extraction for one persisted conversation.
+
+    Reads the transcript from context/conversations/ — so a conversation no
+    longer has to be live in ``agent.sessions`` to be summarized — reuses its
+    recorded archive path if any, and stamps the extraction metadata back so
+    the conversation is not re-extracted until it grows again.
+    """
+    record = conversation_store.load(agent.config.context_dir, session_id)
+    if record is None:
+        return
+    archive_path = record.get("archive_path")
+    written = await extract_learnings(
+        agent.config, record["history"],
+        archive_path=Path(archive_path) if archive_path else None,
+    )
+    conversation_store.set_extracted(
+        agent.config.context_dir, session_id,
+        str(written) if written is not None else archive_path,
+    )
 
 
 def _detect_vision_support(model: str) -> bool:
@@ -334,15 +349,22 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 await in_queue.put(inc)
             continue
 
-        # Control commands: drop or summarize the session before it's gone,
-        # then ack with an empty reply so the channel can render UI feedback.
+        # Delete (clear/reset): capture the conversation's learnings into
+        # long-term memory, then remove its transcript. Extraction is awaited
+        # so the memory summary lands before the transcript file is gone; the
+        # summary in memory/ outlives the deleted conversation.
         if msg.command in ("clear", "reset"):
             history = agent.sessions.pop(msg.session_id, None)
-            archive_path = agent.session_archives.pop(msg.session_id, None)
+            record = conversation_store.load(agent.config.context_dir, msg.session_id)
+            if history is None and record is not None:
+                history = record["history"]
             if history:
-                asyncio.create_task(extract_learnings(
-                    agent.config, list(history), archive_path=archive_path,
-                ))
+                archive_path = record.get("archive_path") if record else None
+                await extract_learnings(
+                    agent.config, list(history),
+                    archive_path=Path(archive_path) if archive_path else None,
+                )
+            conversation_store.delete(agent.config.context_dir, msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -350,11 +372,15 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             continue
 
         if msg.command == "extract":
-            history = agent.sessions.get(msg.session_id)
-            if history:
-                asyncio.create_task(_extract_and_record(
-                    agent, msg.session_id, list(history),
-                ))
+            # Force immediate extraction, bypassing the idle/grown gate that
+            # periodic_extraction applies. Persist the live session first so
+            # _extract_conversation reads an up-to-date transcript from disk.
+            if msg.session_id in agent.sessions:
+                conversation_store.save(
+                    agent.config.context_dir, msg.session_id,
+                    agent.sessions[msg.session_id],
+                )
+            await _extract_conversation(agent, msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -414,6 +440,15 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             if llama_stats:
                 metadata["stats"]["server"] = llama_stats
 
+        # Persist the conversation transcript after the turn so it survives
+        # restarts, appears in the portal sidebar, and can be extracted from
+        # disk without having to stay resident in agent.sessions.
+        if msg.session_id in agent.sessions:
+            conversation_store.save(
+                agent.config.context_dir, msg.session_id,
+                agent.sessions[msg.session_id],
+            )
+
         # Final reply: routed back to the originating channel by route_outbound.
         await out_queue.put(OutgoingMessage(
             content=text,
@@ -426,18 +461,21 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         ))
 
 
+async def _run_extraction_pass(agent: Agent) -> None:
+    """One disk-driven extraction pass.
+
+    Summarizes every persisted conversation whose transcript has settled and
+    grown since its last extraction (see conversation_store.due_for_extraction).
+    """
+    for session_id in conversation_store.due_for_extraction(agent.config.context_dir):
+        await _extract_conversation(agent, session_id)
+
+
 async def periodic_extraction(agent: Agent, interval_sec: int):
-    """Periodically extract learnings from sessions that have grown."""
-    last_extracted_len: dict[str, int] = {}
+    """Periodically extract learnings from settled conversations on disk."""
     while True:
         await asyncio.sleep(interval_sec)
-        for session_id, history in agent.sessions.items():
-            prev_len = last_extracted_len.get(session_id, 0)
-            if len(history) > prev_len:
-                asyncio.create_task(_extract_and_record(
-                    agent, session_id, list(history),
-                ))
-                last_extracted_len[session_id] = len(history)
+        await _run_extraction_pass(agent)
 
 
 logger = logging.getLogger(__name__)
@@ -577,12 +615,13 @@ async def main():
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
             skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
+            conversations_provider=lambda: agent.conversations_snapshot(),
             cancel_session=agent.request_cancel,
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
 
-    extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "3600"))
+    extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 

@@ -659,3 +659,68 @@ async def test_skills_request_command_triggers_snapshot(portal_server):
         assert msg["skills"] == []
     finally:
         task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_conversations_request_invokes_provider_and_sends_snapshot(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    fake_convos = [
+        {"session_id": "tab-A", "title": "First", "preview": "First",
+         "created_at": "2026-05-01T00:00:00+00:00",
+         "updated_at": "2026-05-02T00:00:00+00:00"},
+    ]
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        conversations_provider=lambda: fake_convos,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({"type": "conversations_request"})
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "conversations_snapshot"
+        assert msg["conversations"] == fake_convos
+        assert msg["session_id"] == PORTAL_SESSION_ID
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_conversations_request_command_triggers_snapshot(portal_server):
+    """Browser-driven: a user_message with command=conversations_request and a
+    session_id triggers a conversations_snapshot tagged with that session."""
+    in_q: asyncio.Queue = asyncio.Queue()
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        conversations_provider=lambda: [],
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "conversations_request", "session_id": "tab-S"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "conversations_snapshot"
+        assert msg["session_id"] == "tab-S"
+        assert msg["conversations"] == []
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_conversations_request_no_connection_no_send(portal_server):
+    """A conversations_request with no live connection produces no send."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        conversations_provider=lambda: [{"session_id": "x"}],
+    )
+    # No start() — _connection is None.
+    await ch._handle_conversations_request({})
+    assert ch._connection is None
