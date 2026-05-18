@@ -12,6 +12,9 @@ not bleed into another:
   - {"type": "history_snapshot", "session_id": ...,
      "messages": ...}                                 → route the whole
     envelope to browsers bound to `session_id`.
+  - {"type": "conversations_snapshot", "session_id": ...,
+     "conversations": ...}                            → likewise, route
+    the envelope to browsers bound to `session_id`.
 
 If `session_id` is missing on either frame (stale container build), the
 frame is dropped on the assumption that legacy single-session use is
@@ -92,6 +95,15 @@ async def ws_agent(ws: WebSocket) -> None:
                 if not isinstance(session_id, str) or not session_id:
                     logger.warning(
                         "skills_snapshot without session_id; dropping",
+                        extra={"user_id": user.id},
+                    )
+                    continue
+                await routing.route_to_session(user.id, session_id, raw)
+            elif mtype == "conversations_snapshot":
+                session_id = msg.get("session_id")
+                if not isinstance(session_id, str) or not session_id:
+                    logger.warning(
+                        "conversations_snapshot without session_id; dropping",
                         extra={"user_id": user.id},
                     )
                     continue

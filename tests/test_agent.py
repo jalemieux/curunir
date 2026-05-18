@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.agent import conversation_store as cs
 from src.agent.agent import Agent, _estimate_chars, _trim_history
 from src.llm import LLMResponse
 
@@ -13,10 +14,46 @@ def agent(agent_config):
     return Agent(agent_config)
 
 
-def test_agent_initializes_session_archives_dict(agent_config):
-    """Agent has an empty session_archives dict for tracking archive file paths."""
-    agent = Agent(agent_config)
-    assert agent.session_archives == {}
+class TestConversationPersistence:
+    def test_construction_does_not_bulk_load_conversations(self, agent_config):
+        """Past conversations on disk are NOT rehydrated into agent.sessions."""
+        cs.save(agent_config.context_dir, "old-sess",
+                [{"role": "user", "content": "hi"}])
+        agent = Agent(agent_config)
+        assert agent.sessions == {}
+
+    def test_conversations_snapshot_lists_persisted_conversations(self, agent):
+        cs.save(agent.config.context_dir, "a", [{"role": "user", "content": "first"}])
+        cs.save(agent.config.context_dir, "b", [{"role": "user", "content": "second"}])
+        snap = agent.conversations_snapshot()
+        assert {c["session_id"] for c in snap} == {"a", "b"}
+        assert all("history" not in c for c in snap)
+
+    def test_history_snapshot_lazy_loads_unknown_session(self, agent):
+        """history_snapshot for a session absent from memory loads it from disk."""
+        cs.save(agent.config.context_dir, "disk-only", [
+            {"role": "user", "content": "remembered question"},
+            {"role": "assistant", "content": "remembered answer"},
+        ])
+        assert "disk-only" not in agent.sessions
+        snap = agent.history_snapshot("disk-only")
+        assert [m["content"] for m in snap] == [
+            "remembered question", "remembered answer"]
+
+    async def test_handle_lazy_loads_prior_history_to_resume(self, agent):
+        """Resuming a persisted conversation continues its prior history."""
+        (agent.config.context_dir / ".onboarded").touch()
+        cs.save(agent.config.context_dir, "resumed", [
+            {"role": "user", "content": "earlier turn"},
+            {"role": "assistant", "content": "earlier reply"},
+        ])
+        resp = LLMResponse(text="new reply", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=resp):
+            await agent.handle("new turn", "resumed")
+        history = agent.sessions["resumed"]
+        assert history[0]["content"] == "earlier turn"
+        assert history[-2]["content"] == "new turn"
+        assert history[-1]["content"] == "new reply"
 
 
 class TestAgentHandle:
