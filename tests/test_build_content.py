@@ -416,3 +416,32 @@ async def test_describe_image_cache_persists_across_worker_calls(image_file):
     llm_module._description_cache.clear()
 
 
+
+
+def test_large_text_attachment_spills_to_sidecar(tmp_path):
+    from run import build_multimodal_content, _INLINE_TEXT_CAP
+    big = tmp_path / "big.txt"
+    body = "A" * (_INLINE_TEXT_CAP + 5000)
+    big.write_text(body)
+
+    blocks = build_multimodal_content("read this", [_att(big, "text/plain")])
+    att_block = blocks[1]["text"]
+
+    # Only the capped preview is inlined, not the full body.
+    assert "A" * _INLINE_TEXT_CAP in att_block
+    assert "A" * (_INLINE_TEXT_CAP + 1) not in att_block
+    # Sidecar holds the full extracted text and is pointed at in the block.
+    sidecar = str(big) + ".extracted.txt"
+    assert sidecar in att_block
+    assert os.path.exists(sidecar)
+    with open(sidecar) as f:
+        assert f.read() == body
+
+
+def test_small_text_attachment_stays_fully_inline(tmp_path):
+    from run import build_multimodal_content
+    small = tmp_path / "small.txt"
+    small.write_text("just a little")
+    blocks = build_multimodal_content("x", [_att(small, "text/plain")])
+    assert "just a little" in blocks[1]["text"]
+    assert not os.path.exists(str(small) + ".extracted.txt")

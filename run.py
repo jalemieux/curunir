@@ -112,6 +112,44 @@ async def _fetch_llamacpp_stats(api_base: str) -> dict | None:
         return None
 
 
+# Max chars of extracted attachment text inlined into the first user message.
+# Larger bodies spill to a sidecar .txt file the agent reads on demand, so a
+# big attachment can't fill the context window before the agent does any work.
+_INLINE_TEXT_CAP = 24_000
+
+
+def _attachment_text_block(filename: str, descriptor: str, body: str, staged_path: str) -> dict:
+    """Build a text content block for an attachment's extracted text.
+
+    Bodies within ``_INLINE_TEXT_CAP`` are inlined whole. Larger bodies are
+    written in full to a ``.extracted.txt`` sidecar next to the staged file;
+    only a head preview is inlined, with a pointer telling the agent to use
+    the read/grep tools for the rest.
+    """
+    label = f"{filename} ({descriptor})" if descriptor else filename
+    if len(body) <= _INLINE_TEXT_CAP:
+        return {"type": "text", "text": f"[Attachment: {label}]\n```\n{body}\n```"}
+
+    sidecar = staged_path + ".extracted.txt"
+    try:
+        with open(sidecar, "w", encoding="utf-8") as f:
+            f.write(body)
+        note = (
+            f" — {len(body)} chars of extracted text; the first {_INLINE_TEXT_CAP} "
+            f"are inlined below and the full text is saved at {sidecar}. "
+            f"Use the read or grep tool to access the rest."
+        )
+    except OSError:
+        note = (
+            f" — extracted text truncated to the first {_INLINE_TEXT_CAP} of "
+            f"{len(body)} chars (sidecar file could not be written)."
+        )
+    return {
+        "type": "text",
+        "text": f"[Attachment: {label}{note}]\n```\n{body[:_INLINE_TEXT_CAP]}\n```",
+    }
+
+
 def build_multimodal_content(text: str, attachments: list[dict] | None) -> str | list:
     """Build LiteLLM content from text + a staged-attachment manifest.
 
@@ -165,29 +203,19 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
             reader = PdfReader(path)
             pages_text = "\n\n".join(p.extract_text() or "" for p in reader.pages)
             body = pages_text.strip() or "(no extractable text)"
-            blocks.append({
-                "type": "text",
-                "text": (
-                    f"[Attachment: {att['filename']} (PDF, {len(reader.pages)} pages)]\n"
-                    f"```\n{body}\n```"
-                ),
-            })
+            blocks.append(_attachment_text_block(
+                att["filename"], f"PDF, {len(reader.pages)} pages", body, path,
+            ))
         elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             import docx
             doc = docx.Document(path)
             body = "\n".join(p.text for p in doc.paragraphs).strip() or "(no extractable text)"
-            blocks.append({
-                "type": "text",
-                "text": f"[Attachment: {att['filename']} (DOCX)]\n```\n{body}\n```",
-            })
+            blocks.append(_attachment_text_block(att["filename"], "DOCX", body, path))
         else:
             try:
                 with open(path, "rb") as f:
                     content = f.read().decode("utf-8")
-                blocks.append({
-                    "type": "text",
-                    "text": f"[Attachment: {att['filename']}]\n```\n{content}\n```",
-                })
+                blocks.append(_attachment_text_block(att["filename"], "", content, path))
             except UnicodeDecodeError:
                 size = att.get("size") or os.path.getsize(path)
                 blocks.append({
