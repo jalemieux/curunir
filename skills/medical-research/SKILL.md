@@ -326,10 +326,10 @@ The deliverable is a written report, not just a chat reply. Don't wait to be ask
 - **In the body** (including inside table cells), place the marker immediately after the claim, no space before it:
 
   ```markdown
-  Metformin's labeled boxed warning is for lactic acidosis.^[[1]](#src-1)^
+  Metformin's labeled boxed warning is for lactic acidosis.[^1^](#src-1)
   ```
 
-  `^…^` makes it superscript; `[[1]](#src-1)` is a link with visible text `[1]` pointing at anchor `src-1`.
+  The link `[…](#src-1)` points at the anchor `src-1`; wrapping the number in `^…^` renders the visible `1` as a superscript. Writing it link-first (`[^1^]` before `(#src-1)`) keeps it clear of pandoc's `^[…]` inline-footnote syntax.
 
 - **In the Sources list**, each numbered entry begins with an empty anchor span `[]{#src-N}` matching its number:
 
@@ -340,7 +340,7 @@ The deliverable is a written report, not just a chat reply. Don't wait to be ask
   2. []{#src-2}openFDA FAERS — metformin adverse event report counts. <https://api.fda.gov/...>
   ```
 
-Number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.^[[1]](#src-1)^ ^[[3]](#src-3)^`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
+Number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.[^1^](#src-1) [^3^](#src-3)`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
 
 ## Anti-Patterns (Delivery)
 
@@ -348,5 +348,5 @@ Number sources in first-appearance order; reuse the same number (and anchor) whe
 - **Attaching `.md` instead of `.pdf`** — always convert to PDF first; only fall back to `.md` if pandoc fails.
 - **Forgetting `attach()`** — the report file must be attached, not just written to disk.
 - **Filename slug as the H1** — the slug is for the file; the H1 should be a descriptive long-form title.
-- **Bare URLs instead of numbered markers** — data points cite sources with `^[[N]](#src-N)^` markers resolving to the `## Sources` list, not raw inline URLs scattered through the prose and tables.
-- **Marker/anchor mismatch** — every `^[[N]](#src-N)^` marker needs exactly one matching `[]{#src-N}` anchor in Sources, and every Sources entry must be cited. A marker with no anchor renders as a dead link in the PDF.
+- **Bare URLs instead of numbered markers** — data points cite sources with `[^N^](#src-N)` markers resolving to the `## Sources` list, not raw inline URLs scattered through the prose and tables.
+- **Marker/anchor mismatch** — every `[^N^](#src-N)` marker needs exactly one matching `[]{#src-N}` anchor in Sources, and every Sources entry must be cited. A marker with no anchor renders as a dead link in the PDF.
