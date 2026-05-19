@@ -1,7 +1,19 @@
-# One SSH target per line — used by scripts/deploy.sh.
+# One deploy target per line — used by scripts/deploy.sh.
 # Lines starting with # and blank lines are ignored.
+#
+# Format:
+#   user@host                     # uses default ~/curunir-deploy
+#   user@host  /path/to/dir       # explicit deploy dir (for hosts running
+#                                 # multiple curunir instances side-by-side)
 #
 # Copy this file to scripts/.deploy-hosts (gitignored) and edit.
 #
+# Single-instance hosts:
 # jac@alpha.example.com
 # jac@beta.example.com
+#
+# Multi-instance host — two curunir containers on the same box. Distinct
+# deploy dirs give distinct compose project names, so the containers don't
+# clobber each other.
+# jac@gamma.example.com  ~/curunir-projectA
+# jac@gamma.example.com  ~/curunir-projectB
