@@ -29,6 +29,15 @@ class TestConversationPersistence:
         assert {c["session_id"] for c in snap} == {"a", "b"}
         assert all("history" not in c for c in snap)
 
+    def test_conversations_snapshot_excludes_email_conversations(self, agent):
+        cs.save(agent.config.context_dir, "web", [{"role": "user", "content": "hi"}],
+                channel="ws")
+        cs.save(agent.config.context_dir, "mail", [{"role": "user", "content": "hi"}],
+                channel="email")
+        cs.save(agent.config.context_dir, "legacy", [{"role": "user", "content": "hi"}])
+        snap = agent.conversations_snapshot()
+        assert {c["session_id"] for c in snap} == {"web", "legacy"}
+
     def test_history_snapshot_lazy_loads_unknown_session(self, agent):
         """history_snapshot for a session absent from memory loads it from disk."""
         cs.save(agent.config.context_dir, "disk-only", [
