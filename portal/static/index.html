@@ -397,18 +397,37 @@ body.dragging .drop-hint { display: flex; }
   color: var(--hint); font-style: italic; font-size: 12px;
 }
 
-/* Typing indicator — three pulsing dots while we wait for the first chunk. */
-.typing { display: inline-flex; gap: 4px; padding: 6px 0; align-items: center; }
-.typing span {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--header-text);
-  animation: typing-bounce 1.4s infinite ease-in-out both;
+/* Activity indicator — a shimmering one-liner naming the live tool activity.
+   Sits after .body so streamed text never wipes it; removed on m.final. */
+.status {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 12px;
 }
-.typing span:nth-child(2) { animation-delay: 0.16s; }
-.typing span:nth-child(3) { animation-delay: 0.32s; }
-@keyframes typing-bounce {
-  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
-  40% { opacity: 1; transform: translateY(-2px); }
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+  animation: status-breathe 1.6s ease-in-out infinite;
+}
+@keyframes status-breathe {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+.status-label {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: linear-gradient(90deg,
+    var(--header-text) 35%, var(--fg) 50%, var(--header-text) 65%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: status-shimmer 2.2s linear infinite;
+}
+@keyframes status-shimmer { to { background-position: -250% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .status-dot, .status-label { animation: none; }
+  .status-label { color: var(--header-text); }
 }
 @media (max-width: 480px) {
   .composer-hint { display: none; }
@@ -679,7 +698,7 @@ function setStatus(state) {
   statusText.textContent = state;
   agentOnline = state === "online";
   if (!agentOnline && inProgressMsg) {
-    removeThinking(inProgressMsg);
+    removeStatus(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
@@ -838,7 +857,10 @@ function appendToolCalls(msgEl, calls) {
       '<span class="ticker-count"></span>' +
       '</div></summary>' +
       '<div class="tool-list"></div>';
-    msgEl.appendChild(tools);
+    // Keep the live .status line as the message's last child.
+    const status = msgEl.querySelector(".status");
+    if (status) msgEl.insertBefore(tools, status);
+    else msgEl.appendChild(tools);
   }
   const list = tools.querySelector(".tool-list");
   for (const t of calls) {
@@ -850,6 +872,20 @@ function appendToolCalls(msgEl, calls) {
   const total = list.children.length;
   tools.querySelector(".ticker-count").textContent = total === 1 ? "1 tool" : `${total} tools`;
   tools.querySelector(".ticker-last").textContent = list.lastElementChild.textContent;
+}
+
+// Turn a streamed tool summary ("Read portal/app.py") into a live-action
+// label ("Reading portal/app.py…") for the activity indicator.
+const TOOL_GERUNDS = {
+  Read: "Reading", Write: "Writing", Edit: "Editing",
+  Grep: "Searching", Glob: "Searching", Bash: "Running",
+  LoadSkill: "Loading skill", WebFetch: "Fetching", Delegate: "Delegating",
+};
+function toStatusLabel(summary) {
+  const sp = summary.indexOf(" ");
+  const verb = sp === -1 ? summary : summary.slice(0, sp);
+  const g = TOOL_GERUNDS[verb];
+  return (g ? g + summary.slice(sp) : summary) + "…";
 }
 
 function renderAgentChunk(m) {
@@ -866,8 +902,13 @@ function renderAgentChunk(m) {
   }
   appendToolCalls(inProgressMsg, m.tool_calls);
   renderAttachments(inProgressMsg, m.attachments);
+  if (m.tool_calls && m.tool_calls.length) {
+    const label = inProgressMsg.querySelector(".status-label");
+    if (label) label.textContent =
+      toStatusLabel(m.tool_calls[m.tool_calls.length - 1]);
+  }
   if (m.final) {
-    removeThinking(inProgressMsg);
+    removeStatus(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
     // The turn just completed — refresh the sidebar so a brand-new
@@ -959,19 +1000,24 @@ function appendMessage(role, thinking = false) {
   if (es) es.remove();
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  const bodyHtml = thinking
-    ? '<span class="typing"><span></span><span></span><span></span></span>'
-    : "";
-  el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body">${bodyHtml}</div>`;
+  el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
+  if (thinking) {
+    const status = document.createElement("div");
+    status.className = "status";
+    status.innerHTML =
+      '<span class="status-dot"></span>' +
+      '<span class="status-label">Thinking…</span>';
+    el.appendChild(status);
+  }
   messagesEl.appendChild(el);
   scrollToBottom();
   return el;
 }
 
-function removeThinking(el) {
+function removeStatus(el) {
   if (!el) return;
-  const t = el.querySelector(".typing");
-  if (t) t.remove();
+  const s = el.querySelector(".status");
+  if (s) s.remove();
 }
 
 function scrollToBottom() {
