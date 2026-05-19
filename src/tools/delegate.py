@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch"]
 
 # Sub-agent timeout in seconds
-_TIMEOUT = 900
+_TIMEOUT = 1200
 
 
 async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> str:
