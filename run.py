@@ -432,6 +432,13 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         except Exception as e:
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
+            # An unclassified error escaped handle(), so the user message it
+            # appended is still in history. Drop it (defensively, only if it
+            # is the trailing entry and a user turn) so a failed turn doesn't
+            # bloat the transcript that conversation_store.save persists below.
+            escaped_history = agent.sessions.get(msg.session_id)
+            if escaped_history and escaped_history[-1].get("role") == "user":
+                escaped_history.pop()
 
         # llama.cpp exposes per-request server stats over HTTP — fold them in
         # alongside the agent's own stats so the UI can show both.

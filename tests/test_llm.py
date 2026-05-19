@@ -54,6 +54,19 @@ class TestClassifyProviderError:
         assert result is not None
         assert result[0] == "quota_exhausted"
 
+    def test_400_bad_request_is_provider_error(self):
+        exc = litellm.APIError(
+            status_code=400,
+            message="Provider returned error",
+            llm_provider="openrouter",
+            model="test",
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        category, msg = result
+        assert category == "bad_request"
+        assert "unavailable" in msg.lower()
+
 
 @pytest.mark.asyncio
 async def test_text_response():
