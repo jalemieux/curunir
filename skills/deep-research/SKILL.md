@@ -99,10 +99,10 @@ Compile findings into a structured report. The first page sets the frame — rea
 - **In the body**, place the marker immediately after the claim (no space before it):
 
   ```markdown
-  Retatrutide produced 24.2% mean weight loss at 48 weeks.^[[1]](#src-1)^
+  Retatrutide produced 24.2% mean weight loss at 48 weeks.[^1^](#src-1)
   ```
 
-  `^…^` makes it superscript; `[[1]](#src-1)` is a link whose visible text is `[1]` pointing at the anchor `src-1`.
+  The link `[…](#src-1)` points at the anchor `src-1`; wrapping the number in `^…^` renders the visible `1` as a superscript. Writing it link-first (`[^1^]` before `(#src-1)`) keeps it clear of pandoc's `^[…]` inline-footnote syntax.
 
 - **In the Sources list**, each numbered entry begins with an empty anchor span `[]{#src-N}` matching its number:
 
@@ -113,7 +113,7 @@ Compile findings into a structured report. The first page sets the frame — rea
   2. []{#src-2}[Title](URL) — [X/Twitter] what was found here
   ```
 
-Rules: number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.^[[1]](#src-1)^ ^[[3]](#src-3)^`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
+Rules: number sources in first-appearance order; reuse the same number (and anchor) when a source is cited again; for several sources on one claim, repeat the marker — `…claim.[^1^](#src-1) [^3^](#src-3)`. Every marker number must have exactly one matching `#src-N` anchor, and vice versa.
 
 ### Step 5 — Fact-check the draft (default, not optional)
 
@@ -224,8 +224,8 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 
 - **One big search instead of targeted queries** — decompose into sub-questions, search each separately.
 - **Search snippets without full content** — snippets are too shallow. Use `web_fetch` to read promising pages.
-- **Missing source citations** — every claim needs an inline numbered marker (`^[[N]](#src-N)^`), not a bare URL and not nothing.
-- **Marker/anchor mismatch** — every `^[[N]](#src-N)^` marker must have exactly one matching `[]{#src-N}` anchor in the Sources list, and every Sources entry must be cited at least once. A marker pointing at a missing anchor renders as a dead link in the PDF.
+- **Missing source citations** — every claim needs an inline numbered marker (`[^N^](#src-N)`), not a bare URL and not nothing.
+- **Marker/anchor mismatch** — every `[^N^](#src-N)` marker must have exactly one matching `[]{#src-N}` anchor in the Sources list, and every Sources entry must be cited at least once. A marker pointing at a missing anchor renders as a dead link in the PDF.
 - **Attaching .md instead of .pdf** — always convert to PDF first. Only fall back to .md if pandoc fails.
 - **Forgetting `attach()`** — the report file must be attached, not just written.
 - **Using all sources on every topic** — match sources to the topic. A technical deep-dive doesn't need LinkedIn; a company analysis doesn't need Reddit.

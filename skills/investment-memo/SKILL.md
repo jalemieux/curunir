@@ -215,7 +215,7 @@ columns so it fits a typeset page (see Step 7).
 numbered marker that jumps to it — same convention as `deep-research`
 (see its "Inline citations" block). In short:
 
-- Body marker, immediately after the claim: `…peak sales near $5B.^[[2]](#src-2)^`
+- Body marker, immediately after the claim: `…peak sales near $5B.[^2^](#src-2)`
 - Sources entry, anchored by number:
 
   ```markdown
@@ -362,9 +362,9 @@ fact-check timed out, confidence drops.
 - **Floating numbers.** Every number gets a source and an as-of date in
   the Assumptions block.
 - **Bare URLs instead of numbered markers.** Claims cite sources with
-  `^[[N]](#src-N)^` markers resolving to the `## Sources` list — not raw
+  `[^N^](#src-N)` markers resolving to the `## Sources` list — not raw
   inline URLs and not nothing.
-- **Marker/anchor mismatch.** Every `^[[N]](#src-N)^` marker needs exactly
+- **Marker/anchor mismatch.** Every `[^N^](#src-N)` marker needs exactly
   one matching `[]{#src-N}` anchor in Sources, and every Sources entry must
   be cited. A marker with no anchor renders as a dead link in the PDF.
 - **Attaching .md instead of .pdf.** Always render PDF first; only fall
