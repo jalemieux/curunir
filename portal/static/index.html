@@ -208,10 +208,10 @@ main {
 }
 
 /* Tool ticker — a collapsed tool-count chip that expands into the full list.
-   Hidden while a turn is live (the .status line narrates instead); it appears
-   once the status line is removed on m.final. */
+   Shown throughout the turn, including while it is live: the .status line
+   narrates the current call, the ticker stays expandable so the user can
+   see every call made so far. */
 .msg details.tools { margin: 6px 0; }
-.msg:has(.status) details.tools { display: none; }
 .msg details.tools > summary { list-style: none; cursor: pointer; user-select: none; outline: none; }
 .msg details.tools > summary::-webkit-details-marker { display: none; }
 .msg details.tools .ticker {
