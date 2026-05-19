@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     admin_emails: str = ""  # comma-separated
     rate_limit_per_min: int = 10
     debug: bool = False
+    log_level: str = "INFO"  # root level for the `portal.*` logger tree
 
     # Dev-only seed: when DEBUG=true and both are set, lifespan startup
     # idempotently upserts a user with this email + container token.
