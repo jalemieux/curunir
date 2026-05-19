@@ -204,8 +204,17 @@ class Agent:
         return record["history"] if record else []
 
     def conversations_snapshot(self) -> list[dict]:
-        """Metadata-only summaries of every persisted conversation, newest first."""
-        return conversation_store.list_conversations(self.config.context_dir)
+        """Metadata-only summaries for the portal sidebar, newest first.
+
+        Email-channel conversations are excluded — their transcripts live on
+        disk for memory extraction but don't belong in the web sidebar. A
+        missing ``channel`` (legacy records) is treated as not-email so
+        existing web/CLI conversations keep showing.
+        """
+        return [
+            c for c in conversation_store.list_conversations(self.config.context_dir)
+            if c.get("channel") != "email"
+        ]
 
     def history_snapshot(self, session_id: str = "portal") -> list[dict]:
         """Return a chat-shaped projection of conversation history for the portal.
