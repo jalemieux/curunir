@@ -89,17 +89,18 @@ When `thinking` is true, append a `.status` element (dot + label, label =
 
 ### 4. `appendToolCalls(msgEl, calls)` and the tool ticker
 
-The status line and the collapsed ticker would otherwise both name the current
-tool, one line apart — visually redundant. Resolved by **one indicator at a
-time**:
+The status line and the collapsed ticker must not both name the current tool,
+one line apart — that was visually redundant. Resolved by making the collapsed
+ticker **count-only**:
 
-- While a turn is live, the ticker is hidden entirely
-  (`.msg:has(.status) details.tools { display: none }`) — the status line is
-  the sole live indicator. On `m.final` the status line is removed and the
-  ticker appears.
 - The collapsed ticker shows only the tool **count** + an expand caret — no
   last-tool name (the `.ticker-last` element and its update are dropped).
   Clicking expands the full `.tool-list` as before.
+- Because the count-only chip no longer names a tool, it can coexist with the
+  `.status` line during a live turn. The ticker stays visible (collapsed by
+  default) so the user can expand it on demand and see every tool call made so
+  far in the turn; the status line continues to narrate the current action.
+  On `m.final` the status line is removed and the ticker remains.
 
 Ordering fix: the `details.tools` ticker is inserted **before** any `.status`
 line so the status line stays the message's last child —
@@ -151,6 +152,8 @@ Manual, in the portal chat view:
 
 1. Send a prompt that triggers tools after text — confirm the status line stays
    visible through streaming and updates per tool.
+1a. While that turn is still running, click the collapsed tool ticker — confirm
+   it expands to show every tool call so far, alongside the live status line.
 2. Send a prompt with no tools — confirm "Thinking…" shows, then clears on final.
 3. Reload a past conversation — confirm no status line on completed turns.
 4. Toggle light/dark — confirm shimmer/dot legible in both.
