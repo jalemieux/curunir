@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _SUB_AGENT_TOOLS = ["glob", "grep", "read", "edit", "write", "bash", "load_skill", "web_fetch"]
 
 # Sub-agent timeout in seconds
-_TIMEOUT = 300
+_TIMEOUT = 900
 
 
 async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> str:
@@ -49,7 +49,15 @@ async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> s
         return result
     except asyncio.TimeoutError:
         logger.warning("Sub-agent %s timed out after %ds", session_id[:8], _TIMEOUT)
-        return f"Sub-agent timed out after {_TIMEOUT}s"
+        return (
+            f"Sub-agent hit the hard {_TIMEOUT}s time limit and was terminated. "
+            "All of its in-progress work was discarded — no partial results are "
+            "available. Do NOT re-delegate this task verbatim: it will time out "
+            "again the same way. Instead, either (a) split it into smaller, "
+            "narrower sub-tasks delegated separately, (b) reduce its scope "
+            "(fewer sources, fewer sections), or (c) do the remaining work "
+            "directly in this agent without delegating."
+        )
     except Exception as e:
         logger.error("Sub-agent %s failed: %s", session_id[:8], e)
         classified = classify_provider_error(e)
