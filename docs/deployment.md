@@ -80,15 +80,28 @@ docker compose pull curunir
 docker compose up -d curunir
 ```
 
-To fan out to every host listed in `scripts/.deploy-hosts`:
+To fan out to every target listed in `scripts/.deploy-hosts`:
 
 ```bash
 # from a workstation, inside the repo
 scripts/deploy.sh sha-abc1234
 ```
 
-`scripts/deploy.sh` ssh's into each host and runs the pull + restart
+`scripts/deploy.sh` ssh's into each target and runs the pull + restart
 above. It only touches the curunir service.
+
+Each line in `scripts/.deploy-hosts` is one target. The deploy dir
+defaults to `~/curunir-deploy`, but can be overridden per line — useful
+when one host runs multiple curunir instances side-by-side:
+
+```
+jac@alpha.example.com                          # ~/curunir-deploy
+jac@gamma.example.com  ~/curunir-projectA
+jac@gamma.example.com  ~/curunir-projectB
+```
+
+Distinct deploy dirs give distinct compose project names automatically,
+so the instances don't clobber each other's containers.
 
 ### Rollback
 
