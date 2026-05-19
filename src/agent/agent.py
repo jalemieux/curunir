@@ -494,22 +494,27 @@ class Agent:
                         assistant_msg["content"] = response.text
                     history.append(assistant_msg)
 
-                    for tool_call in response.tool_calls:
+                    # Run the batch's tool calls concurrently. The chat schema
+                    # requires exactly one tool response per tool_call; asyncio.gather
+                    # preserves input order, so results map back 1:1.
+                    #
+                    # Cancellation: mid-batch cancel can no longer skip "remaining"
+                    # calls — once gathered, every call in the batch is in flight at
+                    # once and runs to completion. A cancel requested before the
+                    # batch starts still stubs the whole batch with "(interrupted)";
+                    # the outer-loop cancel check fires on the next iteration.
+                    async def _run_tool_call(tool_call: dict) -> dict:
                         name = tool_call["function"]["name"]
                         args_str = tool_call["function"]["arguments"]
 
-                        # Mid-batch cancel: schema requires a tool response per
-                        # tool_call, so stub remaining calls with "(interrupted)"
-                        # rather than execute them. The outer-loop cancel check
-                        # fires on the next iteration and exits cleanly.
                         if cancel_event.is_set():
                             logger.info("[%s] skipping tool call %s (interrupted)", sid, name)
-                            history.append({
+                            return {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
                                 "content": "(interrupted)",
-                            })
-                            continue
+                                "_tool_name": name,
+                            }
 
                         detail_lines = _tool_detail_lines(name, args_str)
                         logger.info("[%s] tool call: %s", sid, name)
@@ -527,21 +532,29 @@ class Agent:
                             on_tool_call=on_tool_call,
                         )
 
-                        # After load_skill, check for required tools in frontmatter
-                        if name == "load_skill":
-                            required = _parse_skill_tools(result)
+                        result_preview = result[:200] if result else "(empty)"
+                        logger.debug("[%s] tool result: %s", sid, result_preview)
+                        return {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result,
+                            "_tool_name": name,
+                        }
+
+                    tool_messages = await asyncio.gather(
+                        *(_run_tool_call(tc) for tc in response.tool_calls)
+                    )
+
+                    for tool_msg in tool_messages:
+                        # After load_skill, check for required tools in frontmatter.
+                        # Done post-gather so concurrent skill loads apply in order.
+                        if tool_msg.pop("_tool_name", None) == "load_skill":
+                            required = _parse_skill_tools(tool_msg["content"])
                             if required:
                                 self._session_tools.setdefault(session_id, set()).update(required)
                                 tool_schemas = self._get_tool_schemas(session_id)
                                 logger.info("[%s] skill loaded tools: %s", sid, required)
-
-                        result_preview = result[:200] if result else "(empty)"
-                        logger.debug("[%s] tool result: %s", sid, result_preview)
-                        history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": result,
-                        })
+                        history.append(tool_msg)
 
                     _trim_history(history, max_chars=self.config.max_history_chars)
                     messages = [{"role": "system", "content": system_prompt}] + history
