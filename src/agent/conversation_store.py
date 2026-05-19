@@ -53,6 +53,19 @@ def _path(context_dir: Path, session_id: str) -> Path:
     return conversations_dir(context_dir) / f"{_safe_session_id(session_id)}.json"
 
 
+def _strip_channel_prefix(text: str) -> str:
+    """Drop a leading ``[channel: ...]`` line (injected by the email channel).
+
+    Keeps title/preview human-readable. Narrow by design: only strips a first
+    line that both starts with ``[channel:`` and ends with ``]``.
+    """
+    if text.startswith("[channel:") and "\n" in text:
+        first, rest = text.split("\n", 1)
+        if first.rstrip().endswith("]"):
+            return rest
+    return text
+
+
 def _first_user_text(history: list[dict]) -> str:
     """Extract the typed text of the first user turn (handles multimodal)."""
     for entry in history:
@@ -62,9 +75,9 @@ def _first_user_text(history: list[dict]) -> str:
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
-                    return block.get("text", "") or ""
+                    return _strip_channel_prefix(block.get("text", "") or "")
             return ""
-        return content or ""
+        return _strip_channel_prefix(content or "")
     return ""
 
 
@@ -103,18 +116,21 @@ def _read(path: Path) -> dict | None:
 
 
 def save(context_dir: Path, session_id: str, history: list[dict], *,
-         now: datetime | None = None) -> None:
+         channel: str | None = None, now: datetime | None = None) -> None:
     """Persist a conversation transcript.
 
     Read-modify-write: ``created_at`` is set once and preserved; extraction
     metadata (``last_extracted_at``, ``archive_path``) carried over from any
-    existing file so a turn-completion save never clobbers it.
+    existing file so a turn-completion save never clobbers it. ``channel``
+    likewise falls back to the existing value so a re-save without it doesn't
+    drop the originating channel.
     """
     now = now or _now()
     path = _path(context_dir, session_id)
     existing = _read(path) or {}
     record = {
         "session_id": session_id,
+        "channel": channel if channel is not None else existing.get("channel"),
         "title": _derive_title(history),
         "preview": _derive_preview(history),
         "created_at": existing.get("created_at") or now.isoformat(),
@@ -156,6 +172,7 @@ def list_conversations(context_dir: Path) -> list[dict]:
             continue
         out.append({
             "session_id": record.get("session_id", path.stem),
+            "channel": record.get("channel"),
             "title": record.get("title", ""),
             "preview": record.get("preview", ""),
             "created_at": record.get("created_at"),

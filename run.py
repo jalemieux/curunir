@@ -447,6 +447,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             conversation_store.save(
                 agent.config.context_dir, msg.session_id,
                 agent.sessions[msg.session_id],
+                channel=msg.channel,
             )
 
         # Final reply: routed back to the originating channel by route_outbound.
