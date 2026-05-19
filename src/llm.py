@@ -20,6 +20,9 @@ _QUOTA_MSG = "I've hit my allocated quota — please try again later."
 _RATE_LIMIT_MSG = (
     "The LLM provider is rate-limiting me right now. Please try again in a minute."
 )
+_PROVIDER_ERROR_MSG = (
+    "The LLM provider is temporarily unavailable — please try again in a few minutes."
+)
 _QUOTA_SUBSTRINGS = ("key limit", "quota", "monthly limit", "insufficient_quota")
 
 
@@ -42,6 +45,11 @@ def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
         return "quota_exhausted", _QUOTA_MSG
     if (rate_limit_cls is not None and isinstance(exc, rate_limit_cls)) or status == 429:
         return "rate_limited", _RATE_LIMIT_MSG
+    # A generic 400 from an upstream provider (e.g. an OpenRouter provider
+    # rejecting a request). Context-overflow 400s never reach here — the
+    # caller checks _is_context_overflow first.
+    if status == 400:
+        return "bad_request", _PROVIDER_ERROR_MSG
     return None
 
 # In-process cache for describe_image, keyed by SHA-256 of the image bytes so

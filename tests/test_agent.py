@@ -5,8 +5,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _estimate_chars, _trim_history
-from src.llm import LLMResponse
+from src.agent.agent import (
+    Agent,
+    _PROVIDER_FAILURE_THRESHOLD,
+    _estimate_chars,
+    _trim_history,
+)
+from src.llm import _PROVIDER_ERROR_MSG, LLMResponse
 
 
 @pytest.fixture
@@ -218,6 +223,90 @@ class TestAgentHandle:
         ):
             result = await agent.handle("hi", "s1")
         assert "quota" in result.lower()
+
+    async def test_bad_request_returns_friendly_message(self, agent):
+        """A non-overflow 400 from the provider surfaces a friendly message
+        instead of bubbling up as an unhandled traceback."""
+        import litellm
+
+        (agent.config.context_dir / ".onboarded").touch()
+        exc = litellm.BadRequestError(
+            message="Provider returned error",
+            model="test",
+            llm_provider="openrouter",
+        )
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=exc,
+        ):
+            result = await agent.handle("hi", "s1")
+        assert result == _PROVIDER_ERROR_MSG
+
+    async def test_failed_turn_leaves_history_unchanged(self, agent):
+        """A failed turn pops the user message it appended, so history length
+        is unchanged — no bloat across retries."""
+        import litellm
+
+        (agent.config.context_dir / ".onboarded").touch()
+        agent.sessions["s1"] = [
+            {"role": "user", "content": "earlier"},
+            {"role": "assistant", "content": "reply"},
+        ]
+        exc = litellm.BadRequestError(
+            message="boom", model="test", llm_provider="openrouter",
+        )
+        with patch(
+            "src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=exc,
+        ):
+            await agent.handle("hi", "s1")
+        assert len(agent.sessions["s1"]) == 2
+
+    async def test_circuit_breaker_trips_after_consecutive_failures(self, agent):
+        """After N consecutive provider failures the session enters cooldown;
+        the next handle() returns the message without an LLM call."""
+        import litellm
+
+        (agent.config.context_dir / ".onboarded").touch()
+        exc = litellm.BadRequestError(
+            message="boom", model="test", llm_provider="openrouter",
+        )
+        mock = AsyncMock(side_effect=exc)
+        with patch("src.agent.agent.call_llm", new=mock):
+            for _ in range(_PROVIDER_FAILURE_THRESHOLD):
+                result = await agent.handle("hi", "s1")
+                assert result == _PROVIDER_ERROR_MSG
+            # Threshold reached — this call must fast-return without call_llm.
+            result = await agent.handle("hi", "s1")
+            assert result == _PROVIDER_ERROR_MSG
+        assert mock.call_count == _PROVIDER_FAILURE_THRESHOLD
+
+    async def test_successful_turn_resets_circuit_breaker(self, agent):
+        """A successful turn clears accumulated failures so the LLM is called
+        again on the next turn."""
+        import litellm
+
+        (agent.config.context_dir / ".onboarded").touch()
+        exc = litellm.BadRequestError(
+            message="boom", model="test", llm_provider="openrouter",
+        )
+        good = LLMResponse(text="recovered", tool_calls=None)
+        calls: list[int] = []
+
+        async def fake_call_llm(*args, **kwargs):
+            calls.append(1)
+            if len(calls) <= 3:
+                raise exc
+            return good
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            for _ in range(3):
+                await agent.handle("hi", "s1")
+            assert agent._provider_failures.get("s1") == 3
+            result = await agent.handle("hi", "s1")
+        assert result == "recovered"
+        assert "s1" not in agent._provider_failures
+        assert "s1" not in agent._provider_cooldown
 
     async def test_request_cancel_returns_false_when_no_session_running(self, agent):
         assert agent.request_cancel("nope") is False

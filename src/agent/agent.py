@@ -13,7 +13,7 @@ from src.agent.system_prompt import build_static_prompt
 
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
-from src.llm import call_llm, classify_provider_error
+from src.llm import _PROVIDER_ERROR_MSG, call_llm, classify_provider_error
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
@@ -22,6 +22,13 @@ from src.usage_store import UsageRecord, UsageStore
 
 _DEFAULT_MAX_HISTORY_CHARS = 250_000  # ~80k tokens, leaves room for system prompt + tool schemas + max_tokens
 _IMAGE_COST_CHARS = 2000  # fixed budget per image block for history trimming
+
+# Per-session circuit breaker for LLM-provider failures. After this many
+# consecutive provider errors, the session enters a cooldown during which
+# handle() fast-returns without an LLM call — bounding the blast radius of a
+# provider outage (see #169).
+_PROVIDER_FAILURE_THRESHOLD = 5
+_PROVIDER_COOLDOWN_SEC = 60
 
 # Map tool names to their key argument(s) for log display
 _TOOL_KEY_ARGS: dict[str, list[str]] = {
@@ -170,6 +177,11 @@ class Agent:
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
+        # Per-session provider-error circuit breaker: a count of consecutive
+        # failures and a monotonic deadline until which the session is in
+        # cooldown. Both are cleared on the first successful turn.
+        self._provider_failures: dict[str, int] = {}
+        self._provider_cooldown: dict[str, float] = {}
 
     def request_cancel(self, session_id: str) -> bool:
         """Signal an in-flight handle() to stop after the current iteration.
@@ -317,6 +329,21 @@ class Agent:
             history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
+
+        # Circuit breaker: if this session is in an active provider-error
+        # cooldown, fast-return without an LLM call. Pop the message we just
+        # appended so the cooldown leaves history unchanged. We deliberately
+        # do not sleep here — the single agent_worker coroutine is shared
+        # across sessions, so the cooldown window itself is the backoff.
+        if time.monotonic() < self._provider_cooldown.get(session_id, 0.0):
+            if history and history[-1]["role"] == "user":
+                history.pop()
+            logger.warning(
+                "[%s] provider cooldown active — returning unavailable message",
+                session_id[:8],
+            )
+            return _PROVIDER_ERROR_MSG
+
         system_prompt = self.static_prompt
         _trim_history(history, max_chars=self.config.max_history_chars)
         messages = [{"role": "system", "content": system_prompt}] + history
@@ -338,6 +365,9 @@ class Agent:
         total_llm_elapsed = 0.0
         llm_calls = 0
         t_start = time.monotonic()
+        # Set by _call_and_record when a turn fails with a classified
+        # provider error; read at the err-return sites to drive the breaker.
+        provider_error_hit = False
 
         def _finalize_stats() -> None:
             """Write accumulated LLM stats into metadata dict."""
@@ -372,6 +402,7 @@ class Agent:
             nonlocal total_prompt_tokens, total_completion_tokens
             nonlocal total_cached_prompt_tokens
             nonlocal total_llm_elapsed, llm_calls, messages
+            nonlocal provider_error_hit
             try:
                 resp = await call_llm(
                     self.config.model, messages, tool_schemas,
@@ -381,7 +412,16 @@ class Agent:
                 )
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
-                    raise
+                    # A non-overflow 400 (e.g. an upstream provider rejecting
+                    # the request). Classify it into a friendly message rather
+                    # than re-raising as an unhandled traceback.
+                    classified = classify_provider_error(e)
+                    if classified is None:
+                        raise
+                    category, user_message = classified
+                    provider_error_hit = True
+                    logger.warning("[%s] provider error: %s", sid, category)
+                    return None, user_message
                 half = self.config.max_history_chars // 2
                 logger.warning("[%s] context window exceeded, trimming history to %dk chars", sid, half // 1000)
                 _trim_history(history, max_chars=half)
@@ -405,6 +445,7 @@ class Agent:
                 if classified is None:
                     raise
                 category, user_message = classified
+                provider_error_hit = True
                 logger.warning("[%s] provider error: %s", sid, category)
                 return None, user_message
 
@@ -448,6 +489,30 @@ class Agent:
 
             return resp, None
 
+        def _fail(err: str) -> str:
+            """Common path for a failed turn: count provider errors toward the
+            breaker, drop the user message appended at the top of handle() so a
+            failed turn leaves history unchanged, then return the error text."""
+            if provider_error_hit:
+                n = self._provider_failures.get(session_id, 0) + 1
+                self._provider_failures[session_id] = n
+                if n >= _PROVIDER_FAILURE_THRESHOLD:
+                    self._provider_cooldown[session_id] = (
+                        time.monotonic() + _PROVIDER_COOLDOWN_SEC
+                    )
+                    logger.warning(
+                        "[%s] %d consecutive provider failures — cooldown for %ds",
+                        sid, n, _PROVIDER_COOLDOWN_SEC,
+                    )
+            if history and history[-1]["role"] == "user":
+                history.pop()
+            return err
+
+        def _reset_breaker() -> None:
+            """A successful turn clears any accumulated provider-failure state."""
+            self._provider_failures.pop(session_id, None)
+            self._provider_cooldown.pop(session_id, None)
+
         try:
             for iteration in range(self.config.max_iterations):
                 if cancel_event.is_set():
@@ -462,7 +527,7 @@ class Agent:
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 response, err = await _call_and_record()
                 if err is not None:
-                    return err
+                    return _fail(err)
 
                 # Empty response (no text, no tool_calls): a transient model
                 # glitch that otherwise kills the session. Retry the same call
@@ -475,7 +540,7 @@ class Agent:
                     )
                     response, err = await _call_and_record()
                     if err is not None:
-                        return err
+                        return _fail(err)
                 if not response.tool_calls and not response.text:
                     logger.warning(
                         "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
@@ -486,7 +551,7 @@ class Agent:
                     messages = [{"role": "system", "content": system_prompt}] + history
                     response, err = await _call_and_record()
                     if err is not None:
-                        return err
+                        return _fail(err)
 
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -564,6 +629,7 @@ class Agent:
                 if response.text:
                     logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                     history.append({"role": "assistant", "content": response.text})
+                    _reset_breaker()
                     _finalize_stats()
                     if metadata and "stats" in metadata:
                         metadata["stats"]["iterations"] = iteration + 1
@@ -572,6 +638,7 @@ class Agent:
                     return response.text
 
                 history.append({"role": "assistant", "content": ""})
+                _reset_breaker()
                 _finalize_stats()
                 if metadata and "stats" in metadata:
                     metadata["stats"]["iterations"] = iteration + 1
@@ -586,6 +653,7 @@ class Agent:
                 return "Error: LLM returned empty response."
 
             logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
+            _reset_breaker()
             _finalize_stats()
             if metadata and "stats" in metadata:
                 metadata["stats"]["iterations"] = self.config.max_iterations
