@@ -378,7 +378,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             if msg.session_id in agent.sessions:
                 conversation_store.save(
                     agent.config.context_dir, msg.session_id,
-                    agent.sessions[msg.session_id],
+                    agent.sessions[msg.session_id], channel=msg.channel,
                 )
             await _extract_conversation(agent, msg.session_id)
             await out_queue.put(OutgoingMessage(
@@ -446,7 +446,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.session_id in agent.sessions:
             conversation_store.save(
                 agent.config.context_dir, msg.session_id,
-                agent.sessions[msg.session_id],
+                agent.sessions[msg.session_id], channel=msg.channel,
             )
 
         # Final reply: routed back to the originating channel by route_outbound.
@@ -615,7 +615,7 @@ async def main():
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
             skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
-            conversations_provider=lambda: agent.conversations_snapshot(),
+            conversations_provider=lambda: agent.conversations_snapshot(channel="portal"),
             cancel_session=agent.request_cancel,
         )
         channels["portal"] = portal_channel

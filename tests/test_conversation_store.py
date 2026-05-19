@@ -96,6 +96,44 @@ def test_list_conversations_empty_when_no_directory(tmp_context):
     assert cs.list_conversations(tmp_context) == []
 
 
+def test_save_persists_channel(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}],
+            channel="portal")
+    assert cs.load(tmp_context, "sess-1")["channel"] == "portal"
+
+
+def test_channel_preserved_across_resave(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}],
+            channel="email")
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi again"}])
+    assert cs.load(tmp_context, "sess-1")["channel"] == "email"
+
+
+def test_list_conversations_filters_by_channel(tmp_context):
+    cs.save(tmp_context, "p", [{"role": "user", "content": "portal one"}],
+            channel="portal")
+    cs.save(tmp_context, "e", [{"role": "user", "content": "email one"}],
+            channel="email")
+    ids = [c["session_id"] for c in cs.list_conversations(tmp_context, channel="portal")]
+    assert ids == ["p"]
+
+
+def test_list_conversations_infers_email_channel_for_legacy_records(tmp_context):
+    """Pre-channel records: an [channel: email …] title prefix marks email."""
+    cs.save(tmp_context, "thread-123", [
+        {"role": "user", "content": "[channel: email, from: a@b.com]\nhello"},
+    ])
+    [conv] = cs.list_conversations(tmp_context)
+    assert conv["channel"] == "email"
+    assert cs.list_conversations(tmp_context, channel="portal") == []
+
+
+def test_list_conversations_legacy_record_defaults_to_portal(tmp_context):
+    cs.save(tmp_context, "uuid-abc", [{"role": "user", "content": "hi"}])
+    [conv] = cs.list_conversations(tmp_context, channel="portal")
+    assert conv["channel"] == "portal"
+
+
 def test_save_preserves_created_at_across_resave(tmp_context):
     cs.save(tmp_context, "sess-1", [{"role": "user", "content": "first"}],
             now=_utc(2026, 5, 1, 9, 0, 0))

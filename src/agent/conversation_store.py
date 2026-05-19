@@ -103,12 +103,16 @@ def _read(path: Path) -> dict | None:
 
 
 def save(context_dir: Path, session_id: str, history: list[dict], *,
-         now: datetime | None = None) -> None:
+         channel: str | None = None, now: datetime | None = None) -> None:
     """Persist a conversation transcript.
 
-    Read-modify-write: ``created_at`` is set once and preserved; extraction
-    metadata (``last_extracted_at``, ``archive_path``) carried over from any
-    existing file so a turn-completion save never clobbers it.
+    Read-modify-write: ``created_at``/``channel`` are set once and preserved;
+    extraction metadata (``last_extracted_at``, ``archive_path``) carried over
+    from any existing file so a turn-completion save never clobbers it.
+
+    ``channel`` records the originating channel (``"portal"``, ``"email"``,
+    ``"ws"``, …) so consumers can scope the conversation list — the portal
+    sidebar shows only portal conversations.
     """
     now = now or _now()
     path = _path(context_dir, session_id)
@@ -117,6 +121,7 @@ def save(context_dir: Path, session_id: str, history: list[dict], *,
         "session_id": session_id,
         "title": _derive_title(history),
         "preview": _derive_preview(history),
+        "channel": channel or existing.get("channel"),
         "created_at": existing.get("created_at") or now.isoformat(),
         "updated_at": now.isoformat(),
         "last_extracted_at": existing.get("last_extracted_at"),
@@ -144,8 +149,30 @@ def load(context_dir: Path, session_id: str) -> dict | None:
     return _read(_path(context_dir, session_id))
 
 
-def list_conversations(context_dir: Path) -> list[dict]:
-    """Return metadata-only summaries, newest ``updated_at`` first."""
+def _infer_channel(session_id: str, title: str) -> str:
+    """Best-effort channel for records saved before ``channel`` was stored.
+
+    Email turns prefix their content with ``[channel: email, …]`` and the
+    title derives from that first user turn, so the prefix is a reliable
+    tell. The fixed CLI session id is ``"cli"``. Everything else (portal
+    per-tab UUIDs, the legacy ``"portal"`` id) is treated as portal so a
+    real portal conversation is never hidden by the inference.
+    """
+    if title.startswith("[channel: email"):
+        return "email"
+    if session_id == "cli":
+        return "cli"
+    return "portal"
+
+
+def list_conversations(context_dir: Path, *,
+                       channel: str | None = None) -> list[dict]:
+    """Return metadata-only summaries, newest ``updated_at`` first.
+
+    When ``channel`` is given, only conversations from that channel are
+    returned. Records saved before ``channel`` was persisted fall back to
+    ``_infer_channel`` so the filter still works on legacy transcripts.
+    """
     cdir = conversations_dir(context_dir)
     if not cdir.is_dir():
         return []
@@ -154,10 +181,16 @@ def list_conversations(context_dir: Path) -> list[dict]:
         record = _read(path)
         if record is None:
             continue
+        session_id = record.get("session_id", path.stem)
+        title = record.get("title", "")
+        chan = record.get("channel") or _infer_channel(session_id, title)
+        if channel is not None and chan != channel:
+            continue
         out.append({
-            "session_id": record.get("session_id", path.stem),
-            "title": record.get("title", ""),
+            "session_id": session_id,
+            "title": title,
             "preview": record.get("preview", ""),
+            "channel": chan,
             "created_at": record.get("created_at"),
             "updated_at": record.get("updated_at"),
         })

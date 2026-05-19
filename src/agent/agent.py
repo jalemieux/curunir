@@ -203,9 +203,15 @@ class Agent:
         record = conversation_store.load(self.config.context_dir, session_id)
         return record["history"] if record else []
 
-    def conversations_snapshot(self) -> list[dict]:
-        """Metadata-only summaries of every persisted conversation, newest first."""
-        return conversation_store.list_conversations(self.config.context_dir)
+    def conversations_snapshot(self, channel: str | None = None) -> list[dict]:
+        """Metadata-only summaries of persisted conversations, newest first.
+
+        Pass ``channel`` to scope the list to one channel (the portal asks
+        for ``"portal"`` so its sidebar omits email/CLI conversations).
+        """
+        return conversation_store.list_conversations(
+            self.config.context_dir, channel=channel,
+        )
 
     def history_snapshot(self, session_id: str = "portal") -> list[dict]:
         """Return a chat-shaped projection of conversation history for the portal.
@@ -241,24 +247,38 @@ class Agent:
                 content = entry.get("content") or ""
                 tool_calls = entry.get("tool_calls") or []
                 summaries = []
+                attachments: list[dict] = []
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     name = fn.get("name", "tool")
                     args = fn.get("arguments", "")
+                    parsed = None
                     if isinstance(args, str) and args:
                         try:
                             parsed = _json.loads(args)
-                            first_val = next(iter(parsed.values()), "")
-                            summaries.append(f"{name}: {first_val}")
-                        except (ValueError, StopIteration):
-                            summaries.append(name)
+                        except ValueError:
+                            parsed = None
+                    if isinstance(parsed, dict):
+                        first_val = next(iter(parsed.values()), "")
+                        summaries.append(f"{name}: {first_val}")
                     else:
                         summaries.append(name)
-                out.append({
+                    # Rebuild attachments from `attach` calls already in the
+                    # transcript so a reopened conversation keeps its files —
+                    # outbound attachments are never persisted in history.
+                    if name == "attach" and isinstance(parsed, dict) and parsed.get("path"):
+                        from src.tools.attach import attachment_metadata
+                        attachments.append(
+                            attachment_metadata(parsed["path"], parsed.get("name"))
+                        )
+                msg = {
                     "role": "assistant",
                     "content": content,
                     "tool_calls": summaries,
-                })
+                }
+                if attachments:
+                    msg["attachments"] = attachments
+                out.append(msg)
             # role == "tool" is internal noise — skip.
 
         # Apply caps: 200 messages OR ~100 KB serialized, whichever first.
