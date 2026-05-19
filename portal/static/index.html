@@ -667,6 +667,9 @@ let ws = null;
 let agentOnline = false;
 let staged = []; // {filename, mime_type, data (base64), size}
 let inProgressMsg = null; // current assistant DOM node
+// While replaying a history_snapshot: the assistant bubble being built, so
+// consecutive assistant entries (one per agent-loop iteration) fold into it.
+let historyAssistant = null;
 // Cached skills_snapshot for this tab; null until first fetch returns.
 let skillsCache = null;
 // Latest conversations_snapshot — drives the sidebar list.
@@ -789,6 +792,7 @@ function onServerMessage(msg) {
   if (msg.type === "history_snapshot") {
     messagesEl.innerHTML = "";
     inProgressMsg = null;
+    historyAssistant = null;
     for (const m of msg.messages) renderHistoryEntry(m);
     if (!msg.messages.length) renderEmptyState();
     updateComposerMode();
@@ -831,15 +835,26 @@ function setUserBody(bodyEl, content) {
 
 function renderHistoryEntry(m) {
   if (m.role === "user") {
+    historyAssistant = null;
     const el = appendMessage("user");
     setUserBody(el.querySelector(".body"), m.content || "");
     renderAttachments(el, m.attachments);
   } else if (m.role === "assistant") {
-    const el = appendMessage("assistant");
-    el.querySelector(".body").innerHTML = marked.parse(m.content || "");
+    // The agent loop emits one assistant entry per iteration (a tool batch,
+    // then a final text reply) — all part of one turn. Fold consecutive
+    // assistant entries into a single bubble so the tool ticker accumulates
+    // the same way it does for a live turn, instead of one ticker per entry.
+    const el = historyAssistant || (historyAssistant = appendMessage("assistant"));
+    const body = el.querySelector(".body");
+    if (m.content) {
+      body.dataset.raw = body.dataset.raw
+        ? body.dataset.raw + "\n\n" + m.content : m.content;
+      body.innerHTML = marked.parse(body.dataset.raw);
+    }
     appendToolCalls(el, m.tool_calls);
     renderAttachments(el, m.attachments);
   } else if (m.role === "system") {
+    historyAssistant = null;
     const el = appendMessage("assistant");
     el.querySelector(".body").innerHTML = `<em class="system-msg">${m.content}</em>`;
   }
