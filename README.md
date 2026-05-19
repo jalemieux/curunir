@@ -108,11 +108,22 @@ vim context/identity.md     # define your assistant's persona
 python run.py               # starts CLI channel
 ```
 
-### Docker
+### Docker (local dev)
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
+
+The dev override re-adds `build:` for both services, bind-mounts
+`./portal` into the portal container, and enables uvicorn `--reload`.
+
+### Deployment
+
+Production hosts pull a versioned image from GHCR
+(`ghcr.io/jalemieux/curunir`) — they do not run a source checkout. The
+portal deploys independently to render.com from its own GHCR image
+(`ghcr.io/jalemieux/curunir-portal`). See **[docs/deployment.md](docs/deployment.md)**
+for the host layout, the GHCR login flow, and `scripts/deploy.sh`.
 
 ### CLI controls
 

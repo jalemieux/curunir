@@ -1,0 +1,7 @@
+# One SSH target per line — used by scripts/deploy.sh.
+# Lines starting with # and blank lines are ignored.
+#
+# Copy this file to scripts/.deploy-hosts (gitignored) and edit.
+#
+# jac@alpha.example.com
+# jac@beta.example.com

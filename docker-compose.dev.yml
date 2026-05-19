@@ -1,0 +1,19 @@
+# Local-development override.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Adds `build:` for both services so contributors can iterate locally without
+# pulling from GHCR. When both `image:` and `build:` are set, compose builds
+# the image locally and tags it with the `image:` name — `up --build` will
+# always rebuild from source. Re-adds the ./portal bind mount and uvicorn
+# --reload so portal code edits hot-reload during development.
+services:
+  portal:
+    build: ./portal
+    volumes:
+      - ./portal:/app/portal
+    command: uvicorn portal.app:app --host 0.0.0.0 --port 8000 --reload
+
+  curunir:
+    build: .
