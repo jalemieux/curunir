@@ -96,6 +96,46 @@ def test_list_conversations_empty_when_no_directory(tmp_context):
     assert cs.list_conversations(tmp_context) == []
 
 
+def test_save_persists_channel(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}],
+            channel="email")
+    record = cs.load(tmp_context, "sess-1")
+    assert record["channel"] == "email"
+
+
+def test_resave_without_channel_preserves_prior_value(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}],
+            channel="email")
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"},
+                                    {"role": "assistant", "content": "yo"}])
+    record = cs.load(tmp_context, "sess-1")
+    assert record["channel"] == "email"
+
+
+def test_list_conversations_includes_channel(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}],
+            channel="email")
+    summaries = cs.list_conversations(tmp_context)
+    assert summaries[0]["channel"] == "email"
+
+
+def test_channel_none_when_not_provided(tmp_context):
+    cs.save(tmp_context, "sess-1", [{"role": "user", "content": "hi"}])
+    record = cs.load(tmp_context, "sess-1")
+    assert record["channel"] is None
+
+
+def test_title_strips_email_channel_prefix(tmp_context):
+    history = [
+        {"role": "user", "content": "[channel: email, from: a@b.com]\n"
+                                    "What is the capital of France?"},
+    ]
+    cs.save(tmp_context, "sess-1", history)
+    record = cs.load(tmp_context, "sess-1")
+    assert record["title"] == "What is the capital of France?"
+    assert record["preview"] == "What is the capital of France?"
+
+
 def test_save_preserves_created_at_across_resave(tmp_context):
     cs.save(tmp_context, "sess-1", [{"role": "user", "content": "first"}],
             now=_utc(2026, 5, 1, 9, 0, 0))
