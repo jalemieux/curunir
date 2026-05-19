@@ -87,12 +87,24 @@ When `thinking` is true, append a `.status` element (dot + label, label =
 `"Thinking…"`) as the **last child** of the message, instead of putting
 `.typing` inside `.body`. `.body` starts empty.
 
-### 4. `appendToolCalls(msgEl, calls)`
+### 4. `appendToolCalls(msgEl, calls)` and the tool ticker
 
-Unchanged in behavior, with one ordering fix: the `details.tools` ticker must be
-inserted **before** any `.status` line so the status line stays the message's
-last child. Use `msgEl.insertBefore(tools, statusEl)` when a status line is
-present, else `appendChild` as today.
+The status line and the collapsed ticker would otherwise both name the current
+tool, one line apart — visually redundant. Resolved by **one indicator at a
+time**:
+
+- While a turn is live, the ticker is hidden entirely
+  (`.msg:has(.status) details.tools { display: none }`) — the status line is
+  the sole live indicator. On `m.final` the status line is removed and the
+  ticker appears.
+- The collapsed ticker shows only the tool **count** + an expand caret — no
+  last-tool name (the `.ticker-last` element and its update are dropped).
+  Clicking expands the full `.tool-list` as before.
+
+Ordering fix: the `details.tools` ticker is inserted **before** any `.status`
+line so the status line stays the message's last child —
+`msgEl.insertBefore(tools, statusEl)` when a status line is present, else
+`appendChild`.
 
 ### 5. `renderAgentChunk(m)`
 
