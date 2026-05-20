@@ -26,22 +26,21 @@ def build_static_prompt(config: AgentConfig) -> str:
 
 
 def build_memory_block(context_dir: Path) -> str:
-    """Coalesce memory/README.md and memory/profile.md into a delimited block.
+    """Coalesce memory/README.md and memory/profile.md for the system prompt.
 
-    The block is intended to be appended to the system prompt at the start of
-    a session so the routing map and owner profile are always in context. Both
-    files are optional — missing files are silently skipped. Returns an empty
-    string when neither file exists.
+    Appended once per session so the routing map and owner profile are always
+    in context. Both files are optional — missing files are silently skipped.
+    Returns an empty string when neither file exists.
     """
     memory_dir = context_dir / "memory"
     parts: list[str] = []
 
     readme = memory_dir / "README.md"
     if readme.exists():
-        parts.append(f"<memory_routing>\n{readme.read_text()}\n</memory_routing>")
+        parts.append(readme.read_text())
 
     profile = memory_dir / "profile.md"
     if profile.exists():
-        parts.append(f"<memory_profile>\n{profile.read_text()}\n</memory_profile>")
+        parts.append(profile.read_text())
 
     return "\n\n".join(parts)
