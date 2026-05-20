@@ -9,7 +9,7 @@ from pathlib import Path
 import litellm
 
 from src.agent import conversation_store
-from src.agent.system_prompt import build_static_prompt
+from src.agent.system_prompt import build_memory_block, build_static_prompt
 
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
@@ -165,8 +165,17 @@ class Agent:
             build_static_prompt(config)
             + f"\n\nConversation started at: {self._boot_time.isoformat()}"
         )
+        logger.info(
+            "system prompt prefix size: %d chars (identity + skill manifest + boot timestamp)",
+            len(self.static_prompt),
+        )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
+        # Per-session memory snapshot (README.md + profile.md). Built on the
+        # first turn of a session and reused for the rest of that session so
+        # auto-cache providers keep hitting the prefix cache across the tool
+        # loop. External edits during a session are picked up next session.
+        self._session_prompts: dict[str, str] = {}
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
@@ -183,6 +192,25 @@ class Agent:
             return False
         event.set()
         return True
+
+    def _get_session_prompt(self, session_id: str) -> str:
+        """System prompt for a session: static prefix + memory snapshot.
+
+        The memory block (memory/README.md + memory/profile.md) is read once
+        per session and cached so the system prompt stays byte-stable across
+        turns within a session — required for auto-cache providers (OpenAI,
+        DeepSeek, xAI, GLM via OpenRouter) to keep hitting the prefix cache
+        during the tool loop. External file edits during a session are picked
+        up on the next session start.
+        """
+        cached = self._session_prompts.get(session_id)
+        if cached is not None:
+            return cached
+
+        block = build_memory_block(self.config.context_dir)
+        prompt = self.static_prompt if not block else f"{self.static_prompt}\n\n{block}"
+        self._session_prompts[session_id] = prompt
+        return prompt
 
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         base = get_tool_schemas(self.tools)
@@ -326,7 +354,7 @@ class Agent:
             history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
-        system_prompt = self.static_prompt
+        system_prompt = self._get_session_prompt(session_id)
         _trim_history(history, max_chars=self.config.max_history_chars)
         messages = [{"role": "system", "content": system_prompt}] + history
 
@@ -467,6 +495,7 @@ class Agent:
                         metadata["stats"]["iterations"] = iteration
                     if system_task_prompt:
                         self.sessions.pop(session_id, None)
+                        self._session_prompts.pop(session_id, None)
                     return "(interrupted)"
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 response, err = await _call_and_record()
@@ -578,6 +607,7 @@ class Agent:
                         metadata["stats"]["iterations"] = iteration + 1
                     if system_task_prompt:
                         self.sessions.pop(session_id, None)
+                        self._session_prompts.pop(session_id, None)
                     return response.text
 
                 history.append({"role": "assistant", "content": ""})
@@ -586,6 +616,7 @@ class Agent:
                     metadata["stats"]["iterations"] = iteration + 1
                 if system_task_prompt:
                     self.sessions.pop(session_id, None)
+                    self._session_prompts.pop(session_id, None)
                 # Empty text is fine when the agent already attached a file this
                 # turn — the attachment is the reply.
                 if attachments:
@@ -600,6 +631,7 @@ class Agent:
                 metadata["stats"]["iterations"] = self.config.max_iterations
             if system_task_prompt:
                 self.sessions.pop(session_id, None)
+                self._session_prompts.pop(session_id, None)
             return "Iteration limit reached."
         finally:
             self._running_sessions.discard(session_id)

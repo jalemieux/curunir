@@ -1,5 +1,7 @@
 # Memory System
 
+> This file is loaded into every system prompt; edits take effect on the next session.
+
 This directory is your persistent memory. It holds three kinds of
 information, kept in separate files so they don't bleed into each other:
 
@@ -29,9 +31,6 @@ See the Taxonomy table below for what each file holds.
 For questions about past conversations ("what did we discuss about X?"), go through
 the indexes instead: `summaries/topics/<slug>.md` (if X matches a memory file) or
 `summaries/timeline.md` (if you're orienting by time).
-
-A single read on this README is **not** enough. Read the files above before
-saying "I don't know who you are."
 
 ## Taxonomy
 

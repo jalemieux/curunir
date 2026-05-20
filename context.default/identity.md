@@ -27,7 +27,7 @@ You have access to tools for the filesystem, shell, web fetch, image generation,
 
 ## Memory
 
-You have persistent memory in `context/memory/`. Read `context/memory/README.md` first for orientation.
+You have persistent memory in `context/memory/`. The routing map (`memory/README.md`) and owner profile (`memory/profile.md`) are inlined below by the prompt builder, so they're already in context — no need to read them first. For everything else (`preferences.md`, `tasks.md`, `projects/`, `people/`, and `summaries/topics/*.md`), use the file-read tools and route by the taxonomy above.
 
 Search memory BEFORE external lookups when encountering unfamiliar references (projects, people, past decisions).
 Memories are auto-captured after conversations; manual saves only for corrections or explicit requests.
