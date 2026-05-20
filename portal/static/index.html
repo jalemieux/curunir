@@ -813,7 +813,11 @@ function onServerMessage(msg) {
     renderConversations();
     return;
   }
-  // Otherwise: an OutgoingMessage payload.
+  // Otherwise: an OutgoingMessage payload. The portal socket is multiplexed
+  // across sessions, so a frame may arrive for a conversation the user just
+  // navigated away from (e.g. tapped New mid-turn). Drop those before they
+  // spill into the active chat.
+  if (msg.session_id && msg.session_id !== sessionId) return;
   renderAgentChunk(msg);
 }
 
@@ -1396,7 +1400,9 @@ function deleteConversation(id) {
 function startNew() {
   // Mint a fresh conversation id — no `clear` frame, so the prior
   // conversation is kept and stays in the sidebar. The new conversation
-  // joins the list once its first message is sent.
+  // joins the list once its first message is sent. An in-flight turn on the
+  // old session is left to finish and persist; the inbound session_id filter
+  // keeps its chunks out of the new chat.
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
