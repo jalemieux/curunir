@@ -207,13 +207,56 @@ main {
   margin: 6px 0 10px;
 }
 
-/* Tool ticker — a collapsed tool-count chip that expands into the full list.
-   Shown during a live turn too: the count-only chip doesn't duplicate the
-   .status line (which narrates the current tool), so the user can expand it
-   on demand to see every tool call made so far in the turn. */
-.msg details.tools { margin: 6px 0; }
+/* Activity indicator — a unified element rendered after .body for every
+   assistant turn. During a live turn (.live class) it shows a pulsing pill
+   ([● Thinking]) and the current tool name to its right. Clicking either
+   expands the full list of tool calls so far. On m.final the .live class
+   drops and the summary collapses to a static count chip ("3 tools"). */
+.msg details.tools { margin: 8px 0 2px; }
 .msg details.tools > summary { list-style: none; cursor: pointer; user-select: none; outline: none; }
 .msg details.tools > summary::-webkit-details-marker { display: none; }
+
+/* Live state — pill + tool-current */
+.msg details.tools.live .activity-row {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 2px 0;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+}
+.msg details.tools.live .pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px 4px 9px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: border-color .12s;
+}
+.msg details.tools.live > summary:hover .pill { border-color: var(--border-strong); }
+.msg details.tools.live .pill-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+  animation: pill-pulse 1.6s ease-in-out infinite;
+}
+.msg details.tools.live .pill-label,
+.msg details.tools.live .tool-current {
+  background: linear-gradient(90deg,
+    var(--header-text) 35%, var(--fg) 50%, var(--header-text) 65%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: pill-shimmer 2.2s linear infinite;
+}
+.msg details.tools.live .tool-current {
+  max-width: 360px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  animation-delay: .2s;
+}
+.msg details.tools.live .tool-current:empty { display: none; }
+.msg details.tools.live .activity-row .ticker-caret { margin-left: 2px; }
+.msg details.tools.live:not(.has-tools) .ticker-caret { display: none; }
+.msg details.tools.live:not(.has-tools) > summary { cursor: default; }
+
+/* Historical / post-final state — static count chip */
 .msg details.tools .ticker {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 0;
@@ -233,6 +276,7 @@ main {
   transition: transform 0.15s ease;
 }
 .msg details.tools[open] .ticker-caret { transform: rotate(90deg); }
+
 .msg details.tools .tool-list {
   margin: 6px 0 4px 8px;
   padding-left: 12px;
@@ -242,6 +286,20 @@ main {
 }
 .msg details.tools .tool-line {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+@keyframes pill-pulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.1); opacity: 1; }
+}
+@keyframes pill-shimmer { to { background-position: -250% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .msg details.tools.live .pill-dot { animation: none; opacity: 0.8; }
+  .msg details.tools.live .pill-label,
+  .msg details.tools.live .tool-current {
+    animation: none; color: var(--header-text);
+    -webkit-text-fill-color: var(--header-text);
+  }
 }
 .system-msg { color: var(--system-text); }
 
@@ -400,38 +458,6 @@ body.dragging .drop-hint { display: flex; }
   color: var(--hint); font-style: italic; font-size: 12px;
 }
 
-/* Activity indicator — a shimmering one-liner naming the live tool activity.
-   Sits after .body so streamed text never wipes it; removed on m.final. */
-.status {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 8px;
-  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-  font-size: 12px;
-}
-.status-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); flex-shrink: 0;
-  animation: status-breathe 1.6s ease-in-out infinite;
-}
-@keyframes status-breathe {
-  0%, 100% { transform: scale(0.7); opacity: 0.4; }
-  50% { transform: scale(1.1); opacity: 1; }
-}
-.status-label {
-  flex: 1; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: linear-gradient(90deg,
-    var(--header-text) 35%, var(--fg) 50%, var(--header-text) 65%);
-  background-size: 250% 100%;
-  -webkit-background-clip: text; background-clip: text;
-  color: transparent;
-  animation: status-shimmer 2.2s linear infinite;
-}
-@keyframes status-shimmer { to { background-position: -250% 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .status-dot, .status-label { animation: none; }
-  .status-label { color: var(--header-text); }
-}
 @media (max-width: 480px) {
   .composer-hint { display: none; }
   /* The 80px desktop indent eats ~20% of a phone screen; shrink it so user
@@ -704,7 +730,7 @@ function setStatus(state) {
   statusText.textContent = state;
   agentOnline = state === "online";
   if (!agentOnline && inProgressMsg) {
-    removeStatus(inProgressMsg);
+    finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
   }
@@ -864,14 +890,28 @@ function renderHistoryEntry(m) {
   }
 }
 
-// Builds (once) and updates the tool ticker on a message: a collapsed
-// tool-count chip, expandable to the full list of tool calls.
-function appendToolCalls(msgEl, calls) {
-  if (!calls || !calls.length) return;
+// Builds (once) the activity indicator on a message. In live mode it shows a
+// pulsing pill ([● Thinking]) + the current tool name; clicking either
+// expands the full list of tool calls so far. In non-live mode it's a static
+// count chip ("3 tools"). Both modes share the same <details> element and
+// .tool-list so we can morph from live → historical in place on m.final.
+function ensureActivityIndicator(msgEl, live) {
   let tools = msgEl.querySelector("details.tools");
-  if (!tools) {
-    tools = document.createElement("details");
-    tools.className = "tools";
+  if (tools) return tools;
+  tools = document.createElement("details");
+  tools.className = live ? "tools live" : "tools";
+  if (live) {
+    tools.innerHTML =
+      '<summary><div class="activity-row">' +
+      '<span class="pill">' +
+      '<span class="pill-dot"></span>' +
+      '<span class="pill-label">Thinking</span>' +
+      '</span>' +
+      '<span class="tool-current"></span>' +
+      '<span class="ticker-caret">▶</span>' +
+      '</div></summary>' +
+      '<div class="tool-list"></div>';
+  } else {
     tools.innerHTML =
       '<summary><div class="ticker">' +
       '<span class="ticker-dot"></span>' +
@@ -879,11 +919,17 @@ function appendToolCalls(msgEl, calls) {
       '<span class="ticker-caret">▶</span>' +
       '</div></summary>' +
       '<div class="tool-list"></div>';
-    // Keep the live .status line as the message's last child.
-    const status = msgEl.querySelector(".status");
-    if (status) msgEl.insertBefore(tools, status);
-    else msgEl.appendChild(tools);
   }
+  msgEl.appendChild(tools);
+  return tools;
+}
+
+// Append tool entries to whichever indicator exists on the message (creating
+// the historical-style one for the conversation-reload path if needed). Marks
+// a live indicator as .has-tools so the caret/click affordance appears.
+function appendToolCalls(msgEl, calls) {
+  if (!calls || !calls.length) return;
+  const tools = ensureActivityIndicator(msgEl, /*live=*/false);
   const list = tools.querySelector(".tool-list");
   for (const t of calls) {
     const line = document.createElement("div");
@@ -891,8 +937,42 @@ function appendToolCalls(msgEl, calls) {
     line.textContent = t;
     list.appendChild(line);
   }
-  const total = list.children.length;
-  tools.querySelector(".ticker-count").textContent = total === 1 ? "1 tool" : `${total} tools`;
+  if (tools.classList.contains("live")) {
+    tools.classList.add("has-tools");
+  } else {
+    const total = list.children.length;
+    tools.querySelector(".ticker-count").textContent = total === 1 ? "1 tool" : `${total} tools`;
+  }
+}
+
+// Update the shimmering tool-current label on a live indicator. No-op if the
+// message is historical or has no indicator.
+function setCurrentTool(msgEl, summary) {
+  const cur = msgEl.querySelector("details.tools.live .tool-current");
+  if (cur) cur.textContent = toStatusLabel(summary);
+}
+
+// Morph a live indicator into the historical count-chip state. If no tools
+// were called, remove the indicator entirely (text-only turns leave nothing
+// behind).
+function finalizeActivity(msgEl) {
+  if (!msgEl) return;
+  const tools = msgEl.querySelector("details.tools.live");
+  if (!tools) return;
+  const list = tools.querySelector(".tool-list");
+  const total = list ? list.children.length : 0;
+  if (total === 0) {
+    tools.remove();
+    return;
+  }
+  tools.classList.remove("live", "has-tools");
+  const summary = tools.querySelector("summary");
+  summary.innerHTML =
+    '<div class="ticker">' +
+    '<span class="ticker-dot"></span>' +
+    '<span class="ticker-count">' + (total === 1 ? "1 tool" : total + " tools") + '</span>' +
+    '<span class="ticker-caret">▶</span>' +
+    '</div>';
 }
 
 // Turn a streamed tool summary ("Read portal/app.py") into a live-action
@@ -924,12 +1004,10 @@ function renderAgentChunk(m) {
   appendToolCalls(inProgressMsg, m.tool_calls);
   renderAttachments(inProgressMsg, m.attachments);
   if (m.tool_calls && m.tool_calls.length) {
-    const label = inProgressMsg.querySelector(".status-label");
-    if (label) label.textContent =
-      toStatusLabel(m.tool_calls[m.tool_calls.length - 1]);
+    setCurrentTool(inProgressMsg, m.tool_calls[m.tool_calls.length - 1]);
   }
   if (m.final) {
-    removeStatus(inProgressMsg);
+    finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
     inProgressMsg = null;
     // The turn just completed — refresh the sidebar so a brand-new
@@ -1022,23 +1100,10 @@ function appendMessage(role, thinking = false) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
-  if (thinking) {
-    const status = document.createElement("div");
-    status.className = "status";
-    status.innerHTML =
-      '<span class="status-dot"></span>' +
-      '<span class="status-label">Thinking…</span>';
-    el.appendChild(status);
-  }
+  if (thinking) ensureActivityIndicator(el, /*live=*/true);
   messagesEl.appendChild(el);
   scrollToBottom();
   return el;
-}
-
-function removeStatus(el) {
-  if (!el) return;
-  const s = el.querySelector(".status");
-  if (s) s.remove();
 }
 
 function scrollToBottom() {
