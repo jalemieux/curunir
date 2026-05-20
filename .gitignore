@@ -42,3 +42,6 @@ landing_pages
 
 # Brainstorming visual companion
 .superpowers/
+
+# Deployment host list (real targets are private; .example is committed)
+scripts/.deploy-hosts
