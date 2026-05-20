@@ -26,21 +26,13 @@ def build_static_prompt(config: AgentConfig) -> str:
 
 
 def build_memory_block(context_dir: Path) -> str:
-    """Coalesce memory/README.md and memory/profile.md for the system prompt.
+    """Return memory/README.md for inlining into the system prompt.
 
-    Appended once per session so the routing map and owner profile are always
-    in context. Both files are optional — missing files are silently skipped.
-    Returns an empty string when neither file exists.
+    Only the routing map is inlined. profile.md and the rest of memory/ are
+    reached via tools — inlining profile.md previously caused the agent to
+    treat its contents as the entire owner-knowledge surface and refuse to
+    check sibling files (e.g. people/) when asked about anyone not listed
+    inline. Returns an empty string when README.md is absent.
     """
-    memory_dir = context_dir / "memory"
-    parts: list[str] = []
-
-    readme = memory_dir / "README.md"
-    if readme.exists():
-        parts.append(readme.read_text())
-
-    profile = memory_dir / "profile.md"
-    if profile.exists():
-        parts.append(profile.read_text())
-
-    return "\n\n".join(parts)
+    readme = context_dir / "memory" / "README.md"
+    return readme.read_text() if readme.exists() else ""

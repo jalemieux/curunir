@@ -41,7 +41,21 @@ def test_missing_identity_file_raises(tmp_path, tmp_skills):
 
 
 class TestBuildMemoryBlock:
-    def test_coalesces_readme_and_profile(self, tmp_context):
+    def test_inlines_readme(self, tmp_context):
+        memory = tmp_context / "memory"
+        memory.mkdir()
+        (memory / "README.md").write_text("# Routing map\nWhere to look first.")
+
+        block = build_memory_block(tmp_context)
+
+        assert "Where to look first." in block
+
+    def test_does_not_inline_profile(self, tmp_context):
+        # Inlining profile.md caused false satiety: the agent treated its
+        # contents as the complete owner-knowledge surface and refused to
+        # check other memory files (e.g. people/) when asked about anyone
+        # not listed inline. The memory block must surface only the routing
+        # map; profile.md is reached via tools like everything else.
         memory = tmp_context / "memory"
         memory.mkdir()
         (memory / "README.md").write_text("# Routing map\nWhere to look first.")
@@ -50,37 +64,27 @@ class TestBuildMemoryBlock:
         block = build_memory_block(tmp_context)
 
         assert "Where to look first." in block
-        assert "Name: Alice" in block
+        assert "Name: Alice" not in block
+        assert "Owner Profile" not in block
 
     def test_empty_when_memory_dir_missing(self, tmp_context):
         block = build_memory_block(tmp_context)
         assert block == ""
 
-    def test_skips_missing_readme(self, tmp_context):
+    def test_empty_when_readme_missing_even_if_profile_exists(self, tmp_context):
         memory = tmp_context / "memory"
         memory.mkdir()
         (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
 
         block = build_memory_block(tmp_context)
 
-        assert "Routing map" not in block
-        assert "Name: Alice" in block
-
-    def test_skips_missing_profile(self, tmp_context):
-        memory = tmp_context / "memory"
-        memory.mkdir()
-        (memory / "README.md").write_text("# Routing map")
-
-        block = build_memory_block(tmp_context)
-
-        assert "Routing map" in block
-        assert "Owner Profile" not in block
+        assert block == ""
 
 
 class TestSessionMemorySnapshot:
     """Memory block is read once per session and reused across turns."""
 
-    async def test_first_turn_inlines_memory_into_system_prompt(self, agent_config):
+    async def test_first_turn_inlines_readme_into_system_prompt(self, agent_config):
         memory = agent_config.context_dir / "memory"
         memory.mkdir()
         (memory / "README.md").write_text("# Routing map\nLook at people/")
@@ -100,15 +104,14 @@ class TestSessionMemorySnapshot:
 
         system_msg = captured[0][0]["content"]
         assert "Look at people/" in system_msg
-        assert "Name: Alice" in system_msg
+        # Profile content is NOT inlined — must be reached via tools.
+        assert "Name: Alice" not in system_msg
 
     async def test_snapshot_reused_across_turns_in_same_session(self, agent_config):
         memory = agent_config.context_dir / "memory"
         memory.mkdir()
         readme = memory / "README.md"
         readme.write_text("# Routing map\nVersion ONE")
-        profile = memory / "profile.md"
-        profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
         (agent_config.context_dir / ".onboarded").touch()
@@ -121,14 +124,12 @@ class TestSessionMemorySnapshot:
 
         with patch("src.agent.agent.call_llm", new=fake_call_llm):
             await agent.handle("first", "s1")
-            # Mutate the files on disk — the cached snapshot must ignore this.
+            # Mutate the README on disk — the cached snapshot must ignore this.
             readme.write_text("# Routing map\nVersion TWO")
-            profile.write_text("# Owner Profile\nSecond snapshot")
             await agent.handle("second", "s1")
 
         # Both turns saw the same memory snapshot.
         assert "Version ONE" in captured[0]
-        assert "First snapshot" in captured[0]
         assert captured[0] == captured[1]
         assert "Version TWO" not in captured[1]
 
@@ -137,8 +138,6 @@ class TestSessionMemorySnapshot:
         memory.mkdir()
         readme = memory / "README.md"
         readme.write_text("# Routing map\nVersion ONE")
-        profile = memory / "profile.md"
-        profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
         (agent_config.context_dir / ".onboarded").touch()
@@ -152,12 +151,10 @@ class TestSessionMemorySnapshot:
         with patch("src.agent.agent.call_llm", new=fake_call_llm):
             await agent.handle("first", "s1")
             readme.write_text("# Routing map\nVersion TWO")
-            profile.write_text("# Owner Profile\nSecond snapshot")
             await agent.handle("second", "s2")
 
         assert "Version ONE" in captured[0]
         assert "Version TWO" in captured[1]
-        assert "Second snapshot" in captured[1]
 
     async def test_missing_memory_files_handled_gracefully(self, agent_config):
         """First turn with no memory dir must still call the LLM."""

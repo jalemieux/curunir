@@ -171,10 +171,11 @@ class Agent:
         )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
-        # Per-session memory snapshot (README.md + profile.md). Built on the
-        # first turn of a session and reused for the rest of that session so
-        # auto-cache providers keep hitting the prefix cache across the tool
-        # loop. External edits during a session are picked up next session.
+        # Per-session memory snapshot (memory/README.md routing map). Built
+        # on the first turn of a session and reused for the rest of that
+        # session so auto-cache providers keep hitting the prefix cache
+        # across the tool loop. External edits during a session are picked
+        # up next session.
         self._session_prompts: dict[str, str] = {}
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
@@ -196,8 +197,8 @@ class Agent:
     def _get_session_prompt(self, session_id: str) -> str:
         """System prompt for a session: static prefix + memory snapshot.
 
-        The memory block (memory/README.md + memory/profile.md) is read once
-        per session and cached so the system prompt stays byte-stable across
+        The memory block (memory/README.md routing map) is read once per
+        session and cached so the system prompt stays byte-stable across
         turns within a session — required for auto-cache providers (OpenAI,
         DeepSeek, xAI, GLM via OpenRouter) to keep hitting the prefix cache
         during the tool loop. External file edits during a session are picked
