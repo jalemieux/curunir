@@ -1,4 +1,6 @@
 # src/agent/system_prompt.py
+from pathlib import Path
+
 from src.config import AgentConfig
 from src.skills import build_skill_manifest
 
@@ -20,4 +22,26 @@ def build_static_prompt(config: AgentConfig) -> str:
     parts = [identity]
     if manifest:
         parts.append(manifest)
+    return "\n\n".join(parts)
+
+
+def build_memory_block(context_dir: Path) -> str:
+    """Coalesce memory/README.md and memory/profile.md into a delimited block.
+
+    The block is intended to be appended to the system prompt at the start of
+    a session so the routing map and owner profile are always in context. Both
+    files are optional — missing files are silently skipped. Returns an empty
+    string when neither file exists.
+    """
+    memory_dir = context_dir / "memory"
+    parts: list[str] = []
+
+    readme = memory_dir / "README.md"
+    if readme.exists():
+        parts.append(f"<memory_routing>\n{readme.read_text()}\n</memory_routing>")
+
+    profile = memory_dir / "profile.md"
+    if profile.exists():
+        parts.append(f"<memory_profile>\n{profile.read_text()}\n</memory_profile>")
+
     return "\n\n".join(parts)
