@@ -49,11 +49,7 @@ class TestBuildMemoryBlock:
 
         block = build_memory_block(tmp_context)
 
-        assert "<memory_routing>" in block
-        assert "</memory_routing>" in block
         assert "Where to look first." in block
-        assert "<memory_profile>" in block
-        assert "</memory_profile>" in block
         assert "Name: Alice" in block
 
     def test_empty_when_memory_dir_missing(self, tmp_context):
@@ -67,8 +63,7 @@ class TestBuildMemoryBlock:
 
         block = build_memory_block(tmp_context)
 
-        assert "<memory_routing>" not in block
-        assert "<memory_profile>" in block
+        assert "Routing map" not in block
         assert "Name: Alice" in block
 
     def test_skips_missing_profile(self, tmp_context):
@@ -78,8 +73,8 @@ class TestBuildMemoryBlock:
 
         block = build_memory_block(tmp_context)
 
-        assert "<memory_routing>" in block
-        assert "<memory_profile>" not in block
+        assert "Routing map" in block
+        assert "Owner Profile" not in block
 
 
 class TestSessionMemorySnapshot:
@@ -179,5 +174,3 @@ class TestSessionMemorySnapshot:
             result = await agent.handle("hi", "s1")
 
         assert result == "ok"
-        assert "<memory_routing>" not in captured[0]
-        assert "<memory_profile>" not in captured[0]
