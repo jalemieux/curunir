@@ -1398,15 +1398,11 @@ function deleteConversation(id) {
 }
 
 function startNew() {
-  // If a turn is in flight, interrupt the *old* session before minting a new
-  // id — otherwise the agent keeps working on a conversation the user has
-  // abandoned (and the inbound filter just discards the chunks).
-  if (inProgressMsg && agentOnline && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId }));
-  }
   // Mint a fresh conversation id — no `clear` frame, so the prior
   // conversation is kept and stays in the sidebar. The new conversation
-  // joins the list once its first message is sent.
+  // joins the list once its first message is sent. An in-flight turn on the
+  // old session is left to finish and persist; the inbound session_id filter
+  // keeps its chunks out of the new chat.
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
