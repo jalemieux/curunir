@@ -17,7 +17,7 @@ services:
       retries: 5
 
   portal:
-    build: ./portal
+    image: ghcr.io/jalemieux/curunir-portal:${PORTAL_TAG:-latest}
     profiles: ["portal"]
     depends_on:
       postgres:
@@ -31,14 +31,11 @@ services:
       # token here MUST match curunir's CURUNIR_PORTAL_TOKEN default below.
       SEED_USER_EMAIL: ${SEED_USER_EMAIL:-dev@example.com}
       SEED_CONTAINER_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
-    volumes:
-      - ./portal:/app/portal
     ports:
       - "8000:8000"
-    command: uvicorn portal.app:app --host 0.0.0.0 --port 8000 --reload
 
   curunir:
-    build: .
+    image: ghcr.io/jalemieux/curunir:${CURUNIR_TAG:-latest}
     env_file: .env
     # Soft dep: when the portal profile is active, wait for portal to start
     # so curunir doesn't burn through reconnect attempts during startup.
