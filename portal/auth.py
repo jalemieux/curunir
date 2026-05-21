@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import Cookie, HTTPException, status
+from fastapi import Cookie, HTTPException, Response, status
 from itsdangerous import BadSignature, Signer
 
 from portal import db
@@ -36,6 +36,25 @@ def verify_session(cookie_value: str) -> Optional[int]:
         return int(user_id_str)
     except ValueError:
         return None
+
+
+def set_local_session_cookie(response: Response, user_id: int) -> None:
+    """Attach the session cookie for the seeded local-mode user.
+
+    Local mode has no per-request auth — it relies on localhost binding +
+    the WebSocket Origin check — so the cookie is issued with
+    ``secure=False`` (the local surface is plain HTTP, like sign-in under
+    DEBUG). It still rides the same signed-cookie session the browser
+    WebSocket authenticates against.
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=sign_session(user_id),
+        secure=False,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
 
 
 async def current_user(

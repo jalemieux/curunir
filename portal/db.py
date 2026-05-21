@@ -107,6 +107,19 @@ async def upsert_user_with_container_token(
     return _row_to_user(row)
 
 
+async def ensure_local_user() -> User:
+    """Seed the single local-mode user.
+
+    Idempotently upserts a user keyed on ``settings.local_user_email`` with
+    the env-provided container token, active. Called by local-mode lifespan
+    startup so the local browser surface and the curunir container share a
+    known identity without the magic-link / admin provisioning flow.
+    """
+    return await upsert_user_with_container_token(
+        settings.local_user_email, settings.local_container_token
+    )
+
+
 async def get_user_by_id(user_id: int) -> Optional[User]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(

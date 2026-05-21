@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     seed_user_email: str = ""
     seed_container_token: str = ""
 
+    # Local profile: PORTAL_MODE=local turns the portal into a personal,
+    # single-user surface. Lifespan seeds one user (local_user_email +
+    # local_container_token) and the magic-link sign-in / admin routers are
+    # not mounted — `/` auto-issues the session cookie. See portal/README.md.
+    portal_mode: str = "hosted"
+    local_user_email: str = "local@curunir"
+    local_container_token: str = ""
+
+    @property
+    def is_local_mode(self) -> bool:
+        return self.portal_mode.strip().lower() == "local"
+
     @property
     def admin_email_set(self) -> set[str]:
         return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}

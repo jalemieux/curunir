@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    profiles: ["portal"]
+    profiles: ["portal", "portal-local"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -34,14 +34,43 @@ services:
     ports:
       - "8000:8000"
 
+  # Local profile: a personal, single-user portal running alongside curunir.
+  # `docker compose --profile portal-local up` brings up postgres +
+  # portal-local + curunir. PORTAL_MODE=local seeds one user and drops the
+  # magic-link/admin surface; the browser surface has no per-request auth, so
+  # the port is published on localhost only. Point curunir at it by setting
+  # CURUNIR_PORTAL_URL=ws://portal-local:8000/ws/agent in the root .env.
+  portal-local:
+    image: ghcr.io/jalemieux/curunir-portal:${PORTAL_TAG:-latest}
+    profiles: ["portal-local"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: ./portal/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/portal
+      PORTAL_MODE: local
+      # Seeded local user. Its container token must match the token curunir
+      # dials with (CURUNIR_PORTAL_TOKEN, or CURUNIR_PORTAL_INTERNAL_TOKEN in
+      # a multi-portal setup) — both default to `dev-seed-token-change-me`
+      # unless overridden in the root .env.
+      LOCAL_CONTAINER_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
+      LOCAL_USER_EMAIL: ${LOCAL_USER_EMAIL:-local@curunir}
+    ports:
+      # Bind to localhost only — the local profile has no per-request auth.
+      - "127.0.0.1:8000:8000"
+
   curunir:
     image: ghcr.io/jalemieux/curunir:${CURUNIR_TAG:-latest}
     env_file: .env
-    # Soft dep: when the portal profile is active, wait for portal to start
+    # Soft dep: when a portal profile is active, wait for the portal to start
     # so curunir doesn't burn through reconnect attempts during startup.
-    # `required: false` keeps curunir startable without the portal profile.
+    # `required: false` keeps curunir startable without any portal profile.
     depends_on:
       portal:
+        condition: service_started
+        required: false
+      portal-local:
         condition: service_started
         required: false
     environment:

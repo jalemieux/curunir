@@ -57,7 +57,7 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 
 - **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`.
 - **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
-- **Portal** (`portal.py`): Outbound WebSocket to a hosted portal (`CURUNIR_PORTAL_URL` + `CURUNIR_PORTAL_TOKEN`). Container dials portal; portal multiplexes browser ↔ container. Session ID is `"portal"`. See `portal/` directory for the portal service.
+- **Portal** (`portal.py`): Outbound WebSocket to one or more portals. The container dials each portal; the portal multiplexes browser ↔ container. Each `PortalChannel` carries a `channel_key` so `route_outbound` returns replies to the originating portal: the legacy `CURUNIR_PORTAL_URL`/`CURUNIR_PORTAL_TOKEN` pair → key `"portal"`; the named `CURUNIR_PORTAL_PUBLIC_*` / `CURUNIR_PORTAL_INTERNAL_*` pairs → keys `"public"` / `"internal"` (parsed by `parse_portal_configs` in `run.py`). The fallback session ID is derived per-portal from the key. See `portal/` directory for the portal service.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
 
 Channels implement a protocol: `async start()` to listen, `async send(msg)` to respond.
@@ -98,6 +98,8 @@ Manifest auto-built at startup from all `SKILL.md` files and included in the sys
 ### Portal Service (`portal/`)
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
+
+`PORTAL_MODE=local` runs the same codebase as a personal, single-user surface: lifespan seeds one env-defined user (`ensure_local_user`), the magic-link sign-in and admin routers are not mounted, and `/` auto-issues the session cookie. The app is built by `create_app()`, which mounts routers based on `portal_mode`. Postgres is retained either way. The `portal-local` docker compose profile runs a local-mode portal alongside curunir.
 
 ### Memory (`src/memory_extractor.py`, `src/memory_indexer.py`)
 

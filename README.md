@@ -165,18 +165,29 @@ The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use 
 
 See `.env.example` for the full list of email-related variables.
 
-#### Portal Channel (hosted web UI)
+#### Portal Channel (web UI)
 
-The portal is a standalone FastAPI app (in `portal/`) that gives the agent a multi-user browser front end with email-link sign-in, per-tab sessions, and drag-drop attachments. The curunir container dials *out* to the portal over WebSocket on startup; the portal multiplexes each browser to the matching container.
+The portal is a standalone FastAPI app (in `portal/`) that gives the agent a browser front end with per-tab sessions and drag-drop attachments. The curunir container dials *out* to the portal over WebSocket on startup; the portal multiplexes each browser to the matching container.
 
-Enable it by setting:
+Enable it for a single portal by setting:
 
 ```bash
 CURUNIR_PORTAL_URL=wss://your-portal.example.com/ws/agent
 CURUNIR_PORTAL_TOKEN=<bearer-token-issued-by-portal>
 ```
 
-See **[portal/README.md](portal/README.md)** for portal deployment and the local `docker compose --profile portal up` dev path.
+curunir can also register to **multiple portals at once** — e.g. a public hosted portal plus an internal one running locally. Name each portal instead of using the legacy pair above:
+
+```bash
+CURUNIR_PORTAL_PUBLIC_URL=wss://your-portal.example.com/ws/agent
+CURUNIR_PORTAL_PUBLIC_TOKEN=<hosted bearer token>
+CURUNIR_PORTAL_INTERNAL_URL=ws://portal-local:8000/ws/agent
+CURUNIR_PORTAL_INTERNAL_TOKEN=<local bearer token>
+```
+
+Each portal becomes a distinct channel: replies route back to the originating portal and each portal's sidebar shows only its own conversations. The portal itself can run hosted (multi-user, email-link sign-in) or as a personal **`PORTAL_MODE=local`** single-user surface — `docker compose --profile portal-local up` runs a local portal alongside curunir.
+
+See **[portal/README.md](portal/README.md)** for portal deployment, the local profile, and the `docker compose --profile portal` dev path.
 
 ## Attachments
 

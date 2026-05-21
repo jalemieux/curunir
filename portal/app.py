@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from portal import admin, auth, db, sign_in, ws_agent, ws_browser
@@ -54,14 +54,22 @@ async def _maybe_seed_dev_user() -> None:
 async def lifespan(app: FastAPI):
     await db.init_pool()
     await db.run_migrations()
-    await _maybe_seed_dev_user()
+    if settings.is_local_mode:
+        # Local profile: seed the single env-defined user instead of
+        # provisioning via magic-link/admin. Its id is stashed on app.state
+        # so `/` can mint the session cookie for it.
+        user = await db.ensure_local_user()
+        app.state.local_user_id = user.id
+        logger.info(
+            "local mode: seeded user id=%s email=%s", user.id, user.email
+        )
+    else:
+        await _maybe_seed_dev_user()
     try:
         yield
     finally:
         await db.close_pool()
 
-
-app = FastAPI(lifespan=lifespan)
 
 _TOKEN_QS = re.compile(r"(\btoken=)[^&\s]+")
 
@@ -87,20 +95,46 @@ class _RedactingFilter(logging.Filter):
 for _name in ("uvicorn.access", "uvicorn.error"):
     logging.getLogger(_name).addFilter(_RedactingFilter())
 
-app.include_router(sign_in.router)
-app.include_router(admin.router)
-app.include_router(ws_agent.router)
-app.include_router(ws_browser.router)
+
+def create_app() -> FastAPI:
+    """Build the portal FastAPI app.
+
+    In hosted mode (default) the magic-link sign-in and admin routers are
+    mounted. In local mode (``PORTAL_MODE=local``) both are omitted: the
+    local browser surface has no per-request auth and `/` auto-issues the
+    session cookie for the env-seeded local user. See portal/README.md.
+    """
+    app = FastAPI(lifespan=lifespan)
+
+    if not settings.is_local_mode:
+        app.include_router(sign_in.router)
+        app.include_router(admin.router)
+    app.include_router(ws_agent.router)
+    app.include_router(ws_browser.router)
+
+    @app.get("/healthz")
+    async def healthz():
+        ok = await db.ping()
+        return JSONResponse({"status": "ok" if ok else "degraded"})
+
+    @app.get("/")
+    async def root(request: Request, user=Depends(auth.optional_current_user)):
+        index = Path(__file__).parent / "static" / "index.html"
+        if settings.is_local_mode:
+            # No per-request auth in local mode — serve the chat UI directly.
+            # On the first visit there's no cookie yet; mint one for the
+            # seeded local user so the browser WebSocket can authenticate.
+            response = FileResponse(index)
+            if user is None:
+                auth.set_local_session_cookie(
+                    response, request.app.state.local_user_id
+                )
+            return response
+        if user is None:
+            return RedirectResponse("/needs-invite", status_code=302)
+        return FileResponse(index)
+
+    return app
 
 
-@app.get("/healthz")
-async def healthz():
-    ok = await db.ping()
-    return JSONResponse({"status": "ok" if ok else "degraded"})
-
-
-@app.get("/")
-async def root(user=Depends(auth.optional_current_user)):
-    if user is None:
-        return RedirectResponse("/needs-invite", status_code=302)
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+app = create_app()

@@ -5,6 +5,9 @@ authenticates browsers via signed-cookie sessions and routes messages to a
 self-hosted curunir container over WebSocket. The portal stores no chat
 content — only `users` rows in Postgres.
 
+It can also run as a personal, single-user surface with `PORTAL_MODE=local` —
+no sign-in, no admin. See [Local profile](#local-profile-single-user-no-sign-in).
+
 ## Architecture in 30 seconds
 
 ```
@@ -156,6 +159,74 @@ docker compose exec portal sh           # shell into the portal container
 docker compose exec postgres psql -U postgres -d portal   # ad-hoc SQL
 ```
 
+## Local profile (single-user, no sign-in)
+
+The portal can also run as a *personal, local-only* surface — one user, no
+magic-link sign-in, no admin allowlist. It's the **same codebase**: a config
+flag (`PORTAL_MODE=local`) swaps only the auth/onboarding pieces. Postgres is
+still used (it runs as a container); local mode just seeds a single
+env-defined user at startup instead of provisioning users via the admin UI.
+
+What changes in local mode:
+
+- Lifespan seeds one user from `LOCAL_USER_EMAIL` + `LOCAL_CONTAINER_TOKEN`
+  (`ensure_local_user`) instead of the magic-link flow.
+- The `sign-in` and `admin` routers are not mounted.
+- `/` auto-issues the session cookie for the seeded user and serves the chat
+  UI directly — no `/needs-invite` redirect.
+- There is **no per-request browser auth**: local mode relies on binding the
+  port to `localhost` plus the existing WebSocket `Origin` check. Adequate
+  for a single-user laptop; don't expose the port to a LAN.
+
+The container↔portal Bearer-token path is unchanged — the curunir container
+still authenticates against the seeded user's `container_token`.
+
+### Run it with docker compose
+
+The `portal-local` compose profile brings up `postgres`, a local-mode
+`portal-local` service, and `curunir`:
+
+```bash
+docker compose --profile portal-local up -d --build
+```
+
+`portal-local` listens on `http://localhost:8000` (published on `127.0.0.1`
+only). Visit it and you land straight on the chat UI.
+
+Env vars (defaulted in `docker-compose.yml`, override in the root `.env`):
+
+| Var | Purpose | Default |
+|-----|---------|---------|
+| `PORTAL_MODE` | `local` enables the profile | set to `local` by the service |
+| `LOCAL_CONTAINER_TOKEN` | Bearer token the container dials with | `${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}` |
+| `LOCAL_USER_EMAIL` | seeded user's email | `local@curunir` |
+
+### Point curunir at the local portal
+
+Curunir reaches `portal-local` over the compose network at
+`ws://portal-local:8000/ws/agent`. For a **single local portal**, reuse the
+legacy vars in the root `.env`:
+
+```bash
+CURUNIR_PORTAL_URL=ws://portal-local:8000/ws/agent
+CURUNIR_PORTAL_TOKEN=<same value as LOCAL_CONTAINER_TOKEN>
+```
+
+To run curunir against **both** a public (hosted) portal and this internal
+local one at the same time, use the named var pairs instead — and remove the
+legacy `CURUNIR_PORTAL_URL`/`CURUNIR_PORTAL_TOKEN` lines (curunir refuses to
+start if the legacy pair is mixed with named pairs):
+
+```bash
+CURUNIR_PORTAL_PUBLIC_URL=wss://your-hosted-portal.example/ws/agent
+CURUNIR_PORTAL_PUBLIC_TOKEN=<hosted container token>
+CURUNIR_PORTAL_INTERNAL_URL=ws://portal-local:8000/ws/agent
+CURUNIR_PORTAL_INTERNAL_TOKEN=<same value as LOCAL_CONTAINER_TOKEN>
+```
+
+Each portal becomes a distinct channel: replies route back to the portal the
+message came from, and each portal's sidebar shows only its own conversations.
+
 ## Running the portal natively (alternative)
 
 If you'd rather run the portal app outside Docker (e.g. for IDE debugging),
@@ -191,7 +262,7 @@ Postgres on `localhost:5432` (separate `portal_test` db).
 # One-time: create the test database
 docker compose exec postgres createdb -U postgres portal_test
 
-# Portal tests (53 tests) — from <repo-root>/portal
+# Portal tests — from <repo-root>/portal
 cd portal && pytest
 
 # Curunir-side portal channel tests — from <repo-root>
