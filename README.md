@@ -222,6 +222,24 @@ Instructions the agent follows when it loads this skill...
 
 Skills appear in the agent's system prompt as a manifest table. The agent calls `load_skill` to fetch full instructions on demand.
 
+### Skill Visibility
+
+Three optional frontmatter flags control where a skill shows up:
+
+```yaml
+---
+name: my-skill
+description: When to use this skill
+hidden: true             # Omit from the system-prompt manifest
+portal_summary: "..."    # List in the portal Skills panel (user-facing one-liner)
+portal_starter: true     # Also surface as an empty-page starter (requires portal_summary)
+---
+```
+
+- `hidden: true` keeps the skill in the registry — still loadable via `load_skill` and `/skill-name` — but drops it from the agent's manifest, so the agent won't route to it on its own. Use it to trial a skill before GA.
+- `portal_summary` is the **browse-panel gate**: the skill appears in the portal's Skills panel only if this is set, and its value is the user-facing summary shown there.
+- `portal_starter` is the **empty-page gate**: it additionally surfaces the skill as a "What would you like to do?" starter row. Starters are a subset of the browse panel — `portal_starter` without `portal_summary` is ignored (the skill is excluded everywhere and a warning is logged). `hidden` skills never appear in the portal.
+
 ### Skill-Requested Tools
 
 Skills can declare opt-in tools that are only available when the skill is loaded. Add a `tools` field to the frontmatter:
