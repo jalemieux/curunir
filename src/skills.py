@@ -14,7 +14,8 @@ class Skill:
     description: str
     path: Path
     portal_summary: str | None = None
-    beta: bool = False
+    portal_starter: bool = False
+    hidden: bool = False
 
 
 def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
@@ -23,7 +24,7 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
     On name collision, first-seen wins — so passing [system_dir, user_dir]
     makes system skills shadow user skills. Missing dirs are silently skipped.
     Skills with `disabled: true` or missing `name`/`description` are excluded.
-    Skills with `beta: true` are kept in the registry but flagged so that
+    Skills with `hidden: true` are kept in the registry but flagged so that
     `build_skill_manifest` omits them from the agent's system prompt.
     """
     registry: dict[str, Skill] = {}
@@ -52,7 +53,8 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
                 description=fm["description"],
                 path=skill_file,
                 portal_summary=fm.get("portal_summary") or None,
-                beta=fm.get("beta", "").lower() in _TRUTHY,
+                portal_starter=fm.get("portal_starter", "").lower() in _TRUTHY,
+                hidden=fm.get("hidden", "").lower() in _TRUTHY,
             )
     return registry
 
@@ -60,11 +62,11 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
 def build_skill_manifest(skill_dirs: list[Path]) -> str:
     """Return markdown table of catalog skills (name + description).
 
-    Skills flagged `beta: true` are omitted — they stay in the registry
+    Skills flagged `hidden: true` are omitted — they stay in the registry
     (loadable, slash-forceable) but the agent won't route to them on its own.
     """
     registry = load_registry(skill_dirs)
-    catalog = [s for s in registry.values() if not s.beta]
+    catalog = [s for s in registry.values() if not s.hidden]
     if not catalog:
         logger.info("no catalog skills found in %s", [str(d) for d in skill_dirs])
         return ""
@@ -89,26 +91,39 @@ def _display_name(name: str) -> str:
 
 
 def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
-    """User-facing skills for the portal picker.
+    """User-facing skills for the portal Skills panel.
 
-    Returns all non-beta skills sorted by name. Each entry:
+    Returns skills that set `portal_summary`, sorted by name. Each entry:
     {name, display_name, summary, starter}.
 
-    `summary` is the skill's `portal_summary` if set, else its `description`.
-    `starter` is true only when `portal_summary` is set — the empty-state
-    "What would you like to do?" rows filter on this so they don't balloon
-    to every skill in the registry.
+    Two independent portal gates:
+    - `portal_summary` — browse-panel gate. A skill appears in the Skills
+      panel only if it sets `portal_summary`; `summary` is that value.
+    - `portal_starter` — empty-page starter gate, surfaced as `starter`.
+      The empty-state "What would you like to do?" rows filter on this.
+
+    Starters are a subset of the browse panel: a skill that sets
+    `portal_starter` without `portal_summary` is excluded entirely (and a
+    warning is logged). `hidden` skills are excluded regardless.
     """
     registry = load_registry(skill_dirs)
     out = []
     for skill in registry.values():
-        if skill.beta:
+        if skill.hidden:
+            continue
+        if not skill.portal_summary:
+            if skill.portal_starter:
+                logger.warning(
+                    "skill '%s' sets portal_starter but lacks portal_summary; "
+                    "excluded from portal",
+                    skill.name,
+                )
             continue
         out.append({
             "name": skill.name,
             "display_name": _display_name(skill.name),
-            "summary": skill.portal_summary or skill.description,
-            "starter": bool(skill.portal_summary),
+            "summary": skill.portal_summary,
+            "starter": skill.portal_starter,
         })
     out.sort(key=lambda s: s["name"])
     return out

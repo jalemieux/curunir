@@ -1,7 +1,7 @@
 ---
 name: dreaming
 description: "Use when the scheduler or user asks to tidy, organize, or reconcile the memory directory (\"dreaming\", memory housekeeping). Audits context/memory/ against its README and fixes organization — registers new files, corrects naming and placement, repairs references — without ever editing the content of memory files."
-beta: true
+hidden: true
 ---
 
 # Dreaming
