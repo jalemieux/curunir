@@ -165,7 +165,7 @@ CURUNIR_PORTAL_URL=wss://your-portal.example.com/ws/agent
 CURUNIR_PORTAL_TOKEN=<bearer-token-issued-by-portal>
 ```
 
-Every finalized agent response in the portal carries a Copy / Save-as-PDF action row. Copy writes the response markdown to the clipboard; Save as PDF asks the agent to convert its prior artifact (or the inline markdown reply) into a PDF and attach it via the regular message channel.
+Every finalized agent response in the portal carries a Copy / Print action row. Copy writes the response markdown to the clipboard; Print opens the browser's print dialog on a clean, paper-styled copy of that response, which can then be saved as a PDF.
 
 See **[portal/README.md](portal/README.md)** for portal deployment and the local `docker compose --profile portal up` dev path.
 
