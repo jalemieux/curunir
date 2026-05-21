@@ -303,6 +303,79 @@ main {
 }
 .system-msg { color: var(--system-text); }
 
+/* Per-response action row — Copy / Print below each finalized assistant
+   bubble. Re-appended after streaming completes so it sits last, beneath
+   any tool ticker or attachments. flex-wrap prevents mobile overflow. */
+.msg.assistant .response-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-width: 100%; margin-top: 8px;
+}
+.msg.assistant .response-actions .resp-action {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--header-text);
+  font-family: inherit; font-size: 11.5px;
+  padding: 3px 9px; border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.msg.assistant .response-actions .resp-action:hover {
+  background: var(--hover-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.msg.assistant .response-actions .resp-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.msg.assistant .response-actions .resp-action:disabled {
+  cursor: default; opacity: 0.7;
+}
+
+/* Print target — hidden on screen; the @media print block below shows only
+   this element, styled black-on-white for paper regardless of portal theme.
+   printResponse() fills it with a copy of the response's rendered markdown. */
+#print-doc { display: none; }
+@media print {
+  body > *:not(#print-doc) { display: none !important; }
+  @page { margin: 1.6cm; }
+  #print-doc {
+    display: block !important;
+    color: #000; background: #fff;
+    font-size: 12pt; line-height: 1.5;
+  }
+  #print-doc h1 { font-size: 18pt; }
+  #print-doc h2 { font-size: 15pt; }
+  #print-doc h3 { font-size: 13pt; }
+  #print-doc h1, #print-doc h2, #print-doc h3 { margin: 16px 0 8px; }
+  #print-doc p { margin: 0 0 8px; }
+  #print-doc ul, #print-doc ol { padding-left: 22px; margin: 6px 0 10px; }
+  #print-doc li { margin-bottom: 4px; }
+  #print-doc pre {
+    background: #f3f4f6; border-radius: 4px; padding: 10px; margin: 8px 0;
+    font-size: 10pt; white-space: pre-wrap; word-break: break-word;
+  }
+  #print-doc code {
+    background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 10pt;
+  }
+  /* hljs token spans carry dark-theme colors when the portal is in dark
+     mode — force legible dark-on-light so code prints readable either way. */
+  #print-doc pre code, #print-doc pre code * {
+    background: none !important; color: #1a1a1f !important;
+  }
+  #print-doc table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  #print-doc th, #print-doc td {
+    border-bottom: 1px solid #ccc; padding: 6px 8px 6px 0;
+    text-align: left; vertical-align: top;
+  }
+  #print-doc a { color: #000; text-decoration: underline; }
+  #print-doc img { max-width: 100%; }
+  #print-doc blockquote {
+    border-left: 3px solid #ccc; padding-left: 12px;
+    color: #333; margin: 8px 0;
+  }
+}
+
 /* === Empty-state conversation starters === */
 /* Shown inside #messages when a conversation has no messages yet: a static
    greeting plus one clickable starter per portal-enabled skill. */
@@ -821,6 +894,12 @@ function onServerMessage(msg) {
     historyAssistant = null;
     for (const m of msg.messages) renderHistoryEntry(m);
     if (!msg.messages.length) renderEmptyState();
+    // History entries are already finalized — attach Copy / Print to
+    // every assistant bubble that has rendered text. The function is a
+    // no-op for tool-only assistant turns and system rows.
+    for (const el of messagesEl.querySelectorAll(".msg.assistant")) {
+      appendResponseActions(el);
+    }
     updateComposerMode();
     return;
   }
@@ -989,6 +1068,85 @@ function toStatusLabel(summary) {
   return (g ? g + summary.slice(sp) : summary) + "…";
 }
 
+// Build (or rebuild) the Copy / Print action row on a finalized
+// assistant bubble. Idempotent: any prior row is removed first so the
+// new one stays the bubble's last child even after late updates (tool
+// ticker, attachments, history reload). Skipped for bubbles with no
+// rendered text (tool-only assistant turns and system messages — they
+// have no body.dataset.raw to copy).
+function appendResponseActions(msgEl) {
+  if (!msgEl || !msgEl.classList.contains("assistant")) return;
+  const body = msgEl.querySelector(".body");
+  if (!body || !body.dataset.raw) return;
+  const existing = msgEl.querySelector(".response-actions");
+  if (existing) existing.remove();
+
+  const wrap = document.createElement("div");
+  wrap.className = "response-actions";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "resp-action";
+  copyBtn.textContent = "Copy";
+  copyBtn.setAttribute("aria-label", "Copy response");
+  copyBtn.addEventListener("click", () => copyResponse(body.dataset.raw, copyBtn));
+
+  const printBtn = document.createElement("button");
+  printBtn.type = "button";
+  printBtn.className = "resp-action";
+  printBtn.textContent = "Print";
+  printBtn.setAttribute("aria-label", "Print response");
+  printBtn.addEventListener("click", () => printResponse(body));
+
+  wrap.appendChild(copyBtn);
+  wrap.appendChild(printBtn);
+  msgEl.appendChild(wrap);
+}
+
+async function copyResponse(rawText, btn) {
+  const original = btn.textContent;
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(rawText);
+      ok = true;
+    } else {
+      // execCommand fallback for non-secure contexts (e.g. plain http://).
+      const ta = document.createElement("textarea");
+      ta.value = rawText;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch {}
+      document.body.removeChild(ta);
+    }
+  } catch {}
+  btn.textContent = ok ? "Copied" : "Copy failed";
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
+// Client-side Print: copy the response's rendered markdown into the hidden
+// #print-doc, then open the browser print dialog. A @media print stylesheet
+// shows only #print-doc, styled black-on-white for paper — the user picks
+// "Save as PDF" as the destination. No agent round-trip, no dependencies.
+function printResponse(bodyEl) {
+  const printDoc = document.getElementById("print-doc");
+  if (!printDoc || !bodyEl) return;
+  printDoc.innerHTML = bodyEl.innerHTML;
+  // document.title seeds the print dialog's default "Save as PDF" filename;
+  // afterprint fires whether the user prints or cancels, so it always reverts.
+  const prevTitle = document.title;
+  document.title = "Curunir response";
+  window.addEventListener("afterprint", () => {
+    document.title = prevTitle;
+    printDoc.innerHTML = "";
+  }, { once: true });
+  window.print();
+}
+
 function renderAgentChunk(m) {
   if (!inProgressMsg) {
     inProgressMsg = appendMessage("assistant", true);
@@ -1009,6 +1167,7 @@ function renderAgentChunk(m) {
   if (m.final) {
     finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
+    appendResponseActions(inProgressMsg);
     inProgressMsg = null;
     // The turn just completed — refresh the sidebar so a brand-new
     // conversation appears and titles/timestamps stay current.
@@ -1582,5 +1741,8 @@ inputEl.addEventListener("paste", async (e) => {
 
 connect();
 </script>
+<!-- Print target — filled by printResponse() with a copy of a response's
+     rendered markdown, then shown alone via the @media print stylesheet. -->
+<div id="print-doc" aria-hidden="true"></div>
 </body>
 </html>
