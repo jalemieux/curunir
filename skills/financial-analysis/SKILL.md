@@ -2,6 +2,7 @@
 name: financial-analysis
 description: "Use when asked to do financial analysis of a public company — valuation, scenario modeling, peer comparables, sensitivity analysis, what-if revenue/earnings impact. Trigger phrases: 'financial analysis of X', 'is X overvalued', 'what if X adds Y in revenue', 'how does X compare to peers', 'P/E impact', 'valuation scenarios'. Always reach for this when a research report mentions a public company and the user wants the financial layer."
 portal_summary: "Valuation, scenarios, and peer comparison for a public company"
+portal_starter: true
 tools: attach
 ---
 
