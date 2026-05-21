@@ -1130,7 +1130,7 @@ function renderEmptyState() {
   greeting.textContent = "What would you like to do?";
   wrap.appendChild(greeting);
 
-  const skills = skillsCache || [];
+  const skills = (skillsCache || []).filter(s => s.starter);
   if (skills.length) {
     const list = document.createElement("div");
     list.className = "es-list";
