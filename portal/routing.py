@@ -26,6 +26,12 @@ from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
+# Per-session cap on frames held for a session with no bound browser. A
+# browser mid-reconnect misses at most one turn's worth of frames; this
+# bounds memory if a session is abandoned and never rebinds. Oldest frames
+# are dropped first.
+MAX_BUFFERED_FRAMES = 64
+
 
 class Sender(Protocol):
     """Anything we can json-send to and close. WebSocket-shaped."""
@@ -48,6 +54,9 @@ class UserRoute:
 class RoutingTable:
     def __init__(self) -> None:
         self._routes: dict[int, UserRoute] = {}
+        # Frames for a session with no bound browser, held until one binds.
+        # Keyed by (user_id, session_id); flushed and cleared on bind.
+        self._buffers: dict[tuple[int, str], list[str]] = {}
         self._lock = asyncio.Lock()
 
     def _route(self, user_id: int) -> UserRoute:
@@ -105,7 +114,12 @@ class RoutingTable:
         If the session_id changes mid-connection (unusual — would mean
         the tab cleared sessionStorage without reloading) the latest
         binding wins.
+
+        On bind, any frames buffered for the session while it had no bound
+        browser are flushed to this socket in arrival order, then cleared —
+        this is what recovers a reply that landed during a ws reconnect.
         """
+        buffered: list[str] = []
         async with self._lock:
             route = self._routes.get(user_id)
             if route is None:
@@ -113,7 +127,15 @@ class RoutingTable:
             for b in route.browsers:
                 if b.ws is ws:
                     b.session_id = session_id
-                    return
+                    buffered = self._buffers.pop((user_id, session_id), [])
+                    break
+            else:
+                return
+        for frame in buffered:
+            try:
+                await ws.send_text(frame)
+            except Exception:
+                logger.warning("buffered frame send failed", exc_info=True)
 
     def agent_for(self, user_id: int) -> Sender | None:
         route = self._routes.get(user_id)
@@ -151,15 +173,27 @@ class RoutingTable:
     async def route_to_session(
         self, user_id: int, session_id: str, payload: str
     ) -> int:
-        """Send payload only to browsers bound to `session_id`."""
+        """Send payload to browsers bound to `session_id`.
+
+        If the frame reaches no live browser — whether because none is bound
+        (one is mid-reconnect) or because every bound socket is dead but not
+        yet unregistered — it is buffered and replayed when a browser next
+        binds to the session, rather than dropped. A send to a stale socket
+        raises and counts as zero delivered, so a half-disconnected tab can't
+        silently swallow a reply. Returns the count delivered live.
+        """
         targets = self.browsers_for_session(user_id, session_id)
-        if not targets:
+        delivered = await self._send_to(targets, payload, user_id) if targets else 0
+        if delivered == 0:
+            buf = self._buffers.setdefault((user_id, session_id), [])
+            buf.append(payload)
+            if len(buf) > MAX_BUFFERED_FRAMES:
+                del buf[:-MAX_BUFFERED_FRAMES]
             logger.info(
-                "agent_message dropped (no browser bound to session)",
+                "agent_message buffered (no live browser for session)",
                 extra={"user_id": user_id, "session_id": session_id},
             )
-            return 0
-        return await self._send_to(targets, payload, user_id)
+        return delivered
 
     async def _send_to(
         self, targets: list[Sender], payload: str, user_id: int

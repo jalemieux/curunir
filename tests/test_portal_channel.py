@@ -357,6 +357,52 @@ async def test_history_request_command_triggers_snapshot(portal_server):
 
 
 @pytest.mark.asyncio
+async def test_history_snapshot_enriches_attachments(portal_server, tmp_path):
+    """A history message carrying an attachment (path only) is enriched before
+    the snapshot is sent, so a reopened conversation's files are renderable
+    without a second fetch."""
+    doc = tmp_path / "report.txt"
+    doc.write_text("the report body")
+    in_q: asyncio.Queue = asyncio.Queue()
+
+    def provider(sid: str) -> list[dict]:
+        return [{
+            "role": "assistant",
+            "content": "see attached",
+            "tool_calls": [],
+            "attachments": [{
+                "filename": "report.txt",
+                "path": str(doc),
+                "mime_type": "text/plain",
+                "size": doc.stat().st_size,
+            }],
+        }]
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        history_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "history_request", "session_id": "tab-A"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "history_snapshot"
+        att = msg["messages"][0]["attachments"][0]
+        assert att["content"] == "the report body"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_slash_frame_enqueued_as_command_slash(portal_server):
     """Slash frames from the portal are forwarded onto the in_queue as
     IncomingMessage with command="slash" and the raw text as content.
