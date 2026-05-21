@@ -252,16 +252,36 @@ class TestPortalMetadata:
 
 
 class TestPortalSkillList:
-    def test_only_skills_with_summary_appear(self, tmp_path):
-        _write_portal_skill(tmp_path, "shown", "d", summary="visible")
-        _write_skill(tmp_path, "hidden", "d")
-        result = portal_skill_list([tmp_path])
-        names = [s["name"] for s in result]
+    def test_all_non_beta_skills_appear(self, tmp_path):
+        _write_portal_skill(tmp_path, "with-summary", "d", summary="visible")
+        _write_skill(tmp_path, "without-summary", "d")
+        names = [s["name"] for s in portal_skill_list([tmp_path])]
+        assert names == ["with-summary", "without-summary"]
+
+    def test_beta_skills_excluded(self, tmp_path):
+        _write_skill(tmp_path, "shown", "d")
+        _write_skill(tmp_path, "hidden", "d", beta=True)
+        names = [s["name"] for s in portal_skill_list([tmp_path])]
         assert names == ["shown"]
 
-    def test_blank_summary_excluded(self, tmp_path):
-        _write_portal_skill(tmp_path, "blank", "d", summary="")
-        assert portal_skill_list([tmp_path]) == []
+    def test_summary_falls_back_to_description(self, tmp_path):
+        _write_skill(tmp_path, "plain", "agent description")
+        entry = portal_skill_list([tmp_path])[0]
+        assert entry["summary"] == "agent description"
+        assert entry["starter"] is False
+
+    def test_portal_summary_wins_and_marks_starter(self, tmp_path):
+        _write_portal_skill(tmp_path, "memo", "agent description",
+                            summary="User-facing")
+        entry = portal_skill_list([tmp_path])[0]
+        assert entry["summary"] == "User-facing"
+        assert entry["starter"] is True
+
+    def test_blank_summary_falls_back_and_is_not_starter(self, tmp_path):
+        _write_portal_skill(tmp_path, "blank", "agent description", summary="")
+        entry = portal_skill_list([tmp_path])[0]
+        assert entry["summary"] == "agent description"
+        assert entry["starter"] is False
 
     def test_disabled_skill_excluded(self, tmp_path):
         d = tmp_path / "off"
@@ -284,5 +304,6 @@ class TestPortalSkillList:
     def test_entry_shape(self, tmp_path):
         _write_portal_skill(tmp_path, "memo", "d", summary="A memo")
         assert portal_skill_list([tmp_path]) == [
-            {"name": "memo", "display_name": "Memo", "summary": "A memo"}
+            {"name": "memo", "display_name": "Memo",
+             "summary": "A memo", "starter": True}
         ]

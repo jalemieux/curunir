@@ -91,18 +91,24 @@ def _display_name(name: str) -> str:
 def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
     """User-facing skills for the portal picker.
 
-    Returns only skills that opted in with a non-empty `portal_summary`,
-    sorted by name. Each entry: {name, display_name, summary}.
+    Returns all non-beta skills sorted by name. Each entry:
+    {name, display_name, summary, starter}.
+
+    `summary` is the skill's `portal_summary` if set, else its `description`.
+    `starter` is true only when `portal_summary` is set — the empty-state
+    "What would you like to do?" rows filter on this so they don't balloon
+    to every skill in the registry.
     """
     registry = load_registry(skill_dirs)
     out = []
     for skill in registry.values():
-        if not skill.portal_summary:
+        if skill.beta:
             continue
         out.append({
             "name": skill.name,
             "display_name": _display_name(skill.name),
-            "summary": skill.portal_summary,
+            "summary": skill.portal_summary or skill.description,
+            "starter": bool(skill.portal_summary),
         })
     out.sort(key=lambda s: s["name"])
     return out
