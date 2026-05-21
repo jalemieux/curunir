@@ -9,8 +9,11 @@ Two layers:
    should enqueue.
 2. Skill-forcing fallback — anything not intercepted is looked up against
    the live skill registry. A match rewrites the text into a synthetic
-   user prompt (`"Use the `<name>` skill. {args}"`) and enqueues it; a miss
-   returns a polite "unknown command" message.
+   user prompt that directs the agent to call the `load_skill` tool with the
+   exact name and enqueues it; a miss returns a polite "unknown command"
+   message. The prompt is deliberately imperative and notes that the skill
+   may be absent from the system-prompt "Available Skills" catalog (hidden
+   skills are), so the agent loads it instead of assuming it doesn't exist.
 
 `maybe_handle_slash()` is the single entry point. It is called from
 `agent_worker` after a `command="slash"` message is dequeued — channels
@@ -183,7 +186,12 @@ async def maybe_handle_slash(
 
     registry = load_registry(ctx.skill_dirs)
     if name in registry:
-        prompt = f"Use the `{name}` skill."
+        prompt = (
+            f'Call the `load_skill` tool with name="{name}" to load that '
+            f"skill, then follow its instructions. The skill may not appear "
+            f'in your "Available Skills" list, but it exists and is loadable '
+            f"by its exact name."
+        )
         if args:
             prompt = f"{prompt} {args}"
         return SlashResult(handled=True, enqueue=[_inc(ctx_with_args, prompt)])
