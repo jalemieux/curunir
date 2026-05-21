@@ -59,3 +59,57 @@ def test_user_multimodal_text_extracted():
     ]}]
     snap = _agent_with_history(history).history_snapshot()
     assert snap[0]["content"] == "look at this"
+
+
+def test_attach_tool_call_reconstructs_attachment(tmp_path):
+    """An `attach` tool call in the transcript is rebuilt into an attachment
+    on the assistant entry, so a reopened conversation keeps its file."""
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    history = [
+        {"role": "assistant", "content": "Here is the report.",
+         "tool_calls": [
+             {"function": {"name": "attach",
+                           "arguments": json.dumps({"path": str(pdf)})}}
+         ]},
+    ]
+    snap = _agent_with_history(history).history_snapshot()
+    assert snap[0]["attachments"] == [{
+        "filename": "report.pdf",
+        "path": str(pdf),
+        "mime_type": "application/pdf",
+        "size": pdf.stat().st_size,
+    }]
+
+
+def test_no_attachments_key_when_no_attach_call():
+    """Assistant entries without an attach call carry no `attachments` key."""
+    history = [
+        {"role": "assistant", "content": "",
+         "tool_calls": [
+             {"function": {"name": "bash",
+                           "arguments": json.dumps({"command": "ls"})}}
+         ]},
+    ]
+    snap = _agent_with_history(history).history_snapshot()
+    assert "attachments" not in snap[0]
+
+
+def test_attach_reconstruction_survives_missing_file(tmp_path):
+    """If the attached file was later deleted, reconstruction still emits the
+    metadata (size 0) — enrichment downstream flags it as missing."""
+    gone = tmp_path / "gone.pdf"
+    history = [
+        {"role": "assistant", "content": "report",
+         "tool_calls": [
+             {"function": {"name": "attach",
+                           "arguments": json.dumps({"path": str(gone)})}}
+         ]},
+    ]
+    snap = _agent_with_history(history).history_snapshot()
+    assert snap[0]["attachments"] == [{
+        "filename": "gone.pdf",
+        "path": str(gone),
+        "mime_type": "application/pdf",
+        "size": 0,
+    }]
