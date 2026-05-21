@@ -769,3 +769,71 @@ async def test_conversations_request_no_connection_no_send(portal_server):
     # No start() — _connection is None.
     await ch._handle_conversations_request({})
     assert ch._connection is None
+
+
+@pytest.mark.asyncio
+async def test_channel_key_tags_incoming_message_on_chat_frame():
+    """A non-default channel_key tags IncomingMessage.channel so the reply
+    routes back to the originating portal (route_outbound dispatches by it)."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", channel_key="internal",
+    )
+    await ch._handle_user_message({"content": "hi", "session_id": "tab-A"})
+    msg = in_q.get_nowait()
+    assert msg.channel == "internal"
+
+
+@pytest.mark.asyncio
+async def test_channel_key_tags_incoming_message_on_slash_frame():
+    """Slash frames are tagged with the per-portal channel_key too."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", channel_key="internal",
+    )
+    await ch._handle_user_message(
+        {"command": "slash", "text": "/help", "session_id": "tab-A"}
+    )
+    msg = in_q.get_nowait()
+    assert msg.channel == "internal"
+    assert msg.command == "slash"
+
+
+@pytest.mark.asyncio
+async def test_default_session_id_derives_from_channel_key():
+    """A user_message without session_id falls back to a per-portal default
+    derived from channel_key — not the shared legacy "portal" id."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", channel_key="internal",
+    )
+    await ch._handle_user_message({"content": "hi"})
+    msg = in_q.get_nowait()
+    assert msg.session_id == "internal"
+
+
+@pytest.mark.asyncio
+async def test_two_portals_have_distinct_default_sessions():
+    """Two PortalChannels never share the legacy "portal" fallback session,
+    so a session-id-less frame on one portal can't collide with the other."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    pub = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", channel_key="public",
+    )
+    internal = PortalChannel(
+        in_queue=in_q, url="ws://y", token="t", channel_key="internal",
+    )
+    assert pub._default_session_id != internal._default_session_id
+
+
+@pytest.mark.asyncio
+async def test_default_channel_key_is_portal():
+    """An unspecified channel_key keeps the legacy "portal" key + session id,
+    so existing single-portal setups are unchanged."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    assert ch.channel_key == "portal"
+    await ch._handle_user_message({"content": "hi"})
+    msg = in_q.get_nowait()
+    assert msg.channel == "portal"
+    assert msg.session_id == PORTAL_SESSION_ID

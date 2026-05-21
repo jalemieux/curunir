@@ -531,6 +531,64 @@ def _configure_logging(log_file: str | None) -> None:
     logging.getLogger().addHandler(handler)
 
 
+_NAMED_PORTAL_ROLES = (
+    ("public", "CURUNIR_PORTAL_PUBLIC_URL", "CURUNIR_PORTAL_PUBLIC_TOKEN"),
+    ("internal", "CURUNIR_PORTAL_INTERNAL_URL", "CURUNIR_PORTAL_INTERNAL_TOKEN"),
+)
+_LEGACY_PORTAL_ROLE = ("portal", "CURUNIR_PORTAL_URL", "CURUNIR_PORTAL_TOKEN")
+
+
+def parse_portal_configs(env: "dict[str, str] | None" = None) -> list[tuple[str, str, str]]:
+    """Resolve configured portal channels from environment variables.
+
+    Returns a list of ``(channel_key, url, token)`` — one entry per portal:
+
+      - ``CURUNIR_PORTAL_PUBLIC_URL`` / ``_TOKEN``   → key ``"public"``
+      - ``CURUNIR_PORTAL_INTERNAL_URL`` / ``_TOKEN`` → key ``"internal"``
+      - Legacy ``CURUNIR_PORTAL_URL`` / ``_TOKEN``   → key ``"portal"``
+
+    The legacy pair is a fallback for existing single-portal setups. It
+    cannot be combined with a named (public/internal) pair — a multi-portal
+    config must name every portal explicitly.
+
+    Raises ``ValueError`` if a configured role has only one of URL/token,
+    or if the legacy pair is mixed with a named pair.
+    """
+    env = os.environ if env is None else env
+
+    def _pair(url_var: str, token_var: str) -> "tuple[str, str] | None":
+        url = (env.get(url_var) or "").strip()
+        token = (env.get(token_var) or "").strip()
+        if not url and not token:
+            return None
+        if not url or not token:
+            raise ValueError(
+                f"Portal config is half-configured: set both "
+                f"{url_var} and {token_var} (or neither)."
+            )
+        return url, token
+
+    configs: list[tuple[str, str, str]] = []
+    for key, url_var, token_var in _NAMED_PORTAL_ROLES:
+        pair = _pair(url_var, token_var)
+        if pair is not None:
+            configs.append((key, pair[0], pair[1]))
+
+    legacy_key, legacy_url_var, legacy_token_var = _LEGACY_PORTAL_ROLE
+    legacy = _pair(legacy_url_var, legacy_token_var)
+    if legacy is not None:
+        if configs:
+            raise ValueError(
+                f"{legacy_url_var}/{legacy_token_var} (legacy single-portal "
+                "config) cannot be combined with named portal vars "
+                "(CURUNIR_PORTAL_PUBLIC_*/CURUNIR_PORTAL_INTERNAL_*). "
+                "Use named vars for every portal instead."
+            )
+        configs.append((legacy_key, legacy[0], legacy[1]))
+
+    return configs
+
+
 async def main():
     load_dotenv()
     _configure_logging(os.environ.get("LOG_FILE", ""))
@@ -606,21 +664,30 @@ async def main():
             logger.info("Email channel enabled for inbox %s (poll every %ds)",
                         email_config.inbox_id, email_config.poll_interval_sec)
 
-    # Portal channel (conditional)
-    portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
-    portal_token = os.environ.get("CURUNIR_PORTAL_TOKEN", "").strip()
-    if portal_url and portal_token:
+    # Portal channels (conditional). One PortalChannel per configured role —
+    # public, internal, and/or the legacy single portal. See
+    # parse_portal_configs for the env var shape.
+    portal_configs = parse_portal_configs()
+    multi_portal = len(portal_configs) > 1
+    for channel_key, portal_url, portal_token in portal_configs:
+        # In a multi-portal setup each portal's sidebar is filtered to its
+        # own conversations (keeps internal-portal chats off the public
+        # portal); a lone portal keeps the legacy all-conversations view.
+        conv_channel = channel_key if multi_portal else None
         portal_channel = PortalChannel(
             in_queue=in_queue,
             url=portal_url,
             token=portal_token,
+            channel_key=channel_key,
             history_provider=lambda sid: agent.history_snapshot(sid),
             skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
-            conversations_provider=lambda: agent.conversations_snapshot(),
+            conversations_provider=(
+                lambda ch=conv_channel: agent.conversations_snapshot(channel=ch)
+            ),
             cancel_session=agent.request_cancel,
         )
-        channels["portal"] = portal_channel
-        logger.info("Portal channel enabled for %s", portal_url)
+        channels[channel_key] = portal_channel
+        logger.info("Portal channel %r enabled for %s", channel_key, portal_url)
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
 

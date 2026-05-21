@@ -49,7 +49,10 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
-PORTAL_SESSION_ID = "portal"  # Legacy fallback when the portal omits session_id.
+# Default channel key / fallback session id for a legacy single-portal setup.
+# A PortalChannel derives its own fallback from its channel_key, so a portal
+# registered as "portal" still falls back to this exact id.
+PORTAL_SESSION_ID = "portal"
 
 _BACKOFF_INITIAL = 1.0
 _BACKOFF_MAX = 30.0
@@ -81,6 +84,7 @@ class PortalChannel:
         in_queue: asyncio.Queue,
         url: str,
         token: str,
+        channel_key: str = "portal",
         history_provider: "callable[[str], list[dict]] | None" = None,
         skills_provider: "callable[[], list[dict]] | None" = None,
         conversations_provider: "callable[[], list[dict]] | None" = None,
@@ -90,6 +94,13 @@ class PortalChannel:
         self.in_queue = in_queue
         self.url = url
         self.token = token
+        # Routing key for messages from this portal. route_outbound dispatches
+        # replies by it, so two portals registered under distinct keys never
+        # cross-deliver. Defaults to "portal" for legacy single-portal setups.
+        self.channel_key = channel_key
+        # Fallback session id when the portal omits one. Derived from the
+        # channel key so two portals never share the legacy "portal" session.
+        self._default_session_id = channel_key
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
@@ -173,7 +184,7 @@ class PortalChannel:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
     async def _handle_user_message(self, payload: dict) -> None:
-        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        session_id = payload.get("session_id") or self._default_session_id
         if payload.get("command") == "interrupt":
             delivered = bool(self.cancel_session and self.cancel_session(session_id))
             logger.info(
@@ -198,7 +209,7 @@ class PortalChannel:
             # Forward the raw text on the queue with command=slash.
             await self.in_queue.put(IncomingMessage(
                 content=payload.get("text", ""),
-                channel="portal",
+                channel=self.channel_key,
                 session_id=session_id,
                 reply_address={},
                 command="slash",
@@ -209,7 +220,7 @@ class PortalChannel:
         if err is not None:
             await self.send(OutgoingMessage(
                 content=f"Attachment rejected: {err}",
-                channel="portal",
+                channel=self.channel_key,
                 session_id=session_id,
                 reply_address={},
                 final=True,
@@ -229,7 +240,7 @@ class PortalChannel:
         )
         await self.in_queue.put(IncomingMessage(
             content=payload.get("content", ""),
-            channel="portal",
+            channel=self.channel_key,
             session_id=session_id,
             reply_address={},
             command=payload.get("command") or None,
@@ -259,7 +270,7 @@ class PortalChannel:
     async def _handle_history_request(self, payload: dict) -> None:
         if self._connection is None:
             return
-        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        session_id = payload.get("session_id") or self._default_session_id
         messages = self.history_provider(session_id)
         # Inline attachment content/data so a reopened conversation renders
         # its files without a second fetch — same enrichment the live reply
@@ -279,7 +290,7 @@ class PortalChannel:
     async def _handle_skills_request(self, payload: dict) -> None:
         if self._connection is None:
             return
-        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        session_id = payload.get("session_id") or self._default_session_id
         skills = self.skills_provider()
         try:
             await self._connection.send(json.dumps({
@@ -293,7 +304,7 @@ class PortalChannel:
     async def _handle_conversations_request(self, payload: dict) -> None:
         if self._connection is None:
             return
-        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        session_id = payload.get("session_id") or self._default_session_id
         conversations = self.conversations_provider()
         try:
             await self._connection.send(json.dumps({

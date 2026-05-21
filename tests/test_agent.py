@@ -38,6 +38,26 @@ class TestConversationPersistence:
         snap = agent.conversations_snapshot()
         assert {c["session_id"] for c in snap} == {"web", "legacy"}
 
+    def test_conversations_snapshot_filters_by_channel(self, agent):
+        cs.save(agent.config.context_dir, "pub", [{"role": "user", "content": "hi"}],
+                channel="public")
+        cs.save(agent.config.context_dir, "int", [{"role": "user", "content": "hi"}],
+                channel="internal")
+        cs.save(agent.config.context_dir, "cli", [{"role": "user", "content": "hi"}],
+                channel="cli")
+        snap = agent.conversations_snapshot(channel="internal")
+        assert {c["session_id"] for c in snap} == {"int"}
+
+    def test_conversations_snapshot_channel_none_keeps_all_non_email(self, agent):
+        cs.save(agent.config.context_dir, "pub", [{"role": "user", "content": "hi"}],
+                channel="public")
+        cs.save(agent.config.context_dir, "cli", [{"role": "user", "content": "hi"}],
+                channel="cli")
+        cs.save(agent.config.context_dir, "mail", [{"role": "user", "content": "hi"}],
+                channel="email")
+        snap = agent.conversations_snapshot(channel=None)
+        assert {c["session_id"] for c in snap} == {"pub", "cli"}
+
     def test_history_snapshot_lazy_loads_unknown_session(self, agent):
         """history_snapshot for a session absent from memory loads it from disk."""
         cs.save(agent.config.context_dir, "disk-only", [
