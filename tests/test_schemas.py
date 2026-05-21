@@ -37,6 +37,18 @@ def test_filter_ignores_unknown_names():
     assert names == {"read"}
 
 
+def test_load_skill_description_notes_catalog_not_exhaustive():
+    """The load_skill description must tell the agent that the system-prompt
+    "Available Skills" table is not exhaustive — skills missing from it (e.g.
+    hidden skills) are still loadable by exact name. Without this, the agent
+    refuses to load a hidden skill when explicitly invoked (#204)."""
+    schemas = get_tool_schemas(names=["load_skill"])
+    assert len(schemas) == 1
+    desc = schemas[0]["function"]["description"].lower()
+    assert "available skills" in desc
+    assert "exact name" in desc
+
+
 def test_to_audio_is_opt_in():
     assert "to_audio" in _OPT_IN_TOOL_NAMES
     assert "to_audio" not in _DEFAULT_TOOL_NAMES

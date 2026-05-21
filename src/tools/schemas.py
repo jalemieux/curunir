@@ -182,7 +182,14 @@ _SCHEMAS = [
             "type": "function",
             "function": {
                 "name": "load_skill",
-                "description": "Load a skill's instructions by name.",
+                "description": (
+                    "Load a skill's instructions by name. The \"Available "
+                    "Skills\" table in your system prompt is not exhaustive: a "
+                    "skill omitted from it (for example a hidden skill) is "
+                    "still loadable. If you are asked to use a skill by name, "
+                    "call this tool with that exact name rather than assuming "
+                    "the skill does not exist."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {

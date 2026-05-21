@@ -13,13 +13,17 @@ from src.channels.base import IncomingMessage
 from src.slash_commands import SlashContext, SlashResult, maybe_handle_slash
 
 
-def _write_skill(skills_dir, name: str, description: str = "test skill") -> None:
+def _write_skill(
+    skills_dir, name: str, description: str = "test skill", hidden: bool = False,
+) -> None:
     """Drop a minimal SKILL.md into *skills_dir* under name/SKILL.md."""
     skill_dir = skills_dir / name
     skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {description}\n---\n\nbody.\n"
-    )
+    fm = f"---\nname: {name}\ndescription: {description}\n"
+    if hidden:
+        fm += "hidden: true\n"
+    fm += "---\n\nbody.\n"
+    (skill_dir / "SKILL.md").write_text(fm)
 
 
 def _ctx(tmp_skills) -> SlashContext:
@@ -161,6 +165,9 @@ async def test_skill_name_falls_through_to_skill_forcing(tmp_skills):
     assert "yfinance" in inc.content
     assert "skill" in inc.content.lower()
     assert "LLY price" in inc.content
+    # The synthetic prompt directs the agent at the load_skill tool so it
+    # doesn't refuse when the skill is absent from "Available Skills".
+    assert "load_skill" in inc.content
 
 
 @pytest.mark.asyncio
@@ -172,8 +179,29 @@ async def test_skill_name_no_args(tmp_skills):
     assert len(result.enqueue) == 1
     text = result.enqueue[0].content
     assert "identity" in text
+    assert "skill" in text.lower()
+    assert "load_skill" in text
     # No trailing whitespace from f-string template.
     assert text == text.strip()
+
+
+@pytest.mark.asyncio
+async def test_hidden_skill_is_slash_forced(tmp_skills):
+    """A `hidden: true` skill is omitted from the agent's system-prompt
+    catalog but stays slash-forceable — `/hidden-skill` enqueues a synthetic
+    prompt, not an `Unknown command` reply. Regression guard for #204."""
+    _write_skill(tmp_skills, "hidden-skill", "secret skill", hidden=True)
+    result = await maybe_handle_slash("/hidden-skill go", None, _ctx(tmp_skills))
+    assert result is not None
+    assert result.handled is True
+    assert result.outgoing == []
+    assert len(result.enqueue) == 1
+    inc = result.enqueue[0]
+    assert isinstance(inc, IncomingMessage)
+    assert inc.command is None
+    assert "hidden-skill" in inc.content
+    assert "load_skill" in inc.content
+    assert "go" in inc.content
 
 
 @pytest.mark.asyncio

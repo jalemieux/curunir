@@ -67,3 +67,22 @@ No other modules change. `/skills`, `/help`, `load_skill`, dispatch, and
 - Portal "push to prompt" button (dropped — slash-forcing covers testing).
 - Filtering beta skills from `/skills` or `/help`.
 - Per-session dynamic manifest injection.
+
+## Follow-up: explicit invocation (#204)
+
+The `beta` flag was later renamed `hidden` (#207). Issue #204 surfaced a gap:
+because a hidden skill never appears in the system-prompt "Available Skills"
+catalog, the agent would conclude the skill didn't exist when explicitly
+invoked — even though `load_skill` and the slash dispatcher both still
+resolve it. The plumbing was correct; the agent's *awareness* was not.
+
+Fix is behavioral, not structural — the manifest still omits hidden skills:
+
+- The slash-forcing synthetic prompt is now imperative: it tells the agent
+  to call `load_skill` with the exact name and notes the skill may be absent
+  from "Available Skills" but is still loadable.
+- The `load_skill` tool description states the "Available Skills" table is
+  not exhaustive — any skill named by exact name is loadable.
+
+This is a soft lever (prompt wording), not an enforced guarantee; a hard
+guarantee would require dynamic manifest injection, still out of scope.
