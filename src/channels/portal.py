@@ -261,6 +261,12 @@ class PortalChannel:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
         messages = self.history_provider(session_id)
+        # Inline attachment content/data so a reopened conversation renders
+        # its files without a second fetch — same enrichment the live reply
+        # path applies in send().
+        for m in messages:
+            if m.get("attachments"):
+                _enrich_attachments(m["attachments"], os.getcwd())
         try:
             await self._connection.send(json.dumps({
                 "type": "history_snapshot",

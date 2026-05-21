@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from portal.routing import RoutingTable
+from portal.routing import MAX_BUFFERED_FRAMES, RoutingTable
 
 
 class FakeWS:
@@ -12,6 +12,21 @@ class FakeWS:
 
     async def send_text(self, data: str) -> None:
         self.sent.append(data)
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.closed_with = (code, reason)
+
+
+class DeadWS:
+    """A browser socket that has gone away but isn't yet unregistered —
+    every send raises, as a real closed WebSocket would."""
+
+    def __init__(self):
+        self.sent: list[str] = []
+        self.closed_with: tuple[int, str] | None = None
+
+    async def send_text(self, data: str) -> None:
+        raise ConnectionError("socket closed")
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         self.closed_with = (code, reason)
@@ -188,3 +203,128 @@ async def test_online_agent_user_ids_excludes_disconnected_agent():
     await rt.register_agent(5, agent)
     await rt.unregister_agent(5, agent)
     assert rt.online_agent_user_ids() == set()
+
+
+# --- Session buffering: frames for an unbound session are held and replayed
+# when a browser binds, instead of being dropped (the reconnect-loses-binding
+# bug where a reply arrives while the browser ws is mid-reconnect). ---
+
+
+@pytest.mark.asyncio
+async def test_route_to_session_buffers_when_no_browser_bound():
+    rt = RoutingTable()
+    delivered = await rt.route_to_session(5, "tab-A", "payload-1")
+    assert delivered == 0
+    # A browser connects and binds to that session — it receives the frame
+    # that arrived while it was away.
+    b = FakeWS()
+    await rt.add_browser(5, b)
+    await rt.bind_browser_session(5, b, "tab-A")
+    assert b.sent == ["payload-1"]
+
+
+@pytest.mark.asyncio
+async def test_buffered_frames_flush_in_arrival_order():
+    rt = RoutingTable()
+    await rt.route_to_session(1, "tab-A", "first")
+    await rt.route_to_session(1, "tab-A", "second")
+    b = FakeWS()
+    await rt.add_browser(1, b)
+    await rt.bind_browser_session(1, b, "tab-A")
+    assert b.sent == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_buffer_is_per_session():
+    rt = RoutingTable()
+    await rt.route_to_session(1, "tab-A", "for-A")
+    await rt.route_to_session(1, "tab-B", "for-B")
+    b = FakeWS()
+    await rt.add_browser(1, b)
+    await rt.bind_browser_session(1, b, "tab-A")
+    assert b.sent == ["for-A"]
+
+
+@pytest.mark.asyncio
+async def test_buffer_cleared_after_flush():
+    """A second browser binding to the same session must not re-receive
+    frames the first browser already drained."""
+    rt = RoutingTable()
+    await rt.route_to_session(1, "tab-A", "once")
+    b1 = FakeWS()
+    await rt.add_browser(1, b1)
+    await rt.bind_browser_session(1, b1, "tab-A")
+    assert b1.sent == ["once"]
+    b2 = FakeWS()
+    await rt.add_browser(1, b2)
+    await rt.bind_browser_session(1, b2, "tab-A")
+    assert b2.sent == []
+
+
+@pytest.mark.asyncio
+async def test_live_delivery_does_not_buffer():
+    """When a browser is already bound, frames go live and are not also
+    buffered — a later bind by another browser sees nothing."""
+    rt = RoutingTable()
+    b1 = FakeWS()
+    await rt.add_browser(1, b1)
+    await rt.bind_browser_session(1, b1, "tab-A")
+    await rt.route_to_session(1, "tab-A", "live")
+    assert b1.sent == ["live"]
+    b2 = FakeWS()
+    await rt.add_browser(1, b2)
+    await rt.bind_browser_session(1, b2, "tab-A")
+    assert b2.sent == []
+
+
+@pytest.mark.asyncio
+async def test_session_buffer_is_capped_keeping_newest():
+    rt = RoutingTable()
+    overflow = MAX_BUFFERED_FRAMES + 10
+    for i in range(overflow):
+        await rt.route_to_session(1, "tab-A", f"f{i}")
+    b = FakeWS()
+    await rt.add_browser(1, b)
+    await rt.bind_browser_session(1, b, "tab-A")
+    assert len(b.sent) == MAX_BUFFERED_FRAMES
+    assert b.sent[-1] == f"f{overflow - 1}"
+    assert "f0" not in b.sent
+
+
+@pytest.mark.asyncio
+async def test_route_to_session_buffers_when_bound_browser_send_fails():
+    """A browser bound to the session but whose socket is dead (mid-disconnect,
+    not yet unregistered) must not eat the frame: with no live delivery, the
+    frame is buffered and replayed when a live browser binds."""
+    rt = RoutingTable()
+    dead = DeadWS()
+    await rt.add_browser(1, dead)
+    await rt.bind_browser_session(1, dead, "tab-A")
+
+    delivered = await rt.route_to_session(1, "tab-A", "payload-1")
+    assert delivered == 0
+
+    live = FakeWS()
+    await rt.add_browser(1, live)
+    await rt.bind_browser_session(1, live, "tab-A")
+    assert live.sent == ["payload-1"]
+
+
+@pytest.mark.asyncio
+async def test_partial_live_delivery_does_not_buffer():
+    """If at least one bound browser receives the frame, it is delivered live
+    and not buffered — a dead sibling socket doesn't trigger a replay."""
+    rt = RoutingTable()
+    dead, live = DeadWS(), FakeWS()
+    await rt.add_browser(1, dead)
+    await rt.bind_browser_session(1, dead, "tab-A")
+    await rt.add_browser(1, live)
+    await rt.bind_browser_session(1, live, "tab-A")
+
+    delivered = await rt.route_to_session(1, "tab-A", "payload-1")
+    assert delivered == 1
+
+    later = FakeWS()
+    await rt.add_browser(1, later)
+    await rt.bind_browser_session(1, later, "tab-A")
+    assert later.sent == []
