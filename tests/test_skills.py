@@ -31,14 +31,17 @@ class TestParseFrontmatter:
         assert result["description"] == "Use when: user asks"
 
 
-def _write_skill(parent, name, description, disabled=False, beta=False):
+def _write_skill(parent, name, description, disabled=False, hidden=False,
+                 portal_starter=False):
     d = parent / name
     d.mkdir()
     extra = ""
     if disabled:
         extra += "disabled: true\n"
-    if beta:
-        extra += "beta: true\n"
+    if hidden:
+        extra += "hidden: true\n"
+    if portal_starter:
+        extra += "portal_starter: true\n"
     (d / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: {description}\n{extra}---\n# {name}\n"
     )
@@ -96,30 +99,30 @@ class TestDisabledFlag:
         assert load_registry([tmp_path]) == {}
 
 
-class TestBetaFlag:
-    def test_beta_excluded_from_manifest(self, tmp_path):
+class TestHiddenFlag:
+    def test_hidden_excluded_from_manifest(self, tmp_path):
         _write_skill(tmp_path, "alpha", "alpha desc")
-        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+        _write_skill(tmp_path, "newthing", "hidden desc", hidden=True)
         manifest = build_skill_manifest([tmp_path])
         assert "alpha" in manifest
         assert "newthing" not in manifest
 
-    def test_beta_still_in_registry(self, tmp_path):
-        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+    def test_hidden_still_in_registry(self, tmp_path):
+        _write_skill(tmp_path, "newthing", "hidden desc", hidden=True)
         registry = load_registry([tmp_path])
         assert "newthing" in registry
-        assert registry["newthing"].beta is True
+        assert registry["newthing"].hidden is True
 
-    def test_beta_still_loadable(self, tmp_path):
-        path = _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+    def test_hidden_still_loadable(self, tmp_path):
+        path = _write_skill(tmp_path, "newthing", "hidden desc", hidden=True)
         assert load_skill("newthing", [tmp_path]) == path.read_text()
 
-    def test_beta_defaults_false(self, tmp_path):
+    def test_hidden_defaults_false(self, tmp_path):
         _write_skill(tmp_path, "plain", "agent desc")
-        assert load_registry([tmp_path])["plain"].beta is False
+        assert load_registry([tmp_path])["plain"].hidden is False
 
-    def test_only_beta_skill_yields_empty_manifest(self, tmp_path):
-        _write_skill(tmp_path, "newthing", "beta desc", beta=True)
+    def test_only_hidden_skill_yields_empty_manifest(self, tmp_path):
+        _write_skill(tmp_path, "newthing", "hidden desc", hidden=True)
         assert build_skill_manifest([tmp_path]) == ""
 
 
@@ -225,13 +228,16 @@ class TestNestedDiscovery:
         assert "profile" in registry
 
 
-def _write_portal_skill(parent, name, description, summary=None):
+def _write_portal_skill(parent, name, description, summary=None,
+                        portal_starter=False):
     """Create skills/<name>/SKILL.md with optional portal_* frontmatter."""
     d = parent / name
     d.mkdir()
     lines = [f"name: {name}", f"description: {description}"]
     if summary is not None:
         lines.append(f'portal_summary: "{summary}"')
+    if portal_starter:
+        lines.append("portal_starter: true")
     (d / "SKILL.md").write_text(
         "---\n" + "\n".join(lines) + f"\n---\n# {name}\n"
     )
@@ -250,38 +256,25 @@ class TestPortalMetadata:
         skill = load_registry([tmp_path])["plain"]
         assert skill.portal_summary is None
 
+    def test_portal_starter_parsed_into_skill(self, tmp_path):
+        _write_portal_skill(tmp_path, "memo", "agent desc",
+                            summary="s", portal_starter=True)
+        skill = load_registry([tmp_path])["memo"]
+        assert skill.portal_starter is True
+
+    def test_portal_starter_defaults_false(self, tmp_path):
+        _write_skill(tmp_path, "plain", "agent desc")
+        skill = load_registry([tmp_path])["plain"]
+        assert skill.portal_starter is False
+
 
 class TestPortalSkillList:
-    def test_all_non_beta_skills_appear(self, tmp_path):
+    def test_skill_without_portal_summary_excluded(self, tmp_path):
+        """Browse panel is gated on portal_summary — plain skills don't appear."""
         _write_portal_skill(tmp_path, "with-summary", "d", summary="visible")
         _write_skill(tmp_path, "without-summary", "d")
         names = [s["name"] for s in portal_skill_list([tmp_path])]
-        assert names == ["with-summary", "without-summary"]
-
-    def test_beta_skills_excluded(self, tmp_path):
-        _write_skill(tmp_path, "shown", "d")
-        _write_skill(tmp_path, "hidden", "d", beta=True)
-        names = [s["name"] for s in portal_skill_list([tmp_path])]
-        assert names == ["shown"]
-
-    def test_summary_falls_back_to_description(self, tmp_path):
-        _write_skill(tmp_path, "plain", "agent description")
-        entry = portal_skill_list([tmp_path])[0]
-        assert entry["summary"] == "agent description"
-        assert entry["starter"] is False
-
-    def test_portal_summary_wins_and_marks_starter(self, tmp_path):
-        _write_portal_skill(tmp_path, "memo", "agent description",
-                            summary="User-facing")
-        entry = portal_skill_list([tmp_path])[0]
-        assert entry["summary"] == "User-facing"
-        assert entry["starter"] is True
-
-    def test_blank_summary_falls_back_and_is_not_starter(self, tmp_path):
-        _write_portal_skill(tmp_path, "blank", "agent description", summary="")
-        entry = portal_skill_list([tmp_path])[0]
-        assert entry["summary"] == "agent description"
-        assert entry["starter"] is False
+        assert names == ["with-summary"]
 
     def test_disabled_skill_excluded(self, tmp_path):
         d = tmp_path / "off"
@@ -290,6 +283,46 @@ class TestPortalSkillList:
             '---\nname: off\ndescription: d\n'
             'portal_summary: "x"\ndisabled: true\n---\n'
         )
+        assert portal_skill_list([tmp_path]) == []
+
+    def test_hidden_skill_excluded(self, tmp_path):
+        d = tmp_path / "secret"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            '---\nname: secret\ndescription: d\n'
+            'portal_summary: "x"\nhidden: true\n---\n'
+        )
+        assert portal_skill_list([tmp_path]) == []
+
+    def test_portal_summary_skill_appears_not_starter(self, tmp_path):
+        """portal_summary alone → in browse panel, but not an empty-page starter."""
+        _write_portal_skill(tmp_path, "memo", "agent description",
+                            summary="User-facing")
+        entry = portal_skill_list([tmp_path])[0]
+        assert entry["summary"] == "User-facing"
+        assert entry["starter"] is False
+
+    def test_portal_starter_skill_appears_and_is_starter(self, tmp_path):
+        """portal_summary + portal_starter → in browse panel and a starter."""
+        _write_portal_skill(tmp_path, "memo", "agent description",
+                            summary="User-facing", portal_starter=True)
+        entry = portal_skill_list([tmp_path])[0]
+        assert entry["summary"] == "User-facing"
+        assert entry["starter"] is True
+
+    def test_portal_starter_without_summary_excluded_and_warns(self, tmp_path, caplog):
+        """portal_starter without portal_summary is excluded entirely + warns."""
+        _write_skill(tmp_path, "orphan", "d", portal_starter=True)
+        with caplog.at_level(logging.WARNING):
+            result = portal_skill_list([tmp_path])
+        assert result == []
+        assert any(
+            "orphan" in r.message and "portal_starter" in r.message
+            for r in caplog.records
+        )
+
+    def test_blank_summary_excluded(self, tmp_path):
+        _write_portal_skill(tmp_path, "blank", "agent description", summary="")
         assert portal_skill_list([tmp_path]) == []
 
     def test_display_name_derived_from_name(self, tmp_path):
@@ -302,7 +335,8 @@ class TestPortalSkillList:
         assert [s["name"] for s in portal_skill_list([tmp_path])] == ["alpha", "zeta"]
 
     def test_entry_shape(self, tmp_path):
-        _write_portal_skill(tmp_path, "memo", "d", summary="A memo")
+        _write_portal_skill(tmp_path, "memo", "d", summary="A memo",
+                            portal_starter=True)
         assert portal_skill_list([tmp_path]) == [
             {"name": "memo", "display_name": "Memo",
              "summary": "A memo", "starter": True}

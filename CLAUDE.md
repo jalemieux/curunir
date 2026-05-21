@@ -84,14 +84,25 @@ Each skill is a directory with a `SKILL.md` file using YAML frontmatter:
 ---
 name: my-skill
 description: When to use this skill
-tools: attach  # Optional: comma-separated opt-in tools
-beta: true     # Optional: keep in registry but omit from the system-prompt catalog
+tools: attach            # Optional: comma-separated opt-in tools
+hidden: true             # Optional: keep in registry but omit from the system-prompt catalog
+portal_summary: "..."    # Optional: user-facing line; lists the skill in the portal Skills panel
+portal_starter: true     # Optional: also surface as an empty-page starter (requires portal_summary)
 ---
 ```
 
-`beta: true` skills stay loadable (`load_skill`, `/skill-name`) but are
+`hidden: true` skills stay loadable (`load_skill`, `/skill-name`) but are
 excluded from the manifest, so the agent won't route to them on its own —
 use it to trial a new skill before GA without bloating the catalog.
+
+The portal has two independent visibility gates. `portal_summary` is the
+browse-panel gate: a skill appears in the portal's Skills panel only if it
+sets `portal_summary` (the user-facing one-liner shown there). `portal_starter`
+is the empty-page gate: it additionally surfaces the skill as a
+"What would you like to do?" starter row. Starters are a subset of the
+browse panel — `portal_starter` without `portal_summary` is ignored (the
+skill is excluded everywhere and a warning is logged). `hidden` skills never
+appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
