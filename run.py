@@ -8,6 +8,8 @@ import logging.handlers
 import os
 from pathlib import Path
 
+import time
+
 import httpx
 import litellm
 from dotenv import load_dotenv
@@ -24,7 +26,7 @@ from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
-from src.skills import portal_skill_list
+from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
 
@@ -473,6 +475,29 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
         await _run_extraction_pass(agent)
 
 
+async def periodic_dreaming(agent: Agent, interval_sec: int):
+    """Periodically run the dreaming skill to keep memory tidy.
+
+    Sleep-first so a container restart doesn't trigger a dreaming pass.
+    """
+    while True:
+        await asyncio.sleep(interval_sec)
+        try:
+            skill_content = load_skill("dreaming", agent.config.skill_dirs)
+            if skill_content.startswith("Skill not found"):
+                logger.warning("Dreaming skill not found; skipping")
+                continue
+            session_id = f"system:dreaming:{int(time.time())}"
+            logger.info("Firing dreaming pass (session %s)", session_id)
+            await agent.handle(
+                message="",
+                session_id=session_id,
+                system_task_prompt=skill_content,
+            )
+        except Exception as e:
+            logger.exception("Dreaming task failed: %s", e)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -617,6 +642,7 @@ async def main():
         logger.info("Portal channel enabled for %s", portal_url)
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
+    dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
@@ -627,6 +653,7 @@ async def main():
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
         tg.create_task(periodic_extraction(agent, extraction_interval))
+        tg.create_task(periodic_dreaming(agent, dreaming_interval))
         tg.create_task(run_scheduler(agent))
 
 
