@@ -163,15 +163,19 @@ def test_unknown_binary_attachment_falls_back_to_notice(tmp_path):
 
 
 async def _run_worker_once(in_q, out_q, fake_agent):
-    """Drive agent_worker for exactly one message, then cancel cleanly."""
+    """Drive agent_worker for exactly one message, then cancel cleanly.
+
+    Returns the first OutgoingMessage the worker emits.
+    """
     import run as run_module
     task = asyncio.create_task(run_module.agent_worker(fake_agent, in_q, out_q))
-    await asyncio.wait_for(out_q.get(), timeout=2.0)
+    out_msg = await asyncio.wait_for(out_q.get(), timeout=2.0)
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    return out_msg
 
 
 def _fake_agent(captured: dict, *, supports_vision: bool = True,
@@ -377,6 +381,140 @@ def test_detect_vision_support_passes_through_falsy_result():
     with patch("run.litellm") as mock_litellm:
         mock_litellm.supports_vision.return_value = False
         assert _detect_vision_support("openai/gpt-3.5-turbo") is False
+
+
+def test_pdf_attachment_parse_failure_degrades_to_text_block(tmp_path, monkeypatch):
+    """A PDF pypdf cannot open must degrade to a descriptive text block, never
+    raise — an uncaught raise here escapes agent_worker and crashes the process."""
+    pdf_path = tmp_path / "broken.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nnot really a pdf")
+
+    from pypdf.errors import PdfReadError
+
+    def boom(path):
+        raise PdfReadError("Could not read malformed PDF")
+
+    import pypdf
+    monkeypatch.setattr(pypdf, "PdfReader", boom)
+
+    from run import build_multimodal_content
+    blocks = build_multimodal_content("read this", [_att(pdf_path, "application/pdf")])
+
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    assert blocks[0] == {"type": "text", "text": "read this"}
+    assert blocks[1]["type"] == "text"
+    body = blocks[1]["text"]
+    assert "broken.pdf" in body
+    assert "could not be parsed" in body.lower()
+
+
+def test_pdf_attachment_skips_pages_that_fail_extraction(tmp_path, monkeypatch):
+    """One page that fails text extraction must not lose the rest of the PDF."""
+    pdf_path = tmp_path / "partial.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    class GoodPage:
+        def extract_text(self):
+            return "first page text"
+
+    class BadPage:
+        def extract_text(self):
+            raise ValueError("broken content stream")
+
+    class FakeReader:
+        def __init__(self, path):
+            self.pages = [GoodPage(), BadPage()]
+
+    import pypdf
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+
+    from run import build_multimodal_content
+    blocks = build_multimodal_content("summarize", [_att(pdf_path, "application/pdf")])
+
+    assert isinstance(blocks, list)
+    body = blocks[1]["text"]
+    assert "first page text" in body
+    assert "(PDF, 2 pages)" in body
+
+
+def test_docx_attachment_parse_failure_degrades_to_text_block(tmp_path, monkeypatch):
+    """A corrupt DOCX must degrade to a descriptive text block, never raise."""
+    docx_path = tmp_path / "broken.docx"
+    docx_path.write_bytes(b"not a zip")
+
+    import sys
+    import types
+    fake = types.ModuleType("docx")
+
+    def boom(path):
+        raise ValueError("File is not a zip file")
+
+    fake.Document = boom
+    monkeypatch.setitem(sys.modules, "docx", fake)
+
+    from run import build_multimodal_content
+    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    blocks = build_multimodal_content("read", [_att(docx_path, mime)])
+
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    body = blocks[1]["text"]
+    assert "broken.docx" in body
+    assert "could not be parsed" in body.lower()
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_survives_attachment_prep_exception(image_file):
+    """If attachment prep raises, the worker must reply with an error message —
+    not let the exception escape and cancel the TaskGroup that owns every channel."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="hello", channel="cli", session_id="cli", reply_address={},
+        attachments=[_att(image_file, "image/png")],
+    )
+    await in_q.put(msg)
+
+    with patch("run.build_multimodal_content", side_effect=RuntimeError("prep blew up")):
+        out = await _run_worker_once(in_q, out_q, _fake_agent(captured))
+
+    assert out.content == "Sorry, I encountered an error processing your message."
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_does_not_crash_on_unparseable_pdf(tmp_path, monkeypatch):
+    """The reported bug: a PDF pypdf cannot read must not crash the agent.
+    The turn still runs; the agent sees a degraded PDF block instead."""
+    pdf_path = tmp_path / "cit0001e-3.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    from pypdf.errors import PdfReadError
+
+    def boom(path):
+        raise PdfReadError("could not read PDF")
+
+    import pypdf
+    monkeypatch.setattr(pypdf, "PdfReader", boom)
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    captured: dict = {}
+
+    msg = IncomingMessage(
+        content="what does this say?", channel="portal",
+        session_id="portal", reply_address={},
+        attachments=[_att(pdf_path, "application/pdf")],
+    )
+    await in_q.put(msg)
+    await _run_worker_once(in_q, out_q, _fake_agent(captured))
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    pdf_block = next(b for b in content if "cit0001e-3.pdf" in b.get("text", ""))
+    assert "could not be parsed" in pdf_block["text"].lower()
 
 
 @pytest.mark.asyncio

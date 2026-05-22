@@ -4,7 +4,7 @@ rich
 prompt_toolkit
 httpx
 trafilatura
-pypdf
+pypdf[crypto]
 python-docx
 websockets
 pytest

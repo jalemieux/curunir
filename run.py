@@ -20,6 +20,7 @@ from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
+from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.scheduler import run_scheduler
@@ -161,24 +162,14 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
             })
         elif mime == "application/pdf":
-            from pypdf import PdfReader
-            reader = PdfReader(path)
-            pages_text = "\n\n".join(p.extract_text() or "" for p in reader.pages)
-            body = pages_text.strip() or "(no extractable text)"
             blocks.append({
                 "type": "text",
-                "text": (
-                    f"[Attachment: {att['filename']} (PDF, {len(reader.pages)} pages)]\n"
-                    f"```\n{body}\n```"
-                ),
+                "text": pdf_to_text_block(att["filename"], path),
             })
         elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            import docx
-            doc = docx.Document(path)
-            body = "\n".join(p.text for p in doc.paragraphs).strip() or "(no extractable text)"
             blocks.append({
                 "type": "text",
-                "text": f"[Attachment: {att['filename']} (DOCX)]\n```\n{body}\n```",
+                "text": docx_to_text_block(att["filename"], path),
             })
         else:
             try:
@@ -410,19 +401,22 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
-        # Inbound prep: route images through VISION_MODEL when the main model
-        # is text-only (no-op when it isn't), then format into LiteLLM content.
-        msg_attachments = await _vision_prepass(
-            agent.config, msg.content, msg.attachments,
-        )
-        content = build_multimodal_content(msg.content, msg_attachments)
-
         # Outbound sinks the agent fills during the turn: any files it wants
         # to attach to its reply, and a metadata bag for workflow/stats.
         attachments = []
         metadata: dict = {}
 
         try:
+            # Inbound prep runs inside the try: route images through
+            # VISION_MODEL when the main model is text-only (no-op when it
+            # isn't), then format into LiteLLM content. A failed attachment
+            # prep step must degrade to an error reply here — an exception
+            # escaping the worker cancels the TaskGroup and takes every
+            # channel down with it.
+            msg_attachments = await _vision_prepass(
+                agent.config, msg.content, msg.attachments,
+            )
+            content = build_multimodal_content(msg.content, msg_attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
