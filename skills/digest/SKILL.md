@@ -175,8 +175,39 @@ done
 The append-only ledger is what step 3 reads next time. If the file doesn't
 exist yet, create it with the header `# digest URL ledger — one ISO-date + URL per line`.
 
-The digest is delivered via chat/email — no deliverable file is written. If a
-run is ever asked to save the digest to disk, write it to `workspace/generated/`.
+## Step 6 — Deliver
+
+The digest is delivered inline — **never as a PDF, never as an attachment**.
+The markdown produced in step 4 is the deliverable.
+
+- **Chat session** — send the markdown as the final assistant message. Done.
+- **Email** — load the `email-send` skill and send with **both** `text_body`
+  (the raw markdown) **and** `html_body` (the markdown rendered to HTML). The
+  `html_body` is mandatory — do not send a text-only email, and do not attach
+  a PDF or any other file. Render with Python's `markdown` library:
+
+  ```python
+  import markdown
+  html_body = markdown.markdown(digest_md, extensions=["extra", "sane_lists"])
+  ```
+
+  Wrap it in a minimal HTML document so links and headings render cleanly in
+  every mail client:
+
+  ```python
+  html_body = f"""<!DOCTYPE html>
+  <html><body style="font-family: -apple-system, system-ui, sans-serif; max-width: 680px; margin: 0 auto; padding: 16px; line-height: 1.5;">
+  {html_body}
+  </body></html>"""
+  ```
+
+  If `markdown` isn't installed, fall back to `pip install --quiet markdown`
+  in the same shell before the render. Do not ship a digest as HTML-escaped
+  markdown — that defeats the purpose.
+
+If a run is ever asked to save the digest to disk, write it to
+`workspace/generated/` — but disk output is in addition to inline delivery,
+not a replacement for it, and it is still markdown (not PDF).
 
 ## Output checklist
 
@@ -187,6 +218,7 @@ Before sending the digest, confirm in your reasoning:
 - [ ] Every shipped item has `PUBLISHED ≠ UNKNOWN` and `AGE_DAYS ≤ 1`.
 - [ ] Step 3 dedup ran against the per-topic Ledger path.
 - [ ] Step 5 appended shipped URLs to the ledger.
+- [ ] If delivering by email, both `text_body` and `html_body` are set, no attachments, no PDF.
 
 If any box is empty, do not send the digest. Fix the gap or ship a shorter
 digest instead.
