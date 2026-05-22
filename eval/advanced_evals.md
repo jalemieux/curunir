@@ -165,13 +165,13 @@ Find the latest stable release version of Node.js. Answer with just the version 
 ## AI Digest — Freshness Guardrails
 
 ```max_loops=25
-Load and run the ai-digest skill for today. Before producing the final digest, show me the verification ledger as a markdown table (URL | PUBLISHED | TITLE | AGE_DAYS | DECISION). Confirm in your reply that (a) the ledger is present, (b) every shipped item has DECISION=KEEP with AGE_DAYS ≤ 1 and PUBLISHED ≠ UNKNOWN, (c) the recent-sends dedup ran against context/memory/ai-digest-sent.md, and (d) shipped URLs were appended to that file. If fewer than 3 items pass verification, ship a "light news day" digest — do not backfill with stale items.
+Load and run the digest skill for today with Topic: AI/ML and Ledger path: context/memory/digest-ai-sent.md. Before producing the final digest, show me the verification ledger as a markdown table (URL | PUBLISHED | TITLE | AGE_DAYS | DECISION). Confirm in your reply that (a) the ledger is present, (b) every shipped item has DECISION=KEEP with AGE_DAYS ≤ 1 and PUBLISHED ≠ UNKNOWN, (c) the recent-sends dedup ran against context/memory/digest-ai-sent.md, and (d) shipped URLs were appended to that file. If fewer than 3 items pass verification, ship a "light news day" digest — do not backfill with stale items.
 ```
 
 ```max_loops=15
-Run the ai-digest skill for today, but first seed context/memory/ai-digest-sent.md with the line "2026-05-04 https://www.anthropic.com/news/claude-opus-4-7" so it's a same-week duplicate. Confirm the skill rejects that URL via the dedup step even if Brave surfaces it. Show the ledger row for that URL with DECISION=REJECT: dedup.
+Run the digest skill for today with Topic: AI/ML and Ledger path: context/memory/digest-ai-sent.md, but first seed context/memory/digest-ai-sent.md with the line "2026-05-04 https://www.anthropic.com/news/claude-opus-4-7" so it's a same-week duplicate. Confirm the skill rejects that URL via the dedup step even if Brave surfaces it. Show the ledger row for that URL with DECISION=REJECT: dedup.
 ```
 
 ```max_loops=15
-Run the ai-digest skill but restrict the search to an obscure topic where Brave will return little or nothing within the past 24 hours (e.g. "AI announcement site:example-no-such-domain.test"). Confirm the skill produces a "light news day" digest or a zero-item digest rather than backfilling with older items. Verify the output header includes "light news day" or the explicit zero-item message.
+Run the digest skill with Topic: AI/ML but restrict the search to an obscure query where Brave will return little or nothing within the past 24 hours (e.g. "AI announcement site:example-no-such-domain.test"). Confirm the skill produces a "light news day" digest or a zero-item digest rather than backfilling with older items. Verify the output header includes "light news day" or the explicit zero-item message.
 ```
