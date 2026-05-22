@@ -1,6 +1,8 @@
 ---
 name: digest
 description: "Use when the user (or scheduler) asks for a recurring news digest on any topic — AI/ML, personal finance, local news, a specific company. Produces a short briefing of fresh stories from a given window, gated by a verification ledger that rejects any item older than the cadence cap or already shipped recently, plus a per-topic URL dedup ledger."
+portal_summary: "Short news briefing on any topic — AI, finance, a company, or a city"
+portal_starter: true
 ---
 
 # Digest

@@ -1,6 +1,8 @@
 ---
 name: gemini-image
 description: "Use when the user asks to generate, create, or make an image from a text description. Trigger: a request to produce a picture, illustration, logo, diagram, or any image from a prompt — handled via Gemini 2.5 Flash Image."
+portal_summary: "Generate an image from a text description"
+portal_starter: true
 ---
 
 # Gemini Image
