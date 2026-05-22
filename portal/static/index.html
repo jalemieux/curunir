@@ -197,6 +197,9 @@ main {
 .msg.assistant .body td:first-child {
   font-weight: 600; padding-right: 16px;
 }
+.msg.assistant .body td:first-child code {
+  white-space: nowrap; overflow-wrap: normal; word-break: keep-all;
+}
 .msg.assistant .body code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
 .msg.assistant .body pre { background: var(--code-bg); border-radius: 6px; padding: 10px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.4; }
 .msg.assistant .body pre code { background: none; padding: 0; }
