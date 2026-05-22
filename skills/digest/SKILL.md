@@ -1,43 +1,74 @@
 ---
-name: ai-digest
-description: "Use when the user (or scheduler) asks for a daily AI news digest. Produces a short briefing of fresh AI/ML stories from the past 24 hours, gated by a verification ledger that rejects any item older than 1 day or already shipped in the past 7 days."
+name: digest
+description: "Use when the user (or scheduler) asks for a recurring news digest on any topic — AI/ML, personal finance, local news, a specific company. Produces a short briefing of fresh stories from a given window, gated by a verification ledger that rejects any item older than the cadence cap or already shipped recently, plus a per-topic URL dedup ledger."
 ---
 
-# AI Digest
+# Digest
 
-Produce a short briefing of fresh AI/ML stories from the last 24 hours.
+Produce a short briefing of fresh stories on a given topic from a recent window.
 
 ## Why these steps exist (read this first)
 
-This skill has shipped stale items **three times**: once in April, once mid-April,
-and again on 2026-05-05 (the May 5 digest leaked a 19-day-old Opus 4.7 release,
-an 18-day-old Anthropic Labs design post, and a same-day-old Anthropic enterprise
-announcement). All three failures came from a single cause: the freshness rule
-was prose, the agent was free to skip it, and it did.
+This skill (as the topic-specific `ai-digest` it was generalized from) has shipped
+stale items **three times**: once in April, once mid-April, and again on 2026-05-05
+(the May 5 digest leaked a 19-day-old Opus 4.7 release, an 18-day-old Anthropic Labs
+design post, and a same-day-old Anthropic enterprise announcement). All three
+failures came from a single cause: the freshness rule was prose, the agent was free
+to skip it, and it did.
 
 Every step below is load-bearing. Do not collapse, summarize, or skip them.
 The verification ledger and the URL blacklist are **structural** — if the
 artifact isn't on disk, the item cannot ship. If you find yourself wanting to
 ship an item that didn't pass verification, the correct response is a shorter
-digest, not a relaxed rule.
+digest, not a relaxed rule. None of this is topic-specific: the safeguards apply
+to a finance digest or a local-news digest exactly as they do to an AI one.
 
 ## Inputs
 
+This skill is loaded as prompt content — there are no structured arguments. The
+caller supplies these in their message or the scheduler `prompt` field, the same
+way *Digest date* and *Cadence* are supplied below.
+
+- **Topic** *(required)* — the subject of the digest, free text, e.g. `AI/ML`,
+  `personal finance`, `San Francisco local news`, `Anthropic`. Drives the search
+  queries, the digest header, and the ledger path.
+- **Search queries** *(optional)* — an explicit set of search strings. If omitted,
+  derive a small, focused query set (3–6 queries) from the Topic. Quality depends
+  heavily on good queries, so for a narrow or unusual Topic the caller should pass
+  these explicitly. The AI/ML set in step 1 is kept as a worked example.
+- **Cadence** *(optional, default daily)* — daily or weekly. Daily uses
+  `freshness=pd` in step 1 and an `AGE_DAYS` cap of 1 in step 2. Weekly uses
+  `freshness=pw` and a cap of 7.
+- **Ledger path** *(optional)* — the dedup ledger file. Default
+  `context/memory/digest-<topic-slug>-sent.md`. The **topic-slug** is derived
+  deterministically: lowercase the Topic, replace every run of non-alphanumeric
+  characters with a single `-`, and strip leading/trailing `-`. So `AI/ML` →
+  `ai-ml`, `personal finance` → `personal-finance`. Pass an explicit Ledger path
+  to pin a file independent of the Topic text (e.g. the bundled AI/ML schedule
+  entry pins `context/memory/digest-ai-sent.md`). First-run note: if you are
+  migrating from the retired `ai-digest` skill, copy any existing
+  `context/memory/ai-digest-sent.md` to the new Ledger path so recent-send
+  history is not lost.
 - **Digest date** — today, in `YYYY-MM-DD`. Use `date -u +%F`.
-- **Cadence** — daily by default. If the user specifies weekly, swap `freshness=pd` for `freshness=pw` in step 1 and the AGE_DAYS cap in step 2 (1 → 7).
+
+Throughout the steps below, `<slug>` is the topic-slug and `{Topic}` is the
+Topic text.
 
 ## Step 1 — Search with API-level freshness filter
 
-Run a small set of focused Brave queries with `freshness=pd` (past day). This
-removes most stale candidates at the API boundary. `pd` is not authoritative
-(Brave occasionally surfaces re-indexed older content), so the verification in
-step 2 is still required — `freshness` is a cheap pre-filter, not a guarantee.
+Run a small set of focused Brave queries with `freshness=pd` (past day; use `pw`
+for weekly cadence). This removes most stale candidates at the API boundary. `pd`
+is not authoritative (Brave occasionally surfaces re-indexed older content), so the
+verification in step 2 is still required — `freshness` is a cheap pre-filter, not a
+guarantee.
 
-Recommended queries (adjust based on what's been shipped recently — see step 3):
+Use the **Search queries** input if one was given. Otherwise derive 3–6 focused
+queries from the Topic. The block below is the worked example for `Topic: AI/ML`
+— substitute your own topic and queries:
 
 ```bash
 DIGEST_DATE=$(date -u +%F)
-mkdir -p /tmp/ai-digest
+mkdir -p /tmp/digest-<slug>
 for q in \
   "AI announcement" \
   "LLM release" \
@@ -48,7 +79,7 @@ for q in \
     -H "Accept: application/json" \
     -H "X-Subscription-Token: $BRAVE_API_KEY" \
     | jq '.web.results[] | {title, url, description, page_age}'
-done > /tmp/ai-digest/candidates.jsonl
+done > /tmp/digest-<slug>/candidates.jsonl
 ```
 
 Cap the candidate set at **12 URLs** before moving to step 2. Running
@@ -92,21 +123,23 @@ the date from training data. If it isn't on the page, it doesn't ship.
 ## Step 3 — Dedup against the recent-sends ledger
 
 For each URL still marked `KEEP`, check whether it (or a near-equivalent) was
-shipped in the past 7 days:
+shipped in the past 7 days. `LEDGER` is the **Ledger path** input (default
+`context/memory/digest-<slug>-sent.md`):
 
 ```bash
 # Reject anything sent in the past 7 days
+LEDGER=context/memory/digest-<slug>-sent.md
 SEVEN_DAYS_AGO=$(date -u -v-7d +%F 2>/dev/null || date -u -d '7 days ago' +%F)
 while read url; do
   # Lines look like: 2026-05-04 https://example.com/article
-  hit=$(grep -F "$url" context/memory/ai-digest-sent.md || true)
+  hit=$(grep -F "$url" "$LEDGER" || true)
   if [ -n "$hit" ]; then
     last_date=$(echo "$hit" | tail -1 | awk '{print $1}')
     if [ "$last_date" \> "$SEVEN_DAYS_AGO" ] || [ "$last_date" = "$SEVEN_DAYS_AGO" ]; then
       echo "DEDUP: $url (last sent $last_date)"
     fi
   fi
-done < /tmp/ai-digest/keep-urls.txt
+done < /tmp/digest-<slug>/keep-urls.txt
 ```
 
 Update the ledger: any URL flagged DEDUP becomes `REJECT: dedup`.
@@ -115,11 +148,13 @@ Update the ledger: any URL flagged DEDUP becomes `REJECT: dedup`.
 
 Items eligible for the digest = ledger rows where `DECISION = KEEP`.
 
-- **3+ eligible items** → normal digest. One short paragraph per item, with the
-  source URL and publication date inline.
+- **3+ eligible items** → normal digest. Header: `# {Topic} Digest — {DIGEST_DATE}`.
+  One short paragraph per item, with the source URL and publication date inline.
 - **1–2 eligible items** → "Light news day" digest with whatever passed.
-  Header: `# AI Digest — {DIGEST_DATE} (light news day)`.
-- **0 eligible items** → ship a one-line message: `# AI Digest — {DIGEST_DATE}\n\nNo fresh stories passed verification today.` Do not reach back further. Do not lower the bar.
+  Header: `# {Topic} Digest — {DIGEST_DATE} (light news day)`.
+- **0 eligible items** → ship a one-line message:
+  `# {Topic} Digest — {DIGEST_DATE}\n\nNo fresh stories passed verification today.`
+  Do not reach back further. Do not lower the bar.
 
 Including a stale item to "round out" the digest is the failure mode this
 skill exists to prevent. A short digest is the correct output, not a problem to
@@ -127,17 +162,18 @@ solve.
 
 ## Step 5 — Record shipped URLs
 
-Append every URL that made it into the digest to
-`context/memory/ai-digest-sent.md`, one per line, ISO-date prefixed:
+Append every URL that made it into the digest to the **Ledger path**, one per
+line, ISO-date prefixed:
 
 ```bash
+LEDGER=context/memory/digest-<slug>-sent.md
 for url in <shipped_urls>; do
-  echo "$DIGEST_DATE $url" >> context/memory/ai-digest-sent.md
+  echo "$DIGEST_DATE $url" >> "$LEDGER"
 done
 ```
 
 The append-only ledger is what step 3 reads next time. If the file doesn't
-exist yet, create it with the header `# AI digest URL ledger — one ISO-date + URL per line`.
+exist yet, create it with the header `# digest URL ledger — one ISO-date + URL per line`.
 
 The digest is delivered via chat/email — no deliverable file is written. If a
 run is ever asked to save the digest to disk, write it to `workspace/generated/`.
@@ -149,7 +185,7 @@ Before sending the digest, confirm in your reasoning:
 - [ ] Verification ledger table is in scratch with one row per candidate.
 - [ ] Every shipped item has `DECISION = KEEP` in the ledger.
 - [ ] Every shipped item has `PUBLISHED ≠ UNKNOWN` and `AGE_DAYS ≤ 1`.
-- [ ] Step 3 dedup ran against `context/memory/ai-digest-sent.md`.
+- [ ] Step 3 dedup ran against the per-topic Ledger path.
 - [ ] Step 5 appended shipped URLs to the ledger.
 
 If any box is empty, do not send the digest. Fix the gap or ship a shorter

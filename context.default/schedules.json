@@ -2,8 +2,8 @@
   {
     "id": "ai-digest-daily",
     "cron": "0 7 * * *",
-    "skill": "ai-digest",
-    "prompt": "Run the ai-digest skill for today. Follow every step including the verification ledger and the recent-sends dedup. If fewer than 3 items pass verification, ship a 'light news day' digest rather than backfilling.",
+    "skill": "digest",
+    "prompt": "Run the digest skill for today with these inputs:\n- Topic: AI/ML\n- Cadence: daily\n- Ledger path: context/memory/digest-ai-sent.md\n- Search queries: \"AI announcement\", \"LLM release\", \"AI research paper\", \"AI policy regulation\", \"AI funding round\"\nFollow every step including the verification ledger and the recent-sends dedup. If fewer than 3 items pass verification, ship a 'light news day' digest rather than backfilling.",
     "enabled": false
   }
 ]

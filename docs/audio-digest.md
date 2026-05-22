@@ -4,12 +4,12 @@ The `to_audio` tool rewrites text for spoken delivery and synthesizes it into an
 
 ## Enabling it for the daily digest
 
-`to_audio` is opt-in: it only loads when a skill declares it. Add it to your local `context/skills/ai-digest/SKILL.md`:
+`to_audio` is opt-in: it only loads when a skill declares it. Add it to your local `context/skills/digest/SKILL.md`:
 
 ```yaml
 ---
-name: ai-digest
-description: Daily AI/news digest for the morning brief.
+name: digest
+description: Recurring news digest for the morning brief.
 tools: to_audio
 ---
 
