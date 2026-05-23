@@ -264,3 +264,59 @@ async def test_agent_worker_records_inbound(tmp_path, agent_config):
     state = json.loads(state_path.read_text())
     assert state["last_user_msg_at"] > time.time() - 60
     assert state["tiers_sent_this_idle"] == []
+
+
+@pytest.mark.asyncio
+async def test_14d_consumes_lower_tiers_after_long_downtime(mock_agent, tmp_path):
+    """If the system was offline >14d while user was idle, fire 14d once
+    and consume 2d/7d so they don't fire in reverse order on later ticks."""
+    state_path = tmp_path / "nudge_state.json"
+    _write_state(state_path, last_user_msg_at=time.time() - 15 * 86400)
+
+    kwargs = await _run_one_tick(mock_agent, state_path)
+    assert kwargs is not None
+    assert "Tier: 14d" in kwargs["system_task_prompt"]
+
+    state = json.loads(state_path.read_text())
+    assert set(state["tiers_sent_this_idle"]) == {"2d", "7d", "14d"}
+
+
+@pytest.mark.asyncio
+async def test_7d_consumes_2d(mock_agent, tmp_path):
+    """Firing 7d (without prior 2d) also consumes 2d."""
+    state_path = tmp_path / "nudge_state.json"
+    _write_state(state_path, last_user_msg_at=time.time() - 8 * 86400)
+
+    kwargs = await _run_one_tick(mock_agent, state_path)
+    assert kwargs is not None
+    assert "Tier: 7d" in kwargs["system_task_prompt"]
+
+    state = json.loads(state_path.read_text())
+    assert set(state["tiers_sent_this_idle"]) == {"2d", "7d"}
+    assert "14d" not in state["tiers_sent_this_idle"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_does_not_create_state_file(mock_agent, tmp_path):
+    """When NUDGE_ENABLED=false, periodic_nudge must not write the state file."""
+    from run import periodic_nudge
+
+    state_path = tmp_path / "nudge_state.json"
+    # Do NOT pre-create the state file.
+
+    task = asyncio.create_task(periodic_nudge(
+        mock_agent,
+        interval_sec=0,
+        state_path=state_path,
+        recipient="user@example.com",
+        enabled=False,
+    ))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert not state_path.exists()
+    assert not mock_agent.handle.called
