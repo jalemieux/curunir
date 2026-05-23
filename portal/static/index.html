@@ -650,16 +650,8 @@ body.dragging .drop-hint { display: flex; }
   }
 }
 /* === Schedules manager === */
-#schedules-btn {
-  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
-  background: transparent; border: 1px solid var(--border-strong);
-  color: var(--accent); font-family: inherit; font-size: 13px;
-  font-weight: 600; white-space: nowrap;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s, color .12s, border-color .12s;
-}
-#schedules-btn:hover { border-color: var(--accent); background: var(--hover-bg); }
-#schedules-btn .glyph { font-size: 12px; }
+/* #schedules-btn inherits .header-btn styling; only the mobile gate is
+   schedules-specific (mirrors the conversation sidebar's gate). */
 @media (max-width: 767px) {
   #schedules-btn { display: none; }
 }
@@ -830,6 +822,7 @@ body.dragging .drop-hint { display: flex; }
 <header>
   <div><strong>Curunir</strong></div>
   <div class="header-right">
+    <button id="schedules-btn" class="header-btn" title="Manage schedules" aria-label="Manage schedules">Scheduled ⏱</button>
     <button id="theme-btn" class="header-btn" title="Toggle theme" aria-label="Toggle theme"></button>
     <button id="new-btn" class="header-btn" title="Start a new conversation">New</button>
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
@@ -846,7 +839,6 @@ body.dragging .drop-hint { display: flex; }
     <textarea id="input" rows="1" placeholder="What would you like to do?"></textarea>
     <div class="composer-row">
       <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
-      <button id="schedules-btn" title="Manage schedules" aria-label="Manage schedules"><span class="glyph">⏱</span>Schedules</button>
       <button id="attach-btn" title="Attach files" aria-label="Attach files"><span class="glyph">+</span>Attach</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline · drop or paste files to attach</span>
       <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
