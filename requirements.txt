@@ -10,6 +10,7 @@ websockets
 pytest
 pytest-asyncio
 croniter
+cron-descriptor
 shot-scraper
 openai>=1.0
 yfinance

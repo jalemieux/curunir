@@ -759,6 +759,177 @@ async def test_conversations_request_command_triggers_snapshot(portal_server):
 
 
 @pytest.mark.asyncio
+async def test_schedules_request_invokes_provider_and_sends_snapshot(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    fake = [{
+        "id": "t1", "cron": "0 9 * * *", "cron_human": "Every day at 9:00 AM",
+        "prompt": "p", "skill": None, "enabled": True,
+        "last_run": 0, "last_status": None, "last_error": None, "next_run": 0,
+    }]
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        schedules_provider=lambda: fake,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({"type": "schedules_request"})
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "schedules_snapshot"
+        assert msg["schedules"] == fake
+        assert msg["session_id"] == PORTAL_SESSION_ID
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_schedules_request_command_triggers_snapshot(portal_server):
+    """Browser-driven: a user_message with command=schedules_request and a
+    session_id triggers a schedules_snapshot tagged with that session."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        schedules_provider=lambda: [],
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "schedules_request", "session_id": "tab-S"},
+        })
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "schedules_snapshot"
+        assert msg["session_id"] == "tab-S"
+        assert msg["schedules"] == []
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_schedule_mutate_success_emits_result_then_snapshot(portal_server):
+    """A successful mutate produces a schedule_mutate_result(ok=True) followed
+    by a fresh schedules_snapshot — the UI re-syncs on the snapshot."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen: list[tuple[str, dict]] = []
+    schedules_state = [{"id": "existing", "cron": "* * * * *",
+                        "cron_human": "Every minute",
+                        "prompt": "p", "skill": None, "enabled": True,
+                        "last_run": 0, "last_status": None,
+                        "last_error": None, "next_run": 0}]
+
+    def mutator(action, task):
+        seen.append((action, task))
+        return True, None, task.get("id")
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        schedules_provider=lambda: list(schedules_state),
+        schedules_mutator=mutator,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {
+                "command": "schedule_mutate", "session_id": "tab-S",
+                "action": "add",
+                "task": {"id": "t2", "cron": "0 9 * * *", "prompt": "p"},
+            },
+        })
+        # First the result, then a snapshot.
+        raw1 = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        result = json.loads(raw1)
+        assert result["type"] == "schedule_mutate_result"
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["action"] == "add"
+        assert result["task_id"] == "t2"
+        assert result["session_id"] == "tab-S"
+
+        raw2 = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        snapshot = json.loads(raw2)
+        assert snapshot["type"] == "schedules_snapshot"
+        assert snapshot["session_id"] == "tab-S"
+
+        assert seen == [("add", {"id": "t2", "cron": "0 9 * * *", "prompt": "p"})]
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_schedule_mutate_failure_still_emits_snapshot(portal_server):
+    """A validation failure surfaces ok=False with the error, AND still
+    re-syncs the UI with a fresh snapshot (cheap drift insurance)."""
+    in_q: asyncio.Queue = asyncio.Queue()
+
+    def mutator(action, task):
+        return False, "bad cron", task.get("id")
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        schedules_provider=lambda: [],
+        schedules_mutator=mutator,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {
+                "command": "schedule_mutate", "session_id": "tab-S",
+                "action": "update",
+                "task": {"id": "t1", "cron": "garbage"},
+            },
+        })
+        raw1 = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        result = json.loads(raw1)
+        assert result["type"] == "schedule_mutate_result"
+        assert result["ok"] is False
+        assert result["error"] == "bad cron"
+        assert result["action"] == "update"
+
+        raw2 = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        assert json.loads(raw2)["type"] == "schedules_snapshot"
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_schedule_mutate_run_now_routes_to_mutator(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    seen_actions: list[str] = []
+
+    def mutator(action, task):
+        seen_actions.append(action)
+        return True, None, task.get("id")
+
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        schedules_provider=lambda: [],
+        schedules_mutator=mutator,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {
+                "command": "schedule_mutate", "session_id": "tab-S",
+                "action": "run_now", "task": {"id": "t1"},
+            },
+        })
+        await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        assert seen_actions == ["run_now"]
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_conversations_request_no_connection_no_send(portal_server):
     """A conversations_request with no live connection produces no send."""
     in_q: asyncio.Queue = asyncio.Queue()

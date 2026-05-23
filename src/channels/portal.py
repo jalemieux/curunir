@@ -84,6 +84,8 @@ class PortalChannel:
         history_provider: "callable[[str], list[dict]] | None" = None,
         skills_provider: "callable[[], list[dict]] | None" = None,
         conversations_provider: "callable[[], list[dict]] | None" = None,
+        schedules_provider: "callable[[], list[dict]] | None" = None,
+        schedules_mutator: "callable[[str, dict], tuple[bool, str | None, str | None]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
     ):
@@ -93,6 +95,10 @@ class PortalChannel:
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
+        self.schedules_provider = schedules_provider or (lambda: [])
+        self.schedules_mutator = schedules_mutator or (
+            lambda _a, _t: (False, "schedules not configured", None)
+        )
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -169,6 +175,10 @@ class PortalChannel:
                 await self._handle_skills_request(msg.get("payload") or {})
             elif mtype == "conversations_request":
                 await self._handle_conversations_request(msg.get("payload") or {})
+            elif mtype == "schedules_request":
+                await self._handle_schedules_request(msg.get("payload") or {})
+            elif mtype == "schedule_mutate":
+                await self._handle_schedule_mutate(msg)
             else:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
@@ -191,6 +201,18 @@ class PortalChannel:
 
         if payload.get("command") == "conversations_request":
             await self._handle_conversations_request({"session_id": session_id})
+            return
+
+        if payload.get("command") == "schedules_request":
+            await self._handle_schedules_request({"session_id": session_id})
+            return
+
+        if payload.get("command") == "schedule_mutate":
+            await self._handle_schedule_mutate({
+                "session_id": session_id,
+                "action": payload.get("action"),
+                "task": payload.get("task") or {},
+            })
             return
 
         if payload.get("command") == "slash":
@@ -303,6 +325,53 @@ class PortalChannel:
             }))
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during conversations snapshot send")
+
+    async def _handle_schedules_request(self, payload: dict) -> None:
+        if self._connection is None:
+            return
+        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        await self._send_schedules_snapshot(session_id)
+
+    async def _send_schedules_snapshot(self, session_id: str) -> None:
+        if self._connection is None:
+            return
+        schedules = self.schedules_provider()
+        try:
+            await self._connection.send(json.dumps({
+                "type": "schedules_snapshot",
+                "session_id": session_id,
+                "schedules": schedules,
+            }))
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("Portal closed during schedules snapshot send")
+
+    async def _handle_schedule_mutate(self, msg: dict) -> None:
+        if self._connection is None:
+            return
+        session_id = msg.get("session_id") or PORTAL_SESSION_ID
+        action = msg.get("action") or ""
+        task = msg.get("task") or {}
+        try:
+            ok, error, task_id = self.schedules_mutator(action, task)
+        except Exception as exc:  # noqa: BLE001 — surface any helper failure
+            logger.exception("schedules_mutator(%s) raised", action)
+            ok, error, task_id = False, str(exc), task.get("id")
+
+        try:
+            await self._connection.send(json.dumps({
+                "type": "schedule_mutate_result",
+                "session_id": session_id,
+                "action": action,
+                "ok": bool(ok),
+                "task_id": task_id or task.get("id"),
+                "error": error,
+            }))
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("Portal closed during schedule_mutate_result send")
+            return
+        # Always follow up with a fresh snapshot so the UI re-syncs even on
+        # validation errors — cheap and avoids drift.
+        await self._send_schedules_snapshot(session_id)
 
     async def _flush_outbound(self, ws) -> None:
         """Replay buffered frames over a freshly-opened socket, in order.

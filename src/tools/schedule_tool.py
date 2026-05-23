@@ -1,7 +1,18 @@
 # src/tools/schedule_tool.py
-"""CRUD operations for scheduled tasks stored in context/schedules.json."""
+"""CRUD operations for scheduled tasks stored in context/schedules.json.
+
+Two layers:
+
+* Structured helpers — ``list_tasks`` / ``add_task`` / ``update_task`` /
+  ``remove_task`` — return dicts and ``(ok, error)`` tuples. These power
+  both the LLM tool and the portal management UI.
+* ``exec_schedule`` — thin LLM-facing wrapper that calls the helpers and
+  formats the result as markdown. Its output shape is unchanged so the
+  LLM tool keeps working identically.
+"""
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -9,6 +20,22 @@ from pathlib import Path
 from croniter import croniter
 
 from src.config import AgentConfig
+
+logger = logging.getLogger(__name__)
+
+try:
+    from cron_descriptor import ExpressionDescriptor  # type: ignore
+
+    def _describe_cron(expr: str) -> str:
+        try:
+            return ExpressionDescriptor(expr, use_24hour_time_format=False).get_description()
+        except Exception:
+            return expr
+except ImportError:  # pragma: no cover - dependency missing in some envs
+    logger.warning("cron-descriptor not installed; cron_human will mirror raw expr")
+
+    def _describe_cron(expr: str) -> str:
+        return expr
 
 
 def _schedule_path(config: AgentConfig) -> Path:
@@ -46,6 +73,113 @@ def _validate_cron(expr: str) -> bool:
         return False
 
 
+def _next_run(expr: str) -> int | None:
+    try:
+        import time
+        return int(croniter(expr, time.time()).get_next(float))
+    except (ValueError, KeyError):
+        return None
+
+
+def _snapshot_row(task: dict) -> dict:
+    """Normalize a stored task into the snapshot shape exposed over the wire."""
+    cron = task.get("cron", "")
+    return {
+        "id": task.get("id"),
+        "cron": cron,
+        "cron_human": _describe_cron(cron) if cron else "",
+        "prompt": task.get("prompt", ""),
+        "skill": task.get("skill"),
+        "enabled": bool(task.get("enabled", True)),
+        "last_run": int(task.get("last_run", 0) or 0),
+        "last_status": task.get("last_status"),
+        "last_error": task.get("last_error"),
+        "next_run": _next_run(cron) if cron else None,
+    }
+
+
+def list_tasks(config: AgentConfig) -> list[dict]:
+    """Return all stored tasks as snapshot rows (cron_human, next_run, etc.)."""
+    return [_snapshot_row(t) for t in _load(config)]
+
+
+def add_task(config: AgentConfig, task: dict) -> tuple[bool, str | None]:
+    """Append a new task. Returns (True, None) on success, (False, error) on
+    validation or duplicate-id failure."""
+    task_id = task.get("id")
+    cron = task.get("cron")
+    prompt = task.get("prompt")
+
+    if not task_id or not cron or not prompt:
+        return False, "missing required fields — 'id', 'cron', and 'prompt' are required."
+    if not _validate_cron(cron):
+        return False, f"invalid cron expression '{cron}'."
+
+    tasks = _load(config)
+    if any(t["id"] == task_id for t in tasks):
+        return False, f"task '{task_id}' already exists."
+
+    tasks.append({
+        "id": task_id,
+        "cron": cron,
+        "prompt": prompt,
+        "skill": task.get("skill"),
+        "enabled": bool(task.get("enabled", True)),
+        "last_run": 0,
+    })
+    _save(config, tasks)
+    return True, None
+
+
+def update_task(config: AgentConfig, task: dict) -> tuple[bool, str | None]:
+    """Merge fields into an existing task identified by ``task['id']``."""
+    task_id = task.get("id")
+    if not task_id:
+        return False, "'id' is required."
+
+    tasks = _load(config)
+    existing = next((t for t in tasks if t["id"] == task_id), None)
+    if not existing:
+        return False, f"task '{task_id}' not found."
+
+    if "cron" in task:
+        if not _validate_cron(task["cron"]):
+            return False, f"invalid cron expression '{task['cron']}'."
+        existing["cron"] = task["cron"]
+    if "prompt" in task:
+        existing["prompt"] = task["prompt"]
+    if "skill" in task:
+        existing["skill"] = task["skill"]
+    if "enabled" in task:
+        existing["enabled"] = bool(task["enabled"])
+
+    _save(config, tasks)
+    return True, None
+
+
+def remove_task(config: AgentConfig, task_id: str) -> tuple[bool, str | None]:
+    if not task_id:
+        return False, "'id' is required."
+    tasks = _load(config)
+    new_tasks = [t for t in tasks if t["id"] != task_id]
+    if len(new_tasks) == len(tasks):
+        return False, f"task '{task_id}' not found."
+    _save(config, new_tasks)
+    return True, None
+
+
+def task_exists(config: AgentConfig, task_id: str) -> bool:
+    return any(t["id"] == task_id for t in _load(config))
+
+
+def get_task(config: AgentConfig, task_id: str) -> dict | None:
+    """Return the raw stored task (not the snapshot row) by id, or None."""
+    for t in _load(config):
+        if t["id"] == task_id:
+            return t
+    return None
+
+
 def exec_schedule(args: dict, config: AgentConfig) -> str:
     action = args.get("action")
     if not action:
@@ -53,18 +187,27 @@ def exec_schedule(args: dict, config: AgentConfig) -> str:
 
     match action:
         case "list":
-            return _list(config)
+            return _format_list(config)
         case "add":
-            return _add(args, config)
+            ok, err = add_task(config, args)
+            if not ok:
+                return f"Error: {err}"
+            return f"Task '{args['id']}' added — scheduled at `{args['cron']}`."
         case "update":
-            return _update(args, config)
+            ok, err = update_task(config, args)
+            if not ok:
+                return f"Error: {err}"
+            return f"Task '{args['id']}' updated."
         case "remove":
-            return _remove(args, config)
+            ok, err = remove_task(config, args.get("id", ""))
+            if not ok:
+                return f"Error: {err}"
+            return f"Task '{args['id']}' removed."
         case _:
             return f"Error: unknown action '{action}'. Use: list, add, update, remove."
 
 
-def _list(config: AgentConfig) -> str:
+def _format_list(config: AgentConfig) -> str:
     tasks = _load(config)
     if not tasks:
         return "No scheduled tasks."
@@ -74,70 +217,3 @@ def _list(config: AgentConfig) -> str:
         skill = f" (skill: {t['skill']})" if t.get("skill") else ""
         lines.append(f"- **{t['id']}** `{t['cron']}` [{status}]{skill}\n  {t['prompt']}")
     return "\n".join(lines)
-
-
-def _add(args: dict, config: AgentConfig) -> str:
-    task_id = args.get("id")
-    cron = args.get("cron")
-    prompt = args.get("prompt")
-
-    if not task_id or not cron or not prompt:
-        return "Error: missing required fields — 'add' needs 'id', 'cron', and 'prompt'."
-
-    if not _validate_cron(cron):
-        return f"Error: invalid cron expression '{cron}'."
-
-    tasks = _load(config)
-    if any(t["id"] == task_id for t in tasks):
-        return f"Error: task '{task_id}' already exists. Use 'update' to modify it."
-
-    tasks.append({
-        "id": task_id,
-        "cron": cron,
-        "prompt": prompt,
-        "skill": args.get("skill"),
-        "enabled": True,
-        "last_run": 0,
-    })
-    _save(config, tasks)
-    return f"Task '{task_id}' added — scheduled at `{cron}`."
-
-
-def _update(args: dict, config: AgentConfig) -> str:
-    task_id = args.get("id")
-    if not task_id:
-        return "Error: 'update' requires 'id' field."
-
-    tasks = _load(config)
-    task = next((t for t in tasks if t["id"] == task_id), None)
-    if not task:
-        return f"Error: task '{task_id}' not found."
-
-    if "cron" in args:
-        if not _validate_cron(args["cron"]):
-            return f"Error: invalid cron expression '{args['cron']}'."
-        task["cron"] = args["cron"]
-    if "prompt" in args:
-        task["prompt"] = args["prompt"]
-    if "skill" in args:
-        task["skill"] = args["skill"]
-    if "enabled" in args:
-        task["enabled"] = bool(args["enabled"])
-
-    _save(config, tasks)
-    return f"Task '{task_id}' updated."
-
-
-def _remove(args: dict, config: AgentConfig) -> str:
-    task_id = args.get("id")
-    if not task_id:
-        return "Error: 'remove' requires 'id' field."
-
-    tasks = _load(config)
-    original_len = len(tasks)
-    tasks = [t for t in tasks if t["id"] != task_id]
-    if len(tasks) == original_len:
-        return f"Error: task '{task_id}' not found."
-
-    _save(config, tasks)
-    return f"Task '{task_id}' removed."
