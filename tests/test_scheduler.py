@@ -12,6 +12,7 @@ from src.scheduler import (
     _is_due,
     _update_last_run,
     _update_task_fields,
+    run_task_now,
 )
 
 
@@ -253,6 +254,51 @@ class TestCheckAndFire:
         prompt = call_kwargs.kwargs["system_task_prompt"]
         assert "Do special things." in prompt
         assert "do it" in prompt
+
+    async def test_run_task_now_fires_task(self, schedule_file, agent_config):
+        schedule_file.write_text(json.dumps([
+            {"id": "t1", "cron": "0 9 * * *", "prompt": "do it",
+             "skill": None, "enabled": True, "last_run": 0},
+        ]))
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+
+        ok, err = await run_task_now(mock_agent, "t1")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert ok is True
+        assert err is None
+        mock_agent.handle.assert_called_once()
+        call_kwargs = mock_agent.handle.call_args.kwargs
+        assert call_kwargs["system_task_prompt"] == "do it"
+        assert call_kwargs["session_id"].startswith("sched:t1:")
+
+        tasks = json.loads(schedule_file.read_text())
+        assert tasks[0]["last_run"] > 0
+        assert tasks[0]["last_status"] == "success"
+
+    async def test_run_task_now_unknown(self, schedule_file, agent_config):
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        ok, err = await run_task_now(mock_agent, "nope")
+        assert ok is False
+        assert "not found" in err.lower()
+        mock_agent.handle.assert_not_called()
+
+    async def test_run_task_now_ignores_disabled_flag(self, schedule_file, agent_config):
+        # run_now is an explicit user action; the disabled flag should not
+        # block it — that flag only governs the cron loop.
+        schedule_file.write_text(json.dumps([
+            {"id": "t1", "cron": "0 9 * * *", "prompt": "p",
+             "skill": None, "enabled": False, "last_run": 0},
+        ]))
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        ok, _ = await run_task_now(mock_agent, "t1")
+        await asyncio.sleep(0)
+        assert ok is True
+        mock_agent.handle.assert_called_once()
 
     async def test_fires_multiple_tasks_concurrently(self, schedule_file, agent_config):
         schedule_file.write_text(json.dumps([

@@ -14,6 +14,7 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cronstrue@2.50.0/dist/cronstrue.min.js"></script>
 <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" disabled>
 <style>
@@ -648,6 +649,176 @@ body.dragging .drop-hint { display: flex; }
     margin: 8px auto 2px;
   }
 }
+/* === Schedules manager === */
+#schedules-btn {
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--accent); font-family: inherit; font-size: 13px;
+  font-weight: 600; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: background .12s, color .12s, border-color .12s;
+}
+#schedules-btn:hover { border-color: var(--accent); background: var(--hover-bg); }
+#schedules-btn .glyph { font-size: 12px; }
+@media (max-width: 767px) {
+  #schedules-btn { display: none; }
+}
+#schedules-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: color-mix(in srgb, #000 38%, transparent);
+  display: flex;
+}
+#schedules-overlay[hidden] { display: none; }
+#schedules-panel {
+  background: var(--bg); color: var(--fg);
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border);
+  margin: auto; width: 880px; max-width: 96vw;
+  height: 78vh; max-height: 720px;
+  border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.3);
+  overflow: hidden;
+}
+.schedules-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 10px; border-bottom: 1px solid var(--border);
+}
+.schedules-title { font-weight: 700; font-size: 15px; }
+#schedules-close {
+  background: transparent; border: 0; color: var(--header-text);
+  font-size: 15px; cursor: pointer; width: 28px; height: 28px;
+  border-radius: 6px;
+}
+#schedules-close:hover { background: var(--hover-bg); color: var(--accent); }
+#schedules-body {
+  display: flex; flex: 1; min-height: 0;
+}
+#schedules-list {
+  width: 240px; flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 6px 0;
+}
+.sched-row {
+  padding: 9px 14px; cursor: pointer; border-left: 3px solid transparent;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.sched-row:hover { background: var(--hover-bg); }
+.sched-row.active {
+  background: var(--hover-bg);
+  border-left-color: var(--accent);
+}
+.sched-row-head {
+  display: flex; align-items: center; gap: 7px;
+}
+.sched-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--border-strong);
+}
+.sched-dot.ok { background: #34c759; }
+.sched-dot.err { background: #ff453a; }
+.sched-row-name {
+  font-weight: 600; font-size: 13px; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sched-row-cron {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: var(--hint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sched-row-meta {
+  font-size: 11px; color: var(--hint);
+}
+.sched-row.new-row {
+  border-top: 1px solid var(--border); margin-top: 4px; padding-top: 11px;
+  color: var(--accent); font-weight: 600; font-size: 13px;
+}
+#schedules-detail {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.sched-empty {
+  color: var(--hint); font-size: 13px; padding: 18px; text-align: center;
+}
+.sched-detail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+}
+.sched-detail-title {
+  font-weight: 700; font-size: 15px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sched-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--header-text); cursor: pointer;
+  user-select: none;
+}
+.sched-toggle input { margin: 0; }
+.sched-field {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sched-field-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  color: var(--hint); text-transform: uppercase;
+}
+.sched-field input,
+.sched-field select,
+.sched-field textarea {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  font-family: inherit; font-size: 13px; padding: 7px 9px;
+  width: 100%;
+}
+.sched-field input:focus,
+.sched-field select:focus,
+.sched-field textarea:focus {
+  outline: 0; border-color: var(--accent);
+}
+.sched-field input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sched-field input:disabled {
+  opacity: .6; cursor: not-allowed;
+}
+.sched-field textarea {
+  resize: vertical; min-height: 88px;
+}
+.sched-cron-human {
+  font-size: 12px; color: var(--hint); padding-left: 2px;
+}
+.sched-history {
+  background: var(--hover-bg); border-radius: 8px;
+  padding: 10px 12px; font-size: 12px; color: var(--header-text);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sched-history-row {
+  display: flex; gap: 6px;
+}
+.sched-history-row .lbl {
+  color: var(--hint); flex-shrink: 0; min-width: 78px;
+}
+.sched-history-row.error .val {
+  color: #ff453a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; white-space: pre-wrap; word-break: break-word;
+}
+.sched-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto;
+}
+.sched-btn {
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  padding: 7px 14px; font-family: inherit; font-size: 13px;
+  font-weight: 600; cursor: pointer;
+}
+.sched-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sched-btn.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.sched-btn.primary:hover { opacity: .9; color: #fff; }
+.sched-btn.danger:hover { border-color: #ff453a; color: #ff453a; }
+.sched-error {
+  color: #ff453a; font-size: 12px; padding-left: 2px;
+  min-height: 16px;
+}
 </style>
 </head>
 <body>
@@ -675,6 +846,7 @@ body.dragging .drop-hint { display: flex; }
     <textarea id="input" rows="1" placeholder="What would you like to do?"></textarea>
     <div class="composer-row">
       <button id="skills-btn" title="Browse skills" aria-label="Browse skills"><span class="glyph">✦</span>Skills</button>
+      <button id="schedules-btn" title="Manage schedules" aria-label="Manage schedules"><span class="glyph">⏱</span>Schedules</button>
       <button id="attach-btn" title="Attach files" aria-label="Attach files"><span class="glyph">+</span>Attach</button>
       <span class="composer-hint">Enter to send · Shift+Enter for newline · drop or paste files to attach</span>
       <button id="send-btn" data-mode="send" title="Send" aria-label="Send">↑</button>
@@ -706,6 +878,19 @@ body.dragging .drop-hint { display: flex; }
     <div id="skills-list"></div>
     <div class="skills-config-label">SETTINGS</div>
     <div id="skills-config"></div>
+  </div>
+</div>
+
+<div id="schedules-overlay" hidden>
+  <div id="schedules-panel" role="dialog" aria-label="Schedules" aria-modal="true">
+    <div class="schedules-head">
+      <span class="schedules-title">⏱ Schedules</span>
+      <button id="schedules-close" aria-label="Close">✕</button>
+    </div>
+    <div id="schedules-body">
+      <div id="schedules-list"></div>
+      <div id="schedules-detail"></div>
+    </div>
   </div>
 </div>
 
@@ -748,6 +933,11 @@ const skillsClose = document.getElementById("skills-close");
 const skillsSearch = document.getElementById("skills-search");
 const skillsListEl = document.getElementById("skills-list");
 const skillsConfigEl = document.getElementById("skills-config");
+const schedulesBtn = document.getElementById("schedules-btn");
+const schedulesOverlay = document.getElementById("schedules-overlay");
+const schedulesClose = document.getElementById("schedules-close");
+const schedulesListEl = document.getElementById("schedules-list");
+const schedulesDetailEl = document.getElementById("schedules-detail");
 const hljsLight = document.getElementById("hljs-light");
 const hljsDark = document.getElementById("hljs-dark");
 const offlineOverlay = document.getElementById("offline-overlay");
@@ -774,6 +964,17 @@ let inProgressMsg = null; // current assistant DOM node
 let historyAssistant = null;
 // Cached skills_snapshot for this tab; null until first fetch returns.
 let skillsCache = null;
+// Schedule manager state. schedules is the latest snapshot; selectedId
+// points at the row currently shown in the detail pane; draft holds an
+// unsaved new entry when the user clicks "+ New schedule". pendingDraft
+// flags a recently-submitted draft whose ack should select the new id.
+let schedulesState = {
+  schedules: [],
+  selectedId: null,
+  draft: null,
+  pendingDraft: false,
+  lastError: null,
+};
 // Latest conversations_snapshot — drives the sidebar list.
 let conversations = [];
 let backoff = 1000;
@@ -919,6 +1120,32 @@ function onServerMessage(msg) {
   if (msg.type === "conversations_snapshot") {
     conversations = msg.conversations || [];
     renderConversations();
+    return;
+  }
+  if (msg.type === "schedules_snapshot") {
+    schedulesState.schedules = msg.schedules || [];
+    // Promote a just-saved draft so the form shows the persisted row.
+    if (schedulesState.pendingDraft && schedulesState.draft) {
+      const draftId = schedulesState.draft.id;
+      if (schedulesState.schedules.some(s => s.id === draftId)) {
+        schedulesState.selectedId = draftId;
+        schedulesState.draft = null;
+      }
+    }
+    schedulesState.pendingDraft = false;
+    // If the selected row was removed, clear the selection.
+    if (schedulesState.selectedId &&
+        !schedulesState.schedules.some(s => s.id === schedulesState.selectedId) &&
+        !schedulesState.draft) {
+      schedulesState.selectedId = null;
+    }
+    if (!schedulesOverlay.hidden) renderSchedules();
+    return;
+  }
+  if (msg.type === "schedule_mutate_result") {
+    schedulesState.lastError = msg.ok ? null : (msg.error || "Mutation failed.");
+    if (!msg.ok) schedulesState.pendingDraft = false;
+    if (!schedulesOverlay.hidden) renderScheduleDetail();
     return;
   }
   // Otherwise: an OutgoingMessage payload. The portal socket is multiplexed
@@ -1413,6 +1640,359 @@ skillsSearch.addEventListener("input", () => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !skillsOverlay.hidden) closeSkills();
+  if (e.key === "Escape" && !schedulesOverlay.hidden) closeSchedules();
+});
+
+// === Schedules manager ===
+function describeCron(expr) {
+  if (!expr) return "";
+  try {
+    return cronstrue.toString(expr, { use24HourTimeFormat: false });
+  } catch (e) {
+    return "(invalid cron expression)";
+  }
+}
+
+function formatRelative(ts) {
+  if (!ts) return "never";
+  const ms = Date.now() - ts * 1000;
+  if (ms < 0) {
+    // future timestamp (next_run)
+    const fs = -ms / 1000;
+    if (fs < 60) return `in ${Math.round(fs)}s`;
+    if (fs < 3600) return `in ${Math.round(fs / 60)}m`;
+    if (fs < 86400) return `in ${Math.round(fs / 3600)}h`;
+    return `in ${Math.round(fs / 86400)}d`;
+  }
+  const s = ms / 1000;
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+function selectedSchedule() {
+  if (schedulesState.draft && !schedulesState.selectedId) {
+    return schedulesState.draft;
+  }
+  if (schedulesState.selectedId) {
+    return schedulesState.schedules.find(s => s.id === schedulesState.selectedId) || null;
+  }
+  return null;
+}
+
+function renderSchedules() {
+  renderScheduleList();
+  renderScheduleDetail();
+}
+
+function renderScheduleList() {
+  schedulesListEl.innerHTML = "";
+  const { schedules, selectedId, draft } = schedulesState;
+  for (const s of schedules) {
+    const row = document.createElement("div");
+    row.className = "sched-row" + (s.id === selectedId && !draft ? " active" : "");
+    let dotClass = "sched-dot";
+    if (!s.enabled) dotClass += "";
+    else if (s.last_status === "error") dotClass += " err";
+    else dotClass += " ok";
+    const head = document.createElement("div");
+    head.className = "sched-row-head";
+    const dot = document.createElement("span");
+    dot.className = dotClass;
+    const name = document.createElement("span");
+    name.className = "sched-row-name";
+    name.textContent = s.id;
+    head.appendChild(dot);
+    head.appendChild(name);
+    const cron = document.createElement("div");
+    cron.className = "sched-row-cron";
+    cron.textContent = s.cron;
+    const meta = document.createElement("div");
+    meta.className = "sched-row-meta";
+    meta.textContent = s.last_run ? `Last: ${formatRelative(s.last_run)}` : "Never run";
+    row.appendChild(head);
+    row.appendChild(cron);
+    row.appendChild(meta);
+    row.addEventListener("click", () => selectSchedule(s.id));
+    schedulesListEl.appendChild(row);
+  }
+  // Draft row appears as active if present.
+  if (draft) {
+    const row = document.createElement("div");
+    row.className = "sched-row active";
+    row.innerHTML = '<div class="sched-row-head"><span class="sched-row-name">New schedule</span></div>'
+      + '<div class="sched-row-meta">Unsaved</div>';
+    schedulesListEl.appendChild(row);
+  }
+  // "+ New schedule" row at the bottom.
+  const newRow = document.createElement("div");
+  newRow.className = "sched-row new-row";
+  newRow.textContent = "+ New schedule";
+  newRow.addEventListener("click", startScheduleDraft);
+  schedulesListEl.appendChild(newRow);
+  if (!schedules.length && !draft) {
+    const empty = document.createElement("div");
+    empty.className = "sched-empty";
+    empty.textContent = "No schedules yet.";
+    schedulesListEl.insertBefore(empty, newRow);
+  }
+}
+
+function renderScheduleDetail() {
+  schedulesDetailEl.innerHTML = "";
+  const s = selectedSchedule();
+  if (!s) {
+    const empty = document.createElement("div");
+    empty.className = "sched-empty";
+    empty.textContent = "Select a schedule on the left, or click \"+ New schedule\" to create one.";
+    schedulesDetailEl.appendChild(empty);
+    return;
+  }
+  const isNew = !!schedulesState.draft && !schedulesState.selectedId;
+  // Build skill <option> list from the skills picker cache.
+  const skillOptions = ["<option value=\"\">— none —</option>"];
+  if (skillsCache) {
+    for (const sk of skillsCache) {
+      skillOptions.push(`<option value="${sk.name}">${sk.display_name || sk.name}</option>`);
+    }
+  } else if (s.skill) {
+    skillOptions.push(`<option value="${s.skill}">${s.skill}</option>`);
+  }
+
+  const wrap = document.createElement("div");
+  wrap.style.display = "flex";
+  wrap.style.flexDirection = "column";
+  wrap.style.gap = "12px";
+  wrap.style.flex = "1";
+
+  const head = document.createElement("div");
+  head.className = "sched-detail-head";
+  const title = document.createElement("div");
+  title.className = "sched-detail-title";
+  title.textContent = isNew ? "New schedule" : s.id;
+  const toggle = document.createElement("label");
+  toggle.className = "sched-toggle";
+  toggle.innerHTML = '<input type="checkbox" id="sched-enabled"> Enabled';
+  head.appendChild(title);
+  head.appendChild(toggle);
+  wrap.appendChild(head);
+
+  const idField = makeField("ID", "input", { id: "sched-id", value: s.id || "", disabled: !isNew });
+  const cronField = makeField("Cron expression", "input",
+    { id: "sched-cron", value: s.cron || "", className: "mono",
+      placeholder: "0 9 * * *" });
+  const cronHuman = document.createElement("div");
+  cronHuman.className = "sched-cron-human";
+  cronHuman.id = "sched-cron-human";
+  cronField.appendChild(cronHuman);
+
+  const skillField = document.createElement("div");
+  skillField.className = "sched-field";
+  skillField.innerHTML = '<label class="sched-field-label">Skill</label>'
+    + `<select id="sched-skill">${skillOptions.join("")}</select>`;
+
+  const promptField = makeField("Prompt", "textarea",
+    { id: "sched-prompt", value: s.prompt || "", rows: 4 });
+
+  wrap.appendChild(idField);
+  wrap.appendChild(cronField);
+  wrap.appendChild(skillField);
+  wrap.appendChild(promptField);
+
+  if (!isNew) {
+    const history = document.createElement("div");
+    history.className = "sched-history";
+    history.appendChild(makeHistoryRow("Last run", s.last_run ? formatRelative(s.last_run) : "never"));
+    if (s.last_status) {
+      history.appendChild(makeHistoryRow("Status", s.last_status));
+    }
+    if (s.last_error) {
+      const errRow = makeHistoryRow("Last error", s.last_error);
+      errRow.classList.add("error");
+      history.appendChild(errRow);
+    }
+    history.appendChild(makeHistoryRow("Next run", s.next_run ? formatRelative(s.next_run) : "—"));
+    wrap.appendChild(history);
+  }
+
+  const errBox = document.createElement("div");
+  errBox.className = "sched-error";
+  errBox.textContent = schedulesState.lastError || "";
+  wrap.appendChild(errBox);
+
+  const actions = document.createElement("div");
+  actions.className = "sched-actions";
+  if (!isNew) {
+    const delBtn = document.createElement("button");
+    delBtn.className = "sched-btn danger";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () => deleteSchedule(s.id));
+    actions.appendChild(delBtn);
+
+    const runBtn = document.createElement("button");
+    runBtn.className = "sched-btn";
+    runBtn.textContent = "Run now";
+    runBtn.addEventListener("click", () => runScheduleNow(s.id));
+    actions.appendChild(runBtn);
+  }
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "sched-btn primary";
+  saveBtn.textContent = isNew ? "Create" : "Save";
+  saveBtn.addEventListener("click", () => saveSchedule(isNew));
+  actions.appendChild(saveBtn);
+  wrap.appendChild(actions);
+
+  schedulesDetailEl.appendChild(wrap);
+
+  // Wire enabled checkbox + cron live preview.
+  const enabledEl = document.getElementById("sched-enabled");
+  enabledEl.checked = s.enabled !== false;
+  const cronEl = document.getElementById("sched-cron");
+  const updateHuman = () => { cronHuman.textContent = describeCron(cronEl.value); };
+  updateHuman();
+  cronEl.addEventListener("input", updateHuman);
+  // Select the right skill option (after DOM insert so options exist).
+  const skillEl = document.getElementById("sched-skill");
+  skillEl.value = s.skill || "";
+}
+
+function makeField(label, kind, opts) {
+  const wrap = document.createElement("div");
+  wrap.className = "sched-field";
+  const lab = document.createElement("label");
+  lab.className = "sched-field-label";
+  lab.textContent = label;
+  wrap.appendChild(lab);
+  let el;
+  if (kind === "textarea") {
+    el = document.createElement("textarea");
+    el.rows = opts.rows || 3;
+    el.value = opts.value || "";
+  } else {
+    el = document.createElement("input");
+    el.type = "text";
+    el.value = opts.value || "";
+  }
+  if (opts.id) el.id = opts.id;
+  if (opts.className) el.className = opts.className;
+  if (opts.placeholder) el.placeholder = opts.placeholder;
+  if (opts.disabled) el.disabled = true;
+  wrap.appendChild(el);
+  return wrap;
+}
+
+function makeHistoryRow(label, value) {
+  const row = document.createElement("div");
+  row.className = "sched-history-row";
+  const lbl = document.createElement("span");
+  lbl.className = "lbl";
+  lbl.textContent = label + ":";
+  const val = document.createElement("span");
+  val.className = "val";
+  val.textContent = value;
+  row.appendChild(lbl);
+  row.appendChild(val);
+  return row;
+}
+
+function selectSchedule(id) {
+  schedulesState.selectedId = id;
+  schedulesState.draft = null;
+  schedulesState.lastError = null;
+  renderSchedules();
+}
+
+function startScheduleDraft() {
+  schedulesState.draft = {
+    id: "", cron: "", prompt: "", skill: null, enabled: true,
+  };
+  schedulesState.selectedId = null;
+  schedulesState.lastError = null;
+  renderSchedules();
+  const idEl = document.getElementById("sched-id");
+  if (idEl) idEl.focus();
+}
+
+function readForm() {
+  return {
+    id: (document.getElementById("sched-id").value || "").trim(),
+    cron: (document.getElementById("sched-cron").value || "").trim(),
+    skill: (document.getElementById("sched-skill").value || "") || null,
+    prompt: (document.getElementById("sched-prompt").value || "").trim(),
+    enabled: document.getElementById("sched-enabled").checked,
+  };
+}
+
+function saveSchedule(isNew) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const form = readForm();
+  if (!form.id || !form.cron || !form.prompt) {
+    schedulesState.lastError = "id, cron, and prompt are all required.";
+    renderScheduleDetail();
+    return;
+  }
+  if (isNew && !/^[a-z0-9-]+$/.test(form.id)) {
+    schedulesState.lastError = "id must match ^[a-z0-9-]+$";
+    renderScheduleDetail();
+    return;
+  }
+  if (isNew) {
+    schedulesState.draft = form;
+    schedulesState.pendingDraft = true;
+  }
+  schedulesState.lastError = null;
+  ws.send(JSON.stringify({
+    command: "schedule_mutate",
+    session_id: sessionId,
+    action: isNew ? "add" : "update",
+    task: form,
+  }));
+}
+
+function deleteSchedule(id) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!window.confirm(`Delete schedule "${id}"?`)) return;
+  schedulesState.lastError = null;
+  ws.send(JSON.stringify({
+    command: "schedule_mutate",
+    session_id: sessionId,
+    action: "remove",
+    task: { id },
+  }));
+}
+
+function runScheduleNow(id) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  schedulesState.lastError = null;
+  ws.send(JSON.stringify({
+    command: "schedule_mutate",
+    session_id: sessionId,
+    action: "run_now",
+    task: { id },
+  }));
+}
+
+function openSchedules() {
+  schedulesOverlay.hidden = false;
+  schedulesState.lastError = null;
+  schedulesState.draft = null;
+  renderSchedules();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      command: "schedules_request", session_id: sessionId,
+    }));
+  }
+}
+
+function closeSchedules() {
+  schedulesOverlay.hidden = true;
+}
+
+schedulesBtn.addEventListener("click", openSchedules);
+schedulesClose.addEventListener("click", closeSchedules);
+schedulesOverlay.addEventListener("click", (e) => {
+  if (e.target === schedulesOverlay) closeSchedules();
 });
 
 // === Send ===

@@ -25,8 +25,9 @@ from src.config import AgentConfig, EmailChannelConfig
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
-from src.scheduler import run_scheduler
+from src.scheduler import run_scheduler, run_task_now
 from src.skills import load_skill, portal_skill_list
+from src.tools import schedule_tool
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
 
@@ -629,6 +630,29 @@ async def main():
     portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
     portal_token = os.environ.get("CURUNIR_PORTAL_TOKEN", "").strip()
     if portal_url and portal_token:
+        def schedules_mutator(action: str, task: dict) -> tuple[bool, str | None, str | None]:
+            task_id = task.get("id") if isinstance(task, dict) else None
+            if action == "add":
+                ok, err = schedule_tool.add_task(agent.config, task)
+                return ok, err, task_id
+            if action == "update":
+                ok, err = schedule_tool.update_task(agent.config, task)
+                return ok, err, task_id
+            if action == "remove":
+                ok, err = schedule_tool.remove_task(agent.config, task_id or "")
+                return ok, err, task_id
+            if action == "run_now":
+                if not task_id:
+                    return False, "'id' is required.", None
+                if not schedule_tool.task_exists(agent.config, task_id):
+                    return False, f"task '{task_id}' not found.", task_id
+                # Same semantics as a cron tick: spawn and don't await.
+                # run_task_now itself spawns _run_task via create_task, so
+                # this outer coroutine returns quickly.
+                asyncio.create_task(run_task_now(agent, task_id))
+                return True, None, task_id
+            return False, f"unknown action '{action}'.", task_id
+
         portal_channel = PortalChannel(
             in_queue=in_queue,
             url=portal_url,
@@ -636,6 +660,8 @@ async def main():
             history_provider=lambda sid: agent.history_snapshot(sid),
             skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
             conversations_provider=lambda: agent.conversations_snapshot(),
+            schedules_provider=lambda: schedule_tool.list_tasks(agent.config),
+            schedules_mutator=schedules_mutator,
             cancel_session=agent.request_cancel,
         )
         channels["portal"] = portal_channel
