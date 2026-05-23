@@ -33,6 +33,9 @@ services:
       SEED_CONTAINER_TOKEN: ${CURUNIR_PORTAL_TOKEN:-dev-seed-token-change-me}
     ports:
       - "8000:8000"
+    volumes:
+      - ./portal/static:/app/portal/static
+      - ./portal/templates:/app/portal/templates
 
   curunir:
     image: ghcr.io/jalemieux/curunir:${CURUNIR_TAG:-latest}
