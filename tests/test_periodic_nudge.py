@@ -165,3 +165,46 @@ async def test_disabled_flag_suppresses_fire(mock_agent, tmp_path):
         pass
 
     assert not mock_agent.handle.called
+
+
+@pytest.mark.asyncio
+async def test_concurrent_user_reply_during_handle_not_clobbered(mock_agent, tmp_path):
+    """If the user replies (state file rewritten) while agent.handle is
+    awaiting, the post-handle save must not overwrite the fresh state."""
+    from run import periodic_nudge
+
+    state_path = tmp_path / "nudge_state.json"
+    _write_state(state_path, last_user_msg_at=time.time() - 3 * 86400)
+
+    fresh_reply_time = time.time()
+
+    async def simulate_user_reply(**kwargs):
+        # Mid-handle, the user replies and agent_worker writes fresh state.
+        _write_state(
+            state_path,
+            last_user_msg_at=fresh_reply_time,
+            tiers_sent=[],
+            last_weekly_at=0.0,
+        )
+
+    mock_agent.handle.side_effect = simulate_user_reply
+
+    task = asyncio.create_task(periodic_nudge(
+        mock_agent,
+        interval_sec=0,
+        state_path=state_path,
+        recipient="user@example.com",
+        enabled=True,
+    ))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    final = json.loads(state_path.read_text())
+    # The fresh reply timestamp must be preserved, NOT the stale 3-day-ago one.
+    assert abs(final["last_user_msg_at"] - fresh_reply_time) < 1.0
+    # The ladder must remain empty (idle period reset by the reply).
+    assert final["tiers_sent_this_idle"] == []
