@@ -578,7 +578,15 @@ async def periodic_nudge(
             if fired == "weekly":
                 state.last_weekly_at = now
             elif not user_replied_during_handle:
-                state.tiers_sent_this_idle.append(fired)
+                # Sending a higher-severity ladder tier implicitly consumes the
+                # lower ones — otherwise after a long downtime we'd fire
+                # 14d → 7d → 2d on successive ticks (reverse severity order).
+                consume = False
+                for tier, _threshold in _NUDGE_LADDER:
+                    if tier == fired:
+                        consume = True
+                    if consume and tier not in state.tiers_sent_this_idle:
+                        state.tiers_sent_this_idle.append(tier)
             state.save()
         except Exception as e:
             logger.exception("Nudge task failed: %s", e)
