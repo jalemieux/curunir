@@ -515,10 +515,6 @@ async def periodic_nudge(
 
     Sleep-first so a container restart doesn't trigger an immediate pass.
     """
-    LADDER = [("14d", 14 * 86400), ("7d", 7 * 86400), ("2d", 2 * 86400)]
-    WEEKLY_INTERVAL = 7 * 86400
-    ACTIVE_THRESHOLD = 2 * 86400
-
     while True:
         await asyncio.sleep(interval_sec)
         if not enabled:
@@ -529,14 +525,14 @@ async def periodic_nudge(
             idle = now - state.last_user_msg_at
 
             fired: str | None = None
-            for tier, threshold in LADDER:
+            for tier, threshold in _NUDGE_LADDER:
                 if idle >= threshold and tier not in state.tiers_sent_this_idle:
                     fired = tier
                     break
 
             if fired is None:
-                weekly_due = (now - state.last_weekly_at) >= WEEKLY_INTERVAL
-                if weekly_due and idle < ACTIVE_THRESHOLD:
+                weekly_due = (now - state.last_weekly_at) >= _NUDGE_WEEKLY_INTERVAL
+                if weekly_due and idle < _NUDGE_ACTIVE_THRESHOLD:
                     fired = "weekly"
 
             if fired is None:
@@ -564,9 +560,13 @@ async def periodic_nudge(
                 system_task_prompt=system_task_prompt,
             )
 
+            # Re-load so we don't clobber a concurrent record_user_message
+            # write that happened while agent.handle was awaiting.
+            state = NudgeState.load(state_path)
             if fired == "weekly":
                 state.last_weekly_at = now
-            else:
+            elif fired not in state.tiers_sent_this_idle:
+                # Don't append if the idle period reset during handle (user replied).
                 state.tiers_sent_this_idle.append(fired)
             state.save()
         except Exception as e:
@@ -584,6 +584,10 @@ _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 _LOG_MAX_BYTES = 10_000_000
 _LOG_BACKUP_COUNT = 3
+
+_NUDGE_LADDER = [("14d", 14 * 86400), ("7d", 7 * 86400), ("2d", 2 * 86400)]
+_NUDGE_WEEKLY_INTERVAL = 7 * 86400
+_NUDGE_ACTIVE_THRESHOLD = 2 * 86400
 
 
 def _configure_logging(log_file: str | None) -> None:
