@@ -220,3 +220,47 @@ async def test_concurrent_user_reply_during_handle_not_clobbered(mock_agent, tmp
     # Ladder remains empty — the 2d tier fired during the OLD idle period;
     # the user reply started a new idle period and we must not pre-mark it.
     assert final["tiers_sent_this_idle"] == []
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_records_inbound(tmp_path, agent_config):
+    """Each IncomingMessage dequeued bumps last_user_msg_at and clears the ladder."""
+    from unittest.mock import AsyncMock
+
+    from run import agent_worker
+    from src.channels.base import IncomingMessage
+
+    state_path = tmp_path / "nudge_state.json"
+    state_path.write_text(json.dumps({
+        "last_user_msg_at": 1.0,
+        "tiers_sent_this_idle": ["2d", "7d"],
+        "last_weekly_at": 0.0,
+    }))
+
+    in_queue = asyncio.Queue()
+    out_queue = asyncio.Queue()
+    await in_queue.put(IncomingMessage(
+        content="hello",
+        session_id="cli",
+        channel="ws",
+        reply_address={},
+    ))
+
+    agent = AsyncMock()
+    agent.config = agent_config
+    agent.sessions = {}
+    agent.handle.return_value = "ok"
+
+    task = asyncio.create_task(agent_worker(agent, in_queue, out_queue, nudge_state_path=state_path))
+    try:
+        await asyncio.wait_for(out_queue.get(), timeout=2.0)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    state = json.loads(state_path.read_text())
+    assert state["last_user_msg_at"] > time.time() - 60
+    assert state["tiers_sent_this_idle"] == []

@@ -298,7 +298,13 @@ async def _vision_prepass(
     return out
 
 
-async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+async def agent_worker(
+    agent: Agent,
+    in_queue: asyncio.Queue,
+    out_queue: asyncio.Queue,
+    *,
+    nudge_state_path: Path | None = None,
+):
     """Bridge between the message queues and the agent loop.
 
     One IncomingMessage per iteration: handle control commands inline, or
@@ -308,6 +314,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
     """
     while True:
         msg = await in_queue.get()
+        if nudge_state_path is not None:
+            try:
+                NudgeState.record_user_message(nudge_state_path)
+            except Exception:
+                logger.exception("Failed to record inbound for nudge state")
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
         if msg.attachments:
             logger.info(
