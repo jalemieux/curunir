@@ -34,6 +34,17 @@ def test_save_and_reload_round_trip(tmp_path):
     assert reloaded.last_weekly_at == 1700100000
 
 
+def test_save_creates_parent_directories(tmp_path):
+    """save() should mkdir -p the parent so first-run on a fresh install works."""
+    path = tmp_path / "subdir" / "nested" / "nudge_state.json"
+    assert not path.parent.exists()
+    state = NudgeState.load(path)
+    assert path.exists()
+    # And the on-disk JSON is well-formed.
+    data = json.loads(path.read_text())
+    assert "last_user_msg_at" in data
+
+
 def test_record_user_message_resets_ladder(tmp_path):
     path = tmp_path / "nudge_state.json"
     state = NudgeState.load(path)
