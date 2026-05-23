@@ -25,6 +25,7 @@ from src.config import AgentConfig, EmailChannelConfig
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
+from src.nudge_state import NudgeState
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
@@ -496,6 +497,80 @@ async def periodic_dreaming(agent: Agent, interval_sec: int):
             )
         except Exception as e:
             logger.exception("Dreaming task failed: %s", e)
+
+
+async def periodic_nudge(
+    agent: Agent,
+    interval_sec: int,
+    state_path: Path,
+    recipient: str,
+    enabled: bool,
+):
+    """Periodic re-engagement and proactive nudge engine.
+
+    Re-engagement ladder fires at 2d / 7d / 14d of user inactivity, each
+    tier at most once per idle period. A weekly proactive nudge fires for
+    active users (idle < 2d) when at least 7d has elapsed since the last
+    weekly. Ladder and weekly are mutually exclusive per tick; ladder wins.
+
+    Sleep-first so a container restart doesn't trigger an immediate pass.
+    """
+    LADDER = [("14d", 14 * 86400), ("7d", 7 * 86400), ("2d", 2 * 86400)]
+    WEEKLY_INTERVAL = 7 * 86400
+    ACTIVE_THRESHOLD = 2 * 86400
+
+    while True:
+        await asyncio.sleep(interval_sec)
+        if not enabled:
+            continue
+        try:
+            state = NudgeState.load(state_path)
+            now = time.time()
+            idle = now - state.last_user_msg_at
+
+            fired: str | None = None
+            for tier, threshold in LADDER:
+                if idle >= threshold and tier not in state.tiers_sent_this_idle:
+                    fired = tier
+                    break
+
+            if fired is None:
+                weekly_due = (now - state.last_weekly_at) >= WEEKLY_INTERVAL
+                if weekly_due and idle < ACTIVE_THRESHOLD:
+                    fired = "weekly"
+
+            if fired is None:
+                continue
+
+            skill_content = load_skill("nudge", agent.config.skill_dirs)
+            if skill_content.startswith("Skill not found"):
+                logger.warning("Nudge skill not found; skipping")
+                continue
+
+            idle_days = int(idle // 86400)
+            system_task_prompt = (
+                f"{skill_content}\n\n"
+                f"## Runtime context\n\n"
+                f"Tier: {fired}\n"
+                f"Recipient: {recipient}\n"
+                f"Idle days: {idle_days}\n"
+            )
+            session_id = f"system:nudge:{fired}:{int(now)}"
+            logger.info("Firing nudge tier=%s (session %s)", fired, session_id)
+
+            await agent.handle(
+                message="",
+                session_id=session_id,
+                system_task_prompt=system_task_prompt,
+            )
+
+            if fired == "weekly":
+                state.last_weekly_at = now
+            else:
+                state.tiers_sent_this_idle.append(fired)
+            state.save()
+        except Exception as e:
+            logger.exception("Nudge task failed: %s", e)
 
 
 logger = logging.getLogger(__name__)
