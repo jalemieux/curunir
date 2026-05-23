@@ -563,10 +563,10 @@ async def periodic_nudge(
             # Re-load so we don't clobber a concurrent record_user_message
             # write that happened while agent.handle was awaiting.
             state = NudgeState.load(state_path)
+            user_replied_during_handle = state.last_user_msg_at > now
             if fired == "weekly":
                 state.last_weekly_at = now
-            elif fired not in state.tiers_sent_this_idle:
-                # Don't append if the idle period reset during handle (user replied).
+            elif not user_replied_during_handle:
                 state.tiers_sent_this_idle.append(fired)
             state.save()
         except Exception as e:

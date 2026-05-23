@@ -170,22 +170,33 @@ async def test_disabled_flag_suppresses_fire(mock_agent, tmp_path):
 @pytest.mark.asyncio
 async def test_concurrent_user_reply_during_handle_not_clobbered(mock_agent, tmp_path):
     """If the user replies (state file rewritten) while agent.handle is
-    awaiting, the post-handle save must not overwrite the fresh state."""
+    awaiting, the post-handle save must not re-add a tier the reply cleared."""
     from run import periodic_nudge
 
     state_path = tmp_path / "nudge_state.json"
     _write_state(state_path, last_user_msg_at=time.time() - 3 * 86400)
 
-    fresh_reply_time = time.time()
+    fresh_reply_time = None
+    call_count = 0
 
     async def simulate_user_reply(**kwargs):
-        # Mid-handle, the user replies and agent_worker writes fresh state.
-        _write_state(
-            state_path,
-            last_user_msg_at=fresh_reply_time,
-            tiers_sent=[],
-            last_weekly_at=0.0,
-        )
+        nonlocal call_count, fresh_reply_time
+        call_count += 1
+        if call_count == 1:
+            # Mid-handle, user replies — agent_worker writes fresh state.
+            # Capture the reply timestamp HERE (after the loop's `now`) so the
+            # post-handle reload sees last_user_msg_at > now, just like a real
+            # concurrent record_user_message write would.
+            fresh_reply_time = time.time()
+            _write_state(
+                state_path,
+                last_user_msg_at=fresh_reply_time,
+                tiers_sent=[],
+                last_weekly_at=0.0,
+            )
+        else:
+            # Stop the loop so subsequent ticks don't mask the first-tick result.
+            raise asyncio.CancelledError()
 
     mock_agent.handle.side_effect = simulate_user_reply
 
@@ -204,7 +215,8 @@ async def test_concurrent_user_reply_during_handle_not_clobbered(mock_agent, tmp
         pass
 
     final = json.loads(state_path.read_text())
-    # The fresh reply timestamp must be preserved, NOT the stale 3-day-ago one.
+    # Fresh reply timestamp preserved, not the stale 3-day-ago one.
     assert abs(final["last_user_msg_at"] - fresh_reply_time) < 1.0
-    # The ladder must remain empty (idle period reset by the reply).
+    # Ladder remains empty — the 2d tier fired during the OLD idle period;
+    # the user reply started a new idle period and we must not pre-mark it.
     assert final["tiers_sent_this_idle"] == []
