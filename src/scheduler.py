@@ -97,6 +97,33 @@ async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -
         logger.error("Scheduled task failed: %s — %s", task_id, e)
 
 
+async def run_task_now(agent, task_id: str) -> tuple[bool, str | None]:
+    """Fire a single scheduled task immediately.
+
+    Uses the same dispatch path as a real cron tick — ``_run_task`` is
+    spawned via ``asyncio.create_task`` and updates ``last_run`` /
+    ``last_status`` the same way. Returns once the task is scheduled
+    (not awaited); errors surface in ``last_error`` on the next snapshot.
+    """
+    tasks = _load_tasks(agent.config)
+    task = next((t for t in tasks if t["id"] == task_id), None)
+    if not task:
+        return False, f"task '{task_id}' not found."
+
+    prompt = task.get("prompt", "")
+    if task.get("skill"):
+        skill_content = load_skill(task["skill"], agent.config.skill_dirs)
+        if not skill_content.startswith("Skill not found"):
+            prompt = skill_content + "\n\n" + prompt
+
+    timestamp = int(time.time())
+    session_id = f"sched:{task_id}:{timestamp}"
+    _update_task_fields(agent.config, task_id, {"last_attempt_at": timestamp})
+    logger.info("Manually firing scheduled task: %s (session %s)", task_id, session_id)
+    asyncio.create_task(_run_task(agent, agent.config, task_id, session_id, prompt))
+    return True, None
+
+
 async def _check_and_fire(agent) -> list[str]:
     """Check all tasks and fire any that are due. Returns list of fired task IDs."""
     tasks = _load_tasks(agent.config)

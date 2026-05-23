@@ -215,3 +215,61 @@ def test_conversations_snapshot_routes_by_session_id(sync_client, monkeypatch):
 
     targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
     assert any(sid == "tab-C" and p == snapshot for sid, p in targets)
+
+
+def test_schedules_snapshot_routes_by_session_id(sync_client, monkeypatch):
+    user = _create_user(sync_client, "schedsnap@example.com")
+    captured = []
+
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
+        return 1
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        snapshot = {
+            "type": "schedules_snapshot",
+            "session_id": "tab-X",
+            "schedules": [{
+                "id": "t1", "cron": "0 9 * * *",
+                "cron_human": "Every day at 9:00 AM",
+                "prompt": "p", "skill": None, "enabled": True,
+                "last_run": 0, "last_status": None,
+                "last_error": None, "next_run": 0,
+            }],
+        }
+        ws.send_text(json.dumps(snapshot))
+        ws.close()
+
+    targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
+    assert any(sid == "tab-X" and p == snapshot for sid, p in targets)
+
+
+def test_schedule_mutate_result_routes_by_session_id(sync_client, monkeypatch):
+    user = _create_user(sync_client, "schedres@example.com")
+    captured = []
+
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
+        return 1
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        result = {
+            "type": "schedule_mutate_result",
+            "session_id": "tab-Y",
+            "action": "add", "ok": True, "task_id": "t1", "error": None,
+        }
+        ws.send_text(json.dumps(result))
+        ws.close()
+
+    targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
+    assert any(sid == "tab-Y" and p == result for sid, p in targets)

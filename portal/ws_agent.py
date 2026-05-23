@@ -108,6 +108,15 @@ async def ws_agent(ws: WebSocket) -> None:
                     )
                     continue
                 await routing.route_to_session(user.id, session_id, raw)
+            elif mtype in ("schedules_snapshot", "schedule_mutate_result"):
+                session_id = msg.get("session_id")
+                if not isinstance(session_id, str) or not session_id:
+                    logger.warning(
+                        "%s without session_id; dropping", mtype,
+                        extra={"user_id": user.id},
+                    )
+                    continue
+                await routing.route_to_session(user.id, session_id, raw)
             else:
                 logger.warning("agent sent unknown type %r", mtype,
                                extra={"user_id": user.id})
