@@ -733,6 +733,20 @@ async def main():
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
+    nudge_enabled = os.environ.get("NUDGE_ENABLED", "false").lower() == "true"
+    nudge_tick = int(os.environ.get("NUDGE_TICK_SEC", "3600"))
+    nudge_state_path = Path(agent.config.context_dir) / "nudge_state.json"
+    nudge_recipient = (
+        email_config.allowed_senders[0]
+        if email_config.allowed_senders
+        else ""
+    )
+    if nudge_enabled and (not email_config.enabled or not nudge_recipient):
+        logger.warning(
+            "NUDGE_ENABLED=true but EMAIL_ENABLED is false or "
+            "EMAIL_ALLOWED_SENDERS is empty; disabling nudge"
+        )
+        nudge_enabled = False
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
@@ -741,9 +755,19 @@ async def main():
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
-        tg.create_task(agent_worker(agent, in_queue, out_queue))
+        tg.create_task(agent_worker(
+            agent, in_queue, out_queue,
+            nudge_state_path=nudge_state_path if nudge_enabled else None,
+        ))
         tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(periodic_dreaming(agent, dreaming_interval))
+        tg.create_task(periodic_nudge(
+            agent,
+            interval_sec=nudge_tick,
+            state_path=nudge_state_path,
+            recipient=nudge_recipient,
+            enabled=nudge_enabled,
+        ))
         tg.create_task(run_scheduler(agent))
 
 
