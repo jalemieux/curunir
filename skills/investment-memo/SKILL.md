@@ -231,7 +231,7 @@ repeat the marker for multiple sources on one claim. Every marker needs
 exactly one matching `#src-N` anchor. The `## Fact-Check Addendum` (Step 6)
 goes *after* this `## Sources` section.
 
-Write the markdown to `workspace/generated/{ticker-or-slug}-{YYYY-MM-DD}.md`.
+Write the markdown to `context/workspace/generated/{ticker-or-slug}-{YYYY-MM-DD}.md`.
 
 **Honesty rules** (lifted from `financial-analysis` — non-negotiable):
 
@@ -267,7 +267,7 @@ CONTENT_TO_FACT_CHECK>>>
 """)
 ```
 
-For drafts >50KB, write to `workspace/scratch/memo-{slug}-{date}.md`
+For drafts >50KB, write to `context/workspace/scratch/memo-{slug}-{date}.md`
 first and give the sub-agent the path.
 
 When the sub-agent returns:
@@ -297,7 +297,7 @@ LaTeX-via-pandoc path `deep-research` uses, which produces a cleanly
 typeset document:
 
 ```bash
-pandoc workspace/generated/{slug}-{date}.md -o workspace/generated/{slug}-{date}.pdf
+pandoc context/workspace/generated/{slug}-{date}.md -o context/workspace/generated/{slug}-{date}.pdf
 ```
 
 Do **not** render via HTML, headless Chromium, weasyprint, or a CSS
@@ -305,7 +305,7 @@ stylesheet — that route produces a cheap-looking web-page printout
 instead of a typeset memo. If a comparison table is too wide to fit the
 page, the fix is a narrower table (Step 5), not a different renderer.
 
-Attach the PDF: `attach(path="workspace/generated/{slug}-{date}.pdf")`. If
+Attach the PDF: `attach(path="context/workspace/generated/{slug}-{date}.pdf")`. If
 pandoc fails, attach the `.md` as fallback.
 
 In the text reply, post the **Executive Summary** verbatim plus one line on
