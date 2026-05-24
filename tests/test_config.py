@@ -7,7 +7,7 @@ from src.config import AgentConfig, EmailChannelConfig
 def test_default_config():
     config = AgentConfig()
     assert config.model == "anthropic/claude-sonnet-4-20250514"
-    assert config.max_iterations == 75
+    assert config.max_iterations == 200
     assert config.identity_file == Path("./context/identity.md")
     assert config.skill_dirs == [Path("./skills"), Path("./context/skills")]
     assert config.vision_model is None
