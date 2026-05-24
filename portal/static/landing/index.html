@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir — A private research assistant.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --bg-2: #f0f0ef;
+    --ink: #0a0a0a;
+    --ink-2: #525252;
+    --ink-3: #a3a3a3;
+    --rule: #e5e5e5;
+    --accent: #e63946;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+
+  /* Nav */
+  nav {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+  }
+  nav .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+  }
+  nav .brand .tri {
+    color: var(--accent);
+    font-size: 14px;
+    line-height: 1;
+  }
+  nav a {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 8px 14px;
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  nav a:hover { background: var(--ink); color: var(--bg); }
+
+  /* Hero */
+  .hero {
+    padding: 120px 0 100px;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .hero .side {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.8;
+    padding-top: 12px;
+  }
+  .hero .side .k { color: var(--ink-2); }
+  .hero .side .row { display: flex; gap: 10px; margin-bottom: 4px; }
+  .hero .side .row span:first-child { color: var(--accent); width: 12px; }
+  .hero h1 {
+    font-weight: 500;
+    font-size: clamp(48px, 7vw, 92px);
+    line-height: 0.98;
+    letter-spacing: -0.04em;
+    margin-bottom: 32px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .light { font-weight: 300; color: var(--ink-2); }
+  .hero p {
+    font-size: 19px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 620px;
+    margin-bottom: 40px;
+  }
+  .cta-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    text-decoration: none;
+    padding: 14px 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); }
+  .btn .arr { font-family: 'Geist Mono', monospace; }
+
+  /* Sections */
+  section {
+    padding: 96px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .sec-head {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 56px;
+    align-items: baseline;
+  }
+  .sec-head .label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .sec-head .label::before {
+    content: "▲ ";
+    color: var(--accent);
+  }
+  .sec-head h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.5vw, 40px);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    max-width: 700px;
+  }
+  .sec-head h2 .accent { color: var(--accent); }
+
+  /* Uses */
+  .uses {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+  }
+  .uses .spacer {}
+  .uses .list {
+    border-top: 1px solid var(--rule);
+  }
+  .use {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 20px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .use .n {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .use h3 {
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    letter-spacing: -0.015em;
+  }
+  .use p {
+    color: var(--ink-2);
+    font-size: 15.5px;
+    max-width: 620px;
+  }
+
+  /* Reports carousel — frame stays brutalist, slides mimic real chat UI */
+  .reports-wrap {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 40px;
+  }
+  .carousel { position: relative; min-width: 0; max-width: 100%; }
+  .carousel-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .carousel-controls .counter { color: var(--ink); }
+  .carousel-controls .counter .of { color: var(--ink-3); margin: 0 4px; }
+  .carousel-controls .tag {
+    color: var(--accent);
+    margin-left: 12px;
+  }
+  .carousel-controls .nav-btns { display: flex; gap: 8px; }
+  .carousel-controls .nav-btns button {
+    width: 36px; height: 36px;
+    border: 1px solid var(--ink);
+    background: var(--bg);
+    color: var(--ink);
+    cursor: pointer;
+    font-family: 'Geist Mono', monospace;
+    font-size: 14px;
+    line-height: 1;
+    transition: all 150ms;
+  }
+  .carousel-controls .nav-btns button:hover { background: var(--ink); color: var(--bg); }
+  .carousel-controls .nav-btns button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .carousel-track {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    border: 1px solid var(--ink);
+    background: #ffffff;
+    scrollbar-width: none;
+    width: 100%;
+    max-width: 100%;
+  }
+  .carousel-track::-webkit-scrollbar { display: none; }
+
+  .slide {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    scroll-snap-align: start;
+    padding: 48px 32px 36px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  /* Chat content sits directly on white — no card, no chrome */
+  .chat {
+    max-width: 680px;
+    margin: 0 auto;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .chat .user-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 22px;
+  }
+  .chat .user-msg {
+    background: #f1f1f3;
+    color: #1a1a1a;
+    border-radius: 18px;
+    padding: 10px 18px;
+    font-size: 15px;
+    max-width: 80%;
+    line-height: 1.45;
+  }
+  .chat .assistant { color: #1a1a1a; }
+  .chat .assistant p { margin-bottom: 14px; }
+  .chat .assistant p:last-child { margin-bottom: 0; }
+  .chat .assistant strong { font-weight: 600; color: #0a0a0a; }
+  .chat .assistant ul {
+    list-style: disc;
+    padding-left: 22px;
+    margin-bottom: 14px;
+  }
+  .chat .assistant ul li { margin-bottom: 6px; }
+
+  .tools-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, "SF Mono", "Geist Mono", monospace;
+    font-size: 12px;
+    color: #555;
+    margin: 14px 0 18px;
+  }
+  .tools-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #b3a8e8;
+    display: inline-block;
+  }
+  .tools-pill .count {
+    background: #f1f1f3;
+    padding: 3px 9px;
+    border-radius: 4px;
+    color: #444;
+  }
+  .tools-pill .play { color: #888; font-size: 10px; }
+
+  .doc-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #ffffff;
+    border: 1px solid #e8e8eb;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 0 0 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 150ms;
+  }
+  .doc-card:hover { border-color: #b3a8e8; }
+  .doc-card .doc-icon {
+    width: 42px; height: 42px;
+    background: #ecebfd;
+    color: #6f5fe3;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .doc-card .doc-icon svg { width: 22px; height: 22px; }
+  .doc-card .doc-info { flex: 1; min-width: 0; }
+  .doc-card .doc-name {
+    font-weight: 600;
+    font-size: 14.5px;
+    color: #0a0a0a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .doc-card .doc-sub {
+    font-size: 12.5px;
+    color: #8e8e93;
+    margin-top: 2px;
+  }
+  .doc-card .doc-dl {
+    color: #555;
+    flex-shrink: 0;
+    padding: 6px;
+  }
+  .doc-card .doc-dl svg { width: 18px; height: 18px; display: block; }
+
+  .chat-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .chat-actions button {
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 12.5px;
+    background: #ffffff;
+    color: #555;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 5px 14px;
+    cursor: pointer;
+  }
+  .chat-actions button:hover { background: #f8f8f8; }
+
+  .slide-meta {
+    max-width: 680px;
+    margin: 28px auto 0;
+    padding-top: 16px;
+    border-top: 1px dashed var(--rule);
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .slide-meta .tag-row { display: flex; gap: 10px; }
+  .slide-meta .tag-row span::before { content: "▲ "; color: var(--accent); }
+
+  .dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 20px;
+  }
+  .dot {
+    width: 24px; height: 4px;
+    background: var(--rule);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: background 200ms;
+  }
+  .dot.active { background: var(--accent); }
+
+  /* Moat */
+  .moat-body {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+  }
+  .moat-body .spacer {}
+  .moat-body p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 640px;
+    margin-bottom: 14px;
+  }
+  .moat-body p strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .moat-body .accent-mark {
+    color: var(--accent);
+    font-weight: 500;
+    font-style: normal;
+  }
+
+  /* Beta */
+  .beta-body {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+  }
+  form {
+    display: flex;
+    gap: 0;
+    max-width: 480px;
+    border: 1px solid var(--ink);
+  }
+  form input {
+    flex: 1;
+    background: var(--bg);
+    border: none;
+    padding: 14px 16px;
+    font-family: 'Geist', sans-serif;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  form input:focus { outline: none; background: var(--bg-2); }
+  form input::placeholder { color: var(--ink-3); }
+  form button {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    padding: 0 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    transition: background 200ms;
+  }
+  form button:hover { background: var(--accent); }
+  .fine {
+    margin-top: 12px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* Footer */
+  footer {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  footer a { color: inherit; text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  @media (max-width: 768px) {
+    .hero { grid-template-columns: 1fr; padding: 56px 0 64px; }
+    .hero .side { padding-top: 0; }
+    .sec-head, .uses, .moat-body, .beta-body, .reports-wrap { grid-template-columns: 1fr; gap: 24px; }
+    .slide { padding: 20px 16px; }
+    .chat { padding: 20px; font-size: 14px; }
+    .chrome .url { font-size: 10px; }
+    section { padding: 56px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="tri">▲</span> Curunir</div>
+    <a href="#beta">Join the beta →</a>
+  </nav>
+
+  <header class="hero">
+    <aside class="side">
+      <div class="row"><span>▲</span><span class="k">v0.7 / closed beta</span></div>
+      <div class="row"><span>▲</span><span class="k">summer 2026</span></div>
+      <div class="row"><span>▲</span><span class="k">invite only</span></div>
+    </aside>
+    <div>
+      <h1>A <span class="accent">private</span><br>research assistant<br><span class="light">that goes deep.</span></h1>
+      <p>Curunir is a deliberately minimal agentic harness — executing complex workflows, orchestrating sophisticated tools across authoritative sources, learning what works for you, and remembering every conversation. Built to cut through slop, not produce it. On a device in your home, never the cloud.</p>
+      <div class="cta-row">
+        <a class="btn" href="#beta">Request beta access <span class="arr">→</span></a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="label">// what it does</div>
+      <h2>Built for <span class="accent">serious research</span> — and the memory it deserves.</h2>
+    </div>
+    <div class="uses">
+      <div class="spacer"></div>
+      <div class="list">
+        <div class="use">
+          <div class="n">01</div>
+          <div><h3>Thorough on any topic.</h3><p>Composable skills and sophisticated tools that pull from authoritative sources to investigate a question thoroughly, not summarize the first page of results.</p></div>
+        </div>
+        <div class="use">
+          <div class="n">02</div>
+          <div><h3>Learns what works for you.</h3><p>Learns from every interaction what works for you, what doesn't, and where it can help you do better. The more you use it, the less you have to explain.</p></div>
+        </div>
+        <div class="use">
+          <div class="n">03</div>
+          <div><h3>Remembers every conversation.</h3><p>Past research, dropped threads, half-formed hypotheses — all kept. Ask in August about something you said in March; it'll find it, and pick up where you left off.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label">// in practice</div>
+      <h2>What it produces. <span class="accent">Real reports, real prompts.</span></h2>
+    </div>
+    <div class="reports-wrap">
+      <div class="spacer"></div>
+      <div class="carousel" id="carousel">
+        <div class="carousel-controls">
+          <div class="counter"><span id="cur">01</span><span class="of">/</span><span id="total">04</span> · deep research samples</div>
+          <div class="nav-btns">
+            <button id="prev" aria-label="Previous">←</button>
+            <button id="next" aria-label="Next">→</button>
+          </div>
+        </div>
+
+        <div class="carousel-track" id="track">
+
+          <div class="slide">
+            <div class="chat">
+              <div class="user-row"><div class="user-msg">Deep research: retatrutide and its impact on LLY. Bull case, bear case, and stock impact.</div></div>
+              <div class="assistant">
+                <p>Here's what the analysis shows, Jac. Retatrutide is shaping up as Lilly's next blockbuster after Mounjaro/Zepbound — phase-3 weight-loss data is exceeding any prior GLP-1.</p>
+                <p><strong>Bull case:</strong> $15–20B peak revenue by 2030 if it lands the obesity expansion and clears T2D on schedule.</p>
+                <p><strong>Bear case:</strong> GLP-1 supply constraints persist, compounded competition erodes pricing, and reta gets stuck behind Zepbound's franchise.</p>
+                <p><strong>Stock impact:</strong> modest re-rate already in the price; meaningful upside requires 2027 readouts to beat consensus.</p>
+                <p>Full report with sensitivity tables and the competitor map is attached.</p>
+              </div>
+              <div class="tools-pill"><span class="dot"></span><span class="count">27 tools</span><span class="play">▶</span></div>
+              <a class="doc-card" href="/r/retatrutide-blockbuster-analysis-2026-05-04.pdf" target="_blank">
+                <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="doc-info">
+                  <div class="doc-name">Retatrutide — Blockbuster Analysis (May 2026)</div>
+                  <div class="doc-sub">Click to download · PDF · 11 pages</div>
+                </div>
+                <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+              </a>
+              <div class="chat-actions">
+                <button>Copy</button>
+                <button>Print</button>
+              </div>
+            </div>
+            <div class="slide-meta">
+              <div class="tag-row"><span>Pharma</span><span>Equity research</span></div>
+              <div>2026-05-04</div>
+            </div>
+          </div>
+
+          <div class="slide">
+            <div class="chat">
+              <div class="user-row"><div class="user-msg">Do a financial analysis of LLY — how do the reta-led TAM projections impact future revenues and stock price?</div></div>
+              <div class="assistant">
+                <p>Looking at LLY through 2030. The reta-led obesity expansion adds an estimated $14B to the addressable revenue, on top of the existing GLP-1 franchise.</p>
+                <p><strong>Revenue:</strong> $58B in 2026 → ~$95B in 2030 (≈15% CAGR), assuming reta launches by H2 2027.</p>
+                <p><strong>Fair value:</strong> DCF supports $1,150–1,280/share. Current price already reflects most of the upside in the base case.</p>
+                <p><strong>Key risk:</strong> payer pushback on obesity coverage could compress the model by ~20%; Medicare Part D negotiation cycle is the next catalyst.</p>
+                <p>Full comp set, sensitivity tables, and a one-page summary are attached.</p>
+              </div>
+              <div class="tools-pill"><span class="dot"></span><span class="count">34 tools</span><span class="play">▶</span></div>
+              <a class="doc-card" href="/r/LLY-2026-05-11.pdf" target="_blank">
+                <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="doc-info">
+                  <div class="doc-name">LLY — Financial Analysis (2026-05-11)</div>
+                  <div class="doc-sub">Click to download · PDF · 10 pages</div>
+                </div>
+                <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+              </a>
+              <div class="chat-actions">
+                <button>Copy</button>
+                <button>Print</button>
+              </div>
+            </div>
+            <div class="slide-meta">
+              <div class="tag-row"><span>Pharma</span><span>Valuation</span></div>
+              <div>2026-05-11</div>
+            </div>
+          </div>
+
+          <div class="slide">
+            <div class="chat">
+              <div class="user-row"><div class="user-msg">Analysis on the top 10 gold miners, with top 3 recommendations based on their potential over the next 3 years.</div></div>
+              <div class="assistant">
+                <p>Ranked the top 10 by 2025 production, then scored on AISC, reserve life, jurisdiction risk, and 3-year FCF trajectory. Cost discipline and reserves dominate the result.</p>
+                <p><strong>Top 3 recommendations (3-year horizon):</strong></p>
+                <ul>
+                  <li><strong>Agnico Eagle (AEM)</strong> — best-in-class AISC, growing reserves, tier-1 jurisdictions only</li>
+                  <li><strong>Kinross (KGC)</strong> — cheapest on EV/EBITDA, Tasiast ramping, balance sheet repaired</li>
+                  <li><strong>B2Gold (BTG)</strong> — highest FCF yield, but Mali concentration is the live risk</li>
+                </ul>
+                <p>Full table with AISC, reserves, jurisdiction scores, and 3-year IRR by name is in the report.</p>
+              </div>
+              <div class="tools-pill"><span class="dot"></span><span class="count">41 tools</span><span class="play">▶</span></div>
+              <a class="doc-card" href="/r/Top 10 Gold Miners Analysis — May 2026.pdf" target="_blank">
+                <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="doc-info">
+                  <div class="doc-name">Top 10 Gold Miners Analysis — May 2026</div>
+                  <div class="doc-sub">Click to download · PDF · 19 pages</div>
+                </div>
+                <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+              </a>
+              <div class="chat-actions">
+                <button>Copy</button>
+                <button>Print</button>
+              </div>
+            </div>
+            <div class="slide-meta">
+              <div class="tag-row"><span>Commodities</span><span>Equity screen</span></div>
+              <div>2026-05</div>
+            </div>
+          </div>
+
+          <div class="slide">
+            <div class="chat">
+              <div class="user-row"><div class="user-msg">Review and update my gold investment thesis.</div></div>
+              <div class="assistant">
+                <p>Pulled your March thesis from memory and compared it to current state. Three updates worth your attention.</p>
+                <ul>
+                  <li><strong>Thesis intact:</strong> central-bank buying continues at a record pace; your core argument still holds.</li>
+                  <li><strong>Revision needed:</strong> ETF outflows have reversed since April — your "retail still asleep" note is no longer accurate.</li>
+                  <li><strong>New consideration:</strong> silver/gold ratio at 78 suggests silver catch-up; worth extending the thesis to include relative-value sizing.</li>
+                </ul>
+                <p>Updated one-pager with tracked changes is attached. Want me to draft the silver extension?</p>
+              </div>
+              <div class="tools-pill"><span class="dot"></span><span class="count">12 tools</span><span class="play">▶</span></div>
+              <a class="doc-card" href="/r/investment-thesis-gold-2.pdf" target="_blank">
+                <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="doc-info">
+                  <div class="doc-name">Gold Investment Thesis — Update v2</div>
+                  <div class="doc-sub">Click to download · PDF · 1 page</div>
+                </div>
+                <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+              </a>
+              <div class="chat-actions">
+                <button>Copy</button>
+                <button>Print</button>
+              </div>
+            </div>
+            <div class="slide-meta">
+              <div class="tag-row"><span>Personal thesis</span><span>Memory-driven</span></div>
+              <div>2026-05</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="dots" id="dots">
+          <button class="dot active" data-i="0" aria-label="Slide 1"></button>
+          <button class="dot" data-i="1" aria-label="Slide 2"></button>
+          <button class="dot" data-i="2" aria-label="Slide 3"></button>
+          <button class="dot" data-i="3" aria-label="Slide 4"></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label">// where it lives</div>
+      <h2>All of this <span class="accent">at home</span>. Not in the cloud.</h2>
+    </div>
+    <div class="moat-body">
+      <div class="spacer"></div>
+      <div>
+        <p>Curunir runs on a small device in your home or lab. The language models live in the cloud — <strong>but your data doesn't.</strong> Your research, your conversations, and your preferences stay on the device.</p>
+        <p>The assistant is still reachable from anywhere — web, CLI, email — through a thin portal that brokers the conversation without copying the data.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="beta">
+    <div class="sec-head">
+      <div class="label">// closed beta</div>
+      <h2>Summer <span class="accent">2026</span>. Invite only.</h2>
+    </div>
+    <div class="beta-body">
+      <div class="spacer"></div>
+      <div>
+        <form id="betaForm">
+          <input type="email" name="email" required placeholder="you@university.edu">
+          <button type="submit">Request access →</button>
+        </form>
+        <div class="fine" id="betaStatus">We read every request.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div>▲ Curunir · © 2026</div>
+    <div><a href="https://smartlayer.ventures">smartlayer.ventures</a></div>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  const track = document.getElementById('track');
+  const slides = track.querySelectorAll('.slide');
+  const prevBtn = document.getElementById('prev');
+  const nextBtn = document.getElementById('next');
+  const cur = document.getElementById('cur');
+  const dots = document.querySelectorAll('#dots .dot');
+  let idx = 0;
+  const total = slides.length;
+
+  function goTo(i) {
+    idx = Math.max(0, Math.min(total - 1, i));
+    track.scrollTo({ left: track.clientWidth * idx, behavior: 'smooth' });
+    update();
+  }
+  function update() {
+    cur.textContent = String(idx + 1).padStart(2, '0');
+    dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === total - 1;
+  }
+  prevBtn.addEventListener('click', () => goTo(idx - 1));
+  nextBtn.addEventListener('click', () => goTo(idx + 1));
+  dots.forEach((d, i) => d.addEventListener('click', () => goTo(i)));
+
+  // Sync index when user scrolls manually
+  let scrollTimer;
+  track.addEventListener('scroll', () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      const newIdx = Math.round(track.scrollLeft / track.clientWidth);
+      if (newIdx !== idx) { idx = newIdx; update(); }
+    }, 80);
+  });
+
+  update();
+})();
+
+// Beta signup form
+(function() {
+  const form = document.getElementById('betaForm');
+  const status = document.getElementById('betaStatus');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    const email = form.email.value.trim();
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/beta/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email, source: 'landing'}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ok) {
+        form.style.display = 'none';
+        status.textContent = data.created
+          ? '✓ You\'re on the list. We\'ll be in touch.'
+          : '✓ Already on the list. We\'ll be in touch.';
+        status.style.color = 'var(--ink)';
+      } else if (r.status === 429) {
+        btn.disabled = false;
+        btn.textContent = 'Request access →';
+        status.textContent = 'Too many requests. Try again in a minute.';
+        status.style.color = 'var(--accent)';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Request access →';
+        status.textContent = 'Please check your email and try again.';
+        status.style.color = 'var(--accent)';
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Request access →';
+      status.textContent = 'Network error. Try again.';
+      status.style.color = 'var(--accent)';
+    }
+  });
+})();
+</script>
+</body>
+</html>
