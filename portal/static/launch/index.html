@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir /launch — Go-to-market for founders going alone.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --bg-2: #f0f0ef;
+    --ink: #0a0a0a;
+    --ink-2: #525252;
+    --ink-3: #a3a3a3;
+    --rule: #e5e5e5;
+    --accent: #e63946;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+
+  /* Reusable: 6×6 accent square, replaces decorative triangle glyphs */
+  .sq {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .sq-ink { background: var(--ink); }
+  .sq-mute { background: var(--ink-3); }
+
+  /* Nav */
+  nav {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+  }
+  nav .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+  }
+  nav a.cta {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 8px 14px;
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  nav a.cta:hover { background: var(--ink); color: var(--bg); }
+
+  /* Hero */
+  .hero {
+    padding: 120px 0 100px;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .hero .side {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.8;
+    padding-top: 12px;
+  }
+  .hero .side .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .hero .side .row .k { color: var(--ink-2); }
+  .hero h1 {
+    font-weight: 500;
+    font-size: clamp(48px, 7vw, 92px);
+    line-height: 0.98;
+    letter-spacing: -0.04em;
+    margin-bottom: 32px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .light { font-weight: 300; color: var(--ink-2); }
+  .hero p {
+    font-size: 19px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 620px;
+    margin-bottom: 40px;
+  }
+  .cta-row { display: flex; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    text-decoration: none;
+    padding: 14px 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); }
+  .btn .arr { font-family: 'Geist Mono', monospace; font-size: 13px; }
+
+  /* Sections */
+  section {
+    padding: 96px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .sec-head {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 56px;
+    align-items: baseline;
+  }
+  .sec-head .label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sec-head h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.5vw, 40px);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    max-width: 720px;
+  }
+  .sec-head h2 .accent { color: var(--accent); }
+
+  /* What it does */
+  .uses { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .uses .list { border-top: 1px solid var(--rule); }
+  .use {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 20px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .use .n {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .use h3 {
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    letter-spacing: -0.015em;
+  }
+  .use p { color: var(--ink-2); font-size: 15.5px; max-width: 620px; }
+
+  /* Pipeline diagram */
+  .pipe-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .pipe-canvas { background: #fff; border: 1px solid var(--ink); }
+  .tier {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 32px;
+    align-items: center;
+    padding: 28px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .tier:last-child { border-bottom: none; }
+  .tier-label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 500;
+  }
+  .tier-label::before {
+    content: "";
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: var(--accent);
+    margin-bottom: 8px;
+  }
+  .tier-label .sub {
+    display: block;
+    color: var(--ink-3);
+    margin-top: 4px;
+    font-size: 10.5px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+  }
+  .step {
+    border: 1px solid var(--ink);
+    background: #fff;
+    padding: 14px 16px;
+    min-width: 0;
+    position: relative;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .step:hover { background: var(--bg-2); }
+  .step.dashed { border-style: dashed; background: var(--bg); }
+  .step .n {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.14em;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .step.dashed .n { color: var(--ink-3); }
+  .step .name {
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .step .role {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-2);
+    line-height: 1.4;
+  }
+  .validate-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) 1fr;
+    gap: 20px;
+    align-items: center;
+  }
+  .validate-row .note,
+  .maintain-row .note {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .maintain-row .note .pulse {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .build-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    align-items: center;
+  }
+  .build-row .step { margin-right: 22px; }
+  .build-row .step:last-child { margin-right: 0; }
+  .build-row .step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -22px;
+    width: 22px;
+    height: 1px;
+    background: var(--ink);
+    transform: translateY(-50%);
+  }
+  .build-row .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -8px;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--ink);
+    z-index: 1;
+  }
+  .maintain-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 220px;
+    gap: 20px;
+    align-items: center;
+  }
+  .maintain-row .step .loop-mark {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+  }
+  .maintain-row .step .loop-mark svg { width: 100%; height: 100%; display: block; }
+
+  /* Detail blocks (one per skill) */
+  .details-head {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin: 64px 0 28px;
+  }
+  .details-head .label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .details-head h3 {
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.015em;
+    max-width: 620px;
+  }
+  .details-head h3 .accent { color: var(--accent); }
+  .details-head h3 .light { color: var(--ink-2); font-weight: 300; }
+
+  .detail {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    border-top: 1px solid var(--rule);
+    padding: 48px 0;
+    scroll-margin-top: 24px;
+  }
+  .detail .anchor {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    line-height: 1.6;
+  }
+  .detail .anchor .step-n {
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .detail .anchor .tier-tag {
+    color: var(--ink);
+    margin-bottom: 14px;
+  }
+  .detail .anchor .skill-id {
+    color: var(--ink-2);
+    text-transform: lowercase;
+    letter-spacing: 0;
+    font-size: 11px;
+  }
+
+  /* Chat block — same aesthetic as the research landing's carousel slides,
+     just placed in a static stack instead of a horizontal track. */
+  .chat {
+    max-width: 680px;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .chat .user-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 22px;
+  }
+  .chat .user-msg {
+    background: #f1f1f3;
+    color: #1a1a1a;
+    border-radius: 18px;
+    padding: 10px 18px;
+    font-size: 15px;
+    max-width: 80%;
+    line-height: 1.45;
+  }
+  .chat .assistant p { margin-bottom: 14px; }
+  .chat .assistant p:last-child { margin-bottom: 0; }
+  .chat .assistant strong { font-weight: 600; color: #0a0a0a; }
+  .chat .assistant ul {
+    list-style: disc;
+    padding-left: 22px;
+    margin-bottom: 14px;
+  }
+  .chat .assistant ul li { margin-bottom: 6px; }
+  .tools-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, "SF Mono", "Geist Mono", monospace;
+    font-size: 12px;
+    color: #555;
+    margin: 14px 0 18px;
+  }
+  .tools-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #b3a8e8;
+  }
+  .tools-pill .count {
+    background: #f1f1f3;
+    padding: 3px 9px;
+    border-radius: 4px;
+    color: #444;
+  }
+  .doc-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #fff;
+    border: 1px solid #e8e8eb;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 0 0 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 150ms;
+  }
+  .doc-card:hover { border-color: #b3a8e8; }
+  .doc-card .doc-icon {
+    width: 42px; height: 42px;
+    background: #ecebfd;
+    color: #6f5fe3;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .doc-card .doc-icon svg { width: 22px; height: 22px; }
+  .doc-card .doc-info { flex: 1; min-width: 0; }
+  .doc-card .doc-name {
+    font-weight: 600;
+    font-size: 14.5px;
+    color: #0a0a0a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .doc-card .doc-sub {
+    font-size: 12.5px;
+    color: #8e8e93;
+    margin-top: 2px;
+  }
+  .doc-card .doc-dl {
+    color: #555;
+    flex-shrink: 0;
+    padding: 6px;
+  }
+  .doc-card .doc-dl svg { width: 18px; height: 18px; display: block; }
+  .chat-actions { display: flex; gap: 8px; }
+  .chat-actions button {
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 12.5px;
+    background: #fff;
+    color: #555;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 5px 14px;
+    cursor: pointer;
+  }
+  .chat-actions button:hover { background: #f8f8f8; }
+
+  /* Moat */
+  .moat-body { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .moat-body p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 640px;
+    margin-bottom: 14px;
+  }
+  .moat-body p strong { color: var(--ink); font-weight: 600; }
+
+  /* Beta */
+  .beta-body { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  form {
+    display: flex;
+    gap: 0;
+    max-width: 480px;
+    border: 1px solid var(--ink);
+  }
+  form input {
+    flex: 1;
+    background: var(--bg);
+    border: none;
+    padding: 14px 16px;
+    font-family: 'Geist', sans-serif;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  form input:focus { outline: none; background: var(--bg-2); }
+  form input::placeholder { color: var(--ink-3); }
+  form button {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    padding: 0 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    transition: background 200ms;
+  }
+  form button:hover { background: var(--accent); }
+  .fine {
+    margin-top: 12px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* Footer */
+  footer {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  footer a { color: inherit; text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding: 56px 0 64px; }
+    .hero .side { padding-top: 0; }
+    .sec-head, .uses, .pipe-wrap, .moat-body, .beta-body,
+    .details-head, .detail { grid-template-columns: 1fr; gap: 24px; }
+    .tier { grid-template-columns: 1fr; gap: 14px; }
+    .build-row { grid-template-columns: 1fr; gap: 16px; }
+    .build-row .step { margin-right: 0; }
+    .build-row .step::after, .build-row .step::before { display: none; }
+    .validate-row, .maintain-row { grid-template-columns: 1fr; }
+    section { padding: 56px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="sq"></span> Curunir</div>
+    <a class="cta" href="#beta">Join the beta</a>
+  </nav>
+
+  <header class="hero">
+    <aside class="side">
+      <div class="row"><span class="sq"></span><span class="k">v0.7 / closed beta</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">summer 2026</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">invite only</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">for founders</span></div>
+    </aside>
+    <div>
+      <h1>Your <span class="accent">private</span><br>go-to-market team.</h1>
+      <p>Ingest your product. Find your ICPs. Map the competition. Ship the plan. Validate demand. Watch what changes. <strong>The full GTM motion — end to end.</strong></p>
+      <div class="cta-row">
+        <a class="btn" href="#beta">Request beta access <span class="arr">→</span></a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// what it does</div>
+      <h2>Built for <span class="accent">solo GTM</span> — and the work that won't do itself.</h2>
+    </div>
+    <div class="uses">
+      <div></div>
+      <div class="list">
+        <div class="use">
+          <div class="n">01</div>
+          <div>
+            <h3>Knows your product cold.</h3>
+            <p>Ingests every signal — site, docs, market chatter, your own input — and builds a product context that every downstream skill uses. The level of understanding a great fractional CMO would have after a deep-dive week. In minutes.</p>
+          </div>
+        </div>
+        <div class="use">
+          <div class="n">02</div>
+          <div>
+            <h3>Picks your ICP and your shots.</h3>
+            <p>Identifies the buyers most likely to pay. Writes the positioning. Maps the competition. Builds a channel plan with specific actions, sequencing, and metrics — not generic "do content marketing" advice.</p>
+          </div>
+        </div>
+        <div class="use">
+          <div class="n">03</div>
+          <div>
+            <h3>Catches moves before they hurt you.</h3>
+            <p>Watches your competitors and the incumbents in your buyer's stack. When something material changes, it tells you what to update in your positioning, plan, and pricing — and shows the cascade.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// the pipeline</div>
+      <h2>From a vague idea to a <span class="accent">running GTM motion</span> — in order.</h2>
+    </div>
+
+    <div class="pipe-wrap">
+      <div></div>
+      <div class="pipe-canvas">
+
+        <div class="tier">
+          <div class="tier-label">VALIDATE<span class="sub">before you build</span></div>
+          <div class="validate-row">
+            <a class="step dashed" href="#step-00">
+              <div class="n">PRE-FLIGHT</div>
+              <div class="name">Smoke Test</div>
+              <div class="role">fake-door buyer-intent check</div>
+            </a>
+            <div class="note">optional — use when you only have an idea</div>
+          </div>
+        </div>
+
+        <div class="tier">
+          <div class="tier-label">BUILD<span class="sub">the core pipeline</span></div>
+          <div class="build-row">
+            <a class="step" href="#step-01">
+              <div class="n">01</div>
+              <div class="name">Onboard &amp; Ingest</div>
+              <div class="role">product context</div>
+            </a>
+            <a class="step" href="#step-02">
+              <div class="n">02</div>
+              <div class="name">Position &amp; Segment</div>
+              <div class="role">ICPs · messaging</div>
+            </a>
+            <a class="step" href="#step-03">
+              <div class="n">03</div>
+              <div class="name">Competitive Landscape</div>
+              <div class="role">direct · incumbents</div>
+            </a>
+            <a class="step" href="#step-04">
+              <div class="n">04</div>
+              <div class="name">GTM Plan</div>
+              <div class="role">channels · sequencing</div>
+            </a>
+          </div>
+        </div>
+
+        <div class="tier">
+          <div class="tier-label">MAINTAIN<span class="sub">always on</span></div>
+          <div class="maintain-row">
+            <a class="step" href="#step-05">
+              <span class="loop-mark" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 3v4h-4"/>
+                  <path d="M13 7a5 5 0 1 0-1.5 3.5"/>
+                </svg>
+              </span>
+              <div class="n">05</div>
+              <div class="name">Competitive Monitor</div>
+              <div class="role">weekly delta scan</div>
+            </a>
+            <a class="step" href="#step-06">
+              <span class="loop-mark" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 3v4h-4"/>
+                  <path d="M13 7a5 5 0 1 0-1.5 3.5"/>
+                </svg>
+              </span>
+              <div class="n">06</div>
+              <div class="name">Reassess</div>
+              <div class="role">new intel · cascade updates</div>
+            </a>
+            <div class="note"><span class="pulse"></span>runs continuously</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Detail blocks header -->
+    <div class="details-head">
+      <div class="label"><span class="sq"></span>// in practice</div>
+      <h3>One product, <span class="accent">all seven skills.</span><br><span class="light">A fictional SaaS — "Loop" — runs through every step below.</span></h3>
+    </div>
+
+    <!-- 00 — Smoke Test -->
+    <div class="detail" id="step-00">
+      <div class="anchor">
+        <div class="step-n"><span class="sq sq-mute"></span>PRE-FLIGHT</div>
+        <div class="tier-tag">VALIDATE</div>
+        <div class="skill-id">gtm-smoke-test</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">I have an idea — Loop, a tool that auto-drafts a solo founder's weekly newsletter from their work. Smoke test it on FB Marketplace before I build.</div></div>
+        <div class="assistant">
+          <p>Listed three angle variants on Facebook Marketplace at $29/mo and watched the engagement for 5 days.</p>
+          <ul>
+            <li><strong>"Founder weekly, written for you"</strong> — 47 saves, 18 messages, 4 attempted purchases</li>
+            <li><strong>"Stop ghosting your list"</strong> — 31 saves, 9 messages, 1 attempted purchase</li>
+            <li><strong>"Newsletter on autopilot"</strong> — 12 saves, 2 messages, 0 attempted purchases</li>
+          </ul>
+          <p><strong>Verdict:</strong> real demand. The "guilt" angle clearly outperforms the "automation" angle. Build at $29 entry price; pivot copy to the founder-weekly framing.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">19 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Smoke-Test-Report.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Smoke Test Report</div>
+            <div class="doc-sub">Click to download · PDF · 4 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 01 — Onboard -->
+    <div class="detail" id="step-01">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 01</div>
+        <div class="tier-tag">BUILD</div>
+        <div class="skill-id">gtm-onboard-ingest</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Onboard Loop. Site at loop.so, docs at loop.so/docs. I'm targeting solo founders writing weekly newsletters.</div></div>
+        <div class="assistant">
+          <p>Ingested the site, docs, your two LinkedIn posts, and the relevant subreddits. Built the product context.</p>
+          <p><strong>What Loop is:</strong> an LLM that reads a founder's GitHub, Linear, and calendar each week, then drafts a newsletter in their voice.</p>
+          <p><strong>What's distinctive:</strong> work-in-real-time drafting (not retro summaries), founder-voice match, sub-10-minute weekly edit loop.</p>
+          <p><strong>What's underdeveloped in your messaging:</strong> the "voice match" claim is the strongest moat — your site buries it on page 3.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">28 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Product-Context.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Product Context</div>
+            <div class="doc-sub">Click to download · PDF · 6 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 02 — Position -->
+    <div class="detail" id="step-02">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 02</div>
+        <div class="tier-tag">BUILD</div>
+        <div class="skill-id">gtm-position-segment</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Find Loop's best ICPs and write positioning. Use the product context.</div></div>
+        <div class="assistant">
+          <p>Researched four ICP candidates. Two have clear pull, two are distractions.</p>
+          <ul>
+            <li><strong>ICP-1 — devtools founders writing weekly</strong> — high buying power, already pay for Beehiiv, hate writing. Best fit at $29/mo. Lead with this.</li>
+            <li><strong>ICP-2 — fractional CMOs running newsletters for clients</strong> — willing to pay $99/mo for multi-user, but smaller market.</li>
+            <li><strong>Skip:</strong> solopreneur creators (mass market, low willingness to pay) and B2B SaaS marketing teams (need approvals you don't support).</li>
+          </ul>
+          <p>Positioning doc with messaging matrix and a pricing recommendation ($29 / $99) is attached.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">36 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Positioning-and-ICPs.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Positioning &amp; ICPs</div>
+            <div class="doc-sub">Click to download · PDF · 9 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 03 — Competitive Landscape -->
+    <div class="detail" id="step-03">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 03</div>
+        <div class="tier-tag">BUILD</div>
+        <div class="skill-id">gtm-competitive-landscape</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Map Loop's competitive landscape — direct, adjacent, and the incumbents in my buyer's stack.</div></div>
+        <div class="assistant">
+          <p>Six players matter. Two are real threats, four are noise.</p>
+          <ul>
+            <li><strong>Direct:</strong> Castmagic AI Newsletter (weak product, strong distribution) — real threat. Tugan AI — niche, ignore.</li>
+            <li><strong>Adjacent / buyer-stack incumbents:</strong> Beehiiv shipped "AI assist" three weeks ago — watch closely; Substack hasn't moved.</li>
+            <li><strong>Indirect:</strong> ghostwriters on Upwork still take ~40% of the budget for this ICP. Your real competitor is human, not LLM.</li>
+          </ul>
+          <p>Full landscape with pricing, community sentiment, and a feature-watch list for Beehiiv is attached.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">52 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Competitive-Landscape.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Competitive Landscape</div>
+            <div class="doc-sub">Click to download · PDF · 14 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 04 — GTM Plan -->
+    <div class="detail" id="step-04">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 04</div>
+        <div class="tier-tag">BUILD</div>
+        <div class="skill-id">gtm-plan</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Build a GTM plan for ICP-1. Channels, sequencing, what to do week 1.</div></div>
+        <div class="assistant">
+          <p>Four channels in priority order. Two are owned (run them now), two are leveraged (start week 3).</p>
+          <ul>
+            <li><strong>Week 1–2 (owned):</strong> 20 founder DMs, 1 product-hunt-style launch post, weekly newsletter showing Loop using itself.</li>
+            <li><strong>Week 3+ (leveraged):</strong> sponsorship in 2 founder newsletters ($800 total); guest on Indie Hackers podcast.</li>
+            <li><strong>Skip:</strong> SEO (12-month payback, you don't have the runway), paid ads (CAC will exceed LTV until pricing is validated).</li>
+          </ul>
+          <p>Full plan with success metrics, weekly cadence, and the "decline to run" reasoning per channel is attached.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">41 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-GTM-Plan-ICP1.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — GTM Plan (ICP-1)</div>
+            <div class="doc-sub">Click to download · PDF · 11 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 05 — Monitor -->
+    <div class="detail" id="step-05">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 05</div>
+        <div class="tier-tag">MAINTAIN</div>
+        <div class="skill-id">gtm-competitive-monitor</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">What changed in Loop's competitive landscape this week?</div></div>
+        <div class="assistant">
+          <p>Three changes since last week's scan. Two are signal, one is noise.</p>
+          <ul>
+            <li><strong>Signal:</strong> Beehiiv shipped voice-cloning for AI assist. Closes part of your moat. Worth a reassess.</li>
+            <li><strong>Signal:</strong> Castmagic dropped their newsletter price from $39 to $19. Aggressive — they're feeling the squeeze.</li>
+            <li><strong>Noise:</strong> Tugan AI raised a $2M seed. Doesn't change their product trajectory in your buyer's eyes.</li>
+          </ul>
+          <p>Delta report with screenshots and the trigger to run <code>gtm-reassess</code> on Beehiiv's launch is attached.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">17 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Weekly-Competitor-Delta.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Weekly Competitor Delta</div>
+            <div class="doc-sub">Click to download · PDF · 3 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 06 — Reassess -->
+    <div class="detail" id="step-06">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>STEP 06</div>
+        <div class="tier-tag">MAINTAIN</div>
+        <div class="skill-id">gtm-reassess</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Beehiiv just shipped voice cloning. What do I update in my positioning and plan?</div></div>
+        <div class="assistant">
+          <p>This is material. Three documents need updates — here's the cascade.</p>
+          <ul>
+            <li><strong>positioning.md:</strong> the "voice match" claim alone is no longer defensible. Reframe around the work-context ingestion (GitHub, Linear, calendar) — that's still uniquely yours.</li>
+            <li><strong>gtm-plan.md (ICP-1):</strong> kill the LinkedIn ad copy that leads with voice match. Replace with the "writes from your actual work, not your vibes" angle.</li>
+            <li><strong>pricing:</strong> hold at $29 for now. Re-evaluate in 60 days based on Beehiiv adoption signal.</li>
+          </ul>
+          <p>Impact-assessment with section-level diffs is attached. Approve and I'll apply the changes.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">23 tools</span></div>
+        <a class="doc-card" href="/r-launch/Loop-Reassessment-Impact.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Loop — Reassessment Impact</div>
+            <div class="doc-sub">Click to download · PDF · 5 pages</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// built on curunir</div>
+      <h2>A <span class="accent">minimal agentic harness.</span> In your house.</h2>
+    </div>
+    <div class="moat-body">
+      <div></div>
+      <div>
+        <p>The seven skills above are one pipeline on <strong>Curunir</strong> — a deliberately minimal agentic harness. The same engine runs every step, and nothing more. /launch/ is one pipeline; the same harness can run research, scheduling, or anything else you wire into it.</p>
+        <p>It runs on a small device in your home or office. The language models live in the cloud — <strong>but your roadmap, your customer list, and your competitive intel don't.</strong> They stay on the device.</p>
+        <p>Reachable from anywhere — web, CLI, email — through a thin portal that brokers the conversation without copying the data.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="beta">
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// closed beta</div>
+      <h2>Summer <span class="accent">2026</span>. Invite only.</h2>
+    </div>
+    <div class="beta-body">
+      <div></div>
+      <div>
+        <form id="betaForm">
+          <input type="email" name="email" required placeholder="you@yourstartup.com">
+          <button type="submit">Request access</button>
+        </form>
+        <div class="fine" id="betaStatus">We read every request.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div><span class="sq"></span> &nbsp;Curunir · © 2026</div>
+    <div><a href="https://smartlayer.ventures">smartlayer.ventures</a></div>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  const form = document.getElementById('betaForm');
+  const status = document.getElementById('betaStatus');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    const email = form.email.value.trim();
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/beta/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email, source: 'launch'}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ok) {
+        form.style.display = 'none';
+        status.textContent = data.created
+          ? 'You\'re on the list. We\'ll be in touch.'
+          : 'Already on the list. We\'ll be in touch.';
+        status.style.color = 'var(--ink)';
+      } else if (r.status === 429) {
+        btn.disabled = false;
+        btn.textContent = 'Request access';
+        status.textContent = 'Too many requests. Try again in a minute.';
+        status.style.color = 'var(--accent)';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Request access';
+        status.textContent = 'Please check your email and try again.';
+        status.style.color = 'var(--accent)';
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Request access';
+      status.textContent = 'Network error. Try again.';
+      status.style.color = 'var(--accent)';
+    }
+  });
+})();
+</script>
+</body>
+</html>
