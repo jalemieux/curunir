@@ -432,6 +432,37 @@ async def test_slash_frame_enqueued_as_command_slash(portal_server):
 
 
 @pytest.mark.asyncio
+async def test_scratch_discard_frame_enqueued_as_command(portal_server):
+    """The browser sends `scratch_discard` to drop the ephemeral session.
+
+    The channel forwards it as an IncomingMessage with that command so the
+    agent_worker can pop the in-memory session without persisting anything.
+    """
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({
+            "type": "user_message",
+            "payload": {"command": "scratch_discard", "session_id": "scratch"},
+        })
+        msg = await asyncio.wait_for(in_q.get(), timeout=2.0)
+        assert msg.command == "scratch_discard"
+        assert msg.session_id == "scratch"
+        assert msg.channel == "portal"
+        assert msg.content == ""
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_slash_frame_preserves_arbitrary_text(portal_server):
     """The channel forwards the raw slash text verbatim — including args."""
     in_q: asyncio.Queue = asyncio.Queue()
@@ -631,6 +662,20 @@ async def test_same_content_different_sessions_both_enqueued():
     ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
     await ch._handle_user_message({"content": "hello", "session_id": "tab-A"})
     await ch._handle_user_message({"content": "hello", "session_id": "tab-B"})
+    assert in_q.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_scratch_discard_not_deduped():
+    """Two rapid Start-overs (or a switch-away followed by another) must both
+    reach the worker — dropping one could leave a ghost scratch session in
+    agent.sessions on the server.
+    """
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url="ws://x", token="t")
+    payload = {"command": "scratch_discard", "session_id": "scratch"}
+    await ch._handle_user_message(dict(payload))
+    await ch._handle_user_message(dict(payload))
     assert in_q.qsize() == 2
 
 

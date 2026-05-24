@@ -9,6 +9,7 @@ from pathlib import Path
 import litellm
 
 from src.agent import conversation_store
+from src.agent.scratch import is_scratch
 from src.agent.system_prompt import build_memory_block, build_static_prompt
 
 logger = logging.getLogger(__name__)
@@ -238,10 +239,14 @@ class Agent:
         disk for memory extraction but don't belong in the web sidebar. A
         missing ``channel`` (legacy records) is treated as not-email so
         existing web/CLI conversations keep showing.
+
+        The ephemeral Scratch slot is also excluded — it has its own pinned
+        slot in the portal and must never appear as a saved row, even if a
+        transcript file ever leaked to disk.
         """
         return [
             c for c in conversation_store.list_conversations(self.config.context_dir)
-            if c.get("channel") != "email"
+            if c.get("channel") != "email" and not is_scratch(c.get("session_id"))
         ]
 
     def history_snapshot(self, session_id: str = "portal") -> list[dict]:
