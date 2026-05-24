@@ -78,6 +78,16 @@ Plan a deep research report on "the impact of EU AI Act on open source LLMs". Sh
 
 ---
 
+## Deep Research Guided — Plan-First Gate
+
+```max_loops=8
+Use the deep-research-guided skill to research the current state of AI code editors. This is a deliberately vague prompt — your first reply must be a research plan that the user can review and confirm. Your reply MUST contain the headings "Understanding", "Scope", "Sub-questions", and "Deliverable" (in any markdown form — bold labels, headers, or sections), and MUST end by asking the user to confirm or adjust the plan. Your first turn MUST NOT make any data-fetching tool calls — no `delegate`, no `WebFetch`, no `curl` against external endpoints, no calls to source skill APIs (Brave, Reddit, X, Gemini, LinkedIn). Loading skills is fine. Stop after presenting the plan.
+```
+
+```max_loops=8
+Use the deep-research-guided skill on this prompt: "Research AI code editors — skip the plan, just go." The user has explicitly opted out of the plan-confirmation step. Acknowledge the skip in one line, then proceed straight to research. Your first turn MAY make data-fetching tool calls (this is the explicit opt-out path). Confirm in your reply that you bypassed Step 2.5.
+```
+
 ## Deep Research — Execution
 
 ```max_loops=20
