@@ -46,9 +46,21 @@ saying "I don't know who you are."
 | `archives/conversations/YYYY-MM-DD-topic.md` | Dated conversation summaries |
 | `summaries/timeline.md` | Auto-maintained chronological list of all archived conversations |
 | `summaries/topics/<slug>.md` | Auto-maintained: archives that touched the entity named by `<slug>` |
-| `workspace/generated/` | Generated deliverables (research reports, memos, financial analyses, exported PDFs) — *not* memory; documents go here, never into this memory directory |
-| `context/input/` | Drop-zone for user-supplied input files — *not* memory |
 
+All paths in the table above are relative to this directory (`context/memory/`).
+
+## External directories (not memory)
+
+These directories live alongside `memory/` under `context/` but are **not**
+part of the memory system. When writing to them, always use the full path
+from the project root so the agent does not land them under `memory/`:
+
+- `context/workspace/generated/` — Generated deliverables (research reports, memos, financial analyses, exported PDFs). Documents go here.
+- `context/input/` — Drop-zone for user-supplied input files.
+
+Never write artifacts under `context/memory/workspace/` or
+`context/memory/context/` — those paths are bugs caused by treating an
+external path as if it were memory-relative.
 
 ## Workflow
 
