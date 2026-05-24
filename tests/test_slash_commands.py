@@ -13,12 +13,18 @@ from src.channels.base import IncomingMessage
 from src.slash_commands import SlashContext, SlashResult, maybe_handle_slash
 
 
-def _write_skill(skills_dir, name: str, description: str = "test skill") -> None:
+def _write_skill(
+    skills_dir,
+    name: str,
+    description: str = "test skill",
+    hidden: bool = False,
+) -> None:
     """Drop a minimal SKILL.md into *skills_dir* under name/SKILL.md."""
     skill_dir = skills_dir / name
     skill_dir.mkdir()
+    hidden_line = "hidden: true\n" if hidden else ""
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {description}\n---\n\nbody.\n"
+        f"---\nname: {name}\ndescription: {description}\n{hidden_line}---\n\nbody.\n"
     )
 
 
@@ -174,6 +180,28 @@ async def test_skill_name_no_args(tmp_skills):
     assert "identity" in text
     # No trailing whitespace from f-string template.
     assert text == text.strip()
+
+
+@pytest.mark.asyncio
+async def test_hidden_skill_routes_via_load_skill_tool(tmp_skills):
+    """A hidden skill is in the registry but absent from the manifest. The
+    rewritten prompt must point the model at the `load_skill` tool by name
+    and forbid substitution — otherwise the model pattern-matches to a
+    similarly-named visible skill (this regressed in the wild)."""
+    _write_skill(tmp_skills, "deep-research", "visible variant")
+    _write_skill(tmp_skills, "deep-research-guided", "hidden variant", hidden=True)
+
+    result = await maybe_handle_slash(
+        "/deep-research-guided some topic", None, _ctx(tmp_skills),
+    )
+    assert result is not None
+    assert result.handled is True
+    assert len(result.enqueue) == 1
+    text = result.enqueue[0].content
+    assert "deep-research-guided" in text
+    assert "load_skill" in text
+    assert "do not substitute" in text.lower()
+    assert "some topic" in text
 
 
 @pytest.mark.asyncio
