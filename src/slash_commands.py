@@ -183,7 +183,19 @@ async def maybe_handle_slash(
 
     registry = load_registry(ctx.skill_dirs)
     if name in registry:
-        prompt = f"Use the `{name}` skill."
+        skill = registry[name]
+        if skill.hidden:
+            # Hidden skills are absent from the system-prompt manifest, so a
+            # soft "Use the X skill." can read as an unfamiliar name and the
+            # model silently substitutes a similarly-named visible skill.
+            # Be explicit: name the tool, assert existence.
+            prompt = (
+                f"Call the `load_skill` tool with name=`{name}` and follow "
+                f"its instructions. This skill is hidden from the catalog "
+                f"but exists in the registry — do not substitute another skill."
+            )
+        else:
+            prompt = f"Use the `{name}` skill."
         if args:
             prompt = f"{prompt} {args}"
         return SlashResult(handled=True, enqueue=[_inc(ctx_with_args, prompt)])
