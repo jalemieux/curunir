@@ -1,7 +1,16 @@
 # Local-development override.
 #
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Usage (full stack — agent + portal + postgres):
+#   docker compose --profile portal -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Usage (agent only, no portal):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build curunir
+#
+# The portal/postgres services are gated behind the `portal` profile in the
+# root compose file, so `--profile portal` is required whenever you want the
+# browser UI. Without it, curunir starts but its PortalChannel will log
+# "Name or service not known" while retrying because the portal hostname
+# never resolves.
 #
 # Adds `build:` for both services so contributors can iterate locally without
 # pulling from GHCR. When both `image:` and `build:` are set, compose builds
