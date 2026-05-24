@@ -205,9 +205,8 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 | Market research, competitive intel | `gemini-search`, `linkedin-research` | Review sites, market data, job postings reveal tool adoption |
 | YouTube / video content | `gemini-search` | Gemini summarizes YouTube videos directly |
 | Job market, hiring trends | `linkedin-research` | Job postings are the primary signal |
-| Forward-looking event (election, conflict, policy, macro print, sports/award) | `polymarket` | Implied probabilities from live betting markets — cite as a quantitative complement to qualitative sources |
 
-**When in doubt:** opinions → `reddit-research` / `xai-search`. Business context → `linkedin-research`. Need Google's index → `gemini-search`. Forward-looking probabilities → `polymarket`.
+**When in doubt:** opinions → `reddit-research` / `xai-search`. Business context → `linkedin-research`. Need Google's index → `gemini-search`.
 
 ### Source roles
 
@@ -215,7 +214,6 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 - **Reddit / X** — "what real people think" layer. Sentiment, reviews, complaints, controversies.
 - **LinkedIn** — professional layer. Key players, company positioning, hiring signals.
 - **Gemini** — complementary Google-indexed search. Use when Brave results are thin, or for YouTube content.
-- **Polymarket** — priced-probability layer. Real-money implied probabilities on forward-looking events. Not opinion — cite with the market URL, implied prob, and `fetched_at` timestamp (prices move minute-by-minute).
 - **Cross-reference** across sources — contrasts between official coverage and community sentiment are findings worth highlighting.
 
 ## Tips
