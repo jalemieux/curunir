@@ -38,6 +38,20 @@ class TestConversationPersistence:
         snap = agent.conversations_snapshot()
         assert {c["session_id"] for c in snap} == {"web", "legacy"}
 
+    def test_conversations_snapshot_excludes_scratch(self, agent):
+        """The Scratch slot is ephemeral and never belongs in the sidebar list.
+
+        If a scratch transcript ever leaked to disk (regression check), the
+        snapshot must still hide it — the portal renders Scratch as its own
+        pinned slot, not as a conversation row.
+        """
+        cs.save(agent.config.context_dir, "web", [{"role": "user", "content": "hi"}],
+                channel="portal")
+        cs.save(agent.config.context_dir, "scratch", [{"role": "user", "content": "hi"}],
+                channel="portal")
+        snap = agent.conversations_snapshot()
+        assert {c["session_id"] for c in snap} == {"web"}
+
     def test_history_snapshot_lazy_loads_unknown_session(self, agent):
         """history_snapshot for a session absent from memory loads it from disk."""
         cs.save(agent.config.context_dir, "disk-only", [

@@ -111,6 +111,45 @@ body {
 .conv-empty {
   padding: 14px; font-size: 12px; color: var(--header-text);
 }
+/* Ephemeral Scratch slot pinned at the top of the sidebar.
+   See src/agent/scratch.py for the server-side contract. */
+.scratch-row {
+  padding: 14px 14px;
+  display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+  position: relative;
+  background: linear-gradient(180deg, rgba(79,70,229,0.07), rgba(79,70,229,0.03));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+[data-theme="dark"] .scratch-row {
+  background: linear-gradient(180deg, rgba(99,102,241,0.14), rgba(99,102,241,0.06));
+}
+.scratch-row.empty {
+  background: var(--bubble);
+  box-shadow: inset 3px 0 0 var(--muted);
+}
+.scratch-row.active {
+  background: linear-gradient(180deg, rgba(79,70,229,0.12), rgba(79,70,229,0.05));
+}
+[data-theme="dark"] .scratch-row.active {
+  background: linear-gradient(180deg, rgba(99,102,241,0.22), rgba(99,102,241,0.09));
+}
+.scratch-row .conv-title {
+  color: var(--fg); font-weight: 600; font-size: 13px;
+  padding-right: 0;
+}
+.scratch-row.empty .conv-title {
+  color: var(--header-text); font-weight: 500;
+}
+.scratch-row .scratch-meta {
+  color: var(--accent); font-weight: 500; font-size: 11px;
+}
+.scratch-row.empty .scratch-meta {
+  color: var(--header-text); font-weight: 400;
+}
+.sidebar-divider {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
 @media (min-width: 768px) {
   #sidebar {
     display: flex; flex-direction: column;
@@ -146,6 +185,27 @@ header {
 }
 #new-btn:hover { color: #fff; filter: brightness(1.08); }
 #new-btn .glyph { font-size: 14px; line-height: 1; font-weight: 700; }
+/* Scratch ephemerality strip — sits between the global header and the chat
+   body when the active session is the Scratch slot. Carries both the
+   "nothing here is saved" message and the Start over action, so the rule
+   and the reset live in one eye-line. */
+#scratch-banner {
+  background: rgba(79,70,229,0.06);
+  border-bottom: 1px solid var(--border);
+  padding: 9px 18px; font-size: 12px; color: var(--header-text);
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 14px; flex-shrink: 0;
+}
+#scratch-banner[hidden] { display: none; }
+#scratch-banner .scratch-banner-text { line-height: 1.4; }
+#start-over-btn {
+  background: var(--bg); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 6px;
+  padding: 4px 12px; font-size: 12px; font-weight: 500;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+#start-over-btn:hover { background: var(--accent); color: #fff; }
+
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .dot.online { background: var(--user); }
 .dot.offline { background: var(--offline); }
@@ -661,7 +721,8 @@ body.dragging .drop-hint { display: flex; }
 </head>
 <body>
 <aside id="sidebar">
-  <div class="sidebar-head">Conversations</div>
+  <div id="scratch-slot"></div>
+  <div class="sidebar-head sidebar-divider">Conversations</div>
   <div id="conversation-list"></div>
 </aside>
 <div id="app">
@@ -673,6 +734,10 @@ body.dragging .drop-hint { display: flex; }
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
   </div>
 </header>
+<div id="scratch-banner" hidden>
+  <span class="scratch-banner-text">Nothing here is saved. Switching to another conversation clears it.</span>
+  <button id="start-over-btn" type="button">Start over</button>
+</div>
 <main id="messages"></main>
 <footer>
   <input type="file" id="file-input" multiple style="display:none"
@@ -720,6 +785,10 @@ body.dragging .drop-hint { display: flex; }
 
 <script>
 // === Constants ===
+// Singleton id for the ephemeral Scratch slot — must match SCRATCH_SESSION_ID
+// in src/agent/scratch.py. The server gates persistence, snapshot listing,
+// and memory extraction on this id.
+const SCRATCH_SESSION_ID = "scratch";
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_PDF = 10 * 1024 * 1024;
 const MAX_DOCX = 10 * 1024 * 1024;
@@ -750,6 +819,9 @@ const statusDot = document.querySelector("#status .dot");
 const statusText = document.getElementById("status-text");
 const newBtn = document.getElementById("new-btn");
 const conversationListEl = document.getElementById("conversation-list");
+const scratchSlotEl = document.getElementById("scratch-slot");
+const scratchBannerEl = document.getElementById("scratch-banner");
+const startOverBtn = document.getElementById("start-over-btn");
 const themeBtn = document.getElementById("theme-btn");
 const skillsBtn = document.getElementById("skills-btn");
 const skillsOverlay = document.getElementById("skills-overlay");
@@ -770,10 +842,16 @@ const offlineSub = document.getElementById("offline-sub");
 // binds this id to the ws on each frame we send and only routes that
 // session's traffic back here.
 let sessionId = localStorage.getItem("curunir-session-id");
-if (!sessionId) {
+// Never resume into the ephemeral Scratch slot on reload — the whole point
+// is "nothing here is saved across context switches", and a page reload is
+// the strongest possible context switch.
+if (!sessionId || sessionId === SCRATCH_SESSION_ID) {
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
 }
+// True when the Scratch slot has at least one message in this page session.
+// Local-only — the server keeps no persisted notion of "scratch has content".
+let scratchHasMessages = false;
 let ws = null;
 let agentOnline = false;
 let staged = []; // {filename, mime_type, data (base64), size}
@@ -884,6 +962,11 @@ function connect() {
     }));
     // Pull the conversation list for the sidebar.
     requestConversations();
+    // Discard any stale server-side scratch from before this page load so
+    // we open the slot empty. Idempotent: no-op when nothing is there.
+    scratchHasMessages = false;
+    sendScratchDiscard();
+    renderScratchSlot();
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -1474,6 +1557,11 @@ function send() {
   // before any content or tool call arrives.
   if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
   updateComposerMode();
+  // Scratch has at least one message now — flip the slot's visual state.
+  if (sessionId === SCRATCH_SESSION_ID && !scratchHasMessages) {
+    scratchHasMessages = true;
+    renderScratchSlot();
+  }
 }
 
 // === Interrupt ===
@@ -1610,8 +1698,18 @@ function renderConversations() {
 
 function switchConversation(id) {
   if (id === sessionId) return;
+  // Switching away from Scratch is its clear trigger — drop the server-side
+  // session before binding to the new id so a later return to Scratch opens
+  // fresh.
+  if (sessionId === SCRATCH_SESSION_ID && id !== SCRATCH_SESSION_ID) {
+    sendScratchDiscard();
+    scratchHasMessages = false;
+  }
   sessionId = id;
-  localStorage.setItem("curunir-session-id", sessionId);
+  // Scratch is never persisted across reloads — the slot is one-tab-only.
+  if (id !== SCRATCH_SESSION_ID) {
+    localStorage.setItem("curunir-session-id", sessionId);
+  }
   messagesEl.innerHTML = "";
   inProgressMsg = null;
   staged = [];
@@ -1624,6 +1722,54 @@ function switchConversation(id) {
     }));
   }
   renderConversations();
+  renderScratchSlot();
+  updateScratchBanner();
+  inputEl.focus();
+}
+
+// === Scratch (ephemeral) slot ===
+function renderScratchSlot() {
+  scratchSlotEl.innerHTML = "";
+  const row = document.createElement("div");
+  const active = sessionId === SCRATCH_SESSION_ID;
+  const empty = !scratchHasMessages;
+  row.className = "scratch-row"
+    + (active ? " active" : "")
+    + (empty ? " empty" : "");
+  const title = document.createElement("div");
+  title.className = "conv-title";
+  title.textContent = "Scratch";
+  const meta = document.createElement("div");
+  meta.className = "scratch-meta";
+  meta.textContent = empty
+    ? "Empty · type to start"
+    : "Active · clears on switch away";
+  row.appendChild(title);
+  row.appendChild(meta);
+  row.addEventListener("click", () => switchConversation(SCRATCH_SESSION_ID));
+  scratchSlotEl.appendChild(row);
+}
+
+function updateScratchBanner() {
+  scratchBannerEl.hidden = sessionId !== SCRATCH_SESSION_ID;
+}
+
+function sendScratchDiscard() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    content: "",
+    command: "scratch_discard",
+    session_id: SCRATCH_SESSION_ID,
+  }));
+}
+
+function startOverScratch() {
+  sendScratchDiscard();
+  scratchHasMessages = false;
+  messagesEl.innerHTML = "";
+  inProgressMsg = null;
+  renderEmptyState();
+  renderScratchSlot();
   inputEl.focus();
 }
 
@@ -1644,6 +1790,12 @@ function startNew() {
   // joins the list once its first message is sent. An in-flight turn on the
   // old session is left to finish and persist; the inbound session_id filter
   // keeps its chunks out of the new chat.
+  // Switching away from Scratch is its clear trigger (same rule as the
+  // sidebar): drop the server-side session first so a later visit opens fresh.
+  if (sessionId === SCRATCH_SESSION_ID) {
+    sendScratchDiscard();
+    scratchHasMessages = false;
+  }
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
@@ -1654,6 +1806,8 @@ function startNew() {
   inputEl.style.height = "";
   renderEmptyState();
   renderConversations();
+  renderScratchSlot();
+  updateScratchBanner();
   inputEl.focus();
 }
 
@@ -1664,6 +1818,7 @@ sendBtn.onclick = () => {
 };
 newBtn.onclick = startNew;
 themeBtn.onclick = toggleTheme;
+startOverBtn.onclick = startOverScratch;
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
