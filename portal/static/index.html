@@ -930,16 +930,21 @@ function onServerMessage(msg) {
 }
 
 // Render a user message body. Slash commands (/preferences, /investment-memo)
-// get the bold-monospace pill that slash-help output uses; anything else is
-// plain text.
+// get the bold-monospace pill that slash-help output uses; any trailing
+// free-form text after the slash token renders as plain text in the same
+// bubble.
 function setUserBody(bodyEl, content) {
   const text = content || "";
-  if (/^\/[A-Za-z][\w-]*/.test(text.trimStart())) {
+  const leading = text.length - text.trimStart().length;
+  const match = text.slice(leading).match(/^\/[A-Za-z][\w-]*/);
+  if (match) {
     bodyEl.textContent = "";
     const code = document.createElement("code");
     code.className = "slash-cmd";
-    code.textContent = text.trim();
+    code.textContent = match[0];
     bodyEl.appendChild(code);
+    const remainder = text.slice(leading + match[0].length);
+    if (remainder) bodyEl.appendChild(document.createTextNode(remainder));
   } else {
     bodyEl.textContent = text;
   }
