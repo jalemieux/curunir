@@ -33,7 +33,7 @@ Curunir is a configurable agentic LLM framework for building digital assistants.
 
 ### Core Loop (`src/agent/agent.py`)
 
-`Agent.handle()` is the heart: receive message → trim history (250k char limit) → build system prompt → call LLM (via LiteLLM) → execute tool calls sequentially → loop (max 75 iterations) → return response.
+`Agent.handle()` is the heart: receive message → trim history (250k char limit) → build system prompt → call LLM (via LiteLLM) → execute tool calls sequentially → loop (max 200 iterations) → return response.
 
 Context overflow is caught from LiteLLM exceptions; history is adaptively trimmed to 125k chars and retried.
 
