@@ -193,6 +193,20 @@ class PortalChannel:
             await self._handle_conversations_request({"session_id": session_id})
             return
 
+        if payload.get("command") == "scratch_discard":
+            # Ephemeral session reset — bypass the dedup window so two rapid
+            # Start-overs (or a Start-over right after a switch-away) both
+            # fire. Dropping one could leave a ghost scratch session in
+            # agent.sessions on the server.
+            await self.in_queue.put(IncomingMessage(
+                content="",
+                channel="portal",
+                session_id=session_id,
+                reply_address={},
+                command="scratch_discard",
+            ))
+            return
+
         if payload.get("command") == "slash":
             # Channels don't interpret slash — agent_worker does.
             # Forward the raw text on the queue with command=slash.

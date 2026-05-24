@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from src.agent import conversation_store
 from src.agent.agent import Agent
+from src.agent.scratch import SCRATCH_SESSION_ID, is_scratch
 from src.channels.base import OutgoingMessage
 from src.channels.email import EmailChannel
 from src.channels.portal import PortalChannel
@@ -342,6 +343,20 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 await in_queue.put(inc)
             continue
 
+        # Scratch discard: ephemeral session, no persistence and no memory
+        # extraction by design. Just pop the in-memory state and ack.
+        # Handled before the generic clear branch so a stray `clear` for
+        # scratch (legacy clients, misrouted frames) also short-circuits here.
+        if msg.command == "scratch_discard" or (
+            msg.command in ("clear", "reset") and is_scratch(msg.session_id)
+        ):
+            agent.sessions.pop(msg.session_id, None)
+            await out_queue.put(OutgoingMessage(
+                content="", channel=msg.channel, session_id=msg.session_id,
+                reply_address=msg.reply_address,
+            ))
+            continue
+
         # Delete (clear/reset): capture the conversation's learnings into
         # long-term memory, then remove its transcript. Extraction is awaited
         # so the memory summary lands before the transcript file is gone; the
@@ -439,7 +454,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         # Persist the conversation transcript after the turn so it survives
         # restarts, appears in the portal sidebar, and can be extracted from
         # disk without having to stay resident in agent.sessions.
-        if msg.session_id in agent.sessions:
+        # Scratch sessions are deliberately in-memory only — see src/agent/scratch.py.
+        if msg.session_id in agent.sessions and not is_scratch(msg.session_id):
             conversation_store.save(
                 agent.config.context_dir, msg.session_id,
                 agent.sessions[msg.session_id],
