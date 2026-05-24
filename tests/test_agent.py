@@ -153,6 +153,26 @@ class TestAgentHandle:
         assert agent.sessions["s1"][1].get("content") == "Let me check"
         assert agent.sessions["s1"][1].get("tool_calls") is not None
 
+    async def test_unparseable_tool_arguments_do_not_crash(self, agent):
+        bad_tool = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_bad",
+                "type": "function",
+                "function": {"name": "write", "arguments": '{"file_path": "/tmp/x", "content": "unterminated'},
+            }],
+        )
+        recovery = LLMResponse(text="recovered", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[bad_tool, recovery]):
+            result = await agent.handle("write something", "s1")
+
+        assert result == "recovered"
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        assert tool_msg["tool_call_id"] == "call_bad"
+        assert "not valid JSON" in tool_msg["content"]
+
     async def test_empty_response_returns_error(self, agent):
         empty = LLMResponse(text=None, tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=empty) as mock_call:
