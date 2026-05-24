@@ -576,9 +576,20 @@ class Agent:
                         if on_tool_call:
                             await on_tool_call(name, args_str)
 
+                        try:
+                            args = json.loads(args_str)
+                        except (json.JSONDecodeError, TypeError) as exc:
+                            logger.warning("[%s] tool %s: unparseable arguments: %s", sid, name, exc)
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": f"Error: tool arguments were not valid JSON ({exc}). Retry with well-formed JSON arguments.",
+                                "_tool_name": name,
+                            }
+
                         result = await execute_tool_call(
                             name,
-                            json.loads(args_str),
+                            args,
                             self.config,
                             attachments=attachments,
                             on_tool_call=on_tool_call,
