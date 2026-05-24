@@ -5,8 +5,9 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from portal import admin, auth, db, sign_in, ws_agent, ws_browser
+from portal import admin, auth, beta, db, sign_in, ws_agent, ws_browser
 from portal.config import settings
 
 
@@ -89,8 +90,15 @@ for _name in ("uvicorn.access", "uvicorn.error"):
 
 app.include_router(sign_in.router)
 app.include_router(admin.router)
+app.include_router(beta.router)
 app.include_router(ws_agent.router)
 app.include_router(ws_browser.router)
+
+# Public landing page (no auth). Served at /curunir/ — reports/ resolves
+# under the same prefix so the in-page links keep working.
+_LANDING_DIR = Path(__file__).parent / "static" / "landing"
+if _LANDING_DIR.exists():
+    app.mount("/curunir", StaticFiles(directory=_LANDING_DIR, html=True), name="landing")
 
 
 @app.get("/healthz")

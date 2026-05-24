@@ -37,4 +37,4 @@ async def _clean_db(client):
     except RuntimeError:
         return
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE users RESTART IDENTITY")
+        await conn.execute("TRUNCATE users, beta_signups RESTART IDENTITY")

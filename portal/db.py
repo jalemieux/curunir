@@ -25,6 +25,17 @@ class User:
     is_active: bool
 
 
+@dataclass
+class BetaSignup:
+    id: int
+    email: str
+    message: Optional[str]
+    source: Optional[str]
+    ip: Optional[str]
+    user_agent: Optional[str]
+    created_at: object  # datetime, kept loose to avoid importing
+
+
 def _row_to_user(row: asyncpg.Record) -> User:
     return User(
         id=row["id"],
@@ -55,9 +66,11 @@ def get_pool() -> asyncpg.Pool:
 
 
 async def run_migrations() -> None:
-    sql = (Path(__file__).parent / "migrations" / "0001_create_users.sql").read_text()
+    migrations_dir = Path(__file__).parent / "migrations"
+    files = sorted(migrations_dir.glob("*.sql"))
     async with get_pool().acquire() as conn:
-        await conn.execute(sql)
+        for f in files:
+            await conn.execute(f.read_text())
 
 
 async def ping() -> bool:
@@ -167,3 +180,60 @@ async def regenerate_container_token(user_id: int) -> str:
             "UPDATE users SET container_token = $1 WHERE id = $2", new_token, user_id
         )
     return new_token
+
+
+# ---------- Beta signups ----------
+
+def _row_to_beta_signup(row: asyncpg.Record) -> BetaSignup:
+    return BetaSignup(
+        id=row["id"],
+        email=row["email"],
+        message=row["message"],
+        source=row["source"],
+        ip=row["ip"],
+        user_agent=row["user_agent"],
+        created_at=row["created_at"],
+    )
+
+
+async def create_beta_signup(
+    email: str,
+    message: Optional[str] = None,
+    source: Optional[str] = None,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> tuple[BetaSignup, bool]:
+    """Insert a beta signup. Returns (row, created) where `created` is False
+    if the email was already on the list (idempotent)."""
+    normalized = email.strip().lower()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO beta_signups (email, message, source, ip, user_agent)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (LOWER(email)) DO NOTHING
+            RETURNING id, email, message, source, ip, user_agent, created_at
+            """,
+            normalized, message, source, ip, user_agent,
+        )
+        if row is not None:
+            return _row_to_beta_signup(row), True
+        existing = await conn.fetchrow(
+            """
+            SELECT id, email, message, source, ip, user_agent, created_at
+            FROM beta_signups WHERE LOWER(email) = $1
+            """,
+            normalized,
+        )
+        return _row_to_beta_signup(existing), False
+
+
+async def list_beta_signups() -> list[BetaSignup]:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, email, message, source, ip, user_agent, created_at
+            FROM beta_signups ORDER BY created_at DESC
+            """
+        )
+    return [_row_to_beta_signup(r) for r in rows]
