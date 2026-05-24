@@ -137,6 +137,31 @@ header {
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 13px; line-height: 1;
 }
+
+/* Share dropdown — Share ▾ button in the header with two export items
+   ("Download as Markdown" / "Print / Save as PDF"). Anchored under the
+   button via a positioned wrapper; both items are disabled until the
+   conversation has at least one user/assistant turn. */
+.share-wrap { position: relative; display: inline-block; }
+#share-menu {
+  position: absolute; top: calc(100% + 4px); right: 0;
+  min-width: 210px; padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  z-index: 10;
+}
+#share-menu[hidden] { display: none; }
+.share-item {
+  display: block; width: 100%;
+  background: transparent; border: 0;
+  padding: 6px 10px; border-radius: 4px;
+  font-family: inherit; font-size: 12px; color: var(--fg);
+  text-align: left; cursor: pointer;
+}
+.share-item:hover { background: var(--hover-bg); color: var(--accent); }
+.share-item:disabled { opacity: 0.4; cursor: not-allowed; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .dot.online { background: var(--user); }
 .dot.offline { background: var(--offline); }
@@ -376,6 +401,64 @@ main {
   #print-doc blockquote {
     border-left: 3px solid #ccc; padding-left: 12px;
     color: #333; margin: 8px 0;
+  }
+
+  /* === Share-print mode (full conversation) ===
+     Toggled by JS adding body.printing-share before window.print(). Shows
+     the conversation transcript inline (not #print-doc) but hides every
+     element that represents internal/non-conversational content: tool
+     tickers (details.tools), system rows, the per-response action bar,
+     the sidebar, the composer, the offline overlay, etc. The privacy
+     boundary of the export — if a class is missing here, internal frames
+     could leak into a printed PDF. */
+  body.printing-share > *:not(#print-doc):not(#offline-overlay):not(#skills-overlay) {
+    display: revert !important;
+  }
+  body.printing-share #print-doc,
+  body.printing-share #sidebar,
+  body.printing-share footer,
+  body.printing-share #composer,
+  body.printing-share #offline-overlay,
+  body.printing-share #skills-overlay,
+  body.printing-share header .header-right,
+  body.printing-share .empty-state,
+  body.printing-share .response-actions,
+  body.printing-share details.tools,
+  body.printing-share .msg.system,
+  body.printing-share .system-msg { display: none !important; }
+  body.printing-share, body.printing-share #app {
+    color: #000; background: #fff;
+    height: auto; display: block; overflow: visible;
+  }
+  body.printing-share header {
+    border-bottom: 1px solid #ccc; padding: 0 0 10px;
+    color: #000; margin-bottom: 14px;
+  }
+  body.printing-share main {
+    overflow: visible; max-width: none;
+    padding: 0; margin: 0;
+  }
+  body.printing-share .msg {
+    page-break-inside: avoid; margin: 0 0 14px;
+  }
+  body.printing-share .msg .role {
+    display: block; font-size: 10pt; font-weight: 600;
+    color: #555; margin-bottom: 4px; text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  body.printing-share .msg.user .body {
+    background: #f4f4f8; color: #000;
+    border-radius: 8px; padding: 8px 12px; margin-left: 0;
+  }
+  body.printing-share .msg.assistant .body { color: #000; }
+  body.printing-share .msg.assistant .body a { color: #000; text-decoration: underline; }
+  body.printing-share .msg.assistant .body pre,
+  body.printing-share .msg.assistant .body code {
+    background: #f3f4f6; color: #1a1a1f !important;
+  }
+  body.printing-share .msg.assistant .body pre code,
+  body.printing-share .msg.assistant .body pre code * {
+    background: none !important; color: #1a1a1f !important;
   }
 }
 
@@ -660,6 +743,18 @@ body.dragging .drop-hint { display: flex; }
   <div><strong>Curunir</strong></div>
   <div class="header-right">
     <button id="theme-btn" class="header-btn" title="Toggle theme" aria-label="Toggle theme"></button>
+    <div class="share-wrap">
+      <button id="share-btn" class="header-btn" type="button"
+              aria-haspopup="menu" aria-expanded="false"
+              aria-controls="share-menu"
+              title="Share this conversation" disabled>Share ▾</button>
+      <div id="share-menu" role="menu" aria-labelledby="share-btn" hidden>
+        <button type="button" class="share-item" role="menuitem"
+                data-action="markdown">Download as Markdown</button>
+        <button type="button" class="share-item" role="menuitem"
+                data-action="print">Print / Save as PDF</button>
+      </div>
+    </div>
     <button id="new-btn" class="header-btn" title="Start a new conversation">New</button>
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
   </div>
@@ -904,6 +999,7 @@ function onServerMessage(msg) {
       appendResponseActions(el);
     }
     updateComposerMode();
+    updateShareEnabled();
     return;
   }
   if (msg.type === "skills_snapshot") {
@@ -968,6 +1064,10 @@ function renderHistoryEntry(m) {
   } else if (m.role === "system") {
     historyAssistant = null;
     const el = appendMessage("assistant");
+    // Mark system rows so the share-print stylesheet can hide the entire
+    // bubble (not just the .system-msg em) and exportConversationAsMarkdown
+    // can skip them outright.
+    el.classList.add("system");
     el.querySelector(".body").innerHTML = `<em class="system-msg">${m.content}</em>`;
   }
 }
@@ -1150,6 +1250,164 @@ function printResponse(bodyEl) {
   window.print();
 }
 
+// === Share menu ===
+// Per-conversation export: walks the rendered message DOM (already filtered
+// to user/assistant/system bubbles) and produces a recipient-safe artifact —
+// only the user prompts and assistant final replies. Tool calls, thinking,
+// tool responses, and system rows are excluded; that's the privacy boundary
+// for sharing a single conversation without granting portal access.
+
+const shareBtn = document.getElementById("share-btn");
+const shareMenu = document.getElementById("share-menu");
+
+// True if there is at least one user turn or one assistant turn that has
+// rendered markdown (body.dataset.raw). System rows and tool-only assistant
+// entries don't count — they wouldn't appear in the export anyway.
+function hasShareableContent() {
+  for (const m of messagesEl.querySelectorAll(".msg")) {
+    if (m.classList.contains("system")) continue;
+    if (m.classList.contains("user")) return true;
+    if (m.classList.contains("assistant")) {
+      const body = m.querySelector(":scope > .body");
+      if (body && body.dataset.raw) return true;
+    }
+  }
+  return false;
+}
+
+function updateShareEnabled() {
+  const enabled = hasShareableContent();
+  shareBtn.disabled = !enabled;
+  for (const item of shareMenu.querySelectorAll(".share-item")) {
+    item.disabled = !enabled;
+  }
+  if (!enabled) closeShareMenu();
+}
+
+function openShareMenu() {
+  if (shareBtn.disabled) return;
+  shareMenu.hidden = false;
+  shareBtn.setAttribute("aria-expanded", "true");
+}
+function closeShareMenu() {
+  shareMenu.hidden = true;
+  shareBtn.setAttribute("aria-expanded", "false");
+}
+function toggleShareMenu() {
+  if (shareMenu.hidden) openShareMenu(); else closeShareMenu();
+}
+
+// Pull the user-visible filenames from a message's attachments. User
+// attachments live inside .body (insertBefore at firstChild); assistant
+// artifacts are appended outside .body. Either way the cards/images
+// expose the filename on .fname or img[alt].
+function collectAttachmentNames(msgEl) {
+  const names = [];
+  for (const f of msgEl.querySelectorAll(".attachment-card .fname")) {
+    const n = (f.textContent || "").trim();
+    if (n) names.push(n);
+  }
+  for (const img of msgEl.querySelectorAll("img.attachment-image")) {
+    const n = (img.alt || "").trim();
+    if (n) names.push(n);
+  }
+  return names;
+}
+
+// Walk the DOM and emit only the user/assistant dialogue. Internal frames
+// (tool tickers, system rows, response actions) are excluded by construction:
+// tool calls live in details.tools (never read), system rows carry .system
+// (skipped), and the per-bubble action row isn't touched. Assistant bubbles
+// without body.dataset.raw (tool-only iterations of the agent loop) are
+// skipped — they have no user-facing text.
+function exportConversationAsMarkdown() {
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = ["# Conversation", "", `_Exported ${today}_`, ""];
+  let kept = 0;
+  for (const msg of messagesEl.querySelectorAll(".msg")) {
+    if (msg.classList.contains("system")) continue;
+    const body = msg.querySelector(":scope > .body");
+    if (!body) continue;
+    const isUser = msg.classList.contains("user");
+    const isAssistant = msg.classList.contains("assistant");
+    if (!isUser && !isAssistant) continue;
+
+    let content = "";
+    if (isUser) {
+      // body holds an optional .attachments wrap followed by plain text —
+      // clone and strip the wrap so the textContent is just the prompt.
+      const clone = body.cloneNode(true);
+      clone.querySelectorAll(".attachments").forEach((n) => n.remove());
+      content = (clone.textContent || "").trim();
+    } else {
+      // body.dataset.raw is the markdown source; tool tickers and thinking
+      // never land here, they're siblings.
+      if (!body.dataset.raw) continue;
+      content = body.dataset.raw.trim();
+    }
+
+    const attachments = collectAttachmentNames(msg);
+    if (!content && !attachments.length) continue;
+
+    lines.push(isUser ? "**You**" : "**Curunir**");
+    lines.push("");
+    if (content) { lines.push(content); lines.push(""); }
+    if (attachments.length) {
+      for (const a of attachments) lines.push(`- _attachment:_ ${a}`);
+      lines.push("");
+    }
+    lines.push("---");
+    lines.push("");
+    kept++;
+  }
+  if (!kept) return;
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `curunir-conversation-${today}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Print the full conversation: drop body.printing-share to flip the print
+// stylesheet from per-response (#print-doc only) into share mode (show
+// transcript, hide sidebar/composer/tool tickers/system rows), then open
+// the browser print dialog. The user picks "Save as PDF" as the destination.
+function printConversation() {
+  document.body.classList.add("printing-share");
+  const prevTitle = document.title;
+  document.title = "Curunir conversation";
+  window.addEventListener("afterprint", () => {
+    document.body.classList.remove("printing-share");
+    document.title = prevTitle;
+  }, { once: true });
+  window.print();
+}
+
+shareBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleShareMenu();
+});
+shareMenu.addEventListener("click", (e) => {
+  const item = e.target.closest(".share-item");
+  if (!item || item.disabled) return;
+  closeShareMenu();
+  if (item.dataset.action === "markdown") exportConversationAsMarkdown();
+  else if (item.dataset.action === "print") printConversation();
+});
+document.addEventListener("click", (e) => {
+  if (shareMenu.hidden) return;
+  if (e.target === shareBtn || shareBtn.contains(e.target)) return;
+  if (shareMenu.contains(e.target)) return;
+  closeShareMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !shareMenu.hidden) closeShareMenu();
+});
+
 function renderAgentChunk(m) {
   if (!inProgressMsg) {
     inProgressMsg = appendMessage("assistant", true);
@@ -1177,6 +1435,7 @@ function renderAgentChunk(m) {
     requestConversations();
   }
   updateComposerMode();
+  updateShareEnabled();
   scrollToBottom();
 }
 
@@ -1265,6 +1524,7 @@ function appendMessage(role, thinking = false) {
   if (thinking) ensureActivityIndicator(el, /*live=*/true);
   messagesEl.appendChild(el);
   scrollToBottom();
+  updateShareEnabled();
   return el;
 }
 
@@ -1640,6 +1900,7 @@ function startNew() {
   inputEl.style.height = "";
   renderEmptyState();
   renderConversations();
+  updateShareEnabled();
   inputEl.focus();
 }
 
