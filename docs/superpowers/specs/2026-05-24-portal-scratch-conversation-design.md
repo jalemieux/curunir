@@ -1,7 +1,7 @@
-# Portal Scratch Conversation — Design
+# Portal Scratchpad — Design
 
 **Date:** 2026-05-24
-**Status:** Approved, ready for implementation plan
+**Status:** Approved, modal pivot incorporated
 
 ## Problem
 
@@ -14,208 +14,241 @@ extraction the user never wanted. There is no surface in the portal for
 
 ## Goal
 
-Add a single pinned **Scratch** slot at the top of the portal sidebar that
-provides an ephemeral conversation surface:
+Add a **Scratchpad** modal that opens from a header button (next to "New
+conversation"). The modal provides an ephemeral chat surface:
 
 - Doesn't persist to disk.
-- Doesn't appear in the saved conversation list.
+- Doesn't appear in the conversation list.
 - Doesn't trigger memory extraction or get archived.
-- Clears when the user switches to any other conversation.
-- Has a visible **Start over** action to reset in place.
+- Clears when the modal is closed.
+- Visually distinct from a persistent conversation so users don't form
+  the wrong mental model.
 
 The pitch: type whatever, don't worry about it.
+
+## Why a modal (not a sidebar slot)
+
+The first iteration of this design placed Scratch as a pinned slot at the
+top of the sidebar. Inline testing showed the approach was confusing:
+once you clicked into the slot, the chat surface looked identical to any
+other conversation (same composer, same scroll area, same chrome). A
+small banner above the chat trying to communicate "this is ephemeral"
+got ignored — users formed their mental model from the surrounding
+layout, not from text.
+
+A modal is structurally different. It floats over the page, has its own
+visual envelope, dismisses on Esc / backdrop click, and can't be confused
+with the regular chat. The structural difference does the teaching that
+copy cannot.
 
 ## Decisions
 
 | Question | Decision |
 |----------|----------|
-| Session id | Fixed constant `"scratch"` — singleton slot |
+| Surface | Modal overlay, centered, dimmed backdrop |
+| Trigger | Header button labelled **Scratchpad**, next to **New conversation** |
+| Session id | Fixed constant `"scratch"` — singleton |
 | Persistence | None — lives only in `agent.sessions` in-memory |
 | Memory extraction | Hard-skip when `session_id == "scratch"` |
 | Archive | Never written |
 | Sidebar list visibility | Excluded from `conversations_snapshot()` |
-| Clear trigger | (a) switching to another conversation; (b) explicit "Start over" button; (c) browser reload |
-| In-flight reload behavior | On portal connect, browser sends a `scratch_discard` for the scratch session so the server pops any stale in-memory state |
-| Clearing on switch-away | Browser sends `scratch_discard` for `"scratch"` before binding to the new conversation |
-| Visual treatment | Tinted indigo row, accent left-edge stripe, no header label above it; "Conversations" subhead acts as divider between Scratch and saved threads |
-| Empty state | Scratch row goes muted-grey ("Empty · type to start"); chat shows a calm placeholder with example chips |
-| Force-expire on inactivity | **No.** As long as the user doesn't switch away, scratch persists in-session |
+| Multi-turn | Yes — full chat inside the modal so follow-ups work |
+| Tool calls | Hidden in the modal (kept lean) |
+| Clear trigger | Closing the modal (Close button, Esc, or backdrop click); also on browser reload |
+| Inactivity expiry | None — as long as the modal stays open, the session stays alive |
+| In-flight reload behavior | On portal connect, browser sends `scratch_discard` so any stale in-memory state on the server is dropped |
+| Backdrop dim | Yes, `rgba(10, 10, 25, 0.45)` |
+| Companion rename | The header's **New** button is renamed to **New conversation** for clarity now that Scratchpad sits beside it |
 
 ## Scope
 
 In scope:
-- New constant `SCRATCH_SESSION_ID = "scratch"` (single source of truth).
-- Backend: skip `conversation_store.save()`, skip extraction, exclude from
-  snapshot, handle `scratch_discard` command.
-- Frontend: pinned slot above the conversation list, ephemerality banner
-  with embedded **Start over** button, switch-away discard wiring,
-  empty-state placeholder, on-connect discard.
-- Tests covering: session not saved to disk, scratch excluded from
-  snapshot, extraction skipped, `scratch_discard` semantics.
+- New constant `SCRATCH_SESSION_ID = "scratch"` shared between the agent
+  module and the portal frontend.
+- Backend: skip `conversation_store.save()` for scratch, handle a new
+  `scratch_discard` command, exclude scratch from the sidebar snapshot.
+- Frontend: Scratchpad modal markup, styles, JS, WS routing for inbound
+  scratch frames, header button trigger.
+- Tests covering: session not saved, scratch excluded from snapshot,
+  extraction skipped, discard semantics, channel forwarding, dedup bypass.
 
 Out of scope:
-- Spotlight overlay (Option 1 from mockup).
-- Quick Actions launcher (Option 3 from mockup).
-- "Save as conversation" promotion (deferred — keep it simple).
-- Email or WS-CLI channels — scratch is portal-only.
-- Per-user scratch (single user, single browser tab assumption; the slot
-  is one in-memory entry keyed on `"scratch"`).
+- "Save as conversation" promotion — deliberately deferred.
+- Email or CLI channels — scratch is portal-only.
+- Tool-call ticker inside the modal — Scratchpad is for quick interactions;
+  if you need rich tool inspection, use a regular conversation.
+- Cmd-K keyboard shortcut to open the modal — header button is enough for
+  v1; can add later.
+- Attachments inside Scratchpad — deferred.
 
 ## Architecture
 
 ### Constants
 
-A new module `src/agent/scratch.py` exporting `SCRATCH_SESSION_ID = "scratch"`
-and `is_scratch(session_id) -> bool`. Imported wherever scratch needs to be
-distinguished. Single source of truth, no string literals scattered.
+A new module `src/agent/scratch.py` exports `SCRATCH_SESSION_ID = "scratch"`
+and `is_scratch(session_id) -> bool`. Imported wherever scratch needs to
+be distinguished. Single source of truth, no string literals scattered.
+
+The frontend mirrors the constant in `portal/static/index.html` as
+`const SCRATCH_SESSION_ID = "scratch";` with a comment pointing to the
+Python module.
 
 ### Backend touchpoints
 
-**`run.py:agent_worker` (line 442 area).** Before calling
-`conversation_store.save()`, skip when `is_scratch(msg.session_id)`. The
-session stays in `agent.sessions` (in-memory) so multi-turn works, but
-nothing reaches disk.
+**`run.py:agent_worker`.** Before calling `conversation_store.save()`,
+skip when `is_scratch(msg.session_id)`. The session stays in
+`agent.sessions` (in-memory) so multi-turn works, but nothing reaches
+disk.
 
-**`run.py:agent_worker` (line 349 area — `clear`/`reset` branch).** Add
-handling for a new command `scratch_discard`: pop `agent.sessions[SCRATCH]`
-and return. Do *not* call `extract_learnings`, do *not* call
-`conversation_store.delete` (no file to delete). Empty content acknowledgement
-goes back to the channel.
+A new `scratch_discard` command branch pops the in-memory state without
+invoking `extract_learnings`. A stray `clear`/`reset` arriving for the
+scratch session routes through the same branch (belt-and-braces: never
+write memory for scratch).
 
-**`src/channels/portal.py:_handle_user_message`.** Accept
-`command == "scratch_discard"` and forward as an `IncomingMessage` with
-that command (no content). The agent_worker handles it.
+**`src/channels/portal.py:_handle_user_message`.** A `scratch_discard`
+payload is forwarded as an `IncomingMessage` with that command,
+*bypassing the dedup window* so two rapid Close+Open cycles both fire.
 
-**`src/agent/agent.py:conversations_snapshot` (line 244 area).** Filter
-out `is_scratch(c["session_id"])` from the returned list, same way email
-is filtered today.
+**`src/agent/agent.py:conversations_snapshot`.** Filter out
+`is_scratch(c["session_id"])` from the returned list, same way email is
+filtered today.
 
-**`src/memory_extractor.py`.** No change needed — extraction is driven by
+**`src/memory_extractor.py`.** No change. Extraction is driven by
 `conversation_store.due_for_extraction()` which only sees on-disk files,
-and we never write a file. Add a defensive early-return in
-`extract_learnings()` if a caller ever passes scratch history directly,
-gated on a session-id arg the function doesn't currently take. **Decision:**
-defer; the architectural guarantee (no file → no extraction) is enough.
+and we never write a file for scratch — the architectural guarantee is
+enough.
 
-### Frontend touchpoints
+### Frontend touchpoints (`portal/static/index.html`)
 
-All in `portal/static/index.html`.
+**Header.** Renames the "New" button to **New conversation**. Adds a new
+**Scratchpad** button between Theme and New conversation. Both buttons
+share the existing `.header-btn` style.
 
-**Sidebar markup.** A new `#scratch-slot` div above `#conversation-list`.
-Sibling, not parent. Sidebar layout becomes:
-
-```
-#sidebar
-├── #scratch-slot          (new — single fixed row)
-├── .sidebar-divider       (the existing "Conversations" head, restyled with top border)
-└── #conversation-list     (unchanged)
-```
-
-**Scratch row state.** Two visual states driven by whether the scratch
-session has any messages in the current page session:
-
-- *Active* — indigo tint, accent stripe, "{n} messages · clears on switch away"
-- *Empty* — neutral grey, muted stripe, "Empty · type to start"
-
-State is local to the page (no server signal). Set when:
-- User sends a message to scratch → active.
-- `scratch_discard` is sent → empty.
-- A history snapshot for scratch returns empty → empty.
-
-**Ephemerality banner.** When the scratch session is the active session,
-render a banner strip below the chat header (above `#messages`):
+**Modal.** A new `#scratchpad-overlay` element at the bottom of `<body>`
+(beside the existing `#offline-overlay` and `#skills-overlay`):
 
 ```
-Nothing here is saved. Switching to another conversation clears it.   [Start over]
+#scratchpad-overlay (fixed, dim backdrop, z-index 60)
+└── #scratchpad-modal (centered card, max-width 640px, max-height 80vh)
+    ├── #scratchpad-head        (title + sub + Close)
+    ├── #scratchpad-body        (scrollable transcript; empty state by default)
+    └── #scratchpad-composer    (textarea + Send button)
 ```
 
-Hidden when any other conversation is active. The **Start over** button:
-sends `scratch_discard`, clears `#messages`, sets state to empty.
+Distinct from `#sidebar`, `<main>`, and the main composer — completely
+separate DOM subtree.
 
-**Switch-away wiring.** In `switchConversation(id)`, before mutating
-`sessionId`, check if the *current* session is scratch. If so, send
-`scratch_discard` over the WS, then continue switching.
+**State (page-local).** Three variables:
+- `scratchpadOpen: boolean`
+- `scratchInProgressMsg: HTMLElement | null` — the assistant bubble being
+  streamed into
+- `scratchTurnPending: boolean` — gates the Send button while a turn is
+  in flight
 
-**On-connect discard.** When the WebSocket opens, send `scratch_discard`
-unconditionally so any stale in-memory scratch on the server is cleared.
-Cheap and idempotent.
+**Inbound routing.** In `onServerMessage()`, frames with
+`msg.session_id === SCRATCH_SESSION_ID` are routed to `renderScratchChunk()`
+instead of `renderAgentChunk()`. Checked *before* the existing main-chat
+session filter so scratch frames aren't dropped by the
+"different session" guard. If the modal was closed mid-turn (a discard
+was already sent), stragglers are ignored.
 
-**Sidebar click on the scratch slot.** Calls
-`switchConversation(SCRATCH_SESSION_ID)` — same code path; the switch-away
-check above naturally handles "switching to scratch from another
-conversation" without sending a discard (the *prior* session wasn't
-scratch).
+**Outbound.** `sendScratchMessage()` puts the user's text on the wire with
+`session_id: "scratch"`. No attachments, no slash command processing
+(simpler than the main `send()`).
 
-**Empty-state inside scratch.** When `messages` is empty and scratch is
-active, render the placeholder with the four example chips (mirrors the
-mockup). Clicking a chip fills the composer (does not send), matching the
-conversation-starters pattern.
+**Open / close.**
+- `openScratchpad()` shows the overlay and focuses the input. The empty
+  state shown by default invites the four canonical use cases.
+- `closeScratchpad()` sends `scratch_discard`, wipes the local transcript,
+  and hides the overlay. Bound to: Close button, Esc, backdrop click.
+
+**Esc precedence.** The existing global Esc handler triggers `interrupt()`
+for in-flight main-chat turns. Scratchpad's Esc handling runs first when
+the modal is open, so the user always has a one-key dismiss.
+
+**On-connect discard.** When the WebSocket opens, the browser sends an
+idempotent `scratch_discard` so any stale in-memory state on the server
+is dropped before the user opens the modal.
+
+**Session id reset.** On page load, if `localStorage["curunir-session-id"]`
+contains `"scratch"` (from an earlier build of this feature), the browser
+mints a fresh UUID. The main chat must never bind to the scratch id —
+that would route all main-chat traffic into the modal.
 
 ## Data flow
 
-**First scratch message:**
-1. User clicks Scratch slot → `switchConversation("scratch")`.
-2. Composer sends with `session_id: "scratch"`.
-3. `agent_worker` runs the turn; agent.handle reads/writes
+**Opening Scratchpad:**
+1. User clicks the **Scratchpad** header button.
+2. Modal overlay shows; input is focused; empty state is visible.
+3. No server traffic at this point — the slot only exists if the user
+   actually sends a message.
+
+**Sending a message:**
+1. User types and presses Enter.
+2. User bubble appears in the modal; placeholder assistant bubble
+   appears with pulsing-dot "thinking" indicator.
+3. Browser sends `{content, session_id: "scratch"}` over the WS.
+4. `agent_worker` runs the turn; `agent.handle` reads/writes
    `agent.sessions["scratch"]` (in-memory only).
-4. After the turn, `conversation_store.save()` is skipped (gated on
-   `is_scratch`). Nothing written to disk.
-5. The portal does **not** receive a `conversations_snapshot` update for
-   scratch — it never appears in the list.
+5. After the turn, `conversation_store.save()` is skipped because
+   `is_scratch(session_id)` is true. Nothing reaches disk.
+6. Streamed deltas come back tagged with `session_id: "scratch"`;
+   `onServerMessage` routes them to `renderScratchChunk()`. Final frame
+   removes the thinking state.
 
-**Switch to a saved conversation:**
-1. User clicks another sidebar row.
-2. Browser sees current session is scratch → sends
-   `{command: "scratch_discard", session_id: "scratch"}`.
-3. Browser updates `sessionId` to the new id, requests its history.
-4. Server pops `agent.sessions["scratch"]`, replies with empty
-   acknowledgement.
-
-**Start over:**
-1. User clicks Start over.
-2. Browser sends `scratch_discard`.
-3. Browser clears `#messages`, transitions banner/empty-state, leaves
-   `sessionId` as `"scratch"`.
+**Closing the modal:**
+1. User clicks Close, presses Esc, or clicks the backdrop.
+2. Browser sends `{command: "scratch_discard", session_id: "scratch"}`.
+3. Server pops `agent.sessions["scratch"]` (no extraction, no archive).
+4. Modal overlay hides; local transcript is wiped; empty state is
+   restored for next open.
 
 **Page reload:**
-1. Browser connects.
-2. Browser sends `scratch_discard` on connect.
-3. Whatever was in `agent.sessions["scratch"]` is dropped.
+1. Browser connects to the portal.
+2. After the standard handshake (history_request, skills_request,
+   conversations_request), browser sends `scratch_discard`.
+3. Any in-memory scratch on the server from a prior page session is
+   dropped. Next time the user opens the modal, it's fresh.
 
 ## Error handling
 
 - A `scratch_discard` arriving when nothing is in `agent.sessions["scratch"]`
-  is a no-op. Implement with `agent.sessions.pop(SCRATCH, None)`.
-- A `conversations_snapshot` that accidentally includes scratch (e.g. if a
-  past version wrote a `scratch.json` to disk) is filtered client-side as
-  a belt-and-braces measure too: any row with `session_id === "scratch"`
-  is removed before render. The server filter is the real defense.
-- The fixed id `"scratch"` is rejected by `_safe_session_id` only if it
-  contains `/`, `\`, `.`, or is empty — none apply. Safe.
+  is a no-op (uses `dict.pop(key, None)`).
+- A `conversations_snapshot` that accidentally includes scratch is
+  filtered server-side by `is_scratch`. Defense in depth: the client
+  also never renders a row with `session_id === SCRATCH_SESSION_ID`,
+  but that path shouldn't fire.
+- The Send button is disabled while a scratch turn is in flight, so the
+  user can't queue duplicate sends. They can still close the modal
+  mid-turn; stragglers are silently dropped by the
+  `if (scratchpadOpen) renderScratchChunk(msg);` guard.
+- Closing the modal while a turn is streaming: the server-side turn runs
+  to completion (no interrupt is sent — Scratchpad doesn't expose stop),
+  but the discard arrives and pops the session. Any straggler deltas are
+  routed to a closed modal and dropped.
 
 ## Testing
 
 | Test | File | What it verifies |
 |------|------|------------------|
-| `test_scratch_session_not_saved` | `tests/test_conversation_store.py` | A turn on session_id="scratch" produces no file in `context/conversations/` |
-| `test_scratch_excluded_from_snapshot` | `tests/test_agent.py` | `conversations_snapshot()` excludes scratch even when present in `agent.sessions` |
-| `test_scratch_discard_pops_session` | `tests/test_agent.py` or new `tests/test_run.py` | `scratch_discard` removes `agent.sessions["scratch"]` and does not invoke extract_learnings |
-| `test_scratch_discard_does_not_extract` | `tests/test_memory_extractor.py` | extract_learnings is not called when discarding a scratch session (mock and assert not_called) |
-| `test_portal_forwards_scratch_discard` | `tests/test_channels.py` | Portal channel converts `scratch_discard` payload into an IncomingMessage with that command |
-| `test_is_scratch` | `tests/test_scratch.py` (new) | `is_scratch("scratch")` is True; everything else False |
+| `test_is_scratch` | `tests/test_scratch.py` | helper + constant |
+| `test_scratch_excluded_from_snapshot` | `tests/test_agent.py` | sidebar list filter |
+| `test_scratch_turn_is_not_persisted` | `tests/test_run_extraction.py` | no disk write |
+| `test_scratch_discard_pops_session_without_extracting` | `tests/test_run_extraction.py` | discard pops, no extraction |
+| `test_scratch_discard_with_no_session_is_noop` | `tests/test_run_extraction.py` | first-discard safe |
+| `test_clear_command_on_scratch_does_not_extract` | `tests/test_run_extraction.py` | belt-and-braces |
+| `test_scratch_discard_frame_enqueued_as_command` | `tests/test_portal_channel.py` | channel forwarding |
+| `test_duplicate_scratch_discard_not_deduped` | `tests/test_portal_channel.py` | dedup bypass |
 
-Frontend changes are not unit tested today; verified by manual smoke at
-PR time (mockup matches reality, switch-away clears, Start over works,
-reload starts empty).
+Frontend changes are not unit-tested today; verified by manual smoke at
+PR time.
 
 ## Open questions
 
 None blocking. Possible follow-ups:
 
-- "Save as conversation" promotion link — deliberately deferred. Add if
-  users actually ask for it.
-- Per-channel scratch (e.g., scratch in the WS-CLI) — deferred; portal is
-  the primary surface.
-- Multi-tab behavior — both tabs share the same `agent.sessions["scratch"]`
-  on the server. Two tabs racing on scratch is a known nonissue (single
-  user) but worth noting.
+- Cmd-K shortcut to open Scratchpad from anywhere.
+- "Save as conversation" promotion link — if users actually ask for it.
+- Tool-call ticker inside the modal — if quick chats start needing tools
+  often.
+- Attachment support inside Scratchpad.
