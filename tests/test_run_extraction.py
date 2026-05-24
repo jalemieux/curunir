@@ -280,6 +280,104 @@ async def test_slash_clear_loops_through_in_queue(agent_config, memory_dir):
     assert len(list(archives.glob("*.md"))) == 1
 
 
+# --- scratch (ephemeral) session behavior ---------------------------------
+
+@pytest.mark.asyncio
+async def test_scratch_turn_is_not_persisted(agent_config, memory_dir):
+    """A turn on the scratch session must never reach context/conversations/.
+
+    The scratch slot lives only in agent.sessions so multi-turn works, but
+    the disk store stays empty for it.
+    """
+    agent = Agent(agent_config)
+    (agent_config.context_dir / ".onboarded").touch()
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    await in_q.put(IncomingMessage(
+        content="polish this", channel="portal", session_id="scratch",
+        reply_address={},
+    ))
+
+    with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+               return_value=LLMResponse(text="polished", tool_calls=None)):
+        await _drive_worker_once(in_q, out_q, agent)
+
+    assert cs.load(agent_config.context_dir, "scratch") is None
+    # Active session still in memory so a follow-up turn has context.
+    assert "scratch" in agent.sessions
+    assert agent.sessions["scratch"][-1]["content"] == "polished"
+
+
+@pytest.mark.asyncio
+async def test_scratch_discard_pops_session_without_extracting(
+    agent_config, memory_dir,
+):
+    """scratch_discard wipes in-memory state and never invokes extraction."""
+    archives = memory_dir / "archives" / "conversations"
+    agent = Agent(agent_config)
+    agent.sessions["scratch"] = _history()
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    await in_q.put(IncomingMessage(
+        content="", channel="portal", session_id="scratch", reply_address={},
+        command="scratch_discard",
+    ))
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock) as mock_llm:
+        await _drive_worker_once(in_q, out_q, agent)
+        mock_llm.assert_not_called()
+
+    assert "scratch" not in agent.sessions
+    assert not list(archives.glob("*.md"))
+    assert cs.load(agent_config.context_dir, "scratch") is None
+
+
+@pytest.mark.asyncio
+async def test_scratch_discard_with_no_session_is_noop(agent_config, memory_dir):
+    """A discard before scratch has ever been used must not error."""
+    agent = Agent(agent_config)
+    assert "scratch" not in agent.sessions
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    await in_q.put(IncomingMessage(
+        content="", channel="portal", session_id="scratch", reply_address={},
+        command="scratch_discard",
+    ))
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock) as mock_llm:
+        await _drive_worker_once(in_q, out_q, agent)
+        mock_llm.assert_not_called()
+
+    assert "scratch" not in agent.sessions
+
+
+@pytest.mark.asyncio
+async def test_clear_command_on_scratch_does_not_extract(agent_config, memory_dir):
+    """Belt-and-braces: even if a `clear` arrives for scratch (legacy clients,
+    misrouted frames), it must not summarize. Scratch never produces memory.
+    """
+    archives = memory_dir / "archives" / "conversations"
+    agent = Agent(agent_config)
+    agent.sessions["scratch"] = _history()
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    out_q: asyncio.Queue = asyncio.Queue()
+    await in_q.put(IncomingMessage(
+        content="", channel="portal", session_id="scratch", reply_address={},
+        command="clear",
+    ))
+
+    with patch("src.memory_extractor.call_llm", new_callable=AsyncMock) as mock_llm:
+        await _drive_worker_once(in_q, out_q, agent)
+        mock_llm.assert_not_called()
+
+    assert "scratch" not in agent.sessions
+    assert not list(archives.glob("*.md"))
+
+
 @pytest.mark.asyncio
 async def test_slash_malformed_frame_is_dropped(agent_config, memory_dir, caplog):
     import logging

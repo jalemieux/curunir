@@ -115,7 +115,9 @@ async def healthz():
 
 # Public landing page assets. Reports are mounted at /r/ so the in-page
 # absolute links resolve regardless of which URL serves the page.
-# /curunir/ is also kept as a stable alias for direct linking.
+# /curunir/ is also kept as a stable alias for direct linking. The
+# `reports` subdir is checked separately so a landing checkout without
+# reports (e.g. a fresh dev clone) doesn't crash uvicorn at startup.
 if _LANDING_DIR.exists():
     if (_LANDING_DIR / "reports").exists():
         app.mount("/r", StaticFiles(directory=_LANDING_DIR / "reports"), name="landing-reports")
