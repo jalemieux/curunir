@@ -111,45 +111,6 @@ body {
 .conv-empty {
   padding: 14px; font-size: 12px; color: var(--header-text);
 }
-/* Ephemeral Scratch slot pinned at the top of the sidebar.
-   See src/agent/scratch.py for the server-side contract. */
-.scratch-row {
-  padding: 14px 14px;
-  display: flex; flex-direction: column; gap: 3px; cursor: pointer;
-  position: relative;
-  background: linear-gradient(180deg, rgba(79,70,229,0.07), rgba(79,70,229,0.03));
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-[data-theme="dark"] .scratch-row {
-  background: linear-gradient(180deg, rgba(99,102,241,0.14), rgba(99,102,241,0.06));
-}
-.scratch-row.empty {
-  background: var(--bubble);
-  box-shadow: inset 3px 0 0 var(--muted);
-}
-.scratch-row.active {
-  background: linear-gradient(180deg, rgba(79,70,229,0.12), rgba(79,70,229,0.05));
-}
-[data-theme="dark"] .scratch-row.active {
-  background: linear-gradient(180deg, rgba(99,102,241,0.22), rgba(99,102,241,0.09));
-}
-.scratch-row .conv-title {
-  color: var(--fg); font-weight: 600; font-size: 13px;
-  padding-right: 0;
-}
-.scratch-row.empty .conv-title {
-  color: var(--header-text); font-weight: 500;
-}
-.scratch-row .scratch-meta {
-  color: var(--accent); font-weight: 500; font-size: 11px;
-}
-.scratch-row.empty .scratch-meta {
-  color: var(--header-text); font-weight: 400;
-}
-.sidebar-divider {
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
 @media (min-width: 768px) {
   #sidebar {
     display: flex; flex-direction: column;
@@ -185,26 +146,90 @@ header {
 }
 #new-btn:hover { color: #fff; filter: brightness(1.08); }
 #new-btn .glyph { font-size: 14px; line-height: 1; font-weight: 700; }
-/* Scratch ephemerality strip — sits between the global header and the chat
-   body when the active session is the Scratch slot. Carries both the
-   "nothing here is saved" message and the Start over action, so the rule
-   and the reset live in one eye-line. */
-#scratch-banner {
-  background: rgba(79,70,229,0.06);
-  border-bottom: 1px solid var(--border);
-  padding: 9px 18px; font-size: 12px; color: var(--header-text);
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 14px; flex-shrink: 0;
+/* === Scratchpad modal — ephemeral chat surface ===
+   A modal (not an in-rail slot) because users treat chat-window-shaped
+   surfaces as persistent. The overlay's distinct envelope is the cue. */
+#scratchpad-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(10, 10, 25, 0.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 8vh 16px 16px;
 }
-#scratch-banner[hidden] { display: none; }
-#scratch-banner .scratch-banner-text { line-height: 1.4; }
-#start-over-btn {
-  background: var(--bg); color: var(--accent);
-  border: 1px solid var(--accent); border-radius: 6px;
-  padding: 4px 12px; font-size: 12px; font-weight: 500;
-  cursor: pointer; font-family: inherit; white-space: nowrap;
+#scratchpad-overlay[hidden] { display: none; }
+#scratchpad-modal {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border-strong); border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  width: 100%; max-width: 640px; max-height: 80vh;
+  display: flex; flex-direction: column; overflow: hidden;
 }
-#start-over-btn:hover { background: var(--accent); color: #fff; }
+#scratchpad-head {
+  padding: 14px 18px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; border-bottom: 1px solid var(--border);
+}
+.scratchpad-head-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#scratchpad-title { font-size: 14px; font-weight: 600; }
+.scratchpad-sub {
+  font-size: 11px; color: var(--header-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#scratchpad-close {
+  background: transparent; border: 1px solid var(--border-strong);
+  border-radius: 6px; color: var(--header-text);
+  padding: 4px 10px; font-size: 12px; font-family: inherit; cursor: pointer;
+}
+#scratchpad-close:hover { color: var(--accent); border-color: var(--accent); }
+#scratchpad-body {
+  flex: 1; overflow-y: auto; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.scratchpad-empty {
+  margin: auto; text-align: center; padding: 16px 8px; max-width: 420px;
+}
+.scratchpad-empty-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.scratchpad-empty-sub { font-size: 13px; color: var(--header-text); line-height: 1.5; }
+.scratch-msg { line-height: 1.55; overflow-wrap: anywhere; }
+.scratch-msg.user .body {
+  background: var(--bubble); border-radius: 12px;
+  padding: 9px 13px; margin-left: 48px;
+  white-space: pre-wrap; font-size: 14px;
+}
+.scratch-msg.assistant .body { padding: 2px 0; font-size: 14px; }
+.scratch-msg.assistant .body > p { margin: 0 0 6px; }
+.scratch-msg.assistant .body > p:last-child { margin-bottom: 0; }
+.scratch-msg.assistant.thinking .body::after {
+  content: ""; display: inline-block;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-left: 2px;
+  animation: scratch-pulse 1s infinite;
+}
+@keyframes scratch-pulse { 50% { opacity: 0.3; } }
+#scratchpad-composer {
+  border-top: 1px solid var(--border); padding: 12px 14px;
+  display: flex; gap: 8px; align-items: flex-end;
+}
+#scratchpad-input {
+  flex: 1; resize: none; border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 9px 12px;
+  font-family: inherit; font-size: 14px;
+  background: var(--bg); color: var(--fg); outline: none;
+  max-height: 140px;
+}
+#scratchpad-input:focus { border-color: var(--accent); }
+#scratchpad-send {
+  background: var(--accent); color: #fff; border: none;
+  padding: 9px 16px; border-radius: 10px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+}
+#scratchpad-send:disabled {
+  background: var(--btn-disabled-bg); color: var(--btn-disabled-fg);
+  cursor: not-allowed;
+}
+@media (max-width: 600px) {
+  #scratchpad-overlay { padding: 4vh 8px 8px; }
+  #scratchpad-modal { max-height: 90vh; }
+}
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .dot.online { background: var(--user); }
@@ -721,8 +746,7 @@ body.dragging .drop-hint { display: flex; }
 </head>
 <body>
 <aside id="sidebar">
-  <div id="scratch-slot"></div>
-  <div class="sidebar-head sidebar-divider">Conversations</div>
+  <div class="sidebar-head">Conversations</div>
   <div id="conversation-list"></div>
 </aside>
 <div id="app">
@@ -730,14 +754,11 @@ body.dragging .drop-hint { display: flex; }
   <div><strong>Curunir</strong></div>
   <div class="header-right">
     <button id="theme-btn" class="header-btn" title="Toggle theme" aria-label="Toggle theme"></button>
-    <button id="new-btn" class="header-btn" title="Start a new conversation"><span class="glyph">+</span>New chat</button>
+    <button id="scratchpad-btn" class="header-btn" title="Open Scratchpad (ephemeral chat)" aria-label="Open Scratchpad">Scratchpad</button>
+    <button id="new-btn" class="header-btn" title="Start a new conversation"><span class="glyph">+</span>New conversation</button>
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
   </div>
 </header>
-<div id="scratch-banner" hidden>
-  <span class="scratch-banner-text">Nothing here is saved. Switching to another conversation clears it.</span>
-  <button id="start-over-btn" type="button">Start over</button>
-</div>
 <main id="messages"></main>
 <footer>
   <input type="file" id="file-input" multiple style="display:none"
@@ -765,6 +786,28 @@ body.dragging .drop-hint { display: flex; }
     <div id="offline-title">Connecting to your agent…</div>
     <div id="offline-sub">Your agent is offline. This screen will clear
       automatically once it reconnects.</div>
+  </div>
+</div>
+
+<div id="scratchpad-overlay" hidden>
+  <div id="scratchpad-modal" role="dialog" aria-modal="true" aria-labelledby="scratchpad-title">
+    <div id="scratchpad-head">
+      <div class="scratchpad-head-left">
+        <div id="scratchpad-title">Scratchpad</div>
+        <div class="scratchpad-sub">Quick chat &mdash; nothing here is saved</div>
+      </div>
+      <button id="scratchpad-close" type="button" aria-label="Close Scratchpad">Close</button>
+    </div>
+    <div id="scratchpad-body">
+      <div class="scratchpad-empty">
+        <div class="scratchpad-empty-title">What can I help with?</div>
+        <div class="scratchpad-empty-sub">Polish a message, ask a quick question, compare two things, translate something. Nothing here is saved.</div>
+      </div>
+    </div>
+    <div id="scratchpad-composer">
+      <textarea id="scratchpad-input" rows="1" placeholder="Polish a message, ask a quick question…"></textarea>
+      <button id="scratchpad-send" type="button" aria-label="Send">Send</button>
+    </div>
   </div>
 </div>
 
@@ -819,9 +862,12 @@ const statusDot = document.querySelector("#status .dot");
 const statusText = document.getElementById("status-text");
 const newBtn = document.getElementById("new-btn");
 const conversationListEl = document.getElementById("conversation-list");
-const scratchSlotEl = document.getElementById("scratch-slot");
-const scratchBannerEl = document.getElementById("scratch-banner");
-const startOverBtn = document.getElementById("start-over-btn");
+const scratchpadBtn = document.getElementById("scratchpad-btn");
+const scratchpadOverlay = document.getElementById("scratchpad-overlay");
+const scratchpadBody = document.getElementById("scratchpad-body");
+const scratchpadInput = document.getElementById("scratchpad-input");
+const scratchpadSend = document.getElementById("scratchpad-send");
+const scratchpadClose = document.getElementById("scratchpad-close");
 const themeBtn = document.getElementById("theme-btn");
 const skillsBtn = document.getElementById("skills-btn");
 const skillsOverlay = document.getElementById("skills-overlay");
@@ -842,16 +888,13 @@ const offlineSub = document.getElementById("offline-sub");
 // binds this id to the ws on each frame we send and only routes that
 // session's traffic back here.
 let sessionId = localStorage.getItem("curunir-session-id");
-// Never resume into the ephemeral Scratch slot on reload — the whole point
-// is "nothing here is saved across context switches", and a page reload is
-// the strongest possible context switch.
+// Defensive: SCRATCH_SESSION_ID is reserved for the ephemeral Scratchpad
+// modal and must never be the main chat's session — a stale value from
+// an earlier build would route all main-chat traffic into the modal.
 if (!sessionId || sessionId === SCRATCH_SESSION_ID) {
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
 }
-// True when the Scratch slot has at least one message in this page session.
-// Local-only — the server keeps no persisted notion of "scratch has content".
-let scratchHasMessages = false;
 let ws = null;
 let agentOnline = false;
 let staged = []; // {filename, mime_type, data (base64), size}
@@ -899,6 +942,7 @@ function setStatus(state) {
   }
   updateComposerMode();
   updateOfflineModal(state);
+  updateScratchpadSendState();
 }
 
 // === Offline modal ===
@@ -963,10 +1007,9 @@ function connect() {
     // Pull the conversation list for the sidebar.
     requestConversations();
     // Discard any stale server-side scratch from before this page load so
-    // we open the slot empty. Idempotent: no-op when nothing is there.
-    scratchHasMessages = false;
+    // the Scratchpad opens empty next time. Idempotent: no-op when nothing
+    // is there.
     sendScratchDiscard();
-    renderScratchSlot();
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -1011,6 +1054,16 @@ function onServerMessage(msg) {
   if (msg.type === "conversations_snapshot") {
     conversations = msg.conversations || [];
     renderConversations();
+    return;
+  }
+  // Scratchpad frames are routed to the modal's transcript, not the main
+  // chat. Checked before the main session_id filter because scratch traffic
+  // intentionally has a different id than `sessionId` and would otherwise
+  // be dropped here.
+  if (msg.session_id === SCRATCH_SESSION_ID) {
+    // If the modal was closed mid-turn (closeScratchpad already sent a
+    // discard), ignore any straggler chunks rather than reopening the UI.
+    if (scratchpadOpen) renderScratchChunk(msg);
     return;
   }
   // Otherwise: an OutgoingMessage payload. The portal socket is multiplexed
@@ -1557,11 +1610,6 @@ function send() {
   // before any content or tool call arrives.
   if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
   updateComposerMode();
-  // Scratch has at least one message now — flip the slot's visual state.
-  if (sessionId === SCRATCH_SESSION_ID && !scratchHasMessages) {
-    scratchHasMessages = true;
-    renderScratchSlot();
-  }
 }
 
 // === Interrupt ===
@@ -1698,18 +1746,8 @@ function renderConversations() {
 
 function switchConversation(id) {
   if (id === sessionId) return;
-  // Switching away from Scratch is its clear trigger — drop the server-side
-  // session before binding to the new id so a later return to Scratch opens
-  // fresh.
-  if (sessionId === SCRATCH_SESSION_ID && id !== SCRATCH_SESSION_ID) {
-    sendScratchDiscard();
-    scratchHasMessages = false;
-  }
   sessionId = id;
-  // Scratch is never persisted across reloads — the slot is one-tab-only.
-  if (id !== SCRATCH_SESSION_ID) {
-    localStorage.setItem("curunir-session-id", sessionId);
-  }
+  localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
   inProgressMsg = null;
   staged = [];
@@ -1722,36 +1760,7 @@ function switchConversation(id) {
     }));
   }
   renderConversations();
-  renderScratchSlot();
-  updateScratchBanner();
   inputEl.focus();
-}
-
-// === Scratch (ephemeral) slot ===
-function renderScratchSlot() {
-  scratchSlotEl.innerHTML = "";
-  const row = document.createElement("div");
-  const active = sessionId === SCRATCH_SESSION_ID;
-  const empty = !scratchHasMessages;
-  row.className = "scratch-row"
-    + (active ? " active" : "")
-    + (empty ? " empty" : "");
-  const title = document.createElement("div");
-  title.className = "conv-title";
-  title.textContent = "Scratch";
-  const meta = document.createElement("div");
-  meta.className = "scratch-meta";
-  meta.textContent = empty
-    ? "Empty · type to start"
-    : "Active · clears on switch away";
-  row.appendChild(title);
-  row.appendChild(meta);
-  row.addEventListener("click", () => switchConversation(SCRATCH_SESSION_ID));
-  scratchSlotEl.appendChild(row);
-}
-
-function updateScratchBanner() {
-  scratchBannerEl.hidden = sessionId !== SCRATCH_SESSION_ID;
 }
 
 function sendScratchDiscard() {
@@ -1763,14 +1772,108 @@ function sendScratchDiscard() {
   }));
 }
 
-function startOverScratch() {
+// === Scratchpad modal ===
+// State is intentionally minimal: an "open" flag and the in-flight assistant
+// bubble so streamed chunks accumulate into it. The modal is a separate
+// surface from the main chat; the main #sessionId never changes when the
+// modal is in use. Outbound frames carry session_id=SCRATCH_SESSION_ID;
+// inbound frames with that id are routed to this surface in onServerMessage.
+let scratchpadOpen = false;
+let scratchInProgressMsg = null;
+let scratchTurnPending = false;
+
+function openScratchpad() {
+  if (scratchpadOpen) return;
+  scratchpadOpen = true;
+  scratchpadOverlay.hidden = false;
+  // Defer focus until the overlay is laid out so the input scrolls into view
+  // cleanly on mobile.
+  requestAnimationFrame(() => scratchpadInput.focus());
+  updateScratchpadSendState();
+}
+
+function closeScratchpad() {
+  if (!scratchpadOpen) return;
+  scratchpadOpen = false;
+  scratchpadOverlay.hidden = true;
+  // Closing IS the clear: drop the server-side session and wipe local
+  // transcript so re-opening shows the empty state.
   sendScratchDiscard();
-  scratchHasMessages = false;
-  messagesEl.innerHTML = "";
-  inProgressMsg = null;
-  renderEmptyState();
-  renderScratchSlot();
-  inputEl.focus();
+  resetScratchpadBody();
+  scratchInProgressMsg = null;
+  scratchTurnPending = false;
+  scratchpadInput.value = "";
+  scratchpadInput.style.height = "";
+  updateScratchpadSendState();
+}
+
+function resetScratchpadBody() {
+  scratchpadBody.innerHTML =
+    '<div class="scratchpad-empty">' +
+    '<div class="scratchpad-empty-title">What can I help with?</div>' +
+    '<div class="scratchpad-empty-sub">Polish a message, ask a quick ' +
+    'question, compare two things, translate something. Nothing here is ' +
+    'saved.</div>' +
+    '</div>';
+}
+
+function scratchAppendMessage(role, thinking) {
+  // First message — drop the empty state.
+  const empty = scratchpadBody.querySelector(".scratchpad-empty");
+  if (empty) empty.remove();
+  const el = document.createElement("div");
+  el.className = "scratch-msg " + role + (thinking ? " thinking" : "");
+  el.innerHTML = '<div class="body"></div>';
+  scratchpadBody.appendChild(el);
+  scratchpadBody.scrollTop = scratchpadBody.scrollHeight;
+  return el;
+}
+
+function renderScratchChunk(m) {
+  if (!scratchInProgressMsg) {
+    scratchInProgressMsg = scratchAppendMessage("assistant", true);
+  }
+  const body = scratchInProgressMsg.querySelector(".body");
+  if (m.delta) {
+    body.dataset.raw = (body.dataset.raw || "") + (m.content || "");
+    body.innerHTML = marked.parse(body.dataset.raw);
+  } else if (m.content) {
+    body.dataset.raw = m.content;
+    body.innerHTML = marked.parse(m.content);
+  }
+  if (m.final) {
+    scratchInProgressMsg.classList.remove("thinking");
+    scratchInProgressMsg = null;
+    scratchTurnPending = false;
+    updateScratchpadSendState();
+  }
+  scratchpadBody.scrollTop = scratchpadBody.scrollHeight;
+}
+
+function sendScratchMessage() {
+  const text = scratchpadInput.value.trim();
+  if (!text || !agentOnline || scratchTurnPending) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const userEl = scratchAppendMessage("user", false);
+  userEl.querySelector(".body").textContent = text;
+
+  ws.send(JSON.stringify({
+    content: text,
+    session_id: SCRATCH_SESSION_ID,
+  }));
+
+  scratchpadInput.value = "";
+  scratchpadInput.style.height = "";
+  scratchTurnPending = true;
+  // Pre-create the assistant bubble with thinking dots for a "received,
+  // working" signal before any delta arrives.
+  scratchInProgressMsg = scratchAppendMessage("assistant", true);
+  updateScratchpadSendState();
+}
+
+function updateScratchpadSendState() {
+  scratchpadSend.disabled = !agentOnline || scratchTurnPending;
 }
 
 function deleteConversation(id) {
@@ -1790,12 +1893,6 @@ function startNew() {
   // joins the list once its first message is sent. An in-flight turn on the
   // old session is left to finish and persist; the inbound session_id filter
   // keeps its chunks out of the new chat.
-  // Switching away from Scratch is its clear trigger (same rule as the
-  // sidebar): drop the server-side session first so a later visit opens fresh.
-  if (sessionId === SCRATCH_SESSION_ID) {
-    sendScratchDiscard();
-    scratchHasMessages = false;
-  }
   sessionId = crypto.randomUUID();
   localStorage.setItem("curunir-session-id", sessionId);
   messagesEl.innerHTML = "";
@@ -1806,8 +1903,6 @@ function startNew() {
   inputEl.style.height = "";
   renderEmptyState();
   renderConversations();
-  renderScratchSlot();
-  updateScratchBanner();
   inputEl.focus();
 }
 
@@ -1818,17 +1913,41 @@ sendBtn.onclick = () => {
 };
 newBtn.onclick = startNew;
 themeBtn.onclick = toggleTheme;
-startOverBtn.onclick = startOverScratch;
+scratchpadBtn.onclick = openScratchpad;
+scratchpadClose.onclick = closeScratchpad;
+scratchpadSend.onclick = sendScratchMessage;
+// Click on the dim backdrop (but not on the modal itself) closes the modal.
+scratchpadOverlay.addEventListener("click", (e) => {
+  if (e.target === scratchpadOverlay) closeScratchpad();
+});
+scratchpadInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendScratchMessage();
+  }
+});
+scratchpadInput.addEventListener("input", () => {
+  scratchpadInput.style.height = "auto";
+  scratchpadInput.style.height =
+    Math.min(scratchpadInput.scrollHeight, 140) + "px";
+});
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     send();
   }
 });
-// Esc anywhere on the page interrupts an in-flight response. Bound globally
-// because the user may be reading the stream and not have focus on the input.
+// Esc anywhere on the page: closes Scratchpad when open, otherwise interrupts
+// an in-flight main-chat response. Scratchpad takes priority so the user
+// always has a one-key dismiss for the modal.
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && inProgressMsg) {
+  if (e.key !== "Escape") return;
+  if (scratchpadOpen) {
+    e.preventDefault();
+    closeScratchpad();
+    return;
+  }
+  if (inProgressMsg) {
     e.preventDefault();
     interrupt();
   }

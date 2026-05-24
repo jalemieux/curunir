@@ -358,11 +358,12 @@ body {
 
 <div class="controls">
   <h1>Curunir — Quick Chat mockups</h1>
-  <span class="meta">three directions for ephemeral, single-shot conversations</span>
+  <span class="meta">design journey for the ephemeral chat surface</span>
   <div class="tabs">
-    <button class="tab active" data-target="opt-spotlight">1 · Spotlight (recommended)</button>
-    <button class="tab" data-target="opt-scratch">2 · Pinned Scratch</button>
+    <button class="tab" data-target="opt-spotlight">1 · Spotlight</button>
+    <button class="tab" data-target="opt-scratch">2 · Pinned Scratch (tried, abandoned)</button>
     <button class="tab" data-target="opt-actions">3 · Quick Actions</button>
+    <button class="tab active" data-target="opt-modal">4 · Scratchpad modal (shipped)</button>
   </div>
   <button class="theme-toggle" id="theme-btn">Dark</button>
 </div>
@@ -370,7 +371,7 @@ body {
 <div class="stage">
 
   <!-- ================= OPTION 1: SPOTLIGHT ================= -->
-  <div class="frame active" id="opt-spotlight">
+  <div class="frame" id="opt-spotlight">
     <div class="frame-caption">
       <div class="title">1. Cmd-K Spotlight overlay</div>
       <div class="desc">Floats over whatever you're doing. Esc closes, nothing is saved, no sidebar entry. Best match for "quick + ephemeral".</div>
@@ -530,6 +531,59 @@ body {
           <div class="qa-input-wrap">
             <textarea rows="2" placeholder="…or just ask. Press Enter."></textarea>
             <div class="hint"><span>Tip: <span class="kbd-inline">⌘K</span> opens this from anywhere</span><span><span class="status-dot"></span>ephemeral</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OPTION 4: SCRATCHPAD MODAL (shipped) ================= -->
+  <div class="frame active" id="opt-modal">
+    <div class="frame-caption">
+      <div class="title">4. Scratchpad modal &mdash; the final design</div>
+      <div class="desc">Triggered by a header button next to <strong>New conversation</strong>. Centered modal over a dimmed backdrop. Closing &mdash; via the Close button, Esc, or backdrop click &mdash; sends a <code>scratch_discard</code> and wipes state. The original sidebar slot (tab 2) was abandoned because the chat surface looked identical to a persistent conversation; the modal's distinct envelope teaches the ephemeral model structurally instead of through copy.</div>
+    </div>
+    <div class="portal">
+      <div class="sidebar">
+        <div class="sidebar-head">Conversations</div>
+        <div class="conv-row active"><div class="conv-title">Render deploy debug</div><div class="conv-meta">2m ago</div></div>
+        <div class="conv-row"><div class="conv-title">Nudge engine plan</div><div class="conv-meta">Yesterday</div></div>
+        <div class="conv-row"><div class="conv-title">Trip planning &mdash; Lisbon</div><div class="conv-meta">3 days ago</div></div>
+      </div>
+      <div class="chat-col" style="filter: blur(1px); opacity: 0.55; position: relative;">
+        <div class="chat-head">
+          <span><span class="dot"></span>Render deploy debug</span>
+          <span style="display: inline-flex; gap: 6px;">
+            <span style="border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 8px;">Scratchpad</span>
+            <span style="border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 8px;">New conversation</span>
+          </span>
+        </div>
+        <div class="chat-body">
+          <div class="msg assistant"><div class="body"><p>The portal worker is healthy. The most recent deploy log shows three migrations running cleanly&hellip;</p></div></div>
+        </div>
+      </div>
+
+      <!-- The modal overlay -->
+      <div style="position: absolute; inset: 0; background: rgba(10,10,25,0.45); display: flex; align-items: flex-start; justify-content: center; padding: 60px 20px 20px; z-index: 5;">
+        <div style="background: var(--bg); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,0.4); width: 100%; max-width: 540px; max-height: 80%; display: flex; flex-direction: column; overflow: hidden;">
+          <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border);">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div style="font-size: 14px; font-weight: 600;">Scratchpad</div>
+              <div style="font-size: 11px; color: var(--header-text);">Quick chat &mdash; nothing here is saved</div>
+            </div>
+            <button style="background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--header-text); padding: 4px 10px; font-size: 12px; cursor: pointer;">Close</button>
+          </div>
+          <div style="flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="line-height: 1.55;">
+              <div style="background: var(--bubble); border-radius: 12px; padding: 9px 13px; margin-left: 48px; font-size: 14px;">polish this: hey just wanted to follow up on the deck, lmk if you need anything</div>
+            </div>
+            <div style="line-height: 1.55;">
+              <div style="padding: 2px 0; font-size: 14px;"><p style="margin: 0;">Hi &mdash; following up on the deck. Let me know if there's anything I can pull together for you.</p></div>
+            </div>
+          </div>
+          <div style="border-top: 1px solid var(--border); padding: 12px 14px; display: flex; gap: 8px; align-items: flex-end;">
+            <textarea rows="1" style="flex: 1; resize: none; border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; font-family: inherit; font-size: 14px; background: var(--bg); color: var(--fg); outline: none;" placeholder="Polish a message, ask a quick question&hellip;"></textarea>
+            <button style="background: var(--accent); color: #fff; border: none; padding: 9px 16px; border-radius: 10px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500;">Send</button>
           </div>
         </div>
       </div>
