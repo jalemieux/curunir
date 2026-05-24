@@ -148,6 +148,31 @@ async def admin_regenerate_container(
     return RedirectResponse("/admin", status_code=303)
 
 
+@router.get("/beta", response_class=HTMLResponse)
+async def admin_beta_signups(request: Request, user: User = Depends(admin_user)):
+    signups = await db.list_beta_signups()
+    lines = ["<!doctype html><meta charset=utf-8><title>Beta signups</title>",
+             "<style>body{font:14px/1.5 -apple-system,sans-serif;padding:24px;color:#111}",
+             "table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}",
+             "th{background:#f5f5f5}.empty{color:#888;padding:24px}</style>",
+             "<h1>Beta signups</h1>"]
+    if not signups:
+        lines.append('<div class="empty">No signups yet.</div>')
+    else:
+        lines.append(f"<p>{len(signups)} total</p>")
+        lines.append("<table><tr><th>When</th><th>Email</th><th>Source</th><th>Message</th><th>IP</th></tr>")
+        for s in signups:
+            lines.append(
+                f"<tr><td>{s.created_at:%Y-%m-%d %H:%M}</td>"
+                f"<td>{s.email}</td>"
+                f"<td>{s.source or ''}</td>"
+                f"<td>{(s.message or '')[:200]}</td>"
+                f"<td>{s.ip or ''}</td></tr>"
+            )
+        lines.append("</table>")
+    return HTMLResponse("\n".join(lines))
+
+
 @router.post("/users/{user_id}/deactivate")
 async def admin_deactivate(
     user_id: int,
