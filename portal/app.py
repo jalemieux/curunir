@@ -115,18 +115,22 @@ async def healthz():
 
 # Public landing page assets. Reports are mounted at /r/ so the in-page
 # absolute links resolve regardless of which URL serves the page.
-# /curunir/ is also kept as a stable alias for direct linking.
+# /curunir/ is also kept as a stable alias for direct linking. The
+# `reports` subdir is checked separately so a landing checkout without
+# reports (e.g. a fresh dev clone) doesn't crash uvicorn at startup.
 if _LANDING_DIR.exists():
-    app.mount("/r", StaticFiles(directory=_LANDING_DIR / "reports"), name="landing-reports")
+    if (_LANDING_DIR / "reports").exists():
+        app.mount("/r", StaticFiles(directory=_LANDING_DIR / "reports"), name="landing-reports")
     app.mount("/curunir", StaticFiles(directory=_LANDING_DIR, html=True), name="landing")
 
 # Second landing for the GTM pipeline, aimed at solo operators (founders,
 # solopreneurs, in-house marketers running it alone). Beta form posts to
 # /beta/signup with source="launch" so admin can segment.
 if _LAUNCH_DIR.exists():
-    app.mount(
-        "/r-launch",
-        StaticFiles(directory=_LAUNCH_DIR / "reports"),
-        name="launch-reports",
-    )
+    if (_LAUNCH_DIR / "reports").exists():
+        app.mount(
+            "/r-launch",
+            StaticFiles(directory=_LAUNCH_DIR / "reports"),
+            name="launch-reports",
+        )
     app.mount("/launch", StaticFiles(directory=_LAUNCH_DIR, html=True), name="launch")
