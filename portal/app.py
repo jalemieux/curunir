@@ -94,10 +94,11 @@ app.include_router(beta.router)
 app.include_router(ws_agent.router)
 app.include_router(ws_browser.router)
 
-# Public landing page (no auth). Served at /curunir/ — reports/ resolves
-# under the same prefix so the in-page links keep working.
-_LANDING_DIR = Path(__file__).parent / "static" / "landing"
+# Public landing page assets. Reports are mounted at /r/ so the in-page
+# absolute links resolve regardless of which URL serves the page.
+# /curunir/ is also kept as a stable alias for direct linking.
 if _LANDING_DIR.exists():
+    app.mount("/r", StaticFiles(directory=_LANDING_DIR / "reports"), name="landing-reports")
     app.mount("/curunir", StaticFiles(directory=_LANDING_DIR, html=True), name="landing")
 
 
@@ -107,8 +108,12 @@ async def healthz():
     return JSONResponse({"status": "ok" if ok else "degraded"})
 
 
+_LANDING_DIR = Path(__file__).parent / "static" / "landing"
+
+
 @app.get("/")
 async def root(user=Depends(auth.optional_current_user)):
     if user is None:
-        return RedirectResponse("/needs-invite", status_code=302)
+        # Public landing page — same file served at /curunir/ for direct linking.
+        return FileResponse(_LANDING_DIR / "index.html")
     return FileResponse(Path(__file__).parent / "static" / "index.html")
