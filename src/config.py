@@ -8,7 +8,7 @@ class AgentConfig:
     model: str = "anthropic/claude-sonnet-4-20250514"
     api_base: str | None = None
     openrouter_provider: str | None = None
-    max_iterations: int = 75
+    max_iterations: int = 200
     max_history_chars: int = 250_000
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
