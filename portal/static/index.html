@@ -132,6 +132,22 @@ header {
 }
 .header-btn:hover { color: var(--accent); border-color: var(--accent); }
 .header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Ephemeral header button — Scratchpad. Dashed border signals
+   "temporary thing" before the user even opens it; the structural cue
+   matches what the modal itself communicates inside. The companion
+   primary styling lives on #new-btn directly (see #231). */
+.header-btn.ephemeral {
+  border-style: dashed; background: transparent;
+  color: var(--header-text);
+}
+.header-btn.ephemeral:hover {
+  border-style: dashed; color: var(--accent); border-color: var(--accent);
+  background: rgba(79,70,229,0.05);
+}
+[data-theme="dark"] .header-btn.ephemeral:hover {
+  background: rgba(99,102,241,0.10);
+}
 #theme-btn {
   width: 28px; height: 24px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -754,7 +770,7 @@ body.dragging .drop-hint { display: flex; }
   <div><strong>Curunir</strong></div>
   <div class="header-right">
     <button id="theme-btn" class="header-btn" title="Toggle theme" aria-label="Toggle theme"></button>
-    <button id="scratchpad-btn" class="header-btn" title="Open Scratchpad (ephemeral chat)" aria-label="Open Scratchpad">Scratchpad</button>
+    <button id="scratchpad-btn" class="header-btn ephemeral" title="Open Scratchpad (ephemeral chat)" aria-label="Open Scratchpad">Scratchpad</button>
     <button id="new-btn" class="header-btn" title="Start a new conversation"><span class="glyph">+</span>New conversation</button>
     <div id="status"><span class="dot offline"></span><span id="status-text">offline</span></div>
   </div>
