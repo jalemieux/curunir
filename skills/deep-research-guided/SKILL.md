@@ -128,6 +128,8 @@ Compile findings into a structured report. The first page sets the frame — rea
 2. []{#src-2}[Title](URL) — [X/Twitter] what was found here
 ```
 
+**No self-attribution.** Curunir routes each task across a mix of frontier models (main reasoning, vision, gemini-search, xai-search, delegated sub-agents) — no single model produced this report. Do not include an "AI Model Used", "Author", or equivalent section, and do not name the model/LLM that produced it. If methodology is disclosed, limit to data sources and tools (e.g. "web search, Reddit, X") — never the underlying model.
+
 **Title guidance.** The H1 should read like a magazine cover, not a filename: `"Retatrutide: Blockbuster or Bust? Investment Analysis for Eli Lilly (LLY)"` beats `"Retatrutide Research"`. The filename slug is separate (see Step 5).
 
 **Prepared for.** Pull the user's name from `context/identity.md` or memory. If you don't know it, omit the line rather than guess.
@@ -309,3 +311,4 @@ Pick 2-3 sources that fit the topic. Don't use all sources indiscriminately.
 - **Header lines without blank lines between them** — markdown collapses consecutive lines into one paragraph. Each `**Field:**` line in the header needs a blank line before the next, or pandoc renders them as one run-on sentence.
 - **Skipping the fact-check pass** — it's the default, not optional decoration. The only valid reasons to skip are (a) the user explicitly opted out, or (b) the topic has no verifiable claims (pure sentiment/opinion). Otherwise: delegate to `fact-checker`, apply corrections, append the addendum.
 - **Fact-checking yourself instead of delegating** — your context is already anchored on the same sources and framing you used to write the report. Always use `delegate` so the fact-checker gets a fresh window.
+- **"AI Model Used" / author-attribution section** — don't add one; don't name the model that produced the report. Curunir mixes frontier models per task, so any single-model claim would be inaccurate.
