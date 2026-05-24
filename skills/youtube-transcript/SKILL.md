@@ -22,7 +22,7 @@ yt-dlp --write-auto-sub --sub-lang en --skip-download \
 # → writes /tmp/yt_VIDEO_ID.en.vtt
 ```
 
-Then strip VTT timestamps, inline word-timing tags, and entities:
+Then strip VTT timestamps, inline word-timing tags, and entities — **and write to a file**, do not pipe to stdout (see warning below):
 
 ```bash
 awk '
@@ -34,7 +34,17 @@ awk '
   {print}
 ' /tmp/yt_VIDEO_ID.en.vtt \
   | awk '!seen[$0]++' \
-  | sed 's/&gt;/>/g; s/&lt;/</g; s/&amp;/\&/g; s/&#39;/'"'"'/g'
+  | sed 's/&gt;/>/g; s/&lt;/</g; s/&amp;/\&/g; s/&#39;/'"'"'/g' \
+  > /tmp/yt_VIDEO_ID.txt
+
+# Print only stats to bash output, not the transcript itself
+wc -l -w -c /tmp/yt_VIDEO_ID.txt
+```
+
+Then use the **`read` tool** to load the transcript into context:
+
+```
+read(file_path="/tmp/yt_VIDEO_ID.txt")
 ```
 
 What each step does:
@@ -42,6 +52,12 @@ What each step does:
 - `/<[0-9:.]+>/ {next}` — auto-captions ship two parallel versions of each line: a clean one and one with per-word timing tags (`<00:00:01.120><c>back</c>`). Drop the tagged duplicates.
 - `awk '!seen[$0]++'` — dedupes the scrolling-caption repeats (each phrase appears 2-3 times as it slides up the screen).
 - `sed` at the end — decodes the HTML entities VTT uses for `>`, `<`, `&`, `'`. Speaker-change markers (`>>`) come through correctly after this.
+
+### ⚠️ Critical: never pipe the transcript through bash stdout
+
+The `bash` tool **truncates output at 30,000 chars** (~5,000 words). A typical podcast transcript is 15-40k words. If you `cat` the transcript or pipe the awk pipeline straight into bash output, the agent silently sees only the first ~15-20% of the file and confidently summarizes a partial transcript.
+
+Always: pipeline → file → `read` tool. Use bash only for the `yt-dlp` download, the awk transform-to-file, and `wc` for stats.
 
 ## Variants
 
@@ -87,13 +103,15 @@ For pure text output, **stick with VTT**.
 
 ## Tips
 
-- Pipe directly to `wc -w` to estimate length before reading — long-form videos (podcasts, lectures) can yield 10k+ words.
+- Always run `wc -w` against the cleaned `.txt` file first so you know how much you're about to load — long-form videos (podcasts, lectures) can yield 30k+ words.
 - The output filename uses yt-dlp's template — `%(id)s` is the video ID, so re-runs overwrite cleanly in `/tmp/`.
 - For batch processing, pass a playlist URL — yt-dlp writes one subtitle file per video.
 - If the video has no captions at all, yt-dlp prints `WARNING: There are no subtitles for the requested languages` and exits 0. Check that the `.vtt` file exists before parsing.
+- For very long transcripts (>50k words / ~300KB), read in chunks with the `read` tool's `offset`/`limit` params, or grep for sections of interest before reading.
 
 ## Common Mistakes
 
+- **Piping the transcript through bash stdout** — the bash tool truncates output at 30,000 chars (~5k words). A typical podcast is 15-40k words. The agent gets the first 15-20% and confidently summarizes a partial transcript without realizing. Always write to a file and use the `read` tool. See the warning under Usage.
 - **Trying YouTube's `timedtext` endpoint or third-party transcript services first** — they fail unpredictably from server IPs. `yt-dlp` is the only reliable path. Go to it directly.
 - **Forgetting `--skip-download`** — without it, yt-dlp downloads the full video, which is slow and wastes disk.
 - **Not deduping VTT output** — auto-captions scroll, so each phrase appears 2-3 times in the raw text. Always dedupe with `awk '!seen[$0]++'`.
