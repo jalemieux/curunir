@@ -1,6 +1,7 @@
 ---
 name: deep-research-guided
 description: "NotebookLM-style research with a plan-confirmation gate. Use when the user asks to research a topic but the prompt is vague (no explicit timeframe, angle, or deliverable), when the user explicitly asks to 'see the plan first', 'preview', 'confirm', or 'walk me through it', or any time misalignment would be expensive (long-running, broad scope). For tightly-scoped, fire-and-forget research requests prefer `deep-research` instead. Do NOT use for investment requests whose deliverable is a buy/sell/hold recommendation or a ranking of investable names — defer to investment-memo for those."
+hidden: true
 portal_summary: "Research any topic — confirms a plan with you first, then writes the report"
 portal_starter: true
 tools: attach
