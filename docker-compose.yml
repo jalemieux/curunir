@@ -57,6 +57,12 @@ services:
       # read agent activity from inside the container. RotatingFileHandler
       # in run.py caps it at 10MB × 3 backups.
       LOG_FILE: ${LOG_FILE:-/app/workspace/curunir.log}
+      # Bind 0.0.0.0 inside the container so the host's published port
+      # reaches the server. Docker network isolation + the pairing token
+      # written to /app/context/.ws-token are the actual access controls.
+      # Override the publish line below to `127.0.0.1:8765:8765` to keep
+      # the port off your LAN.
+      WS_HOST: ${WS_HOST:-0.0.0.0}
     ports:
       - "8765:8765"
     volumes:

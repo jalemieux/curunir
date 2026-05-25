@@ -6,6 +6,7 @@ import json
 import logging
 import logging.handlers
 import os
+import secrets
 from pathlib import Path
 
 import time
@@ -517,6 +518,39 @@ async def periodic_dreaming(agent: Agent, interval_sec: int):
 logger = logging.getLogger(__name__)
 
 
+def _ensure_ws_token(path: Path) -> str:
+    """Return the pairing token written at *path*, creating it if absent.
+
+    Reusing an existing token across restarts lets long-lived CLI sessions
+    survive a server bounce without having to re-read the file. Written 0600
+    so other local users can't read it.
+    """
+    try:
+        existing = path.read_text().strip()
+        if existing:
+            return existing
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("Could not read %s (%s); regenerating", path, exc)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    # Write atomically with restrictive mode, then chmod to be sure on
+    # filesystems where the umask leaked through.
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, token.encode("utf-8"))
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(str(path), 0o600)
+    except OSError:
+        pass
+    logger.info("WebSocket pairing token at %s", path)
+    return token
+
+
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 # Full date so the introspect skill can filter the rotating log file by a
 # time window (the flat file spans multiple days; time-only stamps can't be
@@ -613,11 +647,22 @@ async def main():
 
     # Register channels
     channels = {}
-    ws_host = os.environ.get("WS_HOST", "0.0.0.0")
+    ws_host = os.environ.get("WS_HOST", "127.0.0.1")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
+    ws_token_path = Path(config.context_dir) / ".ws-token"
+    ws_pairing_token = _ensure_ws_token(ws_token_path)
+    ws_allowed_origins_env = os.environ.get("WS_ALLOWED_ORIGINS", "").strip()
+    if ws_allowed_origins_env:
+        ws_allowed_origins = frozenset(
+            o.strip() for o in ws_allowed_origins_env.split(",") if o.strip()
+        )
+    else:
+        ws_allowed_origins = None  # channel default (localhost set)
     ws = WebSocketChannel(
         in_queue, host=ws_host, port=ws_port, model=config.model,
         cancel_session=agent.request_cancel,
+        allowed_origins=ws_allowed_origins,
+        pairing_token=ws_pairing_token,
     )
     channels["cli"] = ws
 

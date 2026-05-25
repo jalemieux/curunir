@@ -55,7 +55,7 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 
 ### Channels (`src/channels/`)
 
-- **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`.
+- **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`. Binds `127.0.0.1` by default; gated by an Origin allowlist (localhost + missing/`null`) and a pairing token written to `context/.ws-token` (mode 0600). The CLI auto-loads the token from that file or `CURUNIR_WS_TOKEN`; `WS_ALLOWED_ORIGINS` extends the allowlist. Docker compose overrides `WS_HOST=0.0.0.0` so the published port works inside the container — network isolation + the token are the access controls there.
 - **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
 - **Portal** (`portal.py`): Outbound WebSocket to a hosted portal (`CURUNIR_PORTAL_URL` + `CURUNIR_PORTAL_TOKEN`). Container dials portal; portal multiplexes browser ↔ container. Session ID is `"portal"`. See `portal/` directory for the portal service.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
