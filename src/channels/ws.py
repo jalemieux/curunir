@@ -11,6 +11,7 @@ import websockets.exceptions
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
+    _sanitize_session_id,
     _stage_attachments,
 )
 from src.channels.base import IncomingMessage, OutgoingMessage
@@ -79,9 +80,16 @@ class WebSocketChannel:
 
         Used when the client's hello frame names a prior session id it wants
         to resume. Returns the resulting session id (always *new_sid* on
-        success; falls back to *old_sid* on a degenerate input).
+        success; falls back to *old_sid* on a degenerate or unsafe input).
+        Client-supplied ids that fail the shape check are silently rejected
+        — the connection keeps its server-minted id instead.
         """
-        if not isinstance(new_sid, str) or not new_sid:
+        try:
+            new_sid = _sanitize_session_id(new_sid)
+        except ValueError as e:
+            logger.warning(
+                "Rejected client-supplied session_id on hello: %s", e
+            )
             return old_sid
         if new_sid == old_sid:
             return old_sid
@@ -190,10 +198,21 @@ class WebSocketChannel:
             ))
             return
 
-        manifest = (
-            _stage_attachments(decoded, session_id, self.uploads_dir)
-            if decoded else None
-        )
+        try:
+            manifest = (
+                _stage_attachments(decoded, session_id, self.uploads_dir)
+                if decoded else None
+            )
+        except ValueError as e:
+            logger.info("Rejected inbound attachment: %s", e)
+            await self.send(OutgoingMessage(
+                content=f"Attachment rejected: {e}",
+                channel="cli",
+                session_id=session_id,
+                reply_address={},
+                final=True,
+            ))
+            return
 
         msg = IncomingMessage(
             content=data.get("content", ""),

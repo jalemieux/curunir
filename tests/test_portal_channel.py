@@ -614,6 +614,65 @@ async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server
 
 
 @pytest.mark.asyncio
+async def test_user_message_with_traversal_session_id_dropped(tmp_path, caplog):
+    """A `user_message` carrying a path-traversal session_id is dropped
+    entirely — no IncomingMessage enqueued, no file written to disk."""
+    import logging
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", uploads_dir=str(uploads),
+    )
+    import base64 as _b64
+    payload = {
+        "content": "pwn",
+        "session_id": "../../../tmp/pwn",
+        "attachments": [{
+            "filename": "a.txt", "mime_type": "text/plain",
+            "data": _b64.b64encode(b"x").decode(),
+        }],
+    }
+    with caplog.at_level(logging.WARNING, logger="src.channels.portal"):
+        await ch._handle_user_message(payload)
+    assert in_q.empty()
+    # uploads root stayed empty — no `../../../tmp/pwn` subdir created.
+    assert list(uploads.iterdir()) == []
+    assert "invalid session_id" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_user_message_with_traversal_filename_basenamed(tmp_path):
+    """A `user_message` whose attachment filename contains `..` is staged
+    under its basename instead, with the resulting path safely under
+    uploads_dir."""
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url="ws://x", token="t", uploads_dir=str(uploads),
+    )
+    import base64 as _b64
+    payload = {
+        "content": "x",
+        "session_id": "tab-A",
+        "attachments": [{
+            "filename": "../../../etc/authorized_keys",
+            "mime_type": "text/plain",
+            "data": _b64.b64encode(b"ssh-rsa AAAA").decode(),
+        }],
+    }
+    await ch._handle_user_message(payload)
+    msg = in_q.get_nowait()
+    assert msg.attachments is not None
+    att = msg.attachments[0]
+    assert att["filename"] == "authorized_keys"
+    import os as _os
+    uploads_real = _os.path.realpath(str(uploads))
+    assert _os.path.realpath(att["path"]).startswith(uploads_real + _os.sep)
+
+
+@pytest.mark.asyncio
 async def test_duplicate_user_message_within_window_enqueued_once():
     """Two identical content frames back-to-back → exactly one
     IncomingMessage enqueued; the second is dropped as a duplicate."""

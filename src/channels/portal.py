@@ -42,6 +42,7 @@ import websockets.exceptions
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
+    _sanitize_session_id,
     _stage_attachments,
 )
 from src.channels.base import IncomingMessage, OutgoingMessage
@@ -173,7 +174,20 @@ class PortalChannel:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
 
     async def _handle_user_message(self, payload: dict) -> None:
-        session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        # Portal frames are attacker-influenced; the session_id is composed
+        # into `<uploads_dir>/<session_id>/...` paths, so anything that
+        # doesn't match the strict shape is dropped before it can touch
+        # disk or be enqueued. No reply — we don't want to confirm rejection
+        # back to a hostile sender.
+        try:
+            session_id = _sanitize_session_id(
+                payload.get("session_id") or PORTAL_SESSION_ID
+            )
+        except ValueError as e:
+            logger.warning(
+                "PortalChannel: dropped frame with invalid session_id: %s", e
+            )
+            return
         if payload.get("command") == "interrupt":
             delivered = bool(self.cancel_session and self.cancel_session(session_id))
             logger.info(
@@ -237,10 +251,19 @@ class PortalChannel:
             )
             return
 
-        manifest = (
-            _stage_attachments(decoded, session_id, self.uploads_dir)
-            if decoded else None
-        )
+        try:
+            manifest = (
+                _stage_attachments(decoded, session_id, self.uploads_dir)
+                if decoded else None
+            )
+        except ValueError as e:
+            # Boundary checks above should have caught this; if we somehow
+            # reach here (e.g. an in-tree symlink that escapes), drop the
+            # frame silently — no agent turn, no disk artefact.
+            logger.warning(
+                "PortalChannel: dropped frame with unsafe attachment: %s", e
+            )
+            return
         await self.in_queue.put(IncomingMessage(
             content=payload.get("content", ""),
             channel="portal",
