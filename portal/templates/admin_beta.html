@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Beta signups</title>
+  <style>
+    body { font: 14px/1.5 -apple-system, sans-serif; padding: 24px; color: #111; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f5f5f5; }
+    .empty { color: #888; padding: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Beta signups</h1>
+  {% if not signups %}
+  <div class="empty">No signups yet.</div>
+  {% else %}
+  <p>{{ signups|length }} total</p>
+  <table>
+    <tr><th>When</th><th>Email</th><th>Source</th><th>Message</th><th>IP</th></tr>
+    {% for s in signups %}
+    <tr>
+      <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ s.email }}</td>
+      <td>{{ s.source or '' }}</td>
+      <td>{{ (s.message or '')[:200] }}</td>
+      <td>{{ s.ip or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</body>
+</html>

@@ -63,6 +63,51 @@ async def test_signup_rate_limit(client, monkeypatch):
     assert r.status_code == 429
 
 
+@pytest.mark.parametrize("bad_char", ["<", ">", "&", '"', "'"])
+@pytest.mark.asyncio
+async def test_signup_rejects_html_metachars_in_message(client, bad_char):
+    resp = await client.post(
+        "/beta/signup",
+        json={"email": "dan@example.com", "message": f"hello {bad_char}there"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("bad_char", ["<", ">", "&", '"', "'"])
+@pytest.mark.asyncio
+async def test_signup_rejects_html_metachars_in_source(client, bad_char):
+    resp = await client.post(
+        "/beta/signup",
+        json={"email": "eve@example.com", "source": f"x{bad_char}y"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_signup_coerces_malformed_xff_to_unknown(client):
+    resp = await client.post(
+        "/beta/signup",
+        json={"email": "frank@example.com"},
+        headers={"X-Forwarded-For": "<script>alert(1)</script>"},
+    )
+    assert resp.status_code == 200
+    rows = await db.list_beta_signups()
+    assert rows[0].email == "frank@example.com"
+    assert rows[0].ip == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_signup_keeps_well_shaped_xff(client):
+    resp = await client.post(
+        "/beta/signup",
+        json={"email": "gina@example.com"},
+        headers={"X-Forwarded-For": "203.0.113.5, 10.0.0.1"},
+    )
+    assert resp.status_code == 200
+    rows = await db.list_beta_signups()
+    assert rows[0].ip == "203.0.113.5"
+
+
 @pytest.mark.asyncio
 async def test_admin_beta_page_lists_signups(client):
     # Need an admin session to view; use the existing admin pattern.
