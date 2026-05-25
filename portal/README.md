@@ -212,6 +212,22 @@ After signing in as an admin (an email listed in `ADMIN_EMAILS`), visit
 - Rotate the container token (forces the container to re-authenticate)
 - Deactivate a user (revokes both tokens)
 
+## Dependency updates
+
+`portal/requirements.lock` is the authoritative install set for the Docker
+image — the build uses `pip install --require-hashes -r requirements.lock`,
+so every deploy is reproducible and hash-verified. `pyproject.toml` only
+defines floors (including security floors for `h11`, `python-multipart`,
+and `starlette`).
+
+A weekly GitHub Actions workflow (`.github/workflows/refresh-portal-lock.yml`)
+regenerates the lockfile and opens a PR if anything changed. To refresh
+locally:
+
+```bash
+uv pip compile portal/pyproject.toml -o portal/requirements.lock --generate-hashes
+```
+
 ## Deploy
 
 Render auto-deploys from the linked branch using `portal/render.yaml`,
