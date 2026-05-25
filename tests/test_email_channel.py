@@ -172,6 +172,54 @@ async def test_poll_once_drops_disallowed_sender(email_config, in_queue):
     assert in_queue.empty()
 
 
+@pytest.mark.parametrize("bad_sender", [
+    "alice@example.com.evil.tld",      # suffix attack
+    "evilalice@example.com.attacker.tld",  # prefix + suffix attack
+    '"alice@example.com" <attacker@evil.tld>',  # display-name spoof
+    "",  # malformed / empty From
+    "not-an-email",
+])
+@pytest.mark.asyncio
+async def test_poll_once_rejects_allowlist_bypass_attempts(
+    email_config, in_queue, bad_sender,
+):
+    """Substring match → exact RFC-5322 address match. Bypass vectors must be rejected."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z", from_email=bad_sender)],
+        "next_cursor": None,
+    }
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    assert in_queue.empty()
+    client.get_message.assert_not_called()
+
+
+@pytest.mark.parametrize("good_sender", [
+    "alice@example.com",
+    "Alice@Example.COM",  # case-insensitive
+    '"Alice" <alice@example.com>',  # display-name + address form
+    "<alice@example.com>",
+])
+@pytest.mark.asyncio
+async def test_poll_once_accepts_allowed_sender_variants(
+    email_config, in_queue, good_sender,
+):
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z", from_email=good_sender)],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda mid: _detail(mid, from_email=good_sender)
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    assert in_queue.qsize() == 1
+
+
 @pytest.mark.asyncio
 async def test_poll_once_queues_inbound_and_advances_watermark(email_config, in_queue):
     client = AsyncMock()

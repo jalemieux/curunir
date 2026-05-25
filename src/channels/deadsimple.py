@@ -11,6 +11,7 @@ import base64
 import logging
 import mimetypes
 import time
+from email.utils import getaddresses
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,7 @@ class DeadsimpleClient:
         self.api_key = api_key
         self.api_base = api_base.rstrip("/")
         self.inbox_id = inbox_id
-        self.allowed_recipients = allowed_recipients
+        self.allowed_recipients = [r.lower() for r in allowed_recipients]
         self.restrict_outbound = restrict_outbound
         self._http = httpx.AsyncClient(timeout=timeout_sec)
 
@@ -157,15 +158,12 @@ class DeadsimpleClient:
     def _check_recipients_allowed(self, *recipients: str | None) -> None:
         if not self.restrict_outbound or not self.allowed_recipients:
             return
-        flat: list[str] = []
-        for r in recipients:
-            if not r:
-                continue
-            flat.extend(addr.strip() for addr in r.split(",") if addr.strip())
-        blocked = [r for r in flat if not any(a in r for a in self.allowed_recipients)]
-        if blocked:
+        raw = [r for r in recipients if r]
+        parsed = [addr.lower() for _, addr in getaddresses(raw) if addr]
+        blocked = [r for r in parsed if r not in self.allowed_recipients]
+        if blocked or not parsed:
             raise DeadsimpleError(
-                f"Outbound email blocked: recipient(s) {blocked} not in allowlist "
+                f"Outbound email blocked: recipient(s) {blocked or list(raw)} not in allowlist "
                 f"({self.allowed_recipients}). Set EMAIL_RESTRICT_OUTBOUND=false to disable."
             )
 
