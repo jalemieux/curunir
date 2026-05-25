@@ -1,6 +1,7 @@
 ---
 name: sec-edgar
 description: "Use when fetching official SEC filings or standardized fundamentals (10-K, 10-Q, 8-K) for US-listed companies — segment revenue, guidance, drug pipelines, risk factors, executive comp, beneficial ownership. Trigger phrases: 'what does X's 10-K say', 'segment revenue', 'authoritative revenue numbers', 'check the filing', 'recent 8-K'."
+portal_summary: "Pull official SEC filings — 10-K, 10-Q, 8-K — for a US-listed company"
 ---
 
 # SEC EDGAR

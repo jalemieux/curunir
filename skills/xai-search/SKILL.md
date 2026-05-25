@@ -1,6 +1,7 @@
 ---
 name: xai-search
 description: "Use when you need to search the web or X/Twitter via the xAI API. Trigger: a skill or task requires web search or social listening through Grok, or the agent needs real-time X/Twitter data."
+portal_summary: "Search the web and X/Twitter via Grok"
 ---
 
 # xAI Search

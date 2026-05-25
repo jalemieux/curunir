@@ -1,7 +1,7 @@
 ---
 name: polymarket
 description: "Use when fetching live prediction-market data for forward-looking topics — elections, geopolitical events, policy decisions, macro outcomes, sports, awards, anything where a real-money betting market expresses an implied probability. Trigger phrases: 'prediction markets', 'Polymarket', 'Polymarket odds', 'implied probability', 'betting markets say', 'what are the odds of'. Also cite alongside qualitative sources inside deep-research / deep-research-guided when the question is forward-looking."
-hidden: true
+portal_summary: "Live prediction-market odds for elections, policy, and events"
 ---
 
 # Polymarket

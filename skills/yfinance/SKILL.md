@@ -1,6 +1,7 @@
 ---
 name: yfinance
 description: "Use when fetching equity data from Yahoo Finance — fundamentals, prices, valuation multiples, peers, options, dividends, analyst estimates. Trigger phrases: 'current price of X', 'P/E for X', 'revenue/earnings of X', 'how does X compare to peers', 'price history of X'."
+portal_summary: "Look up stock prices, fundamentals, and peers from Yahoo Finance"
 ---
 
 # Yahoo Finance (yfinance)

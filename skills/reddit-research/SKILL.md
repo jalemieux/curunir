@@ -1,6 +1,7 @@
 ---
 name: reddit-research
 description: "Use when you need Reddit discussions, reviews, complaints, or community sentiment for product research. Trigger: an agent needs to find what real users are saying about a product, competitor, pain point, or topic on Reddit."
+portal_summary: "Find what real users on Reddit say about a product or topic"
 ---
 
 # Reddit Research
