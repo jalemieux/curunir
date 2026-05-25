@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from src.channels._attachments import (
-    _normalize_unicode_whitespace,
+    _assert_within,
+    _safe_attachment_filename,
     _validate_attachment_metadata,
 )
 from src.channels._email_state import EmailState
@@ -171,7 +172,18 @@ class EmailChannel:
             fname_raw = att.get("filename", "")
             if not att_id or not fname_raw:
                 continue
-            fname = _normalize_unicode_whitespace(fname_raw)
+            fname = _safe_attachment_filename(fname_raw)
+            if fname is None:
+                logger.warning(
+                    "Dropping email attachment with unsafe filename %r in thread %s",
+                    fname_raw, thread_id,
+                )
+                continue
+            if fname != fname_raw:
+                logger.info(
+                    "Normalized email attachment filename %r -> %r in thread %s",
+                    fname_raw, fname, thread_id,
+                )
             mime = att.get("content_type") or "application/octet-stream"
             declared_size = int(att.get("size") or 0)
             reason = _validate_attachment_metadata(mime, declared_size)
@@ -179,6 +191,11 @@ class EmailChannel:
                 logger.warning("Dropping email attachment %s: %s", fname, reason)
                 continue
             dest = out_dir / fname
+            if not _assert_within(out_dir, dest):
+                logger.warning(
+                    "Dropping email attachment %s: resolves outside %s", fname, out_dir,
+                )
+                continue
             try:
                 await self.client.download_attachment(detail["message_id"], att_id, dest)
             except DeadsimpleError:

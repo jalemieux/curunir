@@ -9,6 +9,7 @@ import base64
 import os
 import re
 import uuid as _uuid
+from pathlib import Path
 
 # Regex matching any Unicode whitespace character that isn't a regular space.
 _UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
@@ -22,6 +23,65 @@ def _normalize_unicode_whitespace(s: str) -> str:
     file-not-found errors downstream.
     """
     return _UNICODE_WHITESPACE_RE.sub(' ', s)
+
+
+# Windows reserved device names — rejected even on Linux since the staging
+# dir may later be synced to a Windows host or shared via SMB.
+_WIN_RESERVED = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+})
+
+
+def _safe_attachment_filename(raw: str) -> str | None:
+    """Normalize a remote-supplied filename for safe use as a basename.
+
+    Returns the sanitized name, or ``None`` if the input cannot be made
+    safe and the attachment should be skipped. Strips path components
+    (POSIX and Windows separators), rejects empty / dot / NUL-bearing
+    names, drops leading dots so silent dotfile creation is impossible,
+    and rejects Windows reserved device names.
+    """
+    if not isinstance(raw, str):
+        return None
+    s = _normalize_unicode_whitespace(raw)
+    if "\x00" in s:
+        return None
+    # Strip directory components for both POSIX and Windows separators —
+    # a Windows-style filename can arrive on a Linux host and vice versa.
+    for sep in ("/", "\\"):
+        if sep in s:
+            s = s.rsplit(sep, 1)[-1]
+    s = s.strip()
+    if not s or s in (".", ".."):
+        return None
+    s = s.lstrip(".")
+    if not s:
+        return None
+    stem = s.split(".", 1)[0].upper()
+    if stem in _WIN_RESERVED:
+        return None
+    return s
+
+
+def _assert_within(parent: Path, child: Path) -> bool:
+    """Return True iff ``child`` resolves to a path inside ``parent``.
+
+    Defense-in-depth against symlinks under the staging dir: even after
+    basenaming, a symlink at ``parent/foo`` could redirect a write outside
+    ``parent``. ``resolve()`` follows symlinks; we then confirm containment.
+    """
+    try:
+        child_r = child.resolve()
+        parent_r = parent.resolve()
+    except OSError:
+        return False
+    try:
+        child_r.relative_to(parent_r)
+    except ValueError:
+        return False
+    return True
 
 # Size caps (mirrored in cli.py)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
@@ -220,15 +280,21 @@ def _stage_attachments(items: list[dict], session_id: str, uploads_dir: str) -> 
 
     manifest: list[dict] = []
     used: set[str] = set()
+    batch_dir_path = Path(batch_dir)
     for item in items:
-        fname = _unique_filename(used, _normalize_unicode_whitespace(item["filename"]))
+        safe = _safe_attachment_filename(item["filename"])
+        if safe is None:
+            continue
+        fname = _unique_filename(used, safe)
+        full_path = batch_dir_path / fname
+        if not _assert_within(batch_dir_path, full_path):
+            continue
         used.add(fname)
-        full_path = os.path.join(batch_dir, fname)
         with open(full_path, "wb") as f:
             f.write(item["bytes"])
         manifest.append({
             "filename": fname,
-            "path": full_path,
+            "path": str(full_path),
             "mime_type": item["mime_type"],
             "size": len(item["bytes"]),
         })
