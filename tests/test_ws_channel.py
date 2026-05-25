@@ -245,6 +245,63 @@ async def test_hello_with_prior_session_id_resumes_and_evicts_stale():
         await _stop_channel(task)
 
 
+@pytest.mark.parametrize("bad_sid", [
+    "../foo",
+    "a/b",
+    "a\\b",
+    "..",
+    "",
+    "abc\x00def",
+    "  ",
+    "has space",
+    "a" * 200,
+])
+@pytest.mark.asyncio
+async def test_rekey_rejects_unsafe_session_id(bad_sid):
+    """Hello frames with path-traversal-shaped session ids are ignored."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 13)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 13}") as ws:
+            sid = await _read_hello(ws)
+            await ws.send(json.dumps({"type": "hello", "session_id": bad_sid}))
+            # No second hello echo should arrive for a rejected rekey.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(ws.recv(), timeout=0.2)
+            # Connection still mapped under the original (safe) id.
+            assert ch._connections.get(sid) is not None
+            # And no entry exists for the bad id.
+            assert ch._connections.get(bad_sid) is None
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.parametrize("good_sid", [
+    "cli",
+    "portal",
+    "0123456789abcdef0123456789abcdef",  # uuid hex
+    "abc_def-123",
+])
+@pytest.mark.asyncio
+async def test_rekey_accepts_safe_session_id(good_sid):
+    """Legitimate alphanumeric/UUID-ish ids still rebind successfully."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 14)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 14}") as ws:
+            await _read_hello(ws)
+            await ws.send(json.dumps({"type": "hello", "session_id": good_sid}))
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            echoed = json.loads(raw)
+            assert echoed["type"] == "hello"
+            assert echoed["session_id"] == good_sid
+            assert ch._connections.get(good_sid) is not None
+    finally:
+        await _stop_channel(task)
+
+
 @pytest.mark.asyncio
 async def test_send_to_unknown_session_warns_no_crash(caplog):
     """send() with a session id no socket holds is a no-op + warning."""
@@ -588,6 +645,54 @@ class TestStageAttachments:
 
     def test_empty_items_returns_empty_manifest(self, tmp_uploads):
         assert _stage_attachments([], "sid", str(tmp_uploads)) == []
+
+    def test_traversal_filename_is_neutralized(self, tmp_uploads):
+        """Filenames with path separators are basename'd; the write stays inside uploads_dir."""
+        items = [
+            {"filename": "../../etc/passwd", "mime_type": "text/plain", "bytes": b"x"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        # Either the entry was skipped or the path lands strictly inside uploads_dir.
+        uploads_root = _os_stage.path.realpath(str(tmp_uploads))
+        for m in manifest:
+            real = _os_stage.path.realpath(m["path"])
+            assert _os_stage.path.commonpath([uploads_root, real]) == uploads_root
+            # Filename component must not contain separators.
+            assert "/" not in m["filename"]
+            assert "\\" not in m["filename"]
+            assert m["filename"] not in ("", ".", "..")
+        # The dangerous absolute target must not have been written.
+        assert not _os_stage.path.exists("/etc/passwd_curunir_marker")
+
+    def test_absolute_filename_is_neutralized(self, tmp_uploads):
+        items = [
+            {"filename": "/tmp/curunir_abs_marker", "mime_type": "text/plain", "bytes": b"x"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        uploads_root = _os_stage.path.realpath(str(tmp_uploads))
+        for m in manifest:
+            real = _os_stage.path.realpath(m["path"])
+            assert _os_stage.path.commonpath([uploads_root, real]) == uploads_root
+        assert not _os_stage.path.exists("/tmp/curunir_abs_marker")
+
+    def test_traversal_session_id_is_rejected(self, tmp_uploads):
+        """A session_id that escapes uploads_dir raises rather than writing outside."""
+        items = [{"filename": "x.txt", "mime_type": "text/plain", "bytes": b"x"}]
+        with pytest.raises(ValueError):
+            _stage_attachments(items, "../escape", str(tmp_uploads))
+        # Nothing was written outside the uploads tree.
+        parent = _os_stage.path.dirname(_os_stage.path.realpath(str(tmp_uploads)))
+        assert not _os_stage.path.exists(_os_stage.path.join(parent, "escape"))
+
+    def test_dotdot_only_filename_is_skipped(self, tmp_uploads):
+        items = [
+            {"filename": "..", "mime_type": "text/plain", "bytes": b"x"},
+            {"filename": "ok.txt", "mime_type": "text/plain", "bytes": b"y"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        names = [m["filename"] for m in manifest]
+        assert ".." not in names
+        assert "ok.txt" in names
 
 
 # ---------------------------------------------------------------------------

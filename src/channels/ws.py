@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Callable
 
@@ -16,6 +17,21 @@ from src.channels._attachments import (
 from src.channels.base import IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
+
+# Session ids appear as a directory component when staging attachments
+# (see _stage_attachments). Anything outside this charset risks path
+# traversal or other shell-flavored surprises, so we reject early at the
+# WS boundary. UUID hex, base64url-ish ids, and the literal channel
+# names ("cli", "portal") all match.
+_SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_MAX_SESSION_ID_LEN = 128
+
+
+def _is_safe_session_id(s: object) -> bool:
+    """True iff *s* is a non-empty, ≤128-char alphanumeric/_-/dash string."""
+    if not isinstance(s, str) or not s or len(s) > _MAX_SESSION_ID_LEN:
+        return False
+    return _SAFE_SESSION_ID_RE.match(s) is not None
 
 
 class WebSocketChannel:
@@ -81,7 +97,11 @@ class WebSocketChannel:
         to resume. Returns the resulting session id (always *new_sid* on
         success; falls back to *old_sid* on a degenerate input).
         """
-        if not isinstance(new_sid, str) or not new_sid:
+        if not _is_safe_session_id(new_sid):
+            logger.warning(
+                "rejecting unsafe session_id rekey request from %s",
+                websocket.remote_address,
+            )
             return old_sid
         if new_sid == old_sid:
             return old_sid
