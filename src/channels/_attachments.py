@@ -6,9 +6,12 @@ and outbound enrichment without duplication.
 """
 
 import base64
+import logging
 import os
 import re
 import uuid as _uuid
+
+logger = logging.getLogger(__name__)
 
 # Regex matching any Unicode whitespace character that isn't a regular space.
 _UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
@@ -206,24 +209,59 @@ def _unique_filename(existing: set[str], name: str) -> str:
     return f"{stem}_{i}{ext}"
 
 
+def _is_within(root: str, candidate: str) -> bool:
+    """True iff *candidate* (after realpath) is rooted at *root* (already realpath'd)."""
+    real_candidate = os.path.realpath(candidate)
+    try:
+        return os.path.commonpath([root, real_candidate]) == root
+    except ValueError:
+        # Different drives on Windows, or one is relative — treat as escape.
+        return False
+
+
 def _stage_attachments(items: list[dict], session_id: str, uploads_dir: str) -> list[dict]:
     """Write decoded items to disk, return an email-shaped manifest.
 
     Layout: <uploads_dir>/<session_id>/<uuid>/<normalized_filename>
     All items in one call share a single uuid subdir.
+
+    Treats both *session_id* and each item's filename as untrusted: filenames
+    are reduced to their basename, and the resolved write path is verified to
+    stay strictly inside *uploads_dir*. Raises ``ValueError`` if *session_id*
+    would escape the uploads root.
     """
     if not items:
         return []
 
+    uploads_root = os.path.realpath(uploads_dir)
     batch_dir = os.path.join(uploads_dir, session_id, _uuid.uuid4().hex)
+    if not _is_within(uploads_root, os.path.dirname(batch_dir)) \
+            or not _is_within(uploads_root, batch_dir):
+        raise ValueError(
+            f"refusing to stage attachments: session_id {session_id!r} escapes uploads_dir"
+        )
     os.makedirs(batch_dir, exist_ok=True)
 
     manifest: list[dict] = []
     used: set[str] = set()
     for item in items:
-        fname = _unique_filename(used, _normalize_unicode_whitespace(item["filename"]))
-        used.add(fname)
+        raw = _normalize_unicode_whitespace(item["filename"])
+        # basename strips any directory component the client supplied
+        # (incl. absolute paths and "..\\" on Windows-shaped inputs).
+        candidate = os.path.basename(raw)
+        if candidate in ("", ".", ".."):
+            logger.warning(
+                "skipping attachment with unsafe filename %r", item["filename"]
+            )
+            continue
+        fname = _unique_filename(used, candidate)
         full_path = os.path.join(batch_dir, fname)
+        if not _is_within(uploads_root, full_path):
+            logger.warning(
+                "skipping attachment %r: resolved path escapes uploads_dir", item["filename"]
+            )
+            continue
+        used.add(fname)
         with open(full_path, "wb") as f:
             f.write(item["bytes"])
         manifest.append({
