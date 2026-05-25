@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research — Curunir (Option A: Ledger)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 96px 0 64px; }
+
+  /* Filter rail */
+  .ledger-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+  }
+  .rail .group { margin-bottom: 28px; }
+  .rail .group .label { margin-bottom: 10px; }
+  .rail ul { list-style: none; }
+  .rail li {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px; color: var(--ink-2);
+    padding: 4px 0;
+    cursor: pointer;
+    display: flex; justify-content: space-between;
+    border-bottom: 1px dashed transparent;
+  }
+  .rail li:hover { color: var(--ink); }
+  .rail li.on { color: var(--accent); }
+  .rail li .n { color: var(--ink-3); }
+
+  /* Ledger list */
+  .ledger { border-top: 1px solid var(--ink); }
+  .row {
+    display: grid;
+    grid-template-columns: 120px 1fr 200px 90px;
+    gap: 24px;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+    text-decoration: none;
+    color: inherit;
+    transition: background 150ms;
+  }
+  .row:hover { background: var(--bg-2); padding-left: 12px; padding-right: 12px; }
+  .row .date {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .row .body h3 {
+    font-weight: 500; font-size: 19px;
+    line-height: 1.25; letter-spacing: -0.015em;
+    margin-bottom: 6px;
+  }
+  .row .body p {
+    color: var(--ink-2);
+    font-size: 14.5px;
+    line-height: 1.5;
+    max-width: 580px;
+  }
+  .row .tickers {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .row .tickers span::before { content: "▲ "; color: var(--accent); }
+  .row .tickers span + span { margin-left: 10px; }
+  .row .meta {
+    text-align: right;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .row .meta .arr { color: var(--ink); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .ledger-grid { grid-template-columns: 1fr; }
+    .sec-head { grid-template-columns: 1fr; gap: 16px; }
+    .row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .row .meta { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="#">Home</a>
+      <a class="pill active" href="#">Research</a>
+      <a class="pill" href="#">Beta</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="sec-head">
+      <div class="label accent">RESEARCH / 011</div>
+      <div>
+        <h1>Investment memos, <span class="accent">written by an agent</span>, kept on file.</h1>
+        <p class="lede">Working notes from Curunir on equities, commodities, and private markets. Each memo is a single research session — prompts, sources, and the report it produced.</p>
+      </div>
+    </div>
+
+    <div class="ledger-grid">
+      <aside class="rail">
+        <div class="group">
+          <div class="label">FILTER · ASSET</div>
+          <ul>
+            <li class="on">All <span class="n">11</span></li>
+            <li>Equities <span class="n">04</span></li>
+            <li>Commodities <span class="n">04</span></li>
+            <li>Private <span class="n">02</span></li>
+            <li>Macro <span class="n">01</span></li>
+          </ul>
+        </div>
+        <div class="group">
+          <div class="label">FILTER · YEAR</div>
+          <ul>
+            <li class="on">2026 <span class="n">11</span></li>
+            <li>2025 <span class="n">00</span></li>
+          </ul>
+        </div>
+        <div class="group">
+          <div class="label">SUBSCRIBE</div>
+          <ul>
+            <li>RSS feed</li>
+            <li>Email digest</li>
+          </ul>
+        </div>
+      </aside>
+
+      <div class="ledger">
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 24</div>
+          <div class="body">
+            <h3>SpaceX IPO — Bull Case vs Bear Case</h3>
+            <p>What the All-In commentary gets right and wrong on launch cadence economics, Starlink steady-state ARPU, and the structural risk of a single-customer (DoD) revenue mix.</p>
+          </div>
+          <div class="tickers"><span>SPACEX</span><span>PRIVATE</span></div>
+          <div class="meta">PDF · 18p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 16</div>
+          <div class="body">
+            <h3>Top 10 Gold Miners — Decathlon Ranking</h3>
+            <p>AISC, reserve life, jurisdiction score, and 3-year IRR by name. Top three buys with sensitivity to a $2,800 / $3,400 / $4,000 spot deck.</p>
+          </div>
+          <div class="tickers"><span>GOLD</span><span>AGNICO</span><span>NEM</span></div>
+          <div class="meta">PDF · 26p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 12</div>
+          <div class="body">
+            <h3>LLY Options Strategy — Post-Earnings</h3>
+            <p>Vol surface after the Q1 print, three structured trades on the GLP-1 franchise, and what the open interest at $920 is telling you about market-maker positioning.</p>
+          </div>
+          <div class="tickers"><span>LLY</span><span>OPTIONS</span></div>
+          <div class="meta">PDF · 09p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 11</div>
+          <div class="body">
+            <h3>Eli Lilly — Updated Thesis</h3>
+            <p>Mounjaro / Zepbound run-rate, manufacturing capacity, the Mounjaro-vs-retatrutide cannibalization risk, and a fair-value bridge to $1,050.</p>
+          </div>
+          <div class="tickers"><span>LLY</span></div>
+          <div class="meta">PDF · 22p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 04</div>
+          <div class="body">
+            <h3>Retatrutide — Blockbuster Sizing</h3>
+            <p>Triple-agonist mechanism, Phase 3 readout implications, addressable population at 24% weight loss, and a peak-sales bracket of $18B–$31B.</p>
+          </div>
+          <div class="tickers"><span>LLY</span><span>GLP1</span></div>
+          <div class="meta">PDF · 31p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 05 · 01</div>
+          <div class="body">
+            <h3>PE Investment Thesis — Health Check</h3>
+            <p>Where the carry math breaks at higher rates, holding-period inflation, and a checklist of red flags for LP-side reviewers.</p>
+          </div>
+          <div class="tickers"><span>PRIVATE</span><span>MACRO</span></div>
+          <div class="meta">PDF · 14p<br><span class="arr">→</span></div>
+        </a>
+
+        <a class="row" href="#">
+          <div class="date">2026 · 04 · 28</div>
+          <div class="body">
+            <h3>Gold — Long Thesis, Take 2</h3>
+            <p>Revisit of the March thesis after the CB net-buying print. Why the central-bank bid is structural, not tactical, and what would invalidate the call.</p>
+          </div>
+          <div class="tickers"><span>GOLD</span><span>MACRO</span></div>
+          <div class="meta">PDF · 12p<br><span class="arr">→</span></div>
+        </a>
+
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · 2026</div>
+    <div><a href="#">RSS</a> · <a href="#">EMAIL</a> · <a href="#">X</a></div>
+  </footer>
+</div>
+</body>
+</html>
