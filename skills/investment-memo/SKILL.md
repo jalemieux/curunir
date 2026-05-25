@@ -1,6 +1,6 @@
 ---
 name: investment-memo
-description: "Use when asked to build, back, pitch, or stress-test an investment thesis on any investable subject — public equity, ETF, sector, commodity, crypto, or private name. Also use for any request that produces buy/sell/hold recommendations or ranks investable names by return potential. Trigger phrases: 'investment thesis on X', 'investment memo', 'investment research on X', 'should I buy/short X', 'is X a buy', 'bull case', 'bear case', 'base case', 'steelman/strawman this trade', 'pitch X', 'kill this trade', 'top N [sector] to own', 'top N [sector] by potential/upside', 'recommendations on [stocks/sector]', 'rank/screen [names] by upside/potential', 'which [stocks] to buy', 'who wins from [catalyst]', 'is the trade crowded', 'blockbuster analysis', 'long/short X'. Use this — not deep-research — whenever the deliverable is a recommendation or ranking of investables, even if the request says 'research'. Produces a fact-checked PDF memo that composes deep research, financial analysis, and social sentiment under a directional view."
+description: "Use when asked to build, back, pitch, or stress-test an investment thesis on any investable subject — public equity, ETF, sector, commodity, crypto, or private name. Also use for any request that produces buy/sell/hold recommendations or ranks investable names by return potential. Trigger phrases: 'investment thesis on X', 'investment memo', 'investment research on X', 'should I buy/short X', 'is X a buy', 'bull case', 'bear case', 'base case', 'steelman/strawman this trade', 'pitch X', 'kill this trade', 'top N [sector] to own', 'top N [sector] by potential/upside', 'recommendations on [stocks/sector]', 'rank/screen [names] by upside/potential', 'which [stocks] to buy', 'who wins from [catalyst]', 'is the trade crowded', 'blockbuster analysis', 'long/short X'. Use this — not deep-research — whenever the deliverable is a recommendation or ranking of investables, even if the request says 'research'. Confirms a memo plan with you before running the research, financial, and sentiment phases. Produces a fact-checked PDF memo that composes deep research, financial analysis, and social sentiment under a directional view."
 portal_summary: "Fact-checked investment memo on any stock, sector, or asset"
 portal_starter: true
 tools: attach
@@ -87,6 +87,83 @@ comparison, a catalyst on the event and its winners and losers — but the
 memo's sections still emerge from the analysis (Step 5), never from a
 fixed skeleton. If the request is genuinely ambiguous about what it
 wants, ask one clarifying question.
+
+### Step 1.5 — Present memo plan & confirm
+
+Before delegating anything, present the memo plan to the user using the
+exact template below, **then end the turn**. Do not call `delegate`,
+`financial-analysis`, `reddit-research`, `xai-search`, or any data-fetching
+`bash` call (yfinance, fred, sec-edgar) in the same turn the plan is
+presented. The plan turn is text-only. Wait for the user to reply.
+
+This is where the **universe definition, applied filters, and excluded
+names** from Step 1 get surfaced for the user to sanity-check — before
+sub-agents burn context fetching data on the wrong set. Step 5's
+universe-integrity language assumes this gate already caught the obvious
+mismatches; the fact-check (Step 6) will not.
+
+**Plan template** — emit inline as your text reply, not as an attachment:
+
+```markdown
+**Memo plan**
+
+**Understanding:** {one-sentence restatement of what you think the user is asking, in your own words}
+
+**Instrument(s) & universe:** {tickers / ETF / commodity proxy / private name(s)}. If a category is named ("gold miners", "biotech longs"), list the names you'll cover, the filters you applied (tradability, liquidity, ADR availability, market cap floor, etc.), and the **true category members you're excluding** under those filters — one line each. If single-name, just name the instrument.
+
+**Shape:** {single-name | sector ranking | catalyst}
+
+**Verdict mode:** {Required — Buy/Sell/Avoid/Pass/Hold | Not required — framing only (e.g. steelman, lay out the cases)}
+
+**Sub-questions → phases:**
+1. {Setup / what is the business or event} → deep-research
+2. {Bull case} → deep-research
+3. {Bear case} → deep-research
+4. {Load-bearing numbers — valuation, peers, scenarios} → financial-analysis ({slim per-name | full workflow})
+5. {Positioning & sentiment — crowdedness, counter-takes} → reddit-research + xai-search
+{...}
+
+**Deliverable:** {what you'll hand back — e.g. "Fact-checked PDF memo with shared header, executive summary, body covering setup/bull/bear/what-the-market-is-missing/load-bearing numbers{/per-name coverage}, sentiment & positioning, {verdict if applicable}, inline numbered citations, Sources, and a Fact-Check Addendum."}
+
+Does this look right, or would you like me to adjust the universe (add/drop names, change filters), swap a sub-question, change shape or verdict mode, or narrow the financial depth before I start?
+```
+
+**After emitting the plan, stop.** No tool calls. The next turn belongs
+to the user.
+
+**When the user replies:**
+- "Looks good" / "go" / "yes" / 👍 → proceed to Step 2 with the plan as-is.
+- "Drop X" / "add Newmont" / "no verdict" / "broader universe" / "skip
+  the financial layer" / etc. → ack the change, revise the plan, re-emit
+  the updated version, and stop again to re-confirm. **Never start
+  research on a half-confirmed plan** — one more round of clarification
+  is cheaper than several minutes of sub-agent context spent on the
+  wrong universe.
+- A question about the plan → answer it, then re-emit the plan if you
+  changed anything material, and stop.
+
+**Skip conditions** — skip Step 1.5 entirely and go straight to Step 2
+only when:
+
+1. **The user explicitly opted out** in this turn or the immediately
+   preceding one — phrases like "skip the plan", "just go", "don't ask,
+   just write the memo", "no preview". Treat these as durable for the
+   current memo only.
+2. **The original prompt already specified all five:** instrument(s),
+   universe (single name or an unambiguous set — no category interpretation
+   needed), shape, verdict-mode, and scope. A prompt like *"Buy/sell call
+   on NVDA on a 12-month horizon, verdict required"* qualifies — one
+   instrument, universe is trivially the single name, shape is single-name,
+   verdict is required, scope is bounded. *"Thesis on gold miners"* does
+   not — the universe (which miners? majors only? streamers in or out?),
+   shape (ranking or single-name pick?), and verdict mode are all open.
+   When in doubt, present the plan; universe integrity matters more here
+   than in plain research, so this bar is intentionally higher than
+   `deep-research-guided`'s.
+
+If you skip, say so in one line ("Scope is clear — going straight to the
+memo.") so the user knows the gate is bypassed and can interrupt if you
+misjudged.
 
 ### Step 2 — Research phase (deep-research)
 
@@ -330,8 +407,95 @@ Confidence (Low / Medium / High) reflects the quality of the data and the
 fact-check, not your enthusiasm. If `sec-edgar` was unavailable or
 fact-check timed out, confidence drops.
 
+## Examples
+
+**Single-name verdict** — user asks: *"Pitch me TSLA — should I buy on
+a 12-month horizon?"*
+
+*Turn 1 (plan):* the prompt names the instrument (TSLA) and the
+verdict-mode (Buy/Sell/Avoid required) but leaves the shape and scope
+open. Universe is trivially TSLA, but the framing — robotaxi catalyst?
+auto fundamentals? energy story? — isn't pinned. Emit the plan:
+
+> **Memo plan**
+>
+> **Understanding:** You want a directional Buy/Sell/Avoid call on TSLA over a 12-month horizon, with the case anchored on what's likely to drive the stock over that window.
+>
+> **Instrument(s) & universe:** TSLA (single name). No peer ranking; Tesla peers (RIVN, BYD, GM) will appear in the multiples comparison but not as ranked alternatives.
+>
+> **Shape:** single-name
+>
+> **Verdict mode:** Required — Buy / Sell / Avoid + confidence
+>
+> **Sub-questions → phases:**
+> 1. Setup — auto, energy, FSD/robotaxi, where revenue and gross profit actually come from today → deep-research
+> 2. Bull case — robotaxi/FSD optionality, energy storage scaling, margin recovery → deep-research
+> 3. Bear case — auto demand softness, margin compression, FSD/robotaxi disappointments → deep-research
+> 4. Load-bearing numbers — scenario model (bull/base/bear FY revenue + margin), peer multiples vs. auto and big-tech baskets, current valuation → financial-analysis (full workflow)
+> 5. Positioning & sentiment — is the long crowded, what's the bear consensus → reddit-research + xai-search
+>
+> **Deliverable:** Fact-checked PDF memo with shared header, executive summary closing in a Buy/Sell/Avoid + confidence, setup/bull/bear/what-the-market-is-missing/scenario + multiples, sentiment & positioning, inline numbered citations, Sources, Fact-Check Addendum.
+>
+> Does this look right, or would you like me to adjust the framing, swap a sub-question, or narrow the financial depth before I start?
+
+Stop. No tool calls.
+
+*Turn 2:* user replies *"drop the energy story, keep it focused on auto
+fundamentals and FSD"* → ack, revise sub-questions 1 and 2 (remove
+energy strand), re-emit the plan, stop.
+
+*Turn 3:* user replies *"go"* → proceed to Step 2.
+
+**Sector ranking** — user asks: *"Top 5 gold miners to own going into 2027."*
+
+*Turn 1 (plan):* category is named ("gold miners") but the universe
+isn't — streamers? majors only? Western-listed? Verdict-mode (ranking +
+top-N picks) is implied but the scope of names to consider needs to be
+surfaced. Emit the plan:
+
+> **Memo plan**
+>
+> **Understanding:** You want a ranked top-5 of gold miners to own with a 2027 horizon, with the picks defended on fundamentals + catalysts and the also-rans explained.
+>
+> **Instrument(s) & universe:** Gold producers ranked by upside. Candidate set: Newmont (NEM), Barrick (GOLD), Agnico Eagle (AEM), Kinross (KGC), Gold Fields (GFI), AngloGold Ashanti (AU), Northern Star (NST.AX), Endeavour Mining (EDV.TO). **Filters applied:** primary-listing tradability and >$3B market cap. **True category members excluded under those filters:** Polyus (Russian-listed, sanctions), Zijin (HK-listed, ADR illiquid), several mid-tiers below the cap. **Royalty/streaming names (Franco-Nevada, Wheaton, Royal Gold) are NOT in the set** — they aren't producers; flagging here so you can override if you want them included.
+>
+> **Shape:** sector ranking
+>
+> **Verdict mode:** Required — top-5 ranked, with one-line verdict per name (Own / Watch / Pass)
+>
+> **Sub-questions → phases:**
+> 1. Sector setup — gold price regime, cost curve, M&A backdrop → deep-research
+> 2. Per-name fundamentals & catalysts — AISC trajectory, reserve life, major projects, near-term catalysts → deep-research
+> 3. Bull/bear cases at the sector level → deep-research
+> 4. Per-name financial pass — multiples, slim scenario, peer table → financial-analysis (slim per-name across the candidate set)
+> 5. Positioning & sentiment — retail/X attention on the names, crowdedness → reddit-research + xai-search
+>
+> **Deliverable:** Fact-checked PDF memo with shared header, executive summary closing in a ranked top-5 + Own/Watch/Pass, per-name coverage (projects/pipeline/catalysts), sector-level bull/bear, comparison table, sentiment & positioning, inline numbered citations, Sources, Fact-Check Addendum.
+>
+> Does this look right, or would you like me to adjust the universe (add streamers? drop the market-cap floor? include Polyus anyway?), change filters, or narrow the financial depth before I start?
+
+Stop.
+
+*Turn 2:* user replies *"include royalty names, and bump it to top-7"*
+→ ack, expand candidate set to include FNV/WPM/RGLD, update shape note
+to allow streamers in the ranking, change top-5 → top-7 throughout the
+plan, re-emit, stop.
+
+*Turn 3:* user replies *"good"* → proceed to Step 2.
+
 ## Common mistakes
 
+- **Skipping the plan gate on a vague request.** The default is confirm,
+  not infer. Unless the prompt already pinned down instrument(s),
+  universe, shape, verdict-mode, and scope (or the user explicitly opted
+  out), present the Step 1.5 plan and stop. The cost of one extra turn
+  is small; the cost of researching the wrong universe — or letting a
+  silently-narrowed set ride through to fact-check — is several minutes
+  of wasted sub-agent context.
+- **Starting research in the same turn the plan was presented.** The plan
+  turn is text-only. No `delegate`, `financial-analysis`,
+  `reddit-research`, `xai-search`, or `bash` data calls. The user's reply
+  is the trigger for Step 2.
 - **Silently redefining the universe.** Swapping the category the user
   named ("miners") for a more convenient set ("Western-tradable names")
   without disclosing it. State every filter; list the true members you
