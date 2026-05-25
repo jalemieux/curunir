@@ -1,6 +1,7 @@
 ---
 name: fred
 description: "Use when fetching US macroeconomic data from FRED (Federal Reserve Economic Data) — interest rates, treasury yields, inflation (CPI), GDP, unemployment, sector indices, FX rates. Trigger phrases: '10y treasury', 'fed funds rate', 'CPI', 'unemployment rate', 'discount rate inputs', 'macro context'."
+portal_summary: "Pull US macro data — rates, CPI, GDP, unemployment — from FRED"
 ---
 
 # FRED (St. Louis Fed)
