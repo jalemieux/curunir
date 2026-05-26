@@ -246,6 +246,62 @@ async def test_hello_with_prior_session_id_resumes_and_evicts_stale():
 
 
 @pytest.mark.asyncio
+async def test_hello_with_traversal_session_id_keeps_server_minted(caplog):
+    """A hello frame whose `session_id` violates the shape check is silently
+    rejected — the connection keeps its server-minted id, and no `../foo`
+    entry leaks into the channel's connection registry."""
+    import logging
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 30)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 30}") as ws:
+            sid = await _read_hello(ws)
+            with caplog.at_level(logging.WARNING, logger="src.channels.ws"):
+                await ws.send(json.dumps(
+                    {"type": "hello", "session_id": "../../../root"}
+                ))
+                await asyncio.sleep(0.1)
+            # No second hello echoed back — the rekey was rejected.
+            assert sid in ch._connections
+            assert "../../../root" not in ch._connections
+        assert "Rejected client-supplied session_id" in caplog.text
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_process_inbound_traversal_filename_basenamed(tmp_uploads):
+    """An attachment whose filename contains `..` is staged under its basename
+    and the resulting path stays under uploads_dir — no traversal."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 31,
+                          uploads_dir=str(tmp_uploads))
+    sent: list[OutgoingMessage] = []
+    async def _capture(msg: OutgoingMessage) -> None:
+        sent.append(msg)
+    ch.send = _capture  # type: ignore[assignment]
+    data = {
+        "content": "x",
+        "command": None,
+        "attachments": [{
+            "filename": "../../../etc/authorized_keys",
+            "mime_type": "text/plain",
+            "data": base64.b64encode(b"ssh-rsa AAAA").decode(),
+        }],
+    }
+    await ch._process_inbound(data, "session-abc")
+    msg = q.get_nowait()
+    att = msg.attachments[0]
+    assert att["filename"] == "authorized_keys"
+    uploads_real = _os_stage.path.realpath(str(tmp_uploads))
+    assert _os_stage.path.realpath(att["path"]).startswith(
+        uploads_real + _os_stage.sep
+    )
+    assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_send_to_unknown_session_warns_no_crash(caplog):
     """send() with a session id no socket holds is a no-op + warning."""
     import logging
@@ -626,6 +682,111 @@ class TestStageAttachments:
         manifest = _stage_attachments(items, "sid", str(tmp_uploads))
         names = [m["filename"] for m in manifest]
         assert names == ["keep.txt"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: _sanitize_session_id — boundary validator for client-supplied ids
+# ---------------------------------------------------------------------------
+from src.channels._attachments import _sanitize_session_id
+
+
+class TestSanitizeSessionId:
+    @pytest.mark.parametrize("sid", [
+        "portal", "cli", "abc:123_x-y",
+        "0123456789abcdef" * 2,        # uuid4 hex
+        "thread-9f8a:tab-3",
+        "a",                            # min length
+        "A" * 128,                      # max length
+    ])
+    def test_accepts_valid(self, sid):
+        assert _sanitize_session_id(sid) == sid
+
+    @pytest.mark.parametrize("sid", [
+        "../foo", "a/b", "a\\b", "", ".", "..",
+        "a" * 129,                      # over max length
+        "has space",
+        "has\nnewline",
+        "../../etc/passwd",
+        "tab\x00null",
+    ])
+    def test_rejects_invalid(self, sid):
+        with pytest.raises(ValueError):
+            _sanitize_session_id(sid)
+
+    @pytest.mark.parametrize("sid", [None, 123, [], {}])
+    def test_rejects_non_string(self, sid):
+        with pytest.raises(ValueError):
+            _sanitize_session_id(sid)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _stage_attachments path-traversal hardening
+# ---------------------------------------------------------------------------
+class TestStageAttachmentsTraversal:
+    def test_filename_with_parent_segment_is_basenamed(self, tmp_uploads):
+        items = [{"filename": "../evil", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest[0]["filename"] == "evil"
+        # Final path stays under the batch dir (which stays under uploads_dir).
+        batch_dir = _os_stage.path.dirname(manifest[0]["path"])
+        uploads_real = _os_stage.path.realpath(str(tmp_uploads))
+        assert _os_stage.path.realpath(manifest[0]["path"]).startswith(
+            uploads_real + _os_stage.sep
+        )
+        assert _os_stage.path.dirname(batch_dir) == _os_stage.path.join(
+            uploads_real, "sid"
+        )
+
+    def test_filename_with_nested_path_is_basenamed(self, tmp_uploads):
+        items = [{"filename": "sub/dir/x", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest[0]["filename"] == "x"
+
+    def test_absolute_path_filename_is_basenamed(self, tmp_uploads):
+        items = [{"filename": "/etc/passwd", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest[0]["filename"] == "passwd"
+        # Wrote under the staging tree, not over /etc/passwd.
+        assert _os_stage.path.realpath(manifest[0]["path"]).startswith(
+            _os_stage.path.realpath(str(tmp_uploads)) + _os_stage.sep
+        )
+
+    def test_bare_dot_filename_skipped(self, tmp_uploads):
+        # Filename that basenames to "." would write to the directory itself —
+        # `_safe_attachment_filename` returns None and the item is skipped.
+        items = [{"filename": "foo/.", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest == []
+
+    def test_invalid_session_id_rejected_before_disk_io(self, tmp_uploads):
+        items = [{"filename": "a.txt", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        with pytest.raises(ValueError):
+            _stage_attachments(items, "../../../root", str(tmp_uploads))
+        # No directory was created.
+        assert list(tmp_uploads.iterdir()) == []
+
+    def test_traversal_via_symlink_blocked(self, tmp_uploads, tmp_path):
+        # Operator-style symlink IN to uploads is allowed; an attacker-shaped
+        # symlink that points OUT must be detected by the realpath check.
+        # Simulate by manually creating the batch dir with a child symlink to
+        # outside, then driving _stage_attachments to write through it.
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        # Replace the staging dir entirely with a symlink that escapes —
+        # _stage_attachments will create batch_dir inside it.
+        rogue_session = tmp_uploads / "rogue"
+        rogue_session.symlink_to(outside, target_is_directory=True)
+        # _stage_attachments uses the session_id as a subdir name, so passing
+        # "rogue" exercises the symlinked path.
+        items = [{"filename": "a.txt", "mime_type": "text/plain",
+                  "bytes": b"x"}]
+        with pytest.raises(ValueError):
+            _stage_attachments(items, "rogue", str(tmp_uploads))
 
 
 # ---------------------------------------------------------------------------

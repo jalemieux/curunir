@@ -14,6 +14,29 @@ from pathlib import Path
 # Regex matching any Unicode whitespace character that isn't a regular space.
 _UNICODE_WHITESPACE_RE = re.compile(r'[^\S ]+')
 
+# Allowed shape for a client-supplied session id. Covers the legitimate
+# producers (`cli`, `portal`, uuid4 hex, gmail thread ids, browser tab ids
+# like `tab-42`) while rejecting anything that could escape `uploads_dir`
+# when joined into a filesystem path.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_\-:]{1,128}$")
+
+
+def _sanitize_session_id(sid: object) -> str:
+    """Validate a client-supplied session id used as a filesystem subdir.
+
+    Returns the validated id, or raises ``ValueError`` for anything that
+    isn't a non-empty string of [A-Za-z0-9_-:] (max 128 chars). Used at
+    every channel boundary that lets the client name its session, since
+    that id is composed into `<uploads_dir>/<session_id>/...` paths.
+    """
+    if not isinstance(sid, str):
+        raise ValueError(f"session_id must be a string, got {type(sid).__name__}")
+    if sid in (".", ".."):
+        raise ValueError(f"session_id rejected: {sid!r}")
+    if not _SESSION_ID_RE.match(sid):
+        raise ValueError(f"session_id rejected: {sid!r}")
+    return sid
+
 
 def _normalize_unicode_whitespace(s: str) -> str:
     """Replace Unicode whitespace characters (e.g. \\u202f) with regular spaces.
@@ -271,12 +294,31 @@ def _stage_attachments(items: list[dict], session_id: str, uploads_dir: str) -> 
 
     Layout: <uploads_dir>/<session_id>/<uuid>/<normalized_filename>
     All items in one call share a single uuid subdir.
+
+    ``session_id`` is validated and each item's filename is reduced to its
+    basename via ``_safe_attachment_filename`` before being joined, so a
+    hostile portal/WS frame can't escape ``uploads_dir`` via ``..`` segments.
+    The composed batch directory is also realpath-checked against
+    ``realpath(uploads_dir)`` to catch the case where an existing symlink at
+    ``uploads_dir/<session_id>`` would redirect writes outside the staging
+    tree, and each per-file path is then checked with ``_assert_within``
+    against the resolved batch directory to catch symlinks inside the batch.
     """
     if not items:
         return []
 
+    _sanitize_session_id(session_id)
+
     batch_dir = os.path.join(uploads_dir, session_id, _uuid.uuid4().hex)
     os.makedirs(batch_dir, exist_ok=True)
+
+    uploads_real = os.path.realpath(uploads_dir)
+    batch_real = os.path.realpath(batch_dir)
+    if not (batch_real == uploads_real
+            or batch_real.startswith(uploads_real + os.sep)):
+        raise ValueError(
+            f"attachment batch escapes uploads_dir via session {session_id!r}"
+        )
 
     manifest: list[dict] = []
     used: set[str] = set()
