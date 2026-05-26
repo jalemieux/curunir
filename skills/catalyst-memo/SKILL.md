@@ -147,7 +147,7 @@ window, ruling expected, election day, earnings, etc. If unknown, say so.}
 
 **Forward-looking signals:**
 - **Polymarket:** {markets I'll search for — e.g., "FDA approval of retatrutide by 2027", "GLP-1 market share by 2027" — or "no obvious market expected, will search broadly"}
-- **Podcasts:** grep keywords `{e.g., retatrutide|tirzepatide|GLP-1|\bLLY\b|\bNVO\b}` over `context/workspace/podcasts/` *(say if the corpus is known empty)*
+- **Podcasts:** browse `summaries/topics/{best-match-slug}.md` if a topic fits, plus grep `{e.g., retatrutide|tirzepatide|GLP-1|\bLLY\b|\bNVO\b}` over `summaries/timeline.md` and `summaries/by-podcast/*.md`; load transcripts only for episodes whose summary bullets look on-point *(say if the corpus is known empty)*
 
 **Deliverable:** Fact-checked PDF memo with executive summary, catalyst
 section, who-wins/loses per-instrument block, TAM, bull/bear, forward-looking
@@ -264,47 +264,85 @@ probabilities**, never floated without context.
 The other layer that distinguishes this skill. Search the local podcast
 corpus for episodes that discuss the catalyst or the impacted instruments.
 
-**Corpus location:** `context/workspace/podcasts/**/*.md`. Each transcript
-is a markdown file with YAML frontmatter:
+**Corpus model — progressive discovery.** The corpus uses the same
+routing pattern as curunir's memory system (`src/memory_indexer.py`):
+`README.md` routes → index files under `summaries/` give cheap browsable
+summaries with topic tags → raw transcript files are loaded on demand
+only when verbatim content is needed.
 
-```yaml
----
-podcast: "All-In"
-episode_title: "Obesity drugs, AI, and the Fed"
-date: "2026-04-12"
-hosts: ["Chamath", "Sacks", "Friedberg", "Calacanis"]
-guests: []
-url: "https://..."
----
-
-[transcript body]
+```
+context/workspace/podcasts/
+  README.md                          # routing entry — read first
+  podcasts.yaml                      # per-show config (ingest-side; informational)
+  summaries/
+    timeline.md                      # newest-first; one entry per episode across all shows
+    by-podcast/<slug>.md             # newest-first; one entry per episode of this show
+    topics/<topic>.md                # newest-first; episodes tagged with this kebab-case topic
+  <show-slug>/
+    YYYY-MM-DD-episode-slug.md       # raw transcript: frontmatter + plain-text body
 ```
 
-**The corpus may be empty or sparse** — an ingestion job is being built
-separately. If the directory does not exist or returns no hits, say so
-explicitly in the memo ("no podcast coverage found in the local corpus as
-of {date}") and move on. Do not fabricate quotes.
+Each index entry carries date, podcast name, episode title, topic tags,
+a 5–10 bullet summary, and a relative link to the raw transcript:
 
-**Search pattern:**
-
-```bash
-# Find episodes mentioning the catalyst or any tracked ticker
-grep -rli -E "retatrutide|tirzepatide|\\bLLY\\b|\\bNVO\\b" \
-  context/workspace/podcasts/ 2>/dev/null | head -20
-
-# For each hit, read the file (frontmatter + transcript) and extract the
-# relevant 1–2 paragraphs around the mention
+```markdown
+### 2026-04-12 — All-In: Obesity drugs, AI, and the Fed
+**Topics:** obesity-drugs, glp-1, biotech, markets
+- Chamath argues retatrutide expands TAM to non-diabetic obesity beyond GLP-1
+- Friedberg pushes back on peak-sales estimates citing manufacturing constraints
+- Hosts disagree on whether NVO's CagriSema closes the gap
+[transcript](../all-in/2026-04-12-obesity-drugs-ai-fed.md)
 ```
 
-For each useful hit:
+The bullets are the searchable layer — they tell you whether an episode
+is worth loading before you pull 100k chars of transcript into context.
 
-1. Capture: **podcast name, episode title, date, host(s) or guest who
-   said it, the URL, and a short verbatim quote (1–3 sentences)**.
-2. Cite as a numbered source in the `## Sources` list with type
-   `[Podcast]`.
-3. Group quotes into the synthesis's **Expert & podcast commentary**
-   section, organized by stance (bullish on the catalyst / bearish /
+**The corpus may be empty or sparse** — the ingest skill (spec'd in
+PR #266) lands separately. If `context/workspace/podcasts/` does not
+exist or `summaries/` is empty, say so explicitly in the memo ("no
+podcast coverage found in the local corpus as of {date}") and skip the
+rest of this step. Do not fabricate quotes.
+
+**Search workflow:**
+
+1. **Route.** `read("context/workspace/podcasts/README.md")` to confirm
+   the structure and skim the known topic taxonomy. If the file is
+   missing, the corpus is empty — say so and move on.
+
+2. **Topic-first browse.** `ls context/workspace/podcasts/summaries/topics/`
+   for a topic slug that fits the catalyst (e.g., `obesity-drugs.md`,
+   `glp-1.md`, `biotech.md`, `m-and-a.md`, `fed-policy.md`). If a topic
+   matches, read it — entries are newest-first and the bullet summaries
+   tell you which episodes are actually on point.
+
+3. **Timeline + by-podcast grep** (if no topic matched, or to widen the
+   net). The summaries layer is small enough to grep cheaply:
+
+   ```bash
+   grep -inE "retatrutide|tirzepatide|\\bLLY\\b|\\bNVO\\b|GLP-1" \
+     context/workspace/podcasts/summaries/timeline.md \
+     context/workspace/podcasts/summaries/by-podcast/*.md \
+     2>/dev/null | head -40
+   ```
+
+4. **Load transcripts selectively.** Only for the episodes whose summary
+   bullets suggest real coverage, follow the `[transcript](../<show>/<file>.md)`
+   link from the index entry and `read()` the transcript file. Extract
+   1–3 sentence verbatim quotes around the catalyst mention.
+
+5. **Cite each useful quote** with: podcast name, episode title, date,
+   host or guest who said it, URL (from the transcript's frontmatter),
+   and the verbatim quote. Tag the source `[Podcast]` in the
+   `## Sources` list. Group quotes in the synthesis's **Expert & podcast
+   commentary** section by stance (bullish on the catalyst / bearish /
    undecided).
+
+**Do not grep the raw transcripts directly** as a first pass. The
+summaries layer is what makes browsing cheap; grepping all transcripts
+floods context with high-noise hits and bypasses the curated topic
+taxonomy. Fall back to raw-transcript grep only as a last resort when
+you have a strong reason to believe coverage exists but the summaries
+layer has missed it.
 
 **Treat podcast quotes as opinion, not fact** — same rule as Reddit/X. A
 podcaster saying "RETA peak sales will be $40B" is not a citation for a
@@ -538,6 +576,13 @@ among investors because of its potential to create a new TAM."*
 - **Fabricating a podcast quote.** If the local corpus has no hits, say
   "no podcast coverage found in the local corpus as of {date}" and move
   on. Never invent a quote or attribute one to a host who didn't say it.
+- **Grepping raw transcripts instead of browsing the summaries layer
+  first.** The corpus is built for progressive disclosure — `README.md`
+  routes, `summaries/topics/*.md` and `summaries/timeline.md` carry the
+  bulleted summaries that tell you which episodes are worth loading.
+  Grepping raw transcripts as a first pass floods context with noise and
+  bypasses the curated topic taxonomy. Raw-transcript grep is a last
+  resort, not a first move.
 - **Inventing a polymarket market.** If no market exists for the
   catalyst, that's a finding — say so. Do not paraphrase an opinion as if
   it were a market price.
