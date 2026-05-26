@@ -183,3 +183,30 @@ async def test_admin_index_shows_agent_connection_status(client):
     assert resp.status_code == 200
     assert "online" in _row_for(resp.text, "connected@example.com")
     assert "offline" in _row_for(resp.text, "offline@example.com")
+
+
+@pytest.mark.asyncio
+async def test_admin_beta_page_escapes_html_in_signup_fields(client):
+    """Stored XSS regression test: attacker-controlled signup fields must be
+    HTML-escaped when rendered on the admin beta page."""
+    from portal import auth
+
+    admin = await db.create_user("admin@example.com")
+    await db.create_beta_signup(
+        email="x@y.z",
+        message="<script>alert(1)</script>",
+        source='"><img src=x onerror=1>',
+        ip="<svg/onload=1>",
+    )
+    cookie = auth.sign_session(admin.id)
+    resp = await client.get(
+        "/admin/beta",
+        cookies={auth.SESSION_COOKIE: cookie},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+    assert "onerror=1>" not in body
+    assert "&quot;" in body or "&#34;" in body
+    assert "&lt;svg/onload=1&gt;" in body
