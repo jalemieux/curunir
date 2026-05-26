@@ -4,9 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Curunir</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"
+        integrity="sha384-QsSpx6a0USazT7nK7w8qXDgpSAPhFsb2XtpoLFQ5+X2yFN6hvCKnwEzN8M5FWaJb"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.5/dist/purify.min.js"
+        integrity="sha384-7FXQySTrDscwsLx1i8RIqZM/JHoUVstx4CuL2b7tziI4Glhp3/3dm/j3qUTheVXE"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+        crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0a12; color: #ccc; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; height: 100vh; display: flex; flex-direction: column; }
@@ -124,6 +133,21 @@ body { background: #0a0a12; color: #ccc; font-family: 'SF Mono', 'Fira Code', 'C
   </div>
   <div class="workflow-bar" style="display:none"></div>
 <script>
+// ── Boot guard ───────────────────────────────────────────────────────────────
+// Refuse to render if DOMPurify failed to load (SRI failure, blocked CDN, etc.)
+// Without it, marked output would reach innerHTML unsanitized — XSS risk.
+if (typeof DOMPurify === 'undefined' || typeof marked === 'undefined') {
+    document.body.innerHTML =
+        '<div style="padding:40px;color:#f87171;font-family:monospace;font-size:13px;line-height:1.6;">' +
+        '<strong style="color:#fff;">Curunir failed to start.</strong><br><br>' +
+        'A required script (marked or DOMPurify) did not load. This can happen if ' +
+        'the CDN is unreachable or a Subresource Integrity check failed.<br><br>' +
+        'Rendering is disabled to avoid showing unsanitized content. Check the ' +
+        'browser console and reload.' +
+        '</div>';
+    throw new Error('Curunir: required library missing (marked or DOMPurify); refusing to render.');
+}
+
 // ── Configuration and state ──────────────────────────────────────────────────
 const params = new URLSearchParams(location.search);
 const host = params.get('host') || 'localhost';
@@ -267,7 +291,7 @@ function handleContent(content) {
     }
     const div = document.createElement('div');
     div.className = 'msg-assistant';
-    div.innerHTML = marked.parse(content);
+    div.innerHTML = renderMarkdown(content);
     // Apply syntax highlighting
     div.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
     messagesEl.appendChild(div);
@@ -319,6 +343,12 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Sanitize marked output before it touches innerHTML. Default DOMPurify
+// profile strips <script>, event-handler attrs, javascript: URLs, etc.
+function renderMarkdown(src) {
+    return DOMPurify.sanitize(marked.parse(src ?? ''), { USE_PROFILES: { html: true } });
 }
 
 // ── Artifact handling ────────────────────────────────────────────────────────
@@ -432,7 +462,11 @@ function selectArtifact(path) {
         content.innerHTML = '<div style="color:#555;text-align:center;padding:40px;">No content available</div>';
         return;
     }
-    content.innerHTML = '<div class="doc-body">' + marked.parse(artifact.content) + '</div>';
+    content.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'doc-body';
+    body.innerHTML = renderMarkdown(artifact.content);
+    content.appendChild(body);
     // Apply syntax highlighting to code blocks
     content.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
 }
