@@ -73,6 +73,11 @@ class EmailChannel:
         (created_at, message_id) descending and only terminate pagination
         when the entire sorted page is ≤ watermark (a within-page miss is
         not enough).
+
+        Outbound messages count toward pagination (page_had_new) but never
+        advance the watermark. Otherwise a scheduled outbound at T+1 would
+        push the watermark past an inbound at T whose listing was delayed,
+        silently dropping it on every subsequent poll.
         """
         cursor: str | None = None
         new_messages: list[dict[str, Any]] = []
@@ -94,6 +99,8 @@ class EmailChannel:
                 if not self.state.is_after_watermark(ts, mid):
                     continue
                 page_had_new = True
+                if m.get("direction") != "inbound":
+                    continue
                 if max_seen is None or (ts, mid) > max_seen:
                     max_seen = (ts, mid)
                 new_messages.append(m)

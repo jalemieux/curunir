@@ -140,6 +140,38 @@ async def test_poll_once_skips_outbound_messages(email_config, in_queue):
 
 
 @pytest.mark.asyncio
+async def test_poll_once_outbound_does_not_advance_watermark(email_config, in_queue):
+    """Outbound messages must not advance the watermark.
+
+    Reproducer for the silent-drop bug: a scheduled outbound at T+1 used to
+    push the watermark past an inbound at T whose delivery into the deadsimple
+    list endpoint lagged by a few seconds. After the watermark jumped, the
+    late-arriving inbound was permanently ≤ watermark and got dropped.
+    """
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [
+            _msg("out1", ts="2026-05-14T15:32:00Z", direction="outbound",
+                 from_email="bot@x.com"),
+            _msg("in1", ts="2026-05-14T15:31:00Z"),
+        ],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda mid: _detail(mid, text_body=f"body of {mid}")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+
+    incoming = in_queue.get_nowait()
+    assert incoming.reply_address["in_reply_to"] == "in1"
+    # Watermark advances only to the inbound, NOT past it to the later outbound.
+    assert ch.state.watermark_message_id == "in1"
+    assert ch.state.watermark_created_at == datetime(2026, 5, 14, 15, 31, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
 async def test_poll_once_drops_spam(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
