@@ -140,6 +140,38 @@ async def test_poll_once_skips_outbound_messages(email_config, in_queue):
 
 
 @pytest.mark.asyncio
+async def test_poll_once_outbound_does_not_advance_watermark(email_config, in_queue):
+    """Outbound messages must not advance the watermark.
+
+    Reproducer for the silent-drop bug: a scheduled outbound at T+1 used to
+    push the watermark past an inbound at T whose delivery into the deadsimple
+    list endpoint lagged by a few seconds. After the watermark jumped, the
+    late-arriving inbound was permanently ≤ watermark and got dropped.
+    """
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [
+            _msg("out1", ts="2026-05-14T15:32:00Z", direction="outbound",
+                 from_email="bot@x.com"),
+            _msg("in1", ts="2026-05-14T15:31:00Z"),
+        ],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda mid: _detail(mid, text_body=f"body of {mid}")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+
+    incoming = in_queue.get_nowait()
+    assert incoming.reply_address["in_reply_to"] == "in1"
+    # Watermark advances only to the inbound, NOT past it to the later outbound.
+    assert ch.state.watermark_message_id == "in1"
+    assert ch.state.watermark_created_at == datetime(2026, 5, 14, 15, 31, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
 async def test_poll_once_drops_spam(email_config, in_queue):
     client = AsyncMock()
     client.list_messages.return_value = {
@@ -323,6 +355,144 @@ async def test_poll_once_downloads_attachments(email_config, in_queue, tmp_path)
     assert Path(att["path"]).read_bytes() == b"PDF"
     # Body content lists the attachment.
     assert "report.pdf" in incoming.content
+
+
+@pytest.mark.asyncio
+async def test_poll_once_rejects_traversal_filename(email_config, in_queue, caplog, tmp_path):
+    """Attacker-supplied path traversal filenames must not write outside the per-thread dir."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail(
+        "m1", thread_id="t1",
+        attachments=[
+            {"attachment_id": "a1", "filename": "../../../etc/pwned.pdf",
+             "content_type": "application/pdf", "size": 1024},
+        ],
+    )
+    sentinel = tmp_path / "pwned_called_with"
+    async def fake_download(message_id, attachment_id, dest):
+        sentinel.write_text(str(dest))
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"PDF")
+    client.download_attachment.side_effect = fake_download
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    import logging
+    with caplog.at_level(logging.WARNING):
+        await ch._poll_once()
+
+    incoming = in_queue.get_nowait()
+    # Attachment is either skipped (manifest None) or basenamed to safe form.
+    if incoming.attachments:
+        for att in incoming.attachments:
+            resolved = Path(att["path"]).resolve()
+            out_root = Path(email_config.attachment_dir).resolve()
+            assert str(resolved).startswith(str(out_root)), \
+                f"attachment written outside {out_root}: {resolved}"
+            assert "pwned.pdf" in att["filename"]  # basenamed
+            assert ".." not in att["filename"]
+    # download_attachment was either not called or only with paths under out_root.
+    if sentinel.exists():
+        called_dest = sentinel.read_text()
+        out_root = str(Path(email_config.attachment_dir).resolve())
+        assert called_dest.startswith(out_root)
+
+
+@pytest.mark.asyncio
+async def test_poll_once_basenames_filename_with_path_separators(email_config, in_queue, tmp_path):
+    """filename='foo/bar.pdf' (legitimate MUA forwarding) gets basenamed to bar.pdf."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail(
+        "m1", thread_id="t1",
+        attachments=[
+            {"attachment_id": "a1", "filename": "folder/report.pdf",
+             "content_type": "application/pdf", "size": 1024},
+        ],
+    )
+    async def fake_download(message_id, attachment_id, dest):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"PDF")
+    client.download_attachment.side_effect = fake_download
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    incoming = in_queue.get_nowait()
+    assert incoming.attachments is not None and len(incoming.attachments) == 1
+    att = incoming.attachments[0]
+    assert att["filename"] == "report.pdf"
+    out_root = Path(email_config.attachment_dir).resolve() / "t1"
+    assert Path(att["path"]).parent == out_root
+
+
+@pytest.mark.parametrize("bad_name", ["", ".", "..", "...", "   "])
+@pytest.mark.asyncio
+async def test_poll_once_skips_empty_and_dot_filenames(email_config, in_queue, bad_name):
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail(
+        "m1", thread_id="t1",
+        attachments=[
+            {"attachment_id": "a1", "filename": bad_name,
+             "content_type": "application/pdf", "size": 1024},
+        ],
+    )
+    client.download_attachment.side_effect = AssertionError(
+        "download must not be called for rejected filename"
+    )
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    incoming = in_queue.get_nowait()
+    assert incoming.attachments is None
+
+
+@pytest.mark.asyncio
+async def test_poll_once_strips_leading_dot_from_filename(email_config, in_queue):
+    """`.bashrc`-style filenames have the leading dot stripped to prevent silent dotfile creation."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.return_value = _detail(
+        "m1", thread_id="t1",
+        attachments=[
+            {"attachment_id": "a1", "filename": ".bashrc",
+             "content_type": "text/plain", "size": 10},
+        ],
+    )
+    written: dict = {}
+    async def fake_download(message_id, attachment_id, dest):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"hello")
+        written["dest"] = dest
+    client.download_attachment.side_effect = fake_download
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+    incoming = in_queue.get_nowait()
+    assert incoming.attachments is not None and len(incoming.attachments) == 1
+    att = incoming.attachments[0]
+    # Leading dot stripped: no hidden dotfile gets planted.
+    assert not att["filename"].startswith(".")
+    assert att["filename"] == "bashrc"
 
 
 @pytest.mark.asyncio

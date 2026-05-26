@@ -13,6 +13,7 @@ import os
 import re
 import signal
 import time
+from pathlib import Path
 
 import websockets
 import websockets.exceptions
@@ -30,6 +31,22 @@ _BACKOFF_BASE = 1.0
 _BACKOFF_MAX = 30.0
 
 _DEFAULT_DOWNLOAD_DIR = os.path.expanduser("~/Downloads/curunir")
+
+# Default token file path, alongside the server's context dir. The CLI is
+# typically launched from the repo root, so a relative path works for the
+# common case; CURUNIR_WS_TOKEN overrides for split-host setups.
+_DEFAULT_TOKEN_PATH = Path(__file__).resolve().parent / "context" / ".ws-token"
+
+
+def _load_pairing_token() -> str | None:
+    """Read the WebSocket pairing token from env or the default file path."""
+    env = os.environ.get("CURUNIR_WS_TOKEN")
+    if env:
+        return env.strip() or None
+    try:
+        return _DEFAULT_TOKEN_PATH.read_text().strip() or None
+    except (FileNotFoundError, OSError):
+        return None
 
 
 def _detect_version() -> str:
@@ -260,9 +277,16 @@ async def run(host: str, port: int, console: Console | None = None,
               download_dir: str = _DEFAULT_DOWNLOAD_DIR) -> None:
     console = console or Console()
     uri = f"ws://{host}:{port}"
+    pairing_token = _load_pairing_token()
 
     console.print(f"[bold]Curunir[/bold] [dim]({uri})[/dim] [dim]rev {_detect_version()}[/dim]")
     console.print("[dim]type /help for commands, /verbose to toggle tool output[/dim]")
+    if pairing_token is None:
+        console.print(
+            "[yellow]Warning: no pairing token found at "
+            f"{_DEFAULT_TOKEN_PATH} or CURUNIR_WS_TOKEN. "
+            "Connection will fail if the server requires one.[/yellow]"
+        )
 
     verbose = True
     ready = asyncio.Event()
@@ -527,17 +551,20 @@ async def run(host: str, port: int, console: Console | None = None,
         # Launch output reader for the current connection
         out_task = asyncio.create_task(output_loop(ws))
 
-        # On reconnect (we already hold a session id from the prior welcome)
-        # ask the server to resume that same session. On a fresh connect this
-        # is a no-op — the server mints a new id and sends it back. Older
-        # servers without hello support ignore this frame.
+        # First frame: hello with the pairing token (if we have one) and any
+        # prior session id we want to resume. The server requires this when a
+        # token is configured server-side; sending it unconditionally also
+        # covers the reconnect-resume case. Old servers without hello support
+        # ignored the resume hello and will simply ignore this one too.
+        hello: dict = {"type": "hello"}
+        if pairing_token is not None:
+            hello["token"] = pairing_token
         if session_id is not None:
-            try:
-                await ws.send(json.dumps({
-                    "type": "hello", "session_id": session_id,
-                }))
-            except websockets.exceptions.ConnectionClosed:
-                pass
+            hello["session_id"] = session_id
+        try:
+            await ws.send(json.dumps(hello))
+        except websockets.exceptions.ConnectionClosed:
+            pass
 
         # Give the server a brief window to send its welcome before we show
         # the prompt, so "model: …" renders above the input line. If no

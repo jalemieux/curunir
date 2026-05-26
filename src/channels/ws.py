@@ -1,9 +1,11 @@
 import asyncio
+import http
 import json
 import logging
 import os
 import uuid
 from typing import Callable
+from urllib.parse import urlparse
 
 import websockets
 import websockets.exceptions
@@ -18,16 +20,55 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
+# Time the server waits for the client's first frame when a pairing token is
+# required. Tight enough to make scanners give up, loose enough for a real
+# client on a slow disk.
+_HELLO_TIMEOUT_SEC = 3.0
+
+# Default Origin allowlist. Browsers always send Origin on a WebSocket upgrade,
+# so a missing Origin signals a native (non-browser) client like cli.py and is
+# accepted. "null" is sent by sandboxed iframes / file:// pages and is allowed
+# at the upgrade layer — the pairing token is the real defense for those.
+_DEFAULT_LOCALHOST_ORIGINS: frozenset[str] = frozenset({
+    "http://localhost",
+    "http://127.0.0.1",
+    "https://localhost",
+    "https://127.0.0.1",
+})
+
+
+def _origin_allowed(origin: str | None, allowed_origins: frozenset[str]) -> bool:
+    """Return True if *origin* is acceptable.
+
+    Browsers always send Origin; native clients usually don't. We accept
+    missing and ``"null"`` Origin headers — the pairing token covers those
+    cases. For any other value we compare ``scheme://host`` (port-agnostic)
+    against the allowlist so e.g. ``http://localhost:5173`` matches an
+    allowlisted ``http://localhost``.
+    """
+    if origin is None or origin == "null":
+        return True
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if not parsed.scheme or not parsed.hostname:
+        return False
+    base = f"{parsed.scheme}://{parsed.hostname}"
+    return base in allowed_origins
+
 
 class WebSocketChannel:
     def __init__(
         self,
         in_queue: asyncio.Queue,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         port: int = 8765,
         model: str = "",
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
+        allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
+        pairing_token: str | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
@@ -37,6 +78,24 @@ class WebSocketChannel:
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
         self._connection: websockets.ServerConnection | None = None
+        self.allowed_origins: frozenset[str] = (
+            frozenset(allowed_origins) if allowed_origins is not None
+            else _DEFAULT_LOCALHOST_ORIGINS
+        )
+        self.pairing_token = pairing_token
+
+    def _process_request(self, connection, request):
+        """Reject cross-origin upgrades before the handler runs.
+
+        Returning a Response from process_request aborts the handshake.
+        """
+        origin = request.headers.get("Origin")
+        if not _origin_allowed(origin, self.allowed_origins):
+            logger.warning(
+                "Rejecting WebSocket upgrade from disallowed Origin %r", origin,
+            )
+            return connection.respond(http.HTTPStatus.FORBIDDEN, "origin not allowed\n")
+        return None
 
     async def start(self) -> None:
         try:
@@ -45,6 +104,7 @@ class WebSocketChannel:
             async with websockets.serve(
                 self._handle_connection, self.host, self.port,
                 max_size=32 * 1024 * 1024,
+                process_request=self._process_request,
             ) as server:
                 logger.info("WebSocket server listening on %s:%d", self.host, self.port)
                 await asyncio.get_running_loop().create_future()
@@ -110,11 +170,73 @@ class WebSocketChannel:
         self._connections[new_sid] = websocket
         return new_sid
 
+    async def _await_token_hello(
+        self, websocket: websockets.ServerConnection,
+    ) -> dict | None:
+        """Wait for the client's first hello frame and validate its token.
+
+        Returns the parsed hello dict on success. On failure (timeout, bad
+        JSON, missing/wrong token), closes the socket with 1008 and returns
+        None. Only called when ``self.pairing_token`` is set.
+        """
+        try:
+            raw = await asyncio.wait_for(websocket.recv(), timeout=_HELLO_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "WebSocket pairing: no hello within %.1fs from %s; closing",
+                _HELLO_TIMEOUT_SEC, websocket.remote_address,
+            )
+            await websocket.close(1008, "auth")
+            return None
+        except websockets.exceptions.ConnectionClosed:
+            return None
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning(
+                "WebSocket pairing: first frame not JSON from %s; closing",
+                websocket.remote_address,
+            )
+            await websocket.close(1008, "auth")
+            return None
+
+        if not isinstance(data, dict) or data.get("type") != "hello":
+            logger.warning(
+                "WebSocket pairing: first frame not a hello from %s; closing",
+                websocket.remote_address,
+            )
+            await websocket.close(1008, "auth")
+            return None
+
+        if data.get("token") != self.pairing_token:
+            logger.warning(
+                "WebSocket pairing: bad/missing token from %s; closing",
+                websocket.remote_address,
+            )
+            await websocket.close(1008, "auth")
+            return None
+
+        return data
+
     async def _handle_connection(self, websocket: websockets.ServerConnection) -> None:
         remote = websocket.remote_address
         session_id = uuid.uuid4().hex
-        self._connections[session_id] = websocket
         logger.info("Client connected from %s (session %s)", remote, session_id)
+
+        resumed_sid: str | None = None
+        if self.pairing_token is not None:
+            hello = await self._await_token_hello(websocket)
+            if hello is None:
+                return
+            requested = hello.get("session_id")
+            if isinstance(requested, str) and requested:
+                resumed_sid = requested
+
+        self._connections[session_id] = websocket
+        if resumed_sid is not None:
+            new_sid = await self._rekey(websocket, session_id, resumed_sid)
+            session_id = new_sid
 
         await self._send_hello(websocket, session_id)
 

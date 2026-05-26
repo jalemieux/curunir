@@ -22,6 +22,8 @@ from portal.config import settings
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_NO_HTML_META_RE = re.compile(r'[<>&"\']')
+_IP_SHAPE_RE = re.compile(r"^[0-9a-fA-F:.]{1,45}$")
 
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,8 @@ def _rate_limited(ip: str) -> bool:
 def _client_ip(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        first = fwd.split(",")[0].strip()
+        return first if _IP_SHAPE_RE.match(first) else "unknown"
     return request.client.host if request.client else "unknown"
 
 
@@ -62,6 +65,15 @@ class BetaSignupIn(BaseModel):
         v = v.strip()
         if not _EMAIL_RE.match(v):
             raise ValueError("invalid email")
+        if _NO_HTML_META_RE.search(v):
+            raise ValueError("invalid characters")
+        return v
+
+    @field_validator("message", "source")
+    @classmethod
+    def _no_html_meta(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and _NO_HTML_META_RE.search(v):
+            raise ValueError("invalid characters")
         return v
 
 

@@ -21,6 +21,21 @@ import cli  # noqa: E402
 _BASE_PORT = 19000
 
 
+def _record(received: list[dict], raw: str) -> dict:
+    """Decode *raw* and append it to *received* unless it's the auth hello.
+
+    The CLI now sends ``{"type": "hello", ...}`` as the first frame on every
+    connection (carrying the pairing token and optional session_id to resume).
+    Tests in this module care about user-visible traffic, not the handshake,
+    so we filter the hello out here to keep their assertions focused.
+    """
+    data = json.loads(raw)
+    if isinstance(data, dict) and data.get("type") == "hello":
+        return data
+    received.append(data)
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -63,8 +78,9 @@ async def test_input_loop_sends_normal_message():
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for raw in ws:
-            data = json.loads(raw)
-            received.append(data)
+            data = _record(received, raw)
+            if data.get("type") == "hello":
+                continue
             # Send a final:true reply so the client unblocks for EOF
             await ws.send(json.dumps({"content": "ok", "tool_calls": [], "final": True, "attachments": None}))
 
@@ -88,8 +104,9 @@ async def test_input_loop_sends_clear_as_slash_command():
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for raw in ws:
-            data = json.loads(raw)
-            received.append(data)
+            data = _record(received, raw)
+            if data.get("type") == "hello":
+                continue
             await ws.send(json.dumps({"content": "", "tool_calls": [], "final": True, "attachments": None}))
 
     console = _make_console_with_input(["/clear"])
@@ -110,8 +127,9 @@ async def test_input_loop_skips_blank_lines():
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for raw in ws:
-            data = json.loads(raw)
-            received.append(data)
+            data = _record(received, raw)
+            if data.get("type") == "hello":
+                continue
             await ws.send(json.dumps({"content": "ok", "tool_calls": [], "final": True, "attachments": None}))
 
     # Two blank lines, then a real message, then EOF
@@ -132,8 +150,9 @@ async def test_verbose_is_not_sent_to_server():
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for raw in ws:
-            data = json.loads(raw)
-            received.append(data)
+            data = _record(received, raw)
+            if data.get("type") == "hello":
+                continue
             await ws.send(json.dumps({"content": "ok", "tool_calls": [], "final": True, "attachments": None}))
 
     console = _make_console_with_input(["/verbose", "hello"])
@@ -157,7 +176,9 @@ async def test_output_renders_markdown_content():
     port = _BASE_PORT + 4
 
     async def handler(ws: websockets.ServerConnection) -> None:
-        async for _ in ws:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
             await ws.send(json.dumps({
                 "content": "**bold answer**",
                 "tool_calls": [],
@@ -180,7 +201,9 @@ async def test_output_renders_attachments():
     port = _BASE_PORT + 5
 
     async def handler(ws: websockets.ServerConnection) -> None:
-        async for _ in ws:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
             await ws.send(json.dumps({
                 "content": "See attached",
                 "tool_calls": [],
@@ -203,7 +226,9 @@ async def test_tool_calls_shown_by_default():
     port = _BASE_PORT + 6
 
     async def handler(ws: websockets.ServerConnection) -> None:
-        async for _ in ws:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
             await ws.send(json.dumps({
                 "content": "done",
                 "tool_calls": ["Read secret_tool.py"],
@@ -226,7 +251,9 @@ async def test_tool_calls_hidden_when_verbose_toggled_off():
     port = _BASE_PORT + 7
 
     async def handler(ws: websockets.ServerConnection) -> None:
-        async for _ in ws:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
             await ws.send(json.dumps({
                 "content": "done",
                 "tool_calls": ["Read hidden_tool.py"],
@@ -320,8 +347,9 @@ async def test_ready_event_resets_after_reconnect():
         connection_count[0] += 1
         conn_num = connection_count[0]
         async for raw in ws:
-            data = json.loads(raw)
-            all_received.append(data)
+            data = _record(all_received, raw)
+            if data.get("type") == "hello":
+                continue
             if conn_num == 1:
                 await ws.close()
                 return
@@ -349,7 +377,9 @@ async def test_output_renders_enriched_attachment_content():
     port = _BASE_PORT + 11
 
     async def handler(ws: websockets.ServerConnection) -> None:
-        async for _ in ws:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
             await ws.send(json.dumps({
                 "content": "See the artifact",
                 "tool_calls": [],
@@ -481,7 +511,7 @@ async def test_attach_then_send_includes_attachments(tmp_path):
 
     async def handler(ws: websockets.ServerConnection) -> None:
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -514,7 +544,7 @@ async def test_send_clears_staging(tmp_path):
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -543,7 +573,7 @@ async def test_attach_clear_drops_staging_locally(tmp_path):
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -572,7 +602,7 @@ async def test_clear_command_also_clears_staging(tmp_path):
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -604,7 +634,7 @@ async def test_attach_rejected_file_does_not_stage():
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -631,7 +661,7 @@ async def test_detach_removes_staged_item(tmp_path):
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -664,7 +694,7 @@ async def test_empty_text_with_staged_file_sends():
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
@@ -786,7 +816,7 @@ async def test_drag_drop_path_autostaged_in_send(tmp_path):
 
     async def handler(ws):
         async for raw in ws:
-            received.append(json.loads(raw))
+            _record(received, raw)
             await ws.send(json.dumps({
                 "content": "ok", "tool_calls": [], "final": True, "attachments": None,
             }))
