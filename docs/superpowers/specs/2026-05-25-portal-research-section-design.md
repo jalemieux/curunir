@@ -26,6 +26,10 @@ hard black borders, brutalist editorial grid.
 - Public URL `/research` — the broadsheet index page.
 - Public URL `/research/<slug>` — per-memo permalink with an editorial hero,
   summary block, embedded PDF, and "earlier memos" footer.
+- Public URL `/research/methodology` — long-form page explaining how the
+  memos are produced (the agent flow, sub-skill primitives, and the
+  catalyst-first framing). Doubles as a promotional surface that links
+  out to `curunir.ai`.
 - File-system content model: a memo is a folder with a markdown file and a
   PDF. No database, no admin UI.
 - Open Graph + Twitter card meta tags on each memo page so link unfurls on
@@ -95,6 +99,57 @@ Per memo (mock: `mockups/research/memo-detail.html`):
 The date suffix is honest about cadence and disambiguates re-takes
 (e.g., `gold-thesis-2026-04-12` vs `gold-thesis-2026-10-13`). The slug
 is the folder name on disk; URL and folder name are identical.
+
+`/research/methodology` is a single fixed route (no date), distinct from
+the slug-pattern memo route.
+
+### `/research/methodology` — How the memos are produced
+
+A standing long-form page (not part of the rotating memo list) that
+explains the agent pipeline behind the memos. Two audiences:
+
+- Readers who land on a memo and want to know how it was put together
+  (linked from each memo's byline rail).
+- Visitors evaluating Curunir as a product, where the methodology
+  doubles as a soft pitch (the page links out to `curunir.ai`).
+
+Structure:
+
+- **Same compact masthead strip** as the memo detail page, with a
+  breadcrumb `RESEARCH / METHODOLOGY`.
+- **Editorial hero**: kicker `METHODOLOGY`, large headline (e.g., "How
+  these memos get made."), dek explaining that every memo is a single
+  Curunir session, with a CTA button `Try Curunir →` linking to
+  `https://curunir.ai`.
+- **The flow section** — the pipeline as a sequence of labeled blocks:
+  1. **Catalyst → instruments → thesis** (not the other way around).
+     Frames the inversion: most sell-side research starts with an
+     instrument and back-fills a thesis. This pipeline starts with a
+     catalyst (a Polymarket-implied probability moving, a podcast
+     mention spiking, a Reddit thread converging on a name) and works
+     forward to the instruments that express it.
+  2. **Sub-skill primitives** (shared with the `investment-memo` skill):
+     `deep-research`, `financial-analysis`, `fact-checker`, `reddit`,
+     `xai`. One short paragraph per primitive describing what it does
+     and why it's in the pipeline.
+  3. **Forward-looking layers** (this approach's additions over the
+     base `investment-memo` skill):
+     - `polymarket` — pulls implied probabilities on catalysts that
+       would move the thesis.
+     - `podcast-corpus grep` — searches a transcript corpus for recent
+       mentions of the company, sector, or catalyst, so the agent
+       can pressure-test the narrative against what operators and
+       investors are actually saying.
+  4. **Output**: a PDF memo + the editorial summary you're reading.
+- **"Built with Curunir" outro**: short pitch with a second CTA to
+  `curunir.ai` and a one-line link to the methodology repo / skill
+  source if/when public.
+- **Footer**: same as the rest of the section.
+
+The page is rendered from a single Jinja template
+(`portal/templates/research_methodology.html`); its copy is part of the
+template rather than a separate content file, since it's a fixed page
+maintained by the operator and not part of the memo content model.
 
 ## Content model
 
@@ -170,6 +225,10 @@ A `Memo` dataclass holds the parsed fields: `slug`, `title`, `date`,
 
 - `GET /research` → renders `research_index.html` with the memo list and
   the derived category list.
+- `GET /research/methodology` → renders `research_methodology.html`.
+  Declared **before** the slug route so FastAPI matches it first; the
+  literal `methodology` path is also added to a reserved-slugs set so a
+  memo can't accidentally claim it.
 - `GET /research/{slug}` → renders `memo_detail.html` or returns 404 via
   `HTTPException`.
 - `GET /research/{slug}/memo.pdf` → returns the PDF file (FileResponse).
@@ -182,7 +241,13 @@ with `{% for %}` loops over the memo list.
 
 **`portal/templates/memo_detail.html`** — Jinja template for the per-memo
 page. Built from `mockups/research/memo-detail.html` with frontmatter
-fields and rendered body interpolated in.
+fields and rendered body interpolated in. The byline rail includes a
+`See methodology →` link to `/research/methodology`.
+
+**`portal/templates/research_methodology.html`** — Jinja template for the
+methodology page. Built from `mockups/research/methodology.html`. Copy
+lives in the template (not a separate content file) since it's a fixed
+operator-maintained page.
 
 **`portal/static/research/research.css`** — shared CSS for both pages.
 Extracted from the mock `<style>` blocks. Keeps the templates clean.
@@ -268,6 +333,10 @@ Tests live in `portal/tests/test_research.py`.
 - `test_memo_detail_404` — GET `/research/nonexistent` returns 404.
 - `test_memo_pdf_serves` — GET `/research/<slug>/memo.pdf` returns the
   file with `application/pdf`.
+- `test_methodology_renders` — GET `/research/methodology` returns 200
+  and contains the `curunir.ai` outbound link.
+- `test_methodology_slug_reserved` — a memo folder named `methodology`
+  does not get routed to (the methodology page wins).
 
 Existing tests in `portal/tests/` use FastAPI's `TestClient`; the new
 tests follow that pattern.
