@@ -224,6 +224,42 @@ async def test_send_reply_blocked_by_allowlist(restricted_client):
     assert not route.called
 
 
+@pytest.mark.parametrize("bad_to", [
+    "alice@example.com.evil.tld",        # suffix attack
+    "evilalice@example.com.attacker.tld",  # prefix + suffix
+    '"alice@example.com" <attacker@evil.tld>',  # display-name spoof
+    "alice@example.com, evil@evil.com",  # mixed — must block on disallowed
+])
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_reply_rejects_allowlist_bypass_attempts(restricted_client, bad_to):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={}))
+    with pytest.raises(DeadsimpleError):
+        await restricted_client.send_reply(
+            in_reply_to="m1", to=bad_to, text_body="hi"
+        )
+    assert not route.called
+
+
+@pytest.mark.parametrize("good_to", [
+    "alice@example.com",
+    "Alice@Example.COM",
+    '"Alice" <alice@example.com>',
+])
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_reply_accepts_allowed_recipient_variants(restricted_client, good_to):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m2"}}))
+    await restricted_client.send_reply(
+        in_reply_to="m1", to=good_to, text_body="hi"
+    )
+    assert route.called
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_send_with_attachments_uses_messages_endpoint(client, tmp_path):

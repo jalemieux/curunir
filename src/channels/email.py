@@ -4,6 +4,7 @@ sends replies into the same thread."""
 import asyncio
 import logging
 from datetime import datetime, timezone
+from email.utils import getaddresses
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ class EmailChannel:
             restrict_outbound=config.restrict_outbound,
         )
         self.poll_interval = config.poll_interval_sec
-        self.allowed_senders = config.allowed_senders
+        self.allowed_senders = [s.lower() for s in config.allowed_senders]
         self.attachment_dir = config.attachment_dir
         self.spam_score_threshold = config.spam_score_threshold
         self.state = EmailState.load(config.state_file)
@@ -125,9 +126,12 @@ class EmailChannel:
                          summary.get("message_id"), summary.get("spam_score"))
             return
         sender = summary.get("from_email", "")
-        if self.allowed_senders and not any(a in sender for a in self.allowed_senders):
-            logger.info("Skipping email from %s (not in allowed_senders)", sender)
-            return
+        if self.allowed_senders:
+            parsed = [addr for _, addr in getaddresses([sender]) if addr]
+            sender_addr = parsed[0].lower() if parsed else ""
+            if not sender_addr or sender_addr not in self.allowed_senders:
+                logger.info("Skipping email from %s (not in allowed_senders)", sender)
+                return
 
         try:
             detail = await self.client.get_message(summary["message_id"])
