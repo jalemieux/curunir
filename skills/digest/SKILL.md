@@ -151,7 +151,6 @@ Update the ledger: any URL flagged DEDUP becomes `REJECT: dedup`.
 Items eligible for the digest = ledger rows where `DECISION = KEEP`.
 
 - **3+ eligible items** → normal digest. Header: `# {Topic} Digest — {DIGEST_DATE}`.
-  One short paragraph per item, with the source URL and publication date inline.
 - **1–2 eligible items** → "Light news day" digest with whatever passed.
   Header: `# {Topic} Digest — {DIGEST_DATE} (light news day)`.
 - **0 eligible items** → ship a one-line message:
@@ -161,6 +160,42 @@ Items eligible for the digest = ledger rows where `DECISION = KEEP`.
 Including a stale item to "round out" the digest is the failure mode this
 skill exists to prevent. A short digest is the correct output, not a problem to
 solve.
+
+### Per-item template
+
+Each item is **one paragraph** in this exact shape:
+
+```
+**{Lead headline as a sentence — what happened, in active voice}.** {1–3 sentences of supporting detail: who, how big, why it matters, follow-on consequence.} ([{Publisher}]({url}), {YYYY-MM-DD})
+```
+
+Hard rules — these are the rules the model breaks first, so re-check them in
+the output checklist:
+
+- **No subheadings between items.** No `##` per story, no bullets, no numbered
+  list, no "Read more →" links. Items are separated by a single blank line.
+- **Citation goes at the end in parentheses**, and the publisher name is the
+  hyperlink: `([Bloomberg](https://...), 2026-05-24)`. Do not paste the bare
+  URL. Do not put the citation on its own line.
+- **Publisher name** is the human-readable brand derived from the URL hostname
+  — `bloomberg.com` → "Bloomberg", `techcrunch.com` → "TechCrunch",
+  `pymnts.com` → "PYMNTS". Not the hostname itself, not the article title
+  prefix. If the article is syndicated (e.g. via `news.google.com`), use the
+  original outlet named on the page, not the syndicator.
+- **Lead sentence is bolded** with `**…**` and ends in a period before the
+  detail sentences begin.
+
+### Canonical example (this is what good looks like)
+
+```markdown
+# AI/ML Digest — 2026-05-25
+
+**Anthropic targets $900B valuation in record funding round.** Bloomberg reports Anthropic is in talks to raise at least $30 billion at a valuation above $900 billion, potentially closing as soon as this week. The deal would vault it past OpenAI as the world's most valuable private AI startup. Quarterly revenue is projected to more than double to $10.9B in Q2, with an annualized run rate topping $50B by end of June — driven largely by Claude Code, which has become one of the fastest-scaling enterprise software products on record. Sequoia, Dragoneer, Altimeter, and Greenoaks are expected to co-lead. ([PYMNTS](https://www.pymnts.com/...), 2026-05-24)
+
+**White House shelves AI safety executive order at the last minute.** President Trump postponed signing a draft AI safety executive order on May 21, telling reporters he "didn't like certain aspects" and worried it could slow the US lead over China. The draft would have created a voluntary 90-day review process for new AI models before release. ([Asanify](https://www.asanify.com/...), 2026-05-25)
+
+**Illinois Senate advances frontier AI model regulation bill.** The Illinois Senate voted 52-5 to pass SB 315, which would require large AI developers (>$500M revenue) to adopt transparency frameworks, undergo third-party audits, and report catastrophic risk capabilities. Modeled after similar laws in California and New York, the bill has support from OpenAI and Anthropic. The effective date was amended to 2028. ([KWQC](https://www.kwqc.com/...), 2026-05-25)
+```
 
 ## Step 5 — Record shipped URLs
 
@@ -194,11 +229,18 @@ The markdown produced in step 4 is the deliverable.
   ```
 
   Wrap it in a minimal HTML document so links and headings render cleanly in
-  every mail client:
+  every mail client. The styling below gives the newspaper-brief look the
+  canonical example in step 4 is aiming for — a narrow column, generous
+  paragraph spacing, and obviously-clickable citations:
 
   ```python
   html_body = f"""<!DOCTYPE html>
-  <html><body style="font-family: -apple-system, system-ui, sans-serif; max-width: 680px; margin: 0 auto; padding: 16px; line-height: 1.5;">
+  <html><head><style>
+    body {{ font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 700px; margin: 0 auto; padding: 24px 16px; font-size: 16px; line-height: 1.6; color: #1a1a1a; }}
+    h1 {{ font-size: 22px; margin: 0 0 1em 0; font-weight: 600; }}
+    p {{ margin: 0 0 1.1em 0; }}
+    a {{ color: #1a5fb4; text-decoration: underline; }}
+  </style></head><body>
   {html_body}
   </body></html>"""
   ```
@@ -220,6 +262,7 @@ Before sending the digest, confirm in your reasoning:
 - [ ] Every shipped item has `PUBLISHED ≠ UNKNOWN` and `AGE_DAYS ≤ 1`.
 - [ ] Step 3 dedup ran against the per-topic Ledger path.
 - [ ] Step 5 appended shipped URLs to the ledger.
+- [ ] Each shipped item starts with a bolded lead sentence and ends with a `([Publisher](url), YYYY-MM-DD)` citation — no subheadings, bullets, or numbering between items.
 - [ ] If delivering by email, both `text_body` and `html_body` are set, no attachments, no PDF.
 
 If any box is empty, do not send the digest. Fix the gap or ship a shorter
