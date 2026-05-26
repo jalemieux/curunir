@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methodology — The Curunir Memo</title>
+<meta name="description" content="How the memos get made. A Curunir agent flow that starts with a catalyst, not an instrument.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 56px 0 64px; }
+
+  /* Compact masthead — reused from memo-detail */
+  .masthead-strip {
+    border-top: 3px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 18px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 56px;
+  }
+  .masthead-strip .name { font-weight: 600; font-size: 22px; letter-spacing: -0.025em; }
+  .masthead-strip .name .accent { color: var(--accent); }
+  .masthead-strip .crumb {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.12em;
+  }
+  .masthead-strip .crumb a { color: var(--ink-2); text-decoration: none; }
+  .masthead-strip .crumb a:hover { color: var(--accent); }
+  .masthead-strip .crumb .sep { color: var(--ink-3); margin: 0 8px; }
+
+  /* Hero */
+  .hero {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 72px;
+    padding-bottom: 56px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .hero .label.accent { padding-top: 4px; }
+  .hero h1 {
+    font-weight: 500;
+    font-size: clamp(44px, 6vw, 78px);
+    line-height: 1.0;
+    letter-spacing: -0.04em;
+    margin-bottom: 24px;
+    max-width: 860px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero .dek {
+    font-size: 19px; line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 680px;
+    margin-bottom: 28px;
+  }
+  .hero .dek:first-letter { font-weight: 600; color: var(--ink); }
+  .hero .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500; font-size: 14px;
+    text-decoration: none;
+    padding: 13px 22px;
+    background: var(--ink); color: var(--bg);
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); }
+  .btn.ghost { background: var(--bg); color: var(--ink); }
+  .btn.ghost:hover { background: var(--ink); color: var(--bg); }
+  .btn .arr { font-family: 'Geist Mono', monospace; }
+
+  /* Flow: catalyst → instruments → thesis */
+  .inversion {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 72px;
+  }
+  .inversion .body { max-width: 760px; }
+  .inversion h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.4vw, 38px);
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    margin-bottom: 18px;
+  }
+  .inversion h2 .accent { color: var(--accent); }
+  .inversion p {
+    color: var(--ink-2);
+    font-size: 16.5px; line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--ink);
+    margin: 32px 0;
+  }
+  .compare .col { padding: 24px 26px; }
+  .compare .col + .col { border-left: 1px solid var(--ink); }
+  .compare .col .label { display: block; margin-bottom: 14px; }
+  .compare .col .seq {
+    font-family: 'Geist Mono', monospace;
+    font-size: 13.5px;
+    color: var(--ink);
+    line-height: 1.8;
+  }
+  .compare .col .seq .step { display: inline-block; }
+  .compare .col .seq .arr { color: var(--accent); margin: 0 8px; }
+  .compare .col p {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .compare .col.them { background: var(--bg-2); }
+  .compare .col.us .label::after { content: " · OURS"; color: var(--accent); }
+  .compare .col.them .label::after { content: " · TYPICAL"; color: var(--ink-3); }
+
+  /* Pipeline section */
+  .pipeline {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 72px;
+  }
+  .pipeline .body { }
+  .pipeline h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.4vw, 38px);
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    margin-bottom: 8px;
+  }
+  .pipeline .h2-sub {
+    color: var(--ink-3);
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 28px;
+  }
+
+  .prim-group {
+    margin-bottom: 28px;
+  }
+  .prim-group .group-label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .prim-group .group-label::before { content: "▲ "; }
+
+  .prim {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 24px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .prim:last-child { border-bottom: 0; }
+  .prim .name {
+    font-family: 'Geist Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    text-transform: lowercase;
+  }
+  .prim .name::before { content: "/ "; color: var(--accent); }
+  .prim .desc {
+    color: var(--ink-2);
+    font-size: 15.5px;
+    line-height: 1.55;
+    max-width: 580px;
+  }
+  .prim .desc strong { color: var(--ink); font-weight: 600; }
+
+  /* Outro */
+  .outro {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 48px;
+    padding-top: 56px;
+    border-top: 1px solid var(--ink);
+  }
+  .outro h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.4vw, 40px);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    margin-bottom: 16px;
+    max-width: 680px;
+  }
+  .outro h2 .accent { color: var(--accent); }
+  .outro p {
+    color: var(--ink-2);
+    font-size: 17px; line-height: 1.55;
+    margin-bottom: 24px;
+    max-width: 620px;
+  }
+
+  @media (max-width: 900px) {
+    .masthead-strip { flex-direction: column; gap: 10px; align-items: flex-start; }
+    .hero, .inversion, .pipeline, .outro { grid-template-columns: 1fr; gap: 20px; }
+    .compare { grid-template-columns: 1fr; }
+    .compare .col + .col { border-left: 0; border-top: 1px solid var(--ink); }
+    .prim { grid-template-columns: 1fr; gap: 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="#">Home</a>
+      <a class="pill active" href="option-c2-broadsheet-equal.html">Research</a>
+      <a class="pill" href="#">Beta</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="masthead-strip">
+      <div class="name">The <span class="accent">Curunir</span> Memo</div>
+      <div class="crumb">
+        <a href="option-c2-broadsheet-equal.html">RESEARCH</a>
+        <span class="sep">/</span>
+        METHODOLOGY
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="label accent">METHODOLOGY</div>
+      <div>
+        <h1>How these memos <span class="accent">get made</span>.</h1>
+        <p class="dek">Every memo on this page is the output of a single Curunir session — one long-running agent flow that researches, fact-checks, sources, and writes end-to-end. This is what's running under the hood.</p>
+        <div class="actions">
+          <a class="btn" href="https://curunir.ai" target="_blank" rel="noopener">Try Curunir <span class="arr">→</span></a>
+          <a class="btn ghost" href="option-c2-broadsheet-equal.html">Read the memos <span class="arr">→</span></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="inversion">
+      <div class="label accent">THE FRAMING</div>
+      <div class="body">
+        <h2>Catalyst → instruments → <span class="accent">thesis</span>.</h2>
+        <p>Sell-side research almost always runs the other direction. A name lands on the desk, the analyst back-fills a thesis, and the catalysts come last (sometimes never). The result is a clean-looking document anchored to whichever ticker the firm wanted covered, not to whatever is actually moving the world.</p>
+        <p>This pipeline inverts it. The agent starts from a catalyst — a Polymarket probability moving, a podcast mention spiking, a Reddit thread converging on a name, an earnings print, a regulatory clock — and works forward to the instruments that express it and the thesis that holds them together.</p>
+
+        <div class="compare">
+          <div class="col them">
+            <span class="label">PIPELINE</span>
+            <div class="seq">
+              <span class="step">instrument</span><span class="arr">→</span><span class="step">thesis</span><span class="arr">→</span><span class="step">catalysts (maybe)</span>
+            </div>
+            <p>You already picked the ticker. You write a thesis. You list catalysts that would help. The ticker was load-bearing; everything else decorates.</p>
+          </div>
+          <div class="col us">
+            <span class="label">PIPELINE</span>
+            <div class="seq">
+              <span class="step">catalyst</span><span class="arr">→</span><span class="step">instruments</span><span class="arr">→</span><span class="step">thesis</span>
+            </div>
+            <p>You start with something that is actually moving. The instruments fall out of what expresses it cleanest. The thesis is the connective tissue, not the premise.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pipeline">
+      <div class="label accent">THE FLOW</div>
+      <div class="body">
+        <h2>What's under the hood.</h2>
+        <div class="h2-sub">A peer of the <span style="color:var(--ink);">investment-memo</span> skill — shares the same primitives, adds two forward-looking layers.</div>
+
+        <div class="prim-group">
+          <div class="group-label">SHARED PRIMITIVES</div>
+
+          <div class="prim">
+            <div class="name">deep-research</div>
+            <div class="desc"><strong>Open-ended web research</strong> across filings, news, transcripts, sell-side notes, and primary sources. The agent decomposes the question, runs parallel searches, and synthesizes findings with inline citations.</div>
+          </div>
+          <div class="prim">
+            <div class="name">financial-analysis</div>
+            <div class="desc"><strong>Numbers, not narrative.</strong> Pulls statements, builds the relevant tables (DCF, sensitivities, peer comps, sum-of-the-parts), and stress-tests the assumptions that the thesis hinges on.</div>
+          </div>
+          <div class="prim">
+            <div class="name">fact-checker</div>
+            <div class="desc"><strong>Every claim in the memo gets verified</strong> against at least one primary source before it ships. Unverifiable claims are either re-sourced, softened, or cut.</div>
+          </div>
+          <div class="prim">
+            <div class="name">reddit</div>
+            <div class="desc"><strong>Operator and retail signal.</strong> Surfaces what people closest to the product or the trade are actually saying, including the disagreements. Catches stories before they reach the tape.</div>
+          </div>
+          <div class="prim">
+            <div class="name">xai</div>
+            <div class="desc"><strong>Real-time X corpus access.</strong> Live discussion, breaking-news graph, and sentiment around the catalyst and the cap table.</div>
+          </div>
+        </div>
+
+        <div class="prim-group">
+          <div class="group-label">FORWARD-LOOKING LAYERS</div>
+
+          <div class="prim">
+            <div class="name">polymarket</div>
+            <div class="desc"><strong>Implied probabilities on the catalysts.</strong> Whatever the thesis is leaning on — a Fed move, an FDA decision, an election, an earnings beat — Polymarket has a price for it. The memo uses those prices to bracket scenarios instead of guessing.</div>
+          </div>
+          <div class="prim">
+            <div class="name">podcast-corpus grep</div>
+            <div class="desc"><strong>Pressure-tests the narrative</strong> against what operators, founders, and investors are saying in long-form. Searches a transcript corpus for recent mentions of the company, sector, or catalyst — so the agent isn't just rebutting the obvious headlines.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="outro">
+      <div class="label accent">BUILT WITH</div>
+      <div>
+        <h2>This is what <span class="accent">Curunir</span> does, every day.</h2>
+        <p>You can run this same pipeline. The skills above are the primitives Curunir ships with — point it at a catalyst you care about and it'll produce a memo with the same shape as the ones on this page.</p>
+        <div class="actions">
+          <a class="btn" href="https://curunir.ai" target="_blank" rel="noopener">Try Curunir <span class="arr">→</span></a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · 2026</div>
+    <div><a href="#">RSS</a> · <a href="#">EMAIL</a> · <a href="#">X</a></div>
+  </footer>
+</div>
+</body>
+</html>
