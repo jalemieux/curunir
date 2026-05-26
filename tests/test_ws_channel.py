@@ -589,6 +589,44 @@ class TestStageAttachments:
     def test_empty_items_returns_empty_manifest(self, tmp_uploads):
         assert _stage_attachments([], "sid", str(tmp_uploads)) == []
 
+    def test_rejects_path_traversal_filename(self, tmp_uploads):
+        """A traversal filename must not escape the per-batch dir."""
+        items = [
+            {"filename": "../../../etc/pwned.txt",
+             "mime_type": "text/plain", "bytes": b"OWNED"},
+            {"filename": "ok.txt", "mime_type": "text/plain", "bytes": b"x"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        # All staged files live under the per-session uuid dir.
+        root = _os_stage.path.realpath(str(tmp_uploads))
+        for m in manifest:
+            assert _os_stage.path.realpath(m["path"]).startswith(root)
+            assert ".." not in m["filename"]
+            assert "/" not in m["filename"]
+        # ok.txt definitely lands; traversal entry is either skipped or basenamed.
+        names = [m["filename"] for m in manifest]
+        assert "ok.txt" in names
+
+    def test_basenames_filename_with_separators(self, tmp_uploads):
+        """Legit nested filenames get collapsed to basename."""
+        items = [{"filename": "folder/sub/report.pdf",
+                  "mime_type": "application/pdf", "bytes": b"PDF"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert len(manifest) == 1
+        assert manifest[0]["filename"] == "report.pdf"
+        assert _os_stage.path.isfile(manifest[0]["path"])
+
+    def test_skips_dot_and_empty_filenames(self, tmp_uploads):
+        items = [
+            {"filename": "", "mime_type": "text/plain", "bytes": b"a"},
+            {"filename": ".", "mime_type": "text/plain", "bytes": b"b"},
+            {"filename": "..", "mime_type": "text/plain", "bytes": b"c"},
+            {"filename": "keep.txt", "mime_type": "text/plain", "bytes": b"d"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        names = [m["filename"] for m in manifest]
+        assert names == ["keep.txt"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: end-to-end inbound attachments through WebSocketChannel
