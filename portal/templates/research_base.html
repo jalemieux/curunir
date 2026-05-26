@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Research — Curunir{% endblock %}</title>
+<meta name="description" content="{% block description %}Investment memos from Curunir.{% endblock %}">
+
+{# Open Graph + Twitter card. Pages override og_title / og_description / og_url. #}
+<meta property="og:type" content="{% block og_type %}website{% endblock %}">
+<meta property="og:title" content="{% block og_title %}The Curunir Memo{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Investment memos from Curunir.{% endblock %}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="The Curunir Memo">
+<meta property="og:image" content="{% block og_image %}{{ canonical_url.split('/research')[0] }}/static/research/og-default.png{% endblock %}">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/research/research.css">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="/">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="/">Home</a>
+      <a class="pill {% block nav_research_active %}active{% endblock %}" href="/research">Research</a>
+    </div>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · {{ now_year }}</div>
+    <div><a href="https://curunir.ai" target="_blank" rel="noopener">CURUNIR.AI</a></div>
+  </footer>
+</div>
+</body>
+</html>

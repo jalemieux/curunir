@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from portal import admin, auth, beta, db, sign_in, ws_agent, ws_browser
+from portal import admin, auth, beta, db, research, sign_in, ws_agent, ws_browser
 from portal.config import settings
 
 
@@ -91,8 +91,18 @@ for _name in ("uvicorn.access", "uvicorn.error"):
 app.include_router(sign_in.router)
 app.include_router(admin.router)
 app.include_router(beta.router)
+app.include_router(research.router)
 app.include_router(ws_agent.router)
 app.include_router(ws_browser.router)
+
+# Static assets for the research section (CSS + OG images).
+_RESEARCH_STATIC_DIR = Path(__file__).parent / "static" / "research"
+if _RESEARCH_STATIC_DIR.is_dir():
+    app.mount(
+        "/static/research",
+        StaticFiles(directory=_RESEARCH_STATIC_DIR),
+        name="research-static",
+    )
 
 
 _LANDING_DIR = Path(__file__).parent / "static" / "landing"

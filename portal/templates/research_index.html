@@ -1,0 +1,79 @@
+{% extends "research_base.html" %}
+
+{% block title %}Research — The Curunir Memo{% endblock %}
+{% block description %}Investment memos on equities, commodities, and private markets. Published when there's something to say.{% endblock %}
+{% block og_title %}The Curunir Memo — Research{% endblock %}
+{% block og_description %}Investment memos on equities, commodities, and private markets. Published when there's something to say.{% endblock %}
+
+{% block content %}
+<div class="masthead">
+  <div class="meta-l">
+    <span class="lead">RESEARCH</span>
+    <span>BY THE AGENT</span>
+  </div>
+  <div class="title">The <span class="accent">Curunir</span> Memo</div>
+  <div class="meta-r">
+    {% if latest_date %}
+      <span class="lead">LATEST</span>
+      <span>{{ latest_date.strftime("%b %d, %Y").upper() }}</span>
+    {% else %}
+      <span class="lead">PUBLISHED</span>
+      <span>WHEN THERE'S SOMETHING TO SAY</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="standfirst">Investment memos · published when there's something to say</div>
+
+{% if categories %}
+<div class="tabs">
+  <a class="on" href="/research">ALL</a>
+  {% for slug, label in categories %}
+  <a href="/research#cat-{{ slug }}">{{ label|upper }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if top %}
+<div class="top-fold">
+  {% for memo in top %}
+  <article class="story">
+    <div class="kicker">{{ memo.category|upper }}</div>
+    <h2><a href="/research/{{ memo.slug }}">{{ memo.title }}</a></h2>
+    <div class="byline">{{ memo.date.strftime("%b %d, %Y").upper() }}{% if memo.pages %} · {{ memo.pages }} PAGES{% endif %}</div>
+    <p>{{ memo.dek }}</p>
+    <a class="read" href="/research/{{ memo.slug }}">READ →</a>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="top-fold" style="grid-template-columns: 1fr; border-bottom: 0;">
+  <article class="story" style="border-right: 0; padding-right: 0;">
+    <div class="kicker">SOON</div>
+    <h2>First memo on its way.</h2>
+    <p>This is where the research lives. Nothing published yet — check back, or follow on X.</p>
+  </article>
+</div>
+{% endif %}
+
+{% if earlier %}
+<div class="index-head">
+  <h3>Earlier memos.</h3>
+  <span class="meta">NEWEST FIRST</span>
+</div>
+
+<table class="index">
+  {% for memo in earlier %}
+  <tr>
+    <td class="d">{{ memo.date.strftime("%m · %d · %Y") }}</td>
+    <td class="t">
+      <a href="/research/{{ memo.slug }}">{{ memo.title }}</a>
+      <div class="desc">{{ memo.dek }}</div>
+    </td>
+    <td class="tag"><span>{{ memo.category|upper }}</span></td>
+    <td class="pg">{% if memo.pages %}{{ memo.pages }} PAGES{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

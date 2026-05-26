@@ -1,0 +1,104 @@
+{% extends "research_base.html" %}
+
+{% block title %}{{ memo.title }} · The Curunir Memo{% endblock %}
+{% block description %}{{ memo.dek }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ memo.title }}{% endblock %}
+{% block og_description %}{{ memo.dek }}{% endblock %}
+
+{% block content %}
+<div class="masthead-strip">
+  <div class="name">The <span class="accent">Curunir</span> Memo</div>
+  <div class="crumb">
+    <a href="/research">RESEARCH</a>
+    <span class="sep">/</span>
+    <a href="/research#cat-{{ memo.category_slug }}">{{ memo.category|upper }}</a>
+    <span class="sep">/</span>
+    {{ memo.title|upper }}
+  </div>
+</div>
+
+<div class="article-hero">
+  <aside class="rail">
+    <div class="row">
+      <span class="k">PUBLISHED</span>
+      <span class="v">{{ memo.date.strftime("%b %d, %Y").upper() }}</span>
+    </div>
+    <div class="row">
+      <span class="k">CATEGORY</span>
+      <span class="v accent">{{ memo.category|upper }}</span>
+    </div>
+    {% if memo.pages %}
+    <div class="row">
+      <span class="k">FORMAT</span>
+      <span class="v">PDF · {{ memo.pages }} PAGES</span>
+    </div>
+    {% endif %}
+    {% if memo.sources %}
+    <div class="row">
+      <span class="k">SOURCES</span>
+      <span class="v">{{ memo.sources }} CITED</span>
+    </div>
+    {% endif %}
+    <div class="row">
+      <span class="k">AUTHOR</span>
+      <span class="v">CURUNIR</span>
+    </div>
+    <div class="row extra">
+      <span class="k">METHOD</span>
+      <span class="v"><a href="/research/methodology">See methodology →</a></span>
+    </div>
+  </aside>
+
+  <div>
+    <div class="kicker">{{ memo.category|upper }}</div>
+    <h1>{{ memo.title }}</h1>
+    <p class="dek">{{ memo.dek }}</p>
+    <div class="actions">
+      {% if memo.pdf_exists %}
+        <a class="btn" href="#pdf">Read the PDF <span class="arr">→</span></a>
+        <a class="btn ghost" href="/research/{{ memo.slug }}/memo.pdf" download>Download <span class="arr">↓</span></a>
+      {% else %}
+        <span class="btn disabled">PDF unavailable</span>
+      {% endif %}
+      {% set tweet_text = memo.title ~ " — " ~ memo.dek ~ " " ~ canonical_url %}
+      <a class="btn ghost" href="https://x.com/intent/tweet?text={{ tweet_text|urlencode }}" target="_blank" rel="noopener">Share on X <span class="arr">→</span></a>
+    </div>
+  </div>
+</div>
+
+{% if memo.body_html %}
+<div class="body-grid">
+  <div class="label accent">SUMMARY</div>
+  <div class="summary">
+    {{ memo.body_html|safe }}
+  </div>
+</div>
+{% endif %}
+
+{% if memo.pdf_exists %}
+<div class="pdf-block" id="pdf">
+  <div class="pdf-head">
+    <h3>The full memo.</h3>
+    <span class="meta">PDF{% if memo.pages %} · {{ memo.pages }} PAGES{% endif %} · {{ memo.date.strftime("%b %d, %Y").upper() }}</span>
+  </div>
+  <iframe class="pdf-frame" src="/research/{{ memo.slug }}/memo.pdf" title="{{ memo.title }} — full PDF"></iframe>
+</div>
+{% endif %}
+
+{% if other %}
+<div class="related-head">
+  <h3>Earlier memos.</h3>
+  <span class="meta"><a href="/research">SEE ALL →</a></span>
+</div>
+<div class="related">
+  {% for o in other %}
+  <a href="/research/{{ o.slug }}">
+    <div class="kicker">{{ o.category|upper }}</div>
+    <h4>{{ o.title }}</h4>
+    <div class="date">{{ o.date.strftime("%b %d, %Y").upper() }}{% if o.pages %} · {{ o.pages }} PAGES{% endif %}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

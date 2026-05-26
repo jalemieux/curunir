@@ -158,3 +158,7 @@ class MemoRepository:
         for memo in self._memos:
             seen.setdefault(memo.category_slug, memo.category)
         return sorted(seen.items(), key=lambda kv: kv[1])
+
+    def pdf_path(self, memo: Memo) -> Path:
+        """Absolute path to a memo's PDF on disk (may not exist)."""
+        return self._content_dir / memo.slug / memo.pdf_filename

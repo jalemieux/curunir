@@ -1,0 +1,112 @@
+{% extends "research_base.html" %}
+
+{% block title %}Methodology — The Curunir Memo{% endblock %}
+{% block description %}How the memos get made. A Curunir agent flow that starts with a catalyst, not an instrument.{% endblock %}
+{% block og_title %}Methodology — The Curunir Memo{% endblock %}
+{% block og_description %}How the memos get made. A Curunir agent flow that starts with a catalyst, not an instrument.{% endblock %}
+
+{% block content %}
+<div class="masthead-strip">
+  <div class="name">The <span class="accent">Curunir</span> Memo</div>
+  <div class="crumb">
+    <a href="/research">RESEARCH</a>
+    <span class="sep">/</span>
+    METHODOLOGY
+  </div>
+</div>
+
+<div class="hero">
+  <div class="label accent">METHODOLOGY</div>
+  <div>
+    <h1>How these memos <span class="accent">get made</span>.</h1>
+    <p class="dek">Every memo on this page is the output of a single Curunir session — one long-running agent flow that researches, fact-checks, sources, and writes end-to-end. This is what's running under the hood.</p>
+    <div class="actions">
+      <a class="btn" href="https://curunir.ai" target="_blank" rel="noopener">Try Curunir <span class="arr">→</span></a>
+      <a class="btn ghost" href="/research">Read the memos <span class="arr">→</span></a>
+    </div>
+  </div>
+</div>
+
+<div class="inversion">
+  <div class="label accent">THE FRAMING</div>
+  <div class="body">
+    <h2>Catalyst → instruments → <span class="accent">thesis</span>.</h2>
+    <p>Sell-side research almost always runs the other direction. A name lands on the desk, the analyst back-fills a thesis, and the catalysts come last (sometimes never). The result is a clean-looking document anchored to whichever ticker the firm wanted covered, not to whatever is actually moving the world.</p>
+    <p>This pipeline inverts it. The agent starts from a catalyst — a Polymarket probability moving, a podcast mention spiking, a Reddit thread converging on a name, an earnings print, a regulatory clock — and works forward to the instruments that express it and the thesis that holds them together.</p>
+
+    <div class="compare">
+      <div class="col them">
+        <span class="label">PIPELINE</span>
+        <div class="seq">
+          <span class="step">instrument</span><span class="arr">→</span><span class="step">thesis</span><span class="arr">→</span><span class="step">catalysts (maybe)</span>
+        </div>
+        <p>You already picked the ticker. You write a thesis. You list catalysts that would help. The ticker was load-bearing; everything else decorates.</p>
+      </div>
+      <div class="col us">
+        <span class="label">PIPELINE</span>
+        <div class="seq">
+          <span class="step">catalyst</span><span class="arr">→</span><span class="step">instruments</span><span class="arr">→</span><span class="step">thesis</span>
+        </div>
+        <p>You start with something that is actually moving. The instruments fall out of what expresses it cleanest. The thesis is the connective tissue, not the premise.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pipeline">
+  <div class="label accent">THE FLOW</div>
+  <div class="body">
+    <h2>What's under the hood.</h2>
+    <div class="h2-sub">A peer of the <span class="lit">investment-memo</span> skill — shares the same primitives, adds two forward-looking layers.</div>
+
+    <div class="prim-group">
+      <div class="group-label">SHARED PRIMITIVES</div>
+
+      <div class="prim">
+        <div class="name">deep-research</div>
+        <div class="desc"><strong>Open-ended web research</strong> across filings, news, transcripts, sell-side notes, and primary sources. The agent decomposes the question, runs parallel searches, and synthesizes findings with inline citations.</div>
+      </div>
+      <div class="prim">
+        <div class="name">financial-analysis</div>
+        <div class="desc"><strong>Numbers, not narrative.</strong> Pulls statements, builds the relevant tables (DCF, sensitivities, peer comps, sum-of-the-parts), and stress-tests the assumptions that the thesis hinges on.</div>
+      </div>
+      <div class="prim">
+        <div class="name">fact-checker</div>
+        <div class="desc"><strong>Every claim in the memo gets verified</strong> against at least one primary source before it ships. Unverifiable claims are either re-sourced, softened, or cut.</div>
+      </div>
+      <div class="prim">
+        <div class="name">reddit</div>
+        <div class="desc"><strong>Operator and retail signal.</strong> Surfaces what people closest to the product or the trade are actually saying, including the disagreements. Catches stories before they reach the tape.</div>
+      </div>
+      <div class="prim">
+        <div class="name">xai</div>
+        <div class="desc"><strong>Real-time X corpus access.</strong> Live discussion, breaking-news graph, and sentiment around the catalyst and the cap table.</div>
+      </div>
+    </div>
+
+    <div class="prim-group">
+      <div class="group-label">FORWARD-LOOKING LAYERS</div>
+
+      <div class="prim">
+        <div class="name">polymarket</div>
+        <div class="desc"><strong>Implied probabilities on the catalysts.</strong> Whatever the thesis is leaning on — a Fed move, an FDA decision, an election, an earnings beat — Polymarket has a price for it. The memo uses those prices to bracket scenarios instead of guessing.</div>
+      </div>
+      <div class="prim">
+        <div class="name">podcast-corpus grep</div>
+        <div class="desc"><strong>Pressure-tests the narrative</strong> against what operators, founders, and investors are saying in long-form. Searches a transcript corpus for recent mentions of the company, sector, or catalyst — so the agent isn't just rebutting the obvious headlines.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="outro">
+  <div class="label accent">BUILT WITH</div>
+  <div>
+    <h2>This is what <span class="accent">Curunir</span> does, every day.</h2>
+    <p>You can run this same pipeline. The skills above are the primitives Curunir ships with — point it at a catalyst you care about and it'll produce a memo with the same shape as the ones on this page.</p>
+    <div class="actions">
+      <a class="btn" href="https://curunir.ai" target="_blank" rel="noopener">Try Curunir <span class="arr">→</span></a>
+    </div>
+  </div>
+</div>
+{% endblock %}
