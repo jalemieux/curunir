@@ -17,6 +17,21 @@
 # the image locally and tags it with the `image:` name — `up --build` will
 # always rebuild from source. Re-adds the ./portal bind mount and uvicorn
 # --reload so portal code edits hot-reload during development.
+#
+# WebSocket pairing token
+# -----------------------
+# The container generates a random token at /app/context/.ws-token on
+# startup. Because docker-compose.yml bind-mounts ./context into the
+# container, that file appears on the host as ./context/.ws-token, and
+# cli.py reads it automatically when launched from the repo root.
+#
+# If you run cli.py from a different directory (or juggle multiple
+# checkouts and don't want to think about which one is mounted), export
+# the token in your shell once per session:
+#
+#   export CURUNIR_WS_TOKEN="$(cat ./context/.ws-token)"
+#
+# CURUNIR_WS_TOKEN takes precedence over the file lookup in cli.py.
 services:
   portal:
     build: ./portal

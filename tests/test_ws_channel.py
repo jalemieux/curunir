@@ -7,7 +7,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels.base import OutgoingMessage
-from src.channels.ws import WebSocketChannel
+from src.channels.ws import WebSocketChannel, _origin_allowed, _DEFAULT_LOCALHOST_ORIGINS
 
 # Use a fixed test port — pick something unlikely to clash
 TEST_PORT = 18765
@@ -645,6 +645,44 @@ class TestStageAttachments:
     def test_empty_items_returns_empty_manifest(self, tmp_uploads):
         assert _stage_attachments([], "sid", str(tmp_uploads)) == []
 
+    def test_rejects_path_traversal_filename(self, tmp_uploads):
+        """A traversal filename must not escape the per-batch dir."""
+        items = [
+            {"filename": "../../../etc/pwned.txt",
+             "mime_type": "text/plain", "bytes": b"OWNED"},
+            {"filename": "ok.txt", "mime_type": "text/plain", "bytes": b"x"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        # All staged files live under the per-session uuid dir.
+        root = _os_stage.path.realpath(str(tmp_uploads))
+        for m in manifest:
+            assert _os_stage.path.realpath(m["path"]).startswith(root)
+            assert ".." not in m["filename"]
+            assert "/" not in m["filename"]
+        # ok.txt definitely lands; traversal entry is either skipped or basenamed.
+        names = [m["filename"] for m in manifest]
+        assert "ok.txt" in names
+
+    def test_basenames_filename_with_separators(self, tmp_uploads):
+        """Legit nested filenames get collapsed to basename."""
+        items = [{"filename": "folder/sub/report.pdf",
+                  "mime_type": "application/pdf", "bytes": b"PDF"}]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert len(manifest) == 1
+        assert manifest[0]["filename"] == "report.pdf"
+        assert _os_stage.path.isfile(manifest[0]["path"])
+
+    def test_skips_dot_and_empty_filenames(self, tmp_uploads):
+        items = [
+            {"filename": "", "mime_type": "text/plain", "bytes": b"a"},
+            {"filename": ".", "mime_type": "text/plain", "bytes": b"b"},
+            {"filename": "..", "mime_type": "text/plain", "bytes": b"c"},
+            {"filename": "keep.txt", "mime_type": "text/plain", "bytes": b"d"},
+        ]
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        names = [m["filename"] for m in manifest]
+        assert names == ["keep.txt"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: _sanitize_session_id — boundary validator for client-supplied ids
@@ -716,12 +754,13 @@ class TestStageAttachmentsTraversal:
             _os_stage.path.realpath(str(tmp_uploads)) + _os_stage.sep
         )
 
-    def test_bare_dot_filename_rejected(self, tmp_uploads):
-        # Filename that basenames to "." would write to the directory itself.
+    def test_bare_dot_filename_skipped(self, tmp_uploads):
+        # Filename that basenames to "." would write to the directory itself —
+        # `_safe_attachment_filename` returns None and the item is skipped.
         items = [{"filename": "foo/.", "mime_type": "text/plain",
                   "bytes": b"x"}]
-        with pytest.raises(ValueError):
-            _stage_attachments(items, "sid", str(tmp_uploads))
+        manifest = _stage_attachments(items, "sid", str(tmp_uploads))
+        assert manifest == []
 
     def test_invalid_session_id_rejected_before_disk_io(self, tmp_uploads):
         items = [{"filename": "a.txt", "mime_type": "text/plain",
@@ -939,3 +978,208 @@ async def test_process_inbound_attachment_rejection_uses_local_session_id(tmp_up
     assert sent[0].session_id == "session-abc"
     assert sent[0].final is True
     assert "exceeds" in sent[0].content or "5 MB" in sent[0].content
+
+
+# ---------------------------------------------------------------------------
+# Tests: Origin allowlist and pairing token (security)
+# ---------------------------------------------------------------------------
+
+
+class TestOriginAllowed:
+    def test_missing_origin_accepted(self):
+        # Native clients (cli.py) don't send Origin.
+        assert _origin_allowed(None, _DEFAULT_LOCALHOST_ORIGINS) is True
+
+    def test_null_origin_accepted(self):
+        # Sandboxed iframes and file:// contexts send "null".
+        assert _origin_allowed("null", _DEFAULT_LOCALHOST_ORIGINS) is True
+
+    def test_localhost_with_port_accepted(self):
+        assert _origin_allowed(
+            "http://localhost:5173", _DEFAULT_LOCALHOST_ORIGINS,
+        ) is True
+
+    def test_127_with_port_accepted(self):
+        assert _origin_allowed(
+            "http://127.0.0.1:8080", _DEFAULT_LOCALHOST_ORIGINS,
+        ) is True
+
+    def test_https_localhost_accepted(self):
+        assert _origin_allowed(
+            "https://localhost", _DEFAULT_LOCALHOST_ORIGINS,
+        ) is True
+
+    def test_remote_origin_rejected(self):
+        # A real browser-driven cross-origin attack.
+        assert _origin_allowed(
+            "http://evil.example.com", _DEFAULT_LOCALHOST_ORIGINS,
+        ) is False
+
+    def test_lookalike_subdomain_rejected(self):
+        assert _origin_allowed(
+            "http://localhost.evil.com", _DEFAULT_LOCALHOST_ORIGINS,
+        ) is False
+
+    def test_custom_allowlist(self):
+        allow = frozenset({"http://my.host"})
+        assert _origin_allowed("http://my.host:9000", allow) is True
+        assert _origin_allowed("http://other.host", allow) is False
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_upgrade_rejected_with_403():
+    """A browser-style Origin from another host gets a 403 before handler runs."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 30)
+    task = await _start_channel(ch)
+    try:
+        with pytest.raises(websockets.exceptions.InvalidStatus) as excinfo:
+            async with websockets.connect(
+                f"ws://{TEST_HOST}:{TEST_PORT + 30}",
+                additional_headers={"Origin": "http://evil.example.com"},
+            ):
+                pass
+        assert excinfo.value.response.status_code == 403
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_localhost_origin_upgrade_accepted():
+    """A browser-style Origin pointing at localhost still connects."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 31)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(
+            f"ws://{TEST_HOST}:{TEST_PORT + 31}",
+            additional_headers={"Origin": "http://localhost:5173"},
+        ) as ws:
+            sid = await _read_hello(ws)
+            assert sid
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_required_no_hello_closes_socket():
+    """When a token is configured, an idle client is dropped after the timeout."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 32, pairing_token="secret",
+    )
+    # Speed up the timeout for tests.
+    from src.channels import ws as ws_mod
+    orig_timeout = ws_mod._HELLO_TIMEOUT_SEC
+    ws_mod._HELLO_TIMEOUT_SEC = 0.3
+    task = await _start_channel(ch)
+    try:
+        ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 32}")
+        # Don't send anything — wait for server to close the connection.
+        with pytest.raises(websockets.exceptions.ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=1.0)
+        assert ws.close_code == 1008
+    finally:
+        ws_mod._HELLO_TIMEOUT_SEC = orig_timeout
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_wrong_closes_socket():
+    """A first frame with the wrong token is rejected with 1008."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 33, pairing_token="correct",
+    )
+    task = await _start_channel(ch)
+    try:
+        ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 33}")
+        await ws.send(json.dumps({"type": "hello", "token": "wrong"}))
+        with pytest.raises(websockets.exceptions.ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=1.0)
+        assert ws.close_code == 1008
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_missing_field_closes_socket():
+    """A hello with no token at all is rejected with 1008."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 34, pairing_token="t",
+    )
+    task = await _start_channel(ch)
+    try:
+        ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 34}")
+        await ws.send(json.dumps({"type": "hello"}))
+        with pytest.raises(websockets.exceptions.ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=1.0)
+        assert ws.close_code == 1008
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_non_hello_first_frame_closes_socket():
+    """A first frame that isn't a hello is rejected even with a token."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 35, pairing_token="t",
+    )
+    task = await _start_channel(ch)
+    try:
+        ws = await websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 35}")
+        await ws.send(json.dumps({"content": "hi", "token": "t"}))
+        with pytest.raises(websockets.exceptions.ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=1.0)
+        assert ws.close_code == 1008
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_valid_connects_and_messages_flow():
+    """With a correct token in the first hello frame, the connection works."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 36, pairing_token="goodtoken",
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 36}") as ws:
+            await ws.send(json.dumps({"type": "hello", "token": "goodtoken"}))
+            sid = await _read_hello(ws)
+            # Normal traffic works after the auth handshake.
+            await ws.send(json.dumps({"content": "hi", "command": None}))
+            await asyncio.sleep(0.05)
+        msgs = []
+        while not q.empty():
+            msgs.append(q.get_nowait())
+        user_msgs = [m for m in msgs if m.command != "extract"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0].content == "hi"
+        assert user_msgs[0].session_id == sid
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_pairing_token_valid_with_session_resume():
+    """A hello with a token AND a session_id resumes that session in one frame."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT + 37, pairing_token="t",
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 37}") as ws:
+            await ws.send(json.dumps({
+                "type": "hello", "token": "t", "session_id": "resumed-sid",
+            }))
+            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+            data = json.loads(raw)
+            assert data["type"] == "hello"
+            assert data["session_id"] == "resumed-sid"
+    finally:
+        await _stop_channel(task)
