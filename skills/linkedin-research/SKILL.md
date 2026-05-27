@@ -1,6 +1,7 @@
 ---
 name: linkedin-research
 description: "Use when an agent needs LinkedIn profile data, company info, job postings, or professional context for GTM research. Trigger: a skill or task requires founder backgrounds, company positioning, ICP job titles, or buyer language sourced from LinkedIn."
+portal_summary: "Look up LinkedIn profiles, companies, and job postings"
 ---
 
 # LinkedIn Research

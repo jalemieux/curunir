@@ -1,6 +1,7 @@
 ---
 name: youtube-transcript
 description: "Use whenever you need the spoken contents of a YouTube video — to read, review, summarize, quote, fact-check, or analyze what was discussed. Trigger phrases include 'transcript of this YouTube video', 'what was discussed in this YT video', 'read/review/summarize this YouTube link', 'what does this video say about X', or any YouTube URL where the actual words matter (not just metadata or thumbnail). Goes straight to yt-dlp — do not try YouTube's timedtext endpoint, third-party scrapers, or page-scraping."
+portal_summary: "Pull the transcript from a YouTube video"
 ---
 
 # YouTube Transcript

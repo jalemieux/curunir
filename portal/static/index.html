@@ -740,6 +740,13 @@ body.dragging .drop-hint { display: flex; }
   color: var(--hint); border-top: 1px solid var(--border);
   margin: 6px 12px 0; padding: 8px 0 4px;
 }
+.skills-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  color: var(--hint); margin: 8px 4px 2px; padding: 4px 0;
+}
+.skills-section-label:not(:first-child) {
+  border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px;
+}
 #skills-config { padding: 0 8px 10px; }
 .skill-row.config { padding: 7px 8px; }
 .skill-row.config .skill-icon { font-size: 15px; opacity: .8; }
@@ -1506,7 +1513,9 @@ function renderSkillsList(skills, filter = "") {
     return;
   }
   skillsListEl.innerHTML = "";
-  for (const s of shown) {
+  // Two tiers: starters (high-level workflows) first, then everything else.
+  // When the user is searching, drop the section labels — matches are flat.
+  const appendRow = (s) => {
     const row = document.createElement("div");
     row.className = "skill-row";
     row.innerHTML =
@@ -1516,6 +1525,26 @@ function renderSkillsList(skills, filter = "") {
     row.querySelector(".skill-summary").textContent = s.summary;
     row.addEventListener("click", () => launchSkill("/" + s.name));
     skillsListEl.appendChild(row);
+  };
+  const appendLabel = (text) => {
+    const lbl = document.createElement("div");
+    lbl.className = "skills-section-label";
+    lbl.textContent = text;
+    skillsListEl.appendChild(lbl);
+  };
+  if (f) {
+    shown.forEach(appendRow);
+    return;
+  }
+  const featured = shown.filter(s => s.starter);
+  const more = shown.filter(s => !s.starter);
+  if (featured.length && more.length) {
+    appendLabel("FEATURED");
+    featured.forEach(appendRow);
+    appendLabel("MORE SKILLS");
+    more.forEach(appendRow);
+  } else {
+    shown.forEach(appendRow);
   }
 }
 
