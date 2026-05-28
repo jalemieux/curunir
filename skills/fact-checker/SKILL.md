@@ -33,7 +33,7 @@ CONTENT_TO_FACT_CHECK>>>
 
 When the sub-agent returns, surface its full report to the user verbatim. Do not soften, summarize away, or argue with its findings. If the sub-agent flagged something as Contradicted, say so plainly.
 
-**Inline vs. file path.** Default to inline. For very large inputs (>50KB or PDFs), write the content to `workspace/scratch/input-<timestamp>.md` first and tell the sub-agent the path to read.
+**Inline vs. file path.** Default to inline. For very large inputs (>50KB or PDFs), write the content to `context/workspace/scratch/input-<timestamp>.md` first and tell the sub-agent the path to read.
 
 **If `delegate` returns a timeout** (`Sub-agent timed out after 300s`), do **not** retry with the same or larger task — you'll just hit the same wall. Tell the user the input was too broad to fact-check in one pass and ask them to scope it: "fact-check the pricing claims", "fact-check the market share figures", "fact-check the funding numbers". Scoped fact-checks complete; unscoped ones on long reports time out.
 
