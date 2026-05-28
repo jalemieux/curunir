@@ -127,14 +127,14 @@ biggest uncertainty.>
 
 ### Step 5 — Deliver
 
-1. Write the markdown to `workspace/generated/<TICKER>-<YYYY-MM-DD>.md`.
+1. Write the markdown to `context/workspace/generated/<TICKER>-<YYYY-MM-DD>.md`.
 2. Convert to PDF with pandoc:
 
    ```bash
-   pandoc workspace/generated/<TICKER>-<DATE>.md \
-     -o workspace/generated/<TICKER>-<DATE>.pdf
+   pandoc context/workspace/generated/<TICKER>-<DATE>.md \
+     -o context/workspace/generated/<TICKER>-<DATE>.pdf
    ```
-3. Attach the PDF: `attach(path="workspace/generated/<TICKER>-<DATE>.pdf")`.
+3. Attach the PDF: `attach(path="context/workspace/generated/<TICKER>-<DATE>.pdf")`.
    If pandoc fails, attach the `.md` as fallback.
 4. In your reply, post the **Bottom Line** section verbatim plus the
    scenario table inline. The full report is the attachment.
