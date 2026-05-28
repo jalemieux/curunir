@@ -1,6 +1,7 @@
 ---
 name: catalyst-memo
 description: "Use when the seed is a forward-looking catalyst, event, rumor, or buzz item — not a ticker — and the user wants both a deep understanding of the catalyst AND its investment implications. Trigger phrases: 'I heard about X', 'what's the deal with [drug/product/event] X', 'investigate the buzz around X', 'deep dive on X and what it means for [companies/stocks]', 'is X for real', 'TAM impact of X', 'who wins/loses if X happens', 'how would X affect [ticker]'. Examples of catalysts: a new drug in trials, a product launch, a regulatory ruling, an antitrust case, a macro print, an M&A rumor, a geopolitical event. Use this — not investment-memo — when the user's starting point is the *event*, not the *instrument*. Use this — not deep-research-guided — when the deliverable must include scenario-priced stock/revenue implications and verdicts on the impacted names. Composes deep-research, financial-analysis, social sentiment (reddit + X), prediction-market probabilities (polymarket), and key-podcast commentary into a fact-checked PDF memo."
+hidden: true
 portal_summary: "Catalyst-first investment memo — start from an event/rumor, end with a fact-checked thesis on who wins"
 portal_starter: true
 tools: attach
