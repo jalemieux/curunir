@@ -212,6 +212,34 @@ async def test_send_reply_posts_to_reply_endpoint(client):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_send_reply_includes_html_body_when_provided(client):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m2"}}))
+    await client.send_reply(
+        in_reply_to="m1", to="alice@example.com",
+        text_body="Hi back", html_body="<p>Hi back</p>",
+    )
+    import json as _json
+    parsed = _json.loads(route.calls.last.request.content.decode())
+    assert parsed["text_body"] == "Hi back"
+    assert parsed["html_body"] == "<p>Hi back</p>"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_reply_omits_html_body_when_absent(client):
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m2"}}))
+    await client.send_reply(in_reply_to="m1", to="alice@example.com", text_body="Hi back")
+    import json as _json
+    parsed = _json.loads(route.calls.last.request.content.decode())
+    assert "html_body" not in parsed
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_send_reply_blocked_by_allowlist(restricted_client):
     route = respx.post(
         "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages/m1/reply"
@@ -290,6 +318,49 @@ async def test_send_with_attachments_uses_messages_endpoint(client, tmp_path):
     assert att["filename"] == "doc.txt"
     import base64 as _b64
     assert _b64.b64decode(att["data"]) == b"hello"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_with_attachments_includes_html_body_when_provided(client, tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"hello")
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m9"}}))
+
+    await client.send_with_attachments(
+        in_reply_to="m1",
+        to="alice@example.com",
+        subject="Re: hi",
+        text_body="see attached",
+        attachment_paths=[str(f)],
+        html_body="<p>see attached</p>",
+    )
+    import json as _json
+    parsed = _json.loads(route.calls.last.request.content.decode())
+    assert parsed["html_body"] == "<p>see attached</p>"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_with_attachments_omits_html_body_when_absent(client, tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"hello")
+    route = respx.post(
+        "https://api.deadsimple.email/v1/inboxes/inbox-uuid-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"data": {"message_id": "m9"}}))
+
+    await client.send_with_attachments(
+        in_reply_to="m1",
+        to="alice@example.com",
+        subject="Re: hi",
+        text_body="see attached",
+        attachment_paths=[str(f)],
+    )
+    import json as _json
+    parsed = _json.loads(route.calls.last.request.content.decode())
+    assert "html_body" not in parsed
 
 
 @pytest.mark.asyncio
