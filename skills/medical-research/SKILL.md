@@ -309,15 +309,15 @@ When presenting evidence, always classify:
 
 The deliverable is a written report, not just a chat reply. Don't wait to be asked, and don't ask which format to use.
 
-1. Write the full report as markdown to `workspace/generated/{topic-slug}-{YYYY-MM-DD}.md` (e.g. `metformin-safety-2026-05-18.md`, `cbc-results-2026-05-18.md`). The H1 inside the document should be a descriptive title, not the filename slug. Include the disclaimer from the top of this skill. End the document with a `## Sources` section (see Inline citations below).
+1. Write the full report as markdown to `context/workspace/generated/{topic-slug}-{YYYY-MM-DD}.md` (e.g. `metformin-safety-2026-05-18.md`, `cbc-results-2026-05-18.md`). The H1 inside the document should be a descriptive title, not the filename slug. Include the disclaimer from the top of this skill. End the document with a `## Sources` section (see Inline citations below).
 2. Convert it to PDF with pandoc — already installed in the environment:
 
    ```bash
-   pandoc workspace/generated/{topic-slug}-{YYYY-MM-DD}.md -o workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf
+   pandoc context/workspace/generated/{topic-slug}-{YYYY-MM-DD}.md -o context/workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf
    ```
 
    Never `pip install` a PDF library — pandoc is the tool. Do not render via HTML, headless Chromium, or CSS.
-3. Attach the **PDF**: `attach(path="workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf")`. If pandoc fails, attach the `.md` as a fallback.
+3. Attach the **PDF**: `attach(path="context/workspace/generated/{topic-slug}-{YYYY-MM-DD}.pdf")`. If pandoc fails, attach the `.md` as a fallback.
 4. Reply with a concise summary (key findings + the doctor questions) as your text response. The full report is the attachment.
 
 **Header block.** Open the document with Date / Prepared for / Subject lines, each separated by a blank line — markdown collapses consecutive lines into one paragraph, and pandoc will render them as a run-on sentence otherwise.

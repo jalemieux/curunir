@@ -24,42 +24,31 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
    filesystem access works (curunir itself, Claude Code, Cursor, etc.). Use
    a prompt like:
 
-   > Read `onboarding/questions.md` and fill the placeholders in
-   > `context.default/identity.md`. The file is a partial template —
-   > its structure, boilerplate, and verbatim default lines are
-   > already correct. **Edit only the HTML-comment placeholders**
-   > (`<!-- … -->`). Leave every other line untouched, including the
-   > `## Personality` preamble, `## Boundaries`, `## Capabilities`,
-   > `## Guidelines`, `## Memory`, `## Scheduling`, and
-   > `## Creating Skills`.
+   > Read `onboarding/questions.md` and fill
+   > `context.default/identity.md`. The file is a bare skeleton — it
+   > has only two empty headings (`## Identity` and `## Personality`)
+   > and no body. You own the whole file. Do not touch
+   > `context.default/behavior.md` — that file is the agent's
+   > operating defaults (capabilities, guidelines, deliverables,
+   > workspace, memory, scheduling, skill creation) and is
+   > intentionally outside the onboarding flow.
    >
-   > For each placeholder, replace the comment with content drawn
-   > directly from the questionnaire answers:
+   > Produce three pieces of content drawn from the questionnaire:
    >
-   > - **Opening sentence** — one sentence introducing the agent and
-   >   the user. Agent name and disposition from q7/q7b; user's name
-   >   from q1; user's domain from q2.
-   > - **`### Identity`** — the agent's name (q7b).
-   > - **`### Voice & Stance`** — 4–8 lines of second-person prose
-   >   covering four things together: (a) how the agent speaks,
-   >   distilled from q5 (response length) and q7's axes (warmth /
-   >   formality / initiative / humor / verbosity); (b) the disposition
-   >   it brings to the user's domain, drawn from q2; (c) how it
-   >   positions itself toward the user (deferential / peer /
-   >   proactive / etc.), from q7's chosen flavor; (d) when it pauses
-   >   to ask permission, from q6. No numeric scales.
-   > - **`### Values & Quirks`** — standing convictions about how the
-   >   agent does its work (citation style, preferred sources, working
-   >   principles) and small habits/tells (input normalization,
-   >   footnote-style asides, etc.), drawn from q3, q7, and q8.
-   >   **Anchor every conviction in something the user actually
-   >   wrote**; do not invent preferences they did not express, and do
-   >   not carry over content from a prior fill of this file.
-   > - **`## Standing Jobs`** — 2–4 bullets straight from q3, in the
-   >   user's own framing.
+   > - **Opening sentence** (prepended above `## Identity`) — one
+   >   sentence introducing the agent and the user. Format:
+   >   `You are <agent name>, <one-clause disposition> for <owner name> — <owner role/focus>.`
+   >   Agent name and disposition from q7/q7b; user's name from q1;
+   >   user's domain from q2.
+   > - **`## Identity` body** — one line: `- **Name:** <agent name>` (q7b).
+   > - **`## Personality` body** — 2–5 sentences of second-person prose
+   >   covering voice (warmth/formality/register from q7), default
+   >   response length (q5), and stance (deferential / peer /
+   >   proactive / etc., derived from q7's chosen flavor and q6's
+   >   permission-asking preference). One prose block, no bullets, no
+   >   numeric scales.
    >
-   > Write each persona subsection in **second person** ("You speak
-   > in…", "You hold a few standing convictions…"). Infer what's
+   > Write in **second person** ("You speak in…"). Infer what's
    > implicit, reconcile tensions between answers (e.g., "detailed"
    > substance + "terse" manner = detailed in *what*, terse in *how*),
    > and normalize ambiguous input (timezone strings, etc.). Do not
@@ -82,11 +71,16 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
 | `bootstrap.py` | Copies any file in `context.default/` to `context/` on first run. Never overwrites existing files. |
 | `README.md` | This file. |
 
-The `## Personality` schema (three subsections: `### Identity`,
-`### Voice & Stance`, `### Values & Quirks`) lives in
-`context.default/identity.md` itself — that file is the source of truth for
-both the structure and the placeholder mapping. The LLM prompt above mirrors
-the schema; if you change the structure, change it there first.
+The agent's system prompt is assembled from two files in `context/`:
+`identity.md` (persona — what the onboarding LLM writes) and
+`behavior.md` (operating defaults — shipped as-is from
+`context.default/`). The `/identity` skill only edits the persona file;
+`behavior.md` is hand-edited.
+
+`context.default/identity.md` is the source of truth for the persona
+file's shape (an opening sentence followed by `## Identity` and
+`## Personality`). The LLM prompt above mirrors that shape; if you
+change the skeleton, change the prompt to match.
 
 The generated identity lives at `context.default/identity.md` (versioned, a
 reasonable default you can ship) and gets copied to `context/identity.md` on

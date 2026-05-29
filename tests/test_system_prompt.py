@@ -40,6 +40,25 @@ def test_missing_identity_file_raises(tmp_path, tmp_skills):
         build_static_prompt(config)
 
 
+def test_includes_behavior_file_when_present(tmp_context, tmp_skills, agent_config):
+    behavior = tmp_context / "behavior.md"
+    behavior.write_text("## Guidelines\n- be concise")
+    agent_config.behavior_file = behavior
+
+    result = build_static_prompt(agent_config)
+
+    assert "You are a test assistant." in result
+    assert "be concise" in result
+
+
+def test_missing_behavior_file_is_silently_skipped(tmp_context, tmp_skills, agent_config):
+    agent_config.behavior_file = tmp_context / "does-not-exist.md"
+
+    result = build_static_prompt(agent_config)
+
+    assert "You are a test assistant." in result
+
+
 def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_config):
     persona_dir = tmp_context / "persona"
     persona_dir.mkdir()
@@ -212,6 +231,6 @@ class TestSessionMemorySnapshot:
 def test_behavior_file_appended_after_identity_if_present(tmp_context, tmp_skills, agent_config):
     behavior = tmp_context / "behavior.md"
     behavior.write_text("BEHAVIOR LAYER")
-    agent_config.behavior_file = behavior  # simulate post-#282 config
+    agent_config.behavior_file = behavior
     result = build_static_prompt(agent_config)
     assert result.index("You are a test assistant.") < result.index("BEHAVIOR LAYER")
