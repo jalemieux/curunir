@@ -106,6 +106,17 @@ appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+### Personas (`personas/`, `src/persona.py`)
+
+A persona is a deployment bundle selected at boot via `CURUNIR_PERSONA=<name>`.
+`personas/<name>/persona.yaml` declares an **absolute** skill allowlist
+(filters `load_registry`), an optional core-tool allowlist (drives
+`Agent(tools=...)`), and key *names* for a soft startup warning. Expertise
+`.md` files under `personas/<name>/expertise/` bootstrap into `context/persona/`
+(non-overwriting) and append to the system prompt after identity/behavior.
+Unset `CURUNIR_PERSONA` = today's behavior. API-key *values* are an operator
+concern (env/.env), never declared in skills or code.
+
 ### Portal Service (`portal/`)
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.

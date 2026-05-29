@@ -23,9 +23,22 @@ def build_static_prompt(config: AgentConfig) -> str:
         )
     identity = config.identity_file.read_text()
     parts = [identity]
+
+    # Behavior layer (operating defaults, PR #282): optional, appended if present.
     if config.behavior_file.exists():
         parts.append(config.behavior_file.read_text())
-    manifest = build_skill_manifest(config.skill_dirs)
+
+    # Persona expertise layer: domain .md files bootstrapped into
+    # context/persona/. Sorted by filename so authors can order with numeric
+    # prefixes (10-domain.md, 20-guardrails.md). Absent dir is skipped.
+    if config.persona_prompt_dir.is_dir():
+        for md in sorted(config.persona_prompt_dir.glob("*.md")):
+            parts.append(md.read_text())
+
+    manifest = build_skill_manifest(
+        config.skill_dirs,
+        set(config.skill_allowlist) if config.skill_allowlist else None,
+    )
     if manifest:
         parts.append(manifest)
     return "\n\n".join(parts)
