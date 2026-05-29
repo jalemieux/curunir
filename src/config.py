@@ -11,6 +11,7 @@ class AgentConfig:
     max_iterations: int = 200
     max_history_chars: int = 250_000
     identity_file: Path = Path("./context/identity.md")
+    behavior_file: Path = Path("./context/behavior.md")
     context_dir: Path = Path("./context")
     usage_db: Path = Path("./context/usage.db")
     skill_dirs: list[Path] = field(

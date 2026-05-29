@@ -116,7 +116,7 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 
 ### Context Directory (`context/`)
 
-Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and `schedules.json` (cron tasks). Use `sync-context.sh` to rsync from a remote machine before starting.
+Local directory containing `identity.md` (agent persona, required), `behavior.md` (operating defaults — capabilities, guidelines, deliverables, memory protocol, scheduling, skill-creation rules; optional, silently skipped if missing), `memory/` (persistent facts), and `schedules.json` (cron tasks). The system prompt concatenates `identity.md` + `behavior.md` at boot. The `/identity` skill only edits `identity.md`; `behavior.md` is hand-edited. Use `sync-context.sh` to rsync from a remote machine before starting.
 
 ### Onboarding (`onboarding/`)
 
