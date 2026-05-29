@@ -18,8 +18,26 @@ def build_static_prompt(config: AgentConfig) -> str:
             "Curunir requires an identity file to start."
         )
     identity = config.identity_file.read_text()
-    manifest = build_skill_manifest(config.skill_dirs)
     parts = [identity]
+
+    # Behavior layer (PR #282): operating defaults, optional. Appended if the
+    # config carries a behavior_file and it exists. Guarded so this works on
+    # branches where the #282 split has not landed yet.
+    behavior_file = getattr(config, "behavior_file", None)
+    if behavior_file is not None and behavior_file.exists():
+        parts.append(behavior_file.read_text())
+
+    # Persona expertise layer: domain .md files bootstrapped into
+    # context/persona/. Sorted by filename so authors can order with numeric
+    # prefixes (10-domain.md, 20-guardrails.md). Absent dir is skipped.
+    if config.persona_prompt_dir.is_dir():
+        for md in sorted(config.persona_prompt_dir.glob("*.md")):
+            parts.append(md.read_text())
+
+    manifest = build_skill_manifest(
+        config.skill_dirs,
+        set(config.skill_allowlist) if config.skill_allowlist else None,
+    )
     if manifest:
         parts.append(manifest)
     return "\n\n".join(parts)
