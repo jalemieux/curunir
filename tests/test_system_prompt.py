@@ -59,6 +59,39 @@ def test_missing_behavior_file_is_silently_skipped(tmp_context, tmp_skills, agen
     assert "You are a test assistant." in result
 
 
+def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_config):
+    persona_dir = tmp_context / "persona"
+    persona_dir.mkdir()
+    (persona_dir / "20-guardrails.md").write_text("GUARDRAILS BLOCK")
+    (persona_dir / "10-domain.md").write_text("DOMAIN BLOCK")
+    agent_config.persona_prompt_dir = persona_dir
+
+    result = build_static_prompt(agent_config)
+
+    assert "You are a test assistant." in result
+    # sorted by filename: 10-domain before 20-guardrails
+    assert result.index("DOMAIN BLOCK") < result.index("GUARDRAILS BLOCK")
+
+
+def test_missing_persona_dir_is_silently_skipped(tmp_context, tmp_skills, agent_config):
+    agent_config.persona_prompt_dir = tmp_context / "no-persona"
+    result = build_static_prompt(agent_config)
+    assert "You are a test assistant." in result
+
+
+def test_skill_allowlist_forwarded_to_manifest(tmp_context, tmp_skills, agent_config):
+    for n in ("identity", "comfyui"):
+        d = tmp_skills / n
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            f"---\nname: {n}\ndescription: does {n}\n---\nbody\n"
+        )
+    agent_config.skill_allowlist = ["identity"]
+    result = build_static_prompt(agent_config)
+    assert "identity" in result
+    assert "comfyui" not in result
+
+
 class TestBuildMemoryBlock:
     def test_coalesces_readme_and_profile(self, tmp_context):
         memory = tmp_context / "memory"
@@ -193,3 +226,11 @@ class TestSessionMemorySnapshot:
             result = await agent.handle("hi", "s1")
 
         assert result == "ok"
+
+
+def test_behavior_file_appended_after_identity_if_present(tmp_context, tmp_skills, agent_config):
+    behavior = tmp_context / "behavior.md"
+    behavior.write_text("BEHAVIOR LAYER")
+    agent_config.behavior_file = behavior
+    result = build_static_prompt(agent_config)
+    assert result.index("You are a test assistant.") < result.index("BEHAVIOR LAYER")
