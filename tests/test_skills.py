@@ -341,3 +341,46 @@ class TestPortalSkillList:
             {"name": "memo", "display_name": "Memo",
              "summary": "A memo", "starter": True}
         ]
+
+
+def _write_allowlist_skill(skills_dir, name):
+    d = skills_dir / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: does {name}\n---\nbody\n"
+    )
+
+
+def test_allowlist_filters_registry(tmp_path):
+    skills_dir = tmp_path / "skills"
+    for n in ("identity", "financial-analysis", "comfyui"):
+        _write_allowlist_skill(skills_dir, n)
+    reg = load_registry([skills_dir], allowlist={"identity", "financial-analysis"})
+    assert set(reg) == {"identity", "financial-analysis"}
+
+
+def test_no_allowlist_returns_all(tmp_path):
+    skills_dir = tmp_path / "skills"
+    for n in ("identity", "comfyui"):
+        _write_allowlist_skill(skills_dir, n)
+    reg = load_registry([skills_dir])
+    assert set(reg) == {"identity", "comfyui"}
+
+
+def test_unknown_allowlisted_skill_warns_not_crashes(tmp_path, caplog):
+    import logging
+    skills_dir = tmp_path / "skills"
+    _write_allowlist_skill(skills_dir, "identity")
+    with caplog.at_level(logging.WARNING):
+        reg = load_registry([skills_dir], allowlist={"identity", "ghost"})
+    assert set(reg) == {"identity"}
+    assert "ghost" in caplog.text
+
+
+def test_manifest_honors_allowlist(tmp_path):
+    skills_dir = tmp_path / "skills"
+    for n in ("identity", "comfyui"):
+        _write_allowlist_skill(skills_dir, n)
+    manifest = build_skill_manifest([skills_dir], allowlist={"identity"})
+    assert "identity" in manifest
+    assert "comfyui" not in manifest
