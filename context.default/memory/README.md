@@ -46,9 +46,8 @@ saying "I don't know who you are."
 | `archives/conversations/YYYY-MM-DD-topic.md` | Dated conversation summaries |
 | `summaries/timeline.md` | Auto-maintained chronological list of all archived conversations |
 | `summaries/topics/<slug>.md` | Auto-maintained: archives that touched the entity named by `<slug>` |
-| `workspace/generated/` | Generated deliverables (research reports, memos, financial analyses, exported PDFs) — *not* memory; documents go here, never into this memory directory |
-| `context/input/` | Drop-zone for user-supplied input files — *not* memory |
 
+All paths in the table above are relative to this directory (`context/memory/`).
 
 ## Workflow
 

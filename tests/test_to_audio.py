@@ -6,7 +6,7 @@ import pytest
 
 from src.config import AgentConfig
 from src.llm import LLMResponse
-from src.tools.to_audio import exec_to_audio
+from src.tools.to_audio import SPEECH_REWRITE_PROMPT, exec_to_audio
 
 
 def _mock_tts_response(audio_bytes: bytes):
@@ -53,8 +53,16 @@ class TestToAudio:
 
         assert mock_llm.await_count == 1
         rewrite_messages = mock_llm.await_args.kwargs["messages"]
-        joined = "\n".join(m["content"] for m in rewrite_messages)
-        assert "bullet" in joined
+        # System message must be exactly the rewrite prompt; user message the
+        # raw content. Locks the wiring so prompt edits stay safe.
+        assert rewrite_messages[0] == {
+            "role": "system",
+            "content": SPEECH_REWRITE_PROMPT,
+        }
+        assert rewrite_messages[1] == {
+            "role": "user",
+            "content": "- bullet\n- list",
+        }
 
         create_mock.assert_awaited_once()
         kwargs = create_mock.await_args.kwargs
@@ -163,3 +171,35 @@ class TestToAudio:
             )
         assert "error" in result.lower()
         assert attachments == []
+
+
+class TestSpeechRewritePrompt:
+    """The rewrite prompt must teach TTS-friendly narration (issue #290)."""
+
+    def test_keeps_output_constraints(self):
+        prompt = SPEECH_REWRITE_PROMPT.lower()
+        # No preamble/sign-off, drop markdown/emoji, output only the script.
+        assert "preamble" in prompt
+        assert "emoji" in prompt
+        assert "markdown" in prompt
+
+    def test_drives_pacing_through_punctuation(self):
+        prompt = SPEECH_REWRITE_PROMPT.lower()
+        # Pacing comes from punctuation/whitespace, not vague "flowing prose".
+        assert "sentence" in prompt
+        assert "pause" in prompt or "pauses" in prompt
+
+    def test_handles_technical_identifiers(self):
+        prompt = SPEECH_REWRITE_PROMPT.lower()
+        # Spell/gloss code-like identifiers and expand acronyms.
+        assert "acronym" in prompt
+        assert "identifier" in prompt or "spell" in prompt
+
+    def test_requires_verbal_signposting(self):
+        prompt = SPEECH_REWRITE_PROMPT.lower()
+        assert "signpost" in prompt or "transition" in prompt
+
+    def test_forbids_ssml_markup(self):
+        prompt = SPEECH_REWRITE_PROMPT.lower()
+        # OpenAI tts-1/tts-1-hd read SSML literally — the prompt must forbid it.
+        assert "ssml" in prompt
