@@ -260,6 +260,19 @@ When the agent loads this skill via `load_skill`, the listed tools are added to 
 |------|-------------|
 | `attach` | Attach a file to the agent's response. Delivered as an email attachment, CLI file path, etc. depending on channel. |
 
+## Personas
+
+Run a domain-focused deployment by setting `CURUNIR_PERSONA=<name>`. A persona
+(`personas/<name>/`) curates which skills register, which core tools are
+available, and an extra prompt layer (domain expertise + guardrails) on top of
+the base identity. The shipped example is `finance` — a local, private
+personal-finance assistant. See `personas/finance/README.md`.
+
+```bash
+cp personas/finance/.env.finance.example .env
+CURUNIR_PERSONA=finance python run.py
+```
+
 ## Evals
 
 LLM-graded eval harness in `eval/` that sends prompts to Curunir over WebSocket and records results.

@@ -18,7 +18,9 @@ class Skill:
     hidden: bool = False
 
 
-def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
+def load_registry(
+    skill_dirs: list[Path], allowlist: set[str] | None = None
+) -> dict[str, Skill]:
     """Scan skill dirs in order and return enabled skills keyed by name.
 
     On name collision, first-seen wins — so passing [system_dir, user_dir]
@@ -26,6 +28,11 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
     Skills with `disabled: true` or missing `name`/`description` are excluded.
     Skills with `hidden: true` are kept in the registry but flagged so that
     `build_skill_manifest` omits them from the agent's system prompt.
+
+    When `allowlist` is given, the registry is filtered down to only those
+    skill names (an absolute persona allowlist); names in the allowlist that
+    match no discovered skill are logged as warnings. `None` leaves the
+    registry unfiltered.
     """
     registry: dict[str, Skill] = {}
     for skills_dir in skill_dirs:
@@ -56,16 +63,26 @@ def load_registry(skill_dirs: list[Path]) -> dict[str, Skill]:
                 portal_starter=fm.get("portal_starter", "").lower() in _TRUTHY,
                 hidden=fm.get("hidden", "").lower() in _TRUTHY,
             )
+    if allowlist is not None:
+        for unknown in sorted(allowlist - registry.keys()):
+            logger.warning(
+                "persona allowlist names unknown skill '%s'", unknown
+            )
+        registry = {k: v for k, v in registry.items() if k in allowlist}
     return registry
 
 
-def build_skill_manifest(skill_dirs: list[Path]) -> str:
+def build_skill_manifest(
+    skill_dirs: list[Path], allowlist: set[str] | None = None
+) -> str:
     """Return markdown table of catalog skills (name + description).
 
     Skills flagged `hidden: true` are omitted — they stay in the registry
     (loadable, slash-forceable) but the agent won't route to them on its own.
+    `allowlist` is forwarded to `load_registry` to scope the manifest to a
+    persona's allowed skills.
     """
-    registry = load_registry(skill_dirs)
+    registry = load_registry(skill_dirs, allowlist)
     catalog = [s for s in registry.values() if not s.hidden]
     if not catalog:
         logger.info("no catalog skills found in %s", [str(d) for d in skill_dirs])
