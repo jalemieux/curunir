@@ -1,4 +1,5 @@
 litellm
+markdown
 python-dotenv
 rich
 prompt_toolkit

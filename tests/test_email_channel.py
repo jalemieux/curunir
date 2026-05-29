@@ -593,13 +593,16 @@ async def test_send_uses_reply_endpoint_when_no_attachments(email_config, in_que
     client = AsyncMock()
     ch, _ = _make_channel(in_queue, email_config, client=client)
     msg = _outgoing(
-        "Hi back",
+        "# Hi back",
         reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
     )
     await ch.send(msg)
-    client.send_reply.assert_awaited_once_with(
-        in_reply_to="m1", to="alice@example.com", text_body="Hi back"
-    )
+    client.send_reply.assert_awaited_once()
+    kwargs = client.send_reply.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m1"
+    assert kwargs["to"] == "alice@example.com"
+    assert kwargs["text_body"] == "# Hi back"
+    assert "<h1>Hi back</h1>" in kwargs["html_body"]
     client.send_with_attachments.assert_not_called()
 
 
@@ -610,19 +613,89 @@ async def test_send_uses_messages_endpoint_when_attachments_present(email_config
     f = tmp_path / "doc.txt"
     f.write_bytes(b"x")
     msg = _outgoing(
-        "see attached",
+        "# see attached",
         reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
         attachments=[{"filename": "doc.txt", "path": str(f), "mime_type": "text/plain", "size": 1}],
     )
     await ch.send(msg)
-    client.send_with_attachments.assert_awaited_once_with(
-        in_reply_to="m1",
-        to="alice@example.com",
-        subject="Re: hi",
-        text_body="see attached",
-        attachment_paths=[str(f)],
-    )
+    client.send_with_attachments.assert_awaited_once()
+    kwargs = client.send_with_attachments.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m1"
+    assert kwargs["to"] == "alice@example.com"
+    assert kwargs["subject"] == "Re: hi"
+    assert kwargs["text_body"] == "# see attached"
+    assert kwargs["attachment_paths"] == [str(f)]
+    assert "<h1>see attached</h1>" in kwargs["html_body"]
     client.send_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_passes_rendered_html_body_with_bold_and_link(email_config, in_queue):
+    """Reply with **bold** + link round-trips through markdown rendering."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    msg = _outgoing(
+        "this is **bold** and a [link](https://example.com)",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+    )
+    await ch.send(msg)
+    kwargs = client.send_reply.await_args.kwargs
+    assert "<strong>bold</strong>" in kwargs["html_body"]
+    assert '<a href="https://example.com">link</a>' in kwargs["html_body"]
+
+
+@pytest.mark.asyncio
+async def test_send_preserves_raw_markdown_in_text_body(email_config, in_queue):
+    """text_body is the raw markdown — plain-text fallback for clients that don't render HTML."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    raw = "# Heading\n\n- item one\n- item two\n\n**bold** here"
+    msg = _outgoing(
+        raw,
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+    )
+    await ch.send(msg)
+    assert client.send_reply.await_args.kwargs["text_body"] == raw
+
+
+def test_render_html_no_raw_markdown_survives():
+    """Rich markdown sample renders to real HTML — no raw syntax leaks through."""
+    from src.channels.email import _render_html
+
+    sample = (
+        "# Top heading\n\n"
+        "## Sub heading\n\n"
+        "Some **bold** and *italic* and a [link](https://example.com).\n\n"
+        "- bullet one\n"
+        "- bullet two\n\n"
+        "Inline `code` here.\n\n"
+        "```\nfenced block\n```\n"
+    )
+    html = _render_html(sample)
+
+    # Expected HTML tags
+    assert "<h1>" in html and "Top heading" in html
+    assert "<h2>" in html and "Sub heading" in html
+    assert "<strong>bold</strong>" in html
+    assert "<em>italic</em>" in html
+    assert '<a href="https://example.com">link</a>' in html
+    assert "<ul>" in html
+    assert "<li>bullet one</li>" in html
+    assert "<code>code</code>" in html
+    assert "<pre>" in html and "fenced block" in html
+
+    # Raw markdown syntax must not survive verbatim into the rendered body
+    # (extract just the rendered body, excluding the wrapper's <style> CSS)
+    body_start = html.rfind("<body>")
+    body_end = html.rfind("</body>")
+    body = html[body_start:body_end] if body_start >= 0 else html
+    assert "**" not in body
+    assert "__" not in body
+    assert "[link](" not in body
+    assert "```" not in body
+    # No bare leading "## " markdown header markers
+    assert "## " not in body
+    assert "# Top" not in body
 
 
 @pytest.mark.asyncio

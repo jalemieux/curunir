@@ -33,23 +33,21 @@ The `## Personality` block is **one prose block, 2–5 sentences, second person,
 
 ## Write
 
-Edit `context/identity.md` with `edit` (not `write` — preserve everything outside the touched lines). Three edits:
-
-**1. Opening sentence (line 1).** Replace the `<!-- Onboarding fills: one-sentence opening… -->` comment with a single sentence introducing the agent and the user. Format:
+`context/identity.md` is persona-only (operating defaults live in `context/behavior.md` and are out of scope). The skeleton has just two empty headings — `## Identity` and `## Personality` — so this skill owns the whole file. Use `write` to produce the filled file in one shot. Shape:
 
 ```
 You are <agent name>, <one-clause disposition> for <owner name> — <owner role/focus>.
-```
 
-**2. `## Identity` section.** Replace its body with:
+## Identity
 
-```
 - **Name:** <user's answer to question 1>
+
+## Personality
+
+<derived 2–5 sentence prose block>
 ```
 
-**3. `## Personality` section.** Replace its body with the derived 2–5 sentence prose block.
-
-Do not introduce new `##` sections. Do not touch anything outside the opening line, `## Identity`, and `## Personality`.
+That's the only structure. Do not add extra `##` sections. Do not touch `context/behavior.md`.
 
 ## Return
 

@@ -250,7 +250,7 @@ The markdown produced in step 4 is the deliverable.
   markdown — that defeats the purpose.
 
 If a run is ever asked to save the digest to disk, write it to
-`workspace/generated/` — but disk output is in addition to inline delivery,
+`context/workspace/generated/` — but disk output is in addition to inline delivery,
 not a replacement for it, and it is still markdown (not PDF).
 
 ## Output checklist

@@ -6,7 +6,11 @@ from src.skills import build_skill_manifest
 
 
 def build_static_prompt(config: AgentConfig) -> str:
-    """Build the static portion of the system prompt (identity + skill manifest).
+    """Build the static portion of the system prompt (identity + behavior + skill manifest).
+
+    Identity (persona) and behavior (operating defaults) live in separate
+    files so the `/identity` skill can edit persona without touching
+    behavior. Both are concatenated into the system prompt at boot.
 
     Agent.__init__ appends a single boot-time timestamp on top of this so the
     full system block is byte-stable across calls — required for auto-cache
@@ -20,12 +24,9 @@ def build_static_prompt(config: AgentConfig) -> str:
     identity = config.identity_file.read_text()
     parts = [identity]
 
-    # Behavior layer (PR #282): operating defaults, optional. Appended if the
-    # config carries a behavior_file and it exists. Guarded so this works on
-    # branches where the #282 split has not landed yet.
-    behavior_file = getattr(config, "behavior_file", None)
-    if behavior_file is not None and behavior_file.exists():
-        parts.append(behavior_file.read_text())
+    # Behavior layer (operating defaults, PR #282): optional, appended if present.
+    if config.behavior_file.exists():
+        parts.append(config.behavior_file.read_text())
 
     # Persona expertise layer: domain .md files bootstrapped into
     # context/persona/. Sorted by filename so authors can order with numeric
