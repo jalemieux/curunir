@@ -66,3 +66,42 @@ def test_creates_context_dir_if_missing(setup_dirs):
     bootstrap_context(context_dir)
     assert context_dir.is_dir()
     assert (context_dir / "identity.md").exists()
+
+
+from onboarding.bootstrap import bootstrap_persona
+
+
+@pytest.fixture
+def persona_dirs(tmp_path, monkeypatch):
+    personas_dir = tmp_path / "personas"
+    context_dir = tmp_path / "context"
+    monkeypatch.setattr("onboarding.bootstrap.PERSONAS_DIR", personas_dir)
+    return personas_dir, context_dir
+
+
+def test_persona_copies_expertise(persona_dirs):
+    personas_dir, context_dir = persona_dirs
+    exp = personas_dir / "finance" / "expertise"
+    exp.mkdir(parents=True)
+    (exp / "10-domain.md").write_text("DOMAIN")
+    bootstrap_persona(context_dir, "finance")
+    assert (context_dir / "persona" / "10-domain.md").read_text() == "DOMAIN"
+
+
+def test_persona_does_not_overwrite(persona_dirs):
+    personas_dir, context_dir = persona_dirs
+    exp = personas_dir / "finance" / "expertise"
+    exp.mkdir(parents=True)
+    (exp / "10-domain.md").write_text("NEW")
+    dest = context_dir / "persona"
+    dest.mkdir(parents=True)
+    (dest / "10-domain.md").write_text("EXISTING")
+    bootstrap_persona(context_dir, "finance")
+    assert (dest / "10-domain.md").read_text() == "EXISTING"
+
+
+def test_persona_missing_expertise_is_noop(persona_dirs):
+    personas_dir, context_dir = persona_dirs
+    (personas_dir / "finance").mkdir(parents=True)
+    bootstrap_persona(context_dir, "finance")
+    assert not (context_dir / "persona").exists()
