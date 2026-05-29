@@ -1,0 +1,33 @@
+name: finance
+description: Local, private personal-finance assistant — capital allocation, position tracking, investment-thesis lifecycle, tax strategy.
+
+# ABSOLUTE skill allowlist. Only these register for this deployment.
+# Add thesis-management and position-tracking when PR #277 ships them.
+skills:
+  - identity
+  - onboarding
+  - financial-analysis
+  - investment-memo
+  - fred
+  - sec-edgar
+  - yfinance
+
+# Core tools. Omit this block to inherit all default tools.
+tools:
+  - glob
+  - grep
+  - read
+  - edit
+  - write
+  - bash
+  - load_skill
+  - web_fetch
+  - delegate
+  - schedule
+  - attach
+
+# Key NAMES only — documentation + soft startup warning. The operator
+# supplies the values via the container environment / .env. See
+# .env.finance.example and README.md.
+keys:
+  - FRED_API_KEY
