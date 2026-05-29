@@ -26,12 +26,13 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
 
    > Read `onboarding/questions.md` and fill the placeholders in
    > `context.default/identity.md`. The file is a partial template —
-   > its structure, boilerplate, and verbatim default lines are
-   > already correct. **Edit only the HTML-comment placeholders**
-   > (`<!-- … -->`). Leave every other line untouched, including the
-   > `## Personality` preamble, `## Boundaries`, `## Capabilities`,
-   > `## Guidelines`, `## Memory`, `## Scheduling`, and
-   > `## Creating Skills`.
+   > its structure (opening sentence, `## Identity`, `## Personality`)
+   > is already correct. **Edit only the HTML-comment placeholders**
+   > (`<!-- … -->`). Leave the headings themselves untouched. Do not
+   > touch `context.default/behavior.md` — that file is the agent's
+   > operating defaults (capabilities, guidelines, deliverables,
+   > memory, scheduling, skill creation) and is intentionally outside
+   > the onboarding flow.
    >
    > For each placeholder, replace the comment with content drawn
    > directly from the questionnaire answers:
@@ -81,6 +82,12 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
 | `questions.md` | The questionnaire (8 questions + 7b for the agent's name). User edits this. |
 | `bootstrap.py` | Copies any file in `context.default/` to `context/` on first run. Never overwrites existing files. |
 | `README.md` | This file. |
+
+The agent's system prompt is assembled from two files in `context/`:
+`identity.md` (persona — what the onboarding LLM writes) and
+`behavior.md` (operating defaults — shipped as-is from
+`context.default/`). The `/identity` skill only edits the persona file;
+`behavior.md` is hand-edited.
 
 The `## Personality` schema (three subsections: `### Identity`,
 `### Voice & Stance`, `### Values & Quirks`) lives in
