@@ -5,9 +5,21 @@ description: "Use when the user wants to view, change, or shape this agent's ide
 
 # Identity
 
-The agent's persona is the contents of `context/identity.md`. It is read
-verbatim into every system prompt, so edits take effect on the next turn —
-no restart needed. This skill helps the user inspect and edit it safely.
+The agent's persona is the contents of `context/identity.md` — just the
+`## Identity` (name) and `## Personality` (voice / stance) sections. It is
+read verbatim into every system prompt, so edits take effect on the next
+turn — no restart needed. This skill helps the user inspect and edit it
+safely.
+
+## Scope: persona only
+
+Operating defaults — Capabilities, Guidelines, Deliverables, Memory,
+Scheduling, Creating Skills — live in `context/behavior.md`, **not** in
+`identity.md`. This skill **does not** touch `behavior.md`. If the user
+asks to change something that belongs in behavior (e.g. "be more concise
+by default", "always attach as PDF", "change the schedule rules"), say so
+and point them at `context/behavior.md` — they can edit it directly, or
+ask in a regular turn (not via `/identity`) for help editing it.
 
 ## When to use
 
@@ -114,13 +126,16 @@ large.
 
 ## Style notes
 
-- The file is markdown. Top-level headings are conventional (Core Traits,
-  Capabilities, Guidelines, Memory, Scheduling, Creating Skills) — keep
-  them when present, don't reorganize unless asked.
+- The file is markdown. The conventional shape is an opening sentence
+  followed by `## Identity` (the agent's name) and `## Personality` (voice
+  / stance / register) — keep that shape when present, don't reorganize
+  unless asked.
 - Persona changes are subjective; surface tradeoffs ("terser will drop the
   preambles you sometimes use to explain reasoning — keep that?") rather
   than guessing.
 - Do not modify `context.default/identity.md` — that's the shipped default,
   not the user's persona.
+- Do not modify `context/behavior.md` from inside this skill — operating
+  defaults are out of scope here (see *Scope: persona only* above).
 - Never write a stub `context/identity.md` from inside this skill — the
   onboarding flow is the only legitimate way to create it.

@@ -6,7 +6,11 @@ from src.skills import build_skill_manifest
 
 
 def build_static_prompt(config: AgentConfig) -> str:
-    """Build the static portion of the system prompt (identity + skill manifest).
+    """Build the static portion of the system prompt (identity + behavior + skill manifest).
+
+    Identity (persona) and behavior (operating defaults) live in separate
+    files so the `/identity` skill can edit persona without touching
+    behavior. Both are concatenated into the system prompt at boot.
 
     Agent.__init__ appends a single boot-time timestamp on top of this so the
     full system block is byte-stable across calls — required for auto-cache
@@ -18,8 +22,10 @@ def build_static_prompt(config: AgentConfig) -> str:
             "Curunir requires an identity file to start."
         )
     identity = config.identity_file.read_text()
-    manifest = build_skill_manifest(config.skill_dirs)
     parts = [identity]
+    if config.behavior_file.exists():
+        parts.append(config.behavior_file.read_text())
+    manifest = build_skill_manifest(config.skill_dirs)
     if manifest:
         parts.append(manifest)
     return "\n\n".join(parts)
