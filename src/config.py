@@ -16,6 +16,9 @@ class AgentConfig:
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
+    persona: str | None = None
+    skill_allowlist: list[str] | None = None
+    persona_prompt_dir: Path = Path("./context/persona")
     attachment_dir: str = "/tmp/attachments"
     tts_model: str = "tts-1"
     tts_voice: str = "alloy"
