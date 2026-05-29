@@ -40,6 +40,25 @@ def test_missing_identity_file_raises(tmp_path, tmp_skills):
         build_static_prompt(config)
 
 
+def test_includes_behavior_file_when_present(tmp_context, tmp_skills, agent_config):
+    behavior = tmp_context / "behavior.md"
+    behavior.write_text("## Guidelines\n- be concise")
+    agent_config.behavior_file = behavior
+
+    result = build_static_prompt(agent_config)
+
+    assert "You are a test assistant." in result
+    assert "be concise" in result
+
+
+def test_missing_behavior_file_is_silently_skipped(tmp_context, tmp_skills, agent_config):
+    agent_config.behavior_file = tmp_context / "does-not-exist.md"
+
+    result = build_static_prompt(agent_config)
+
+    assert "You are a test assistant." in result
+
+
 class TestBuildMemoryBlock:
     def test_coalesces_readme_and_profile(self, tmp_context):
         memory = tmp_context / "memory"
