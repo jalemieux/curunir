@@ -15,3 +15,4 @@ openai>=1.0
 yfinance
 respx
 yt-dlp
+PyYAML>=6.0
