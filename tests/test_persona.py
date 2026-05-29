@@ -71,3 +71,21 @@ def test_warn_missing_keys_returns_absent_names(make_bundle, caplog):
         missing = warn_missing_keys(p, {"OTHER": "set"})
     assert missing == ["FRED_API_KEY"]
     assert "FRED_API_KEY" in caplog.text
+
+
+def test_finance_bundle_parses_from_repo():
+    # Loads the real personas/finance/ shipped in the repo (PERSONAS_DIR
+    # default is Path("personas"); no monkeypatch here).
+    p = load_persona("finance")
+    assert p.name == "finance"
+    assert "financial-analysis" in p.skills
+    assert "investment-memo" in p.skills
+    assert p.skills  # non-empty absolute allowlist
+
+
+def test_finance_bundle_skills_exist_on_disk():
+    # Every allowlisted skill must resolve to a skills/<name>/SKILL.md so a
+    # typo in persona.yaml is caught instead of silently dropping a skill.
+    p = load_persona("finance")
+    for name in p.skills:
+        assert (Path("skills") / name / "SKILL.md").exists(), name
