@@ -28,7 +28,7 @@ lets the model reconcile tensions in your answers (e.g., "detailed" substance
    > `context.default/identity.md`. The file is a bare skeleton — it
    > has only two empty headings (`## Identity` and `## Personality`)
    > and no body. You own the whole file. Do not touch
-   > `context.default/behavior.md` — that file is the agent's
+   > `personas/default/prompts/behavior.md` — that file is the agent's
    > operating defaults (capabilities, guidelines, deliverables,
    > workspace, memory, scheduling, skill creation) and is
    > intentionally outside the onboarding flow.

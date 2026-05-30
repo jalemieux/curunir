@@ -40,31 +40,14 @@ def test_missing_identity_file_raises(tmp_path, tmp_skills):
         build_static_prompt(config)
 
 
-def test_includes_behavior_file_when_present(tmp_context, tmp_skills, agent_config):
-    behavior = tmp_context / "behavior.md"
-    behavior.write_text("## Guidelines\n- be concise")
-    agent_config.behavior_file = behavior
-
-    result = build_static_prompt(agent_config)
-
-    assert "You are a test assistant." in result
-    assert "be concise" in result
-
-
-def test_missing_behavior_file_is_silently_skipped(tmp_context, tmp_skills, agent_config):
-    agent_config.behavior_file = tmp_context / "does-not-exist.md"
-
-    result = build_static_prompt(agent_config)
-
-    assert "You are a test assistant." in result
-
-
-def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_config):
-    persona_dir = tmp_context / "persona"
-    persona_dir.mkdir()
-    (persona_dir / "20-guardrails.md").write_text("GUARDRAILS BLOCK")
-    (persona_dir / "10-domain.md").write_text("DOMAIN BLOCK")
-    agent_config.persona_prompt_dir = persona_dir
+def test_persona_prompts_appended_sorted(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    personas_root = tmp_path / "personas"
+    prompts = personas_root / "demo" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / "20-guardrails.md").write_text("GUARDRAILS BLOCK")
+    (prompts / "10-domain.md").write_text("DOMAIN BLOCK")
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", personas_root)
+    agent_config.persona = "demo"
 
     result = build_static_prompt(agent_config)
 
@@ -73,8 +56,9 @@ def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_con
     assert result.index("DOMAIN BLOCK") < result.index("GUARDRAILS BLOCK")
 
 
-def test_missing_persona_dir_is_silently_skipped(tmp_context, tmp_skills, agent_config):
-    agent_config.persona_prompt_dir = tmp_context / "no-persona"
+def test_missing_persona_prompts_dir_is_silently_skipped(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", tmp_path / "personas")
+    agent_config.persona = "no-such-persona"
     result = build_static_prompt(agent_config)
     assert "You are a test assistant." in result
 
@@ -228,9 +212,12 @@ class TestSessionMemorySnapshot:
         assert result == "ok"
 
 
-def test_behavior_file_appended_after_identity_if_present(tmp_context, tmp_skills, agent_config):
-    behavior = tmp_context / "behavior.md"
-    behavior.write_text("BEHAVIOR LAYER")
-    agent_config.behavior_file = behavior
+def test_persona_prompts_appended_after_identity(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    personas_root = tmp_path / "personas"
+    prompts = personas_root / "demo" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / "behavior.md").write_text("BEHAVIOR LAYER")
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", personas_root)
+    agent_config.persona = "demo"
     result = build_static_prompt(agent_config)
     assert result.index("You are a test assistant.") < result.index("BEHAVIOR LAYER")
