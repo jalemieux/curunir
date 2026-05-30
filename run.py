@@ -29,6 +29,7 @@ from onboarding.bootstrap import bootstrap_persona
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
+from src.nudge_state import NudgeState
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
@@ -301,7 +302,13 @@ async def _vision_prepass(
     return out
 
 
-async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+async def agent_worker(
+    agent: Agent,
+    in_queue: asyncio.Queue,
+    out_queue: asyncio.Queue,
+    *,
+    nudge_state_path: Path | None = None,
+):
     """Bridge between the message queues and the agent loop.
 
     One IncomingMessage per iteration: handle control commands inline, or
@@ -311,6 +318,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
     """
     while True:
         msg = await in_queue.get()
+        if nudge_state_path is not None:
+            try:
+                NudgeState.record_user_message(nudge_state_path)
+            except Exception:
+                logger.exception("Failed to record inbound for nudge state")
         logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
         if msg.attachments:
             logger.info(
@@ -517,6 +529,88 @@ async def periodic_dreaming(agent: Agent, interval_sec: int):
             logger.exception("Dreaming task failed: %s", e)
 
 
+async def periodic_nudge(
+    agent: Agent,
+    interval_sec: int,
+    state_path: Path,
+    recipient: str,
+    enabled: bool,
+):
+    """Periodic re-engagement and proactive nudge engine.
+
+    Re-engagement ladder fires at 2d / 7d / 14d of user inactivity, each
+    tier at most once per idle period. A weekly proactive nudge fires for
+    active users (idle < 2d) when at least 7d has elapsed since the last
+    weekly. Ladder and weekly are mutually exclusive per tick; ladder wins.
+
+    Sleep-first so a container restart doesn't trigger an immediate pass.
+    """
+    while True:
+        await asyncio.sleep(interval_sec)
+        if not enabled:
+            continue
+        try:
+            state = NudgeState.load(state_path)
+            now = time.time()
+            idle = now - state.last_user_msg_at
+
+            fired: str | None = None
+            for tier, threshold in _NUDGE_LADDER:
+                if idle >= threshold and tier not in state.tiers_sent_this_idle:
+                    fired = tier
+                    break
+
+            if fired is None:
+                weekly_due = (now - state.last_weekly_at) >= _NUDGE_WEEKLY_INTERVAL
+                if weekly_due and idle < _NUDGE_ACTIVE_THRESHOLD:
+                    fired = "weekly"
+
+            if fired is None:
+                continue
+
+            skill_content = load_skill("nudge", agent.config.skill_dirs)
+            if skill_content.startswith("Skill not found"):
+                logger.warning("Nudge skill not found; skipping")
+                continue
+
+            idle_days = int(idle // 86400)
+            system_task_prompt = (
+                f"{skill_content}\n\n"
+                f"## Runtime context\n\n"
+                f"Tier: {fired}\n"
+                f"Recipient: {recipient}\n"
+                f"Idle days: {idle_days}\n"
+            )
+            session_id = f"system:nudge:{fired}:{int(now)}"
+            logger.info("Firing nudge tier=%s (session %s)", fired, session_id)
+
+            await agent.handle(
+                message="",
+                session_id=session_id,
+                system_task_prompt=system_task_prompt,
+            )
+
+            # Re-load so we don't clobber a concurrent record_user_message
+            # write that happened while agent.handle was awaiting.
+            state = NudgeState.load(state_path)
+            user_replied_during_handle = state.last_user_msg_at > now
+            if fired == "weekly":
+                state.last_weekly_at = now
+            elif not user_replied_during_handle:
+                # Sending a higher-severity ladder tier implicitly consumes the
+                # lower ones — otherwise after a long downtime we'd fire
+                # 14d → 7d → 2d on successive ticks (reverse severity order).
+                consume = False
+                for tier, _threshold in _NUDGE_LADDER:
+                    if tier == fired:
+                        consume = True
+                    if consume and tier not in state.tiers_sent_this_idle:
+                        state.tiers_sent_this_idle.append(tier)
+            state.save()
+        except Exception as e:
+            logger.exception("Nudge task failed: %s", e)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -561,6 +655,10 @@ _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 _LOG_MAX_BYTES = 10_000_000
 _LOG_BACKUP_COUNT = 3
+
+_NUDGE_LADDER = [("14d", 14 * 86400), ("7d", 7 * 86400), ("2d", 2 * 86400)]
+_NUDGE_WEEKLY_INTERVAL = 7 * 86400
+_NUDGE_ACTIVE_THRESHOLD = 2 * 86400
 
 
 def _configure_logging(log_file: str | None) -> None:
@@ -726,6 +824,20 @@ async def main():
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
+    nudge_enabled = os.environ.get("NUDGE_ENABLED", "false").lower() == "true"
+    nudge_tick = int(os.environ.get("NUDGE_TICK_SEC", "3600"))
+    nudge_state_path = Path(agent.config.context_dir) / "nudge_state.json"
+    nudge_recipient = (
+        email_config.allowed_senders[0]
+        if email_config.allowed_senders
+        else ""
+    )
+    if nudge_enabled and (not email_config.enabled or not nudge_recipient):
+        logger.warning(
+            "NUDGE_ENABLED=true but EMAIL_ENABLED is false or "
+            "EMAIL_ALLOWED_SENDERS is empty; disabling nudge"
+        )
+        nudge_enabled = False
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
@@ -734,9 +846,19 @@ async def main():
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
-        tg.create_task(agent_worker(agent, in_queue, out_queue))
+        tg.create_task(agent_worker(
+            agent, in_queue, out_queue,
+            nudge_state_path=nudge_state_path if nudge_enabled else None,
+        ))
         tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(periodic_dreaming(agent, dreaming_interval))
+        tg.create_task(periodic_nudge(
+            agent,
+            interval_sec=nudge_tick,
+            state_path=nudge_state_path,
+            recipient=nudge_recipient,
+            enabled=nudge_enabled,
+        ))
         tg.create_task(run_scheduler(agent))
 
 
