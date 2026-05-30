@@ -24,8 +24,7 @@ from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
-from src.persona import load_persona, warn_missing_keys
-from onboarding.bootstrap import bootstrap_persona
+from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
@@ -329,6 +328,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 channel=msg.channel,
                 reply_address=msg.reply_address,
                 skill_dirs=agent.config.skill_dirs,
+                skill_allowlist=agent.config.skill_allowlist,
             )
             result = await maybe_handle_slash(msg.content, None, ctx)
             if result is None:
@@ -616,16 +616,14 @@ async def main():
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
 
-    persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or None
-    persona = load_persona(persona_name) if persona_name else None
-    if persona:
-        logger.info(
-            "Persona '%s' active: %d skills, tools=%s",
-            persona.name, len(persona.skills),
-            persona.tools if persona.tools is not None else "all-defaults",
-        )
-        bootstrap_persona(Path("./context"), persona_name)
-        warn_missing_keys(persona, os.environ)
+    persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or DEFAULT_PERSONA
+    persona = load_persona(persona_name)
+    logger.info(
+        "Persona '%s' active: skills=%s",
+        persona.name,
+        f"{len(persona.skills)} allowlisted" if persona.skills else "all on disk",
+    )
+    warn_missing_keys(persona, os.environ)
 
     config = AgentConfig(
         **({"model": model} if model else {}),
@@ -637,8 +635,8 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
-        **({"persona": persona_name} if persona_name else {}),
-        **({"skill_allowlist": persona.skills} if persona else {}),
+        persona=persona_name,
+        **({"skill_allowlist": persona.skills} if persona.skills else {}),
     )
     config.main_model_supports_vision = _detect_vision_support(config.model)
     if not config.main_model_supports_vision:
@@ -657,11 +655,7 @@ async def main():
         )
 
     usage_store = UsageStore(config.usage_db)
-    agent = Agent(
-        config,
-        tools=persona.tools if persona else None,
-        usage_store=usage_store,
-    )
+    agent = Agent(config, usage_store=usage_store)
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
 
@@ -717,7 +711,10 @@ async def main():
             url=portal_url,
             token=portal_token,
             history_provider=lambda sid: agent.history_snapshot(sid),
-            skills_provider=lambda: portal_skill_list(agent.config.skill_dirs),
+            skills_provider=lambda: portal_skill_list(
+                agent.config.skill_dirs,
+                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
+            ),
             conversations_provider=lambda: agent.conversations_snapshot(),
             cancel_session=agent.request_cancel,
         )

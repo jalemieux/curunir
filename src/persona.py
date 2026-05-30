@@ -1,11 +1,19 @@
 # src/persona.py
 """Persona bundle loading — resolves personas/<name>/persona.yaml at boot.
 
-A persona curates a deployment: an absolute skill allowlist, an optional core
-tool allowlist, and a list of API-key names (documentation / soft warning
-only — never a hard failure). Expertise prompt files live alongside in
-personas/<name>/expertise/ and are bootstrapped into context/persona/
-separately (see onboarding/bootstrap.py).
+A persona is a deployment bundle:
+
+- an optional absolute skill allowlist (omit `skills:` to allow every skill
+  on disk — this is what `personas/default/` does);
+- a `prompts/` directory of `.md` files layered on top of `context/identity.md`
+  in the system prompt;
+- an optional list of API-key names (documentation / soft warning only —
+  never a hard failure).
+
+Core tools are universal across personas and are not curated here.
+
+When `CURUNIR_PERSONA` is unset, boot loads `personas/default/`. There is no
+"no persona" code path.
 """
 import logging
 from collections.abc import Mapping
@@ -17,14 +25,14 @@ import yaml
 logger = logging.getLogger(__name__)
 
 PERSONAS_DIR = Path("personas")
+DEFAULT_PERSONA = "default"
 
 
 @dataclass(frozen=True)
 class Persona:
     name: str
     description: str
-    skills: list[str]
-    tools: list[str] | None  # None = all default tools
+    skills: list[str] | None  # None = no allowlist; every skill on disk
     keys: list[str] = field(default_factory=list)
 
 
@@ -32,11 +40,16 @@ def persona_dir(name: str) -> Path:
     return PERSONAS_DIR / name
 
 
+def prompts_dir(name: str) -> Path:
+    """Where a persona's system-prompt overlay files live."""
+    return persona_dir(name) / "prompts"
+
+
 def load_persona(name: str) -> Persona:
     """Load and validate personas/<name>/persona.yaml.
 
     Raises FileNotFoundError if the bundle/manifest is missing, ValueError if
-    the manifest is malformed or omits the required 'skills:' list.
+    the manifest is malformed.
     """
     manifest = persona_dir(name) / "persona.yaml"
     if not manifest.exists():
@@ -52,23 +65,19 @@ def load_persona(name: str) -> Persona:
         raise ValueError(f"Persona manifest {manifest} must be a YAML mapping")
 
     skills = data.get("skills")
-    if not isinstance(skills, list) or not skills:
-        raise ValueError(
-            f"Persona manifest {manifest} must list at least one skill "
-            "under 'skills:'"
-        )
-    tools = data.get("tools")
-    if tools is not None and not isinstance(tools, list):
-        raise ValueError(
-            f"Persona manifest {manifest} 'tools:' must be a list if present"
-        )
+    if skills is not None:
+        if not isinstance(skills, list) or not skills:
+            raise ValueError(
+                f"Persona manifest {manifest} 'skills:' must be a non-empty "
+                "list if present (omit the field entirely to allow every skill)"
+            )
+        skills = [str(s) for s in skills]
     keys = data.get("keys") or []
 
     return Persona(
         name=str(data.get("name", name)),
         description=str(data.get("description", "")),
-        skills=[str(s) for s in skills],
-        tools=[str(t) for t in tools] if tools is not None else None,
+        skills=skills,
         keys=[str(k) for k in keys],
     )
 

@@ -1,0 +1,6 @@
+name: default
+description: Stock Curunir deployment. Ships the full skill catalog and the
+  baseline behavior prompt; loaded automatically when CURUNIR_PERSONA is unset.
+
+# No `skills:` field — omitted means "every skill on disk." Named personas
+# (personas/<other>/persona.yaml) declare an absolute allowlist to curate.

@@ -384,3 +384,31 @@ def test_manifest_honors_allowlist(tmp_path):
     manifest = build_skill_manifest([skills_dir], allowlist={"identity"})
     assert "identity" in manifest
     assert "comfyui" not in manifest
+
+
+def test_load_skill_honors_allowlist(tmp_path):
+    skills_dir = tmp_path / "skills"
+    for n in ("identity", "comfyui"):
+        _write_allowlist_skill(skills_dir, n)
+    # In-allowlist skill loads.
+    body = load_skill("identity", [skills_dir], allowlist={"identity"})
+    assert "identity" in body
+    # Out-of-allowlist skill is not loadable, even though it exists on disk.
+    out = load_skill("comfyui", [skills_dir], allowlist={"identity"})
+    assert "not found" in out.lower()
+
+
+def test_load_skill_no_allowlist_loads_anything(tmp_path):
+    skills_dir = tmp_path / "skills"
+    _write_allowlist_skill(skills_dir, "comfyui")
+    out = load_skill("comfyui", [skills_dir])
+    assert "comfyui" in out
+
+
+def test_portal_list_honors_allowlist(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    for n in ("alpha", "beta"):
+        _write_portal_skill(skills_dir, n, "d", summary=f"summary-{n}")
+    names = [s["name"] for s in portal_skill_list([skills_dir], allowlist={"alpha"})]
+    assert names == ["alpha"]
