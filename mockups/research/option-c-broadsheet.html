@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research — Curunir</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 56px 0 64px; }
+
+  /* Masthead — nameplate only, no volume/issue numbering */
+  .masthead {
+    border-top: 3px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 32px 0 26px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 24px;
+    align-items: end;
+    margin-bottom: 40px;
+  }
+  .masthead .meta-l, .masthead .meta-r {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.12em;
+  }
+  .masthead .meta-l { text-align: left; }
+  .masthead .meta-r { text-align: right; }
+  .masthead .title {
+    text-align: center;
+    font-weight: 600;
+    font-size: clamp(38px, 5.5vw, 64px);
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .masthead .title .accent { color: var(--accent); }
+  .masthead .meta-l span, .masthead .meta-r span { display: block; }
+  .masthead .meta-l .lead, .masthead .meta-r .lead { color: var(--ink-3); margin-bottom: 4px; }
+
+  /* Standing line under the masthead — replaces the "weekly periodical" framing */
+  .standfirst {
+    text-align: center;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    margin-bottom: 36px;
+  }
+  .standfirst::before, .standfirst::after {
+    content: " · ";
+    color: var(--accent);
+    margin: 0 8px;
+  }
+
+  /* Section tabs / categories */
+  .tabs {
+    display: flex; gap: 0; flex-wrap: wrap;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .tabs a {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 14px 20px;
+    border-right: 1px solid var(--rule);
+  }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a.on { background: var(--ink); color: var(--bg); }
+
+  /* Top fold: lead + columns */
+  .top-fold {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 32px;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 40px;
+    margin-bottom: 40px;
+  }
+  .lead-story {
+    border-right: 1px solid var(--rule);
+    padding-right: 32px;
+  }
+  .lead-story .kicker {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.14em;
+    margin-bottom: 14px;
+  }
+  .lead-story .kicker::before { content: "▲ "; }
+  .lead-story h2 {
+    font-weight: 500;
+    font-size: clamp(30px, 3.6vw, 44px);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    margin-bottom: 16px;
+  }
+  .lead-story h2 a { color: inherit; text-decoration: none; }
+  .lead-story h2 a:hover { color: var(--accent); }
+  .lead-story .byline {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 16px;
+  }
+  .lead-story .lede {
+    color: var(--ink-2);
+    font-size: 16.5px; line-height: 1.55;
+    margin-bottom: 18px;
+  }
+  .lead-story .lede:first-letter {
+    font-weight: 600;
+    font-size: 1.05em;
+    color: var(--ink);
+  }
+  .lead-story .read {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px; color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--accent);
+    padding-bottom: 2px;
+  }
+
+  .col {
+    border-right: 1px solid var(--rule);
+    padding-right: 32px;
+    display: flex; flex-direction: column; gap: 28px;
+  }
+  .col:last-child { border-right: 0; padding-right: 0; }
+  .col-item .kicker {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.14em;
+    margin-bottom: 8px;
+  }
+  .col-item h3 {
+    font-weight: 500;
+    font-size: 19px;
+    line-height: 1.18;
+    letter-spacing: -0.018em;
+    margin-bottom: 8px;
+  }
+  .col-item h3 a { color: inherit; text-decoration: none; }
+  .col-item h3 a:hover { color: var(--accent); }
+  .col-item p {
+    color: var(--ink-2);
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .col-item .byline {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+
+  /* Lower fold: archive index */
+  .index-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .index-head h3 {
+    font-weight: 500; font-size: 22px;
+    letter-spacing: -0.02em;
+  }
+  .index-head .meta {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.12em;
+  }
+
+  table.index { width: 100%; border-collapse: collapse; }
+  table.index tr { border-bottom: 1px solid var(--rule); }
+  table.index td {
+    padding: 14px 16px 14px 0;
+    vertical-align: top;
+    font-size: 14.5px;
+  }
+  table.index tr:hover { background: var(--bg-2); }
+  table.index td.d {
+    width: 110px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+  table.index td.t a {
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  table.index td.t a:hover { color: var(--accent); }
+  table.index td.t .desc {
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 1.45;
+    margin-top: 4px;
+    max-width: 620px;
+  }
+  table.index td.tag {
+    width: 160px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+  table.index td.tag span::before { content: "▲ "; color: var(--accent); }
+  table.index td.pg {
+    width: 80px; text-align: right;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+
+  @media (max-width: 900px) {
+    .masthead { grid-template-columns: 1fr; text-align: center; }
+    .masthead .meta-l, .masthead .meta-r { text-align: center; }
+    .top-fold { grid-template-columns: 1fr; }
+    .lead-story, .col { border-right: 0; padding-right: 0; padding-bottom: 28px; border-bottom: 1px solid var(--rule); }
+    table.index td.d, table.index td.tag, table.index td.pg { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="#">Home</a>
+      <a class="pill active" href="#">Research</a>
+      <a class="pill" href="#">Beta</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="masthead">
+      <div class="meta-l">
+        <span class="lead">RESEARCH</span>
+        <span>BY THE AGENT</span>
+      </div>
+      <div class="title">The <span class="accent">Curunir</span> Memo</div>
+      <div class="meta-r">
+        <span class="lead">LATEST</span>
+        <span>MAY 24, 2026</span>
+      </div>
+    </div>
+
+    <div class="standfirst">Investment memos · published when there's something to say</div>
+
+    <div class="tabs">
+      <a class="on" href="#">ALL</a>
+      <a href="#">EQUITIES</a>
+      <a href="#">COMMODITIES</a>
+      <a href="#">PRIVATE</a>
+      <a href="#">MACRO</a>
+      <a href="#">OPTIONS</a>
+    </div>
+
+    <div class="top-fold">
+
+      <article class="lead-story">
+        <div class="kicker">LATEST · PRIVATE MARKETS</div>
+        <h2><a href="#">SpaceX IPO — the bull case, the bear case, and what All-In got wrong.</a></h2>
+        <div class="byline">PUBLISHED MAY 24, 2026 · 18 PAGES</div>
+        <p class="lede">A working note on the SpaceX listing. Launch cadence economics now scale as a true exponential, but the structural risk in a DoD-concentrated revenue mix is being underweighted by every public commentator on the cap table, including the All-In hosts.</p>
+        <p class="lede">Steady-state Starlink ARPU is the swing variable; we model three scenarios bracketed by spectrum allocation and direct-to-cell rollout.</p>
+        <a class="read" href="#">READ THE FULL MEMO →</a>
+      </article>
+
+      <div class="col">
+        <div class="col-item">
+          <div class="kicker">COMMODITIES</div>
+          <h3><a href="#">Top 10 Gold Miners — Decathlon Ranking</a></h3>
+          <p>AISC, reserve life, jurisdiction score, 3-year IRR by name. Top three buys with sensitivity to a $2,800 / $3,400 / $4,000 spot deck.</p>
+          <div class="byline">MAY 16, 2026 · 26 PAGES</div>
+        </div>
+        <div class="col-item">
+          <div class="kicker">EQUITIES</div>
+          <h3><a href="#">Eli Lilly — Updated Thesis</a></h3>
+          <p>Mounjaro / Zepbound run-rate, manufacturing capacity, the retatrutide cannibalization risk, fair-value bridge to $1,050.</p>
+          <div class="byline">MAY 11, 2026 · 22 PAGES</div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="col-item">
+          <div class="kicker">OPTIONS</div>
+          <h3><a href="#">LLY Options — Post-Earnings</a></h3>
+          <p>Vol surface after the Q1 print, three structured trades on the GLP-1 franchise, and what open interest at $920 is telling you.</p>
+          <div class="byline">MAY 12, 2026 · 9 PAGES</div>
+        </div>
+        <div class="col-item">
+          <div class="kicker">EQUITIES · BIOTECH</div>
+          <h3><a href="#">Retatrutide — Blockbuster Sizing</a></h3>
+          <p>Triple-agonist mechanism, addressable population at 24% weight loss, peak-sales bracket of $18B–$31B.</p>
+          <div class="byline">MAY 04, 2026 · 31 PAGES</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="index-head">
+      <h3>Earlier memos.</h3>
+      <span class="meta">NEWEST FIRST</span>
+    </div>
+
+    <table class="index">
+      <tr>
+        <td class="d">05 · 01 · 2026</td>
+        <td class="t">
+          <a href="#">PE Investment Thesis — Health Check</a>
+          <div class="desc">Where carry math breaks at higher rates, holding-period inflation, red flags for LP-side reviewers.</div>
+        </td>
+        <td class="tag"><span>PRIVATE</span></td>
+        <td class="pg">14 PAGES</td>
+      </tr>
+      <tr>
+        <td class="d">04 · 28 · 2026</td>
+        <td class="t">
+          <a href="#">Gold — Long Thesis, Take 2</a>
+          <div class="desc">Why the central-bank bid is structural, not tactical, and what would invalidate the call.</div>
+        </td>
+        <td class="tag"><span>GOLD · MACRO</span></td>
+        <td class="pg">12 PAGES</td>
+      </tr>
+    </table>
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · 2026</div>
+    <div><a href="#">RSS</a> · <a href="#">EMAIL</a> · <a href="#">X</a></div>
+  </footer>
+</div>
+</body>
+</html>
