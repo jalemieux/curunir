@@ -31,13 +31,19 @@ def test_no_skills_section_when_empty(tmp_context, tmp_skills, agent_config):
     assert "Available Skills" not in result
 
 
-def test_missing_identity_file_raises(tmp_path, tmp_skills):
+def test_missing_identity_file_warns_and_builds(tmp_path, tmp_skills, caplog):
+    """Identity is the personality layer only — missing it warns rather than
+    failing, and the prompt still builds from the remaining layers."""
     config = AgentConfig(
         identity_file=tmp_path / "nonexistent.md",
+        behavior_file=tmp_path / "also-missing.md",
+        persona_prompt_dir=tmp_path / "no-persona",
         skill_dirs=[tmp_skills],
     )
-    with pytest.raises(FileNotFoundError, match="identity file"):
-        build_static_prompt(config)
+    with caplog.at_level("WARNING"):
+        result = build_static_prompt(config)
+    assert "Identity file not found" in caplog.text
+    assert result == ""
 
 
 def test_includes_behavior_file_when_present(tmp_context, tmp_skills, agent_config):
