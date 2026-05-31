@@ -32,7 +32,6 @@ class TestDelegate:
         assert "delegate" not in tool_names
 
     async def test_image_paths_inlined_as_base64(self, agent_config, tmp_path):
-        (agent_config.context_dir / ".onboarded").touch()
         from src.tools.delegate import exec_delegate
 
         # Create a tiny 1x1 PNG
@@ -117,7 +116,6 @@ class TestDelegate:
 
     async def test_invalid_image_paths_type_handled(self, agent_config):
         """If LLM sends image_paths as a string instead of list, handle gracefully."""
-        (agent_config.context_dir / ".onboarded").touch()
         from src.tools.delegate import exec_delegate
 
         mock_response = LLMResponse(text="Done", tool_calls=None)
