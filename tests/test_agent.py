@@ -723,14 +723,18 @@ class TestAgentInit:
     def test_loads_identity(self, agent):
         assert "test assistant" in agent.static_prompt.lower()
 
-    def test_missing_identity_raises(self, tmp_path, tmp_skills):
+    def test_missing_identity_boots_with_warning(self, tmp_path, tmp_skills, caplog):
         from src.config import AgentConfig
         config = AgentConfig(
             identity_file=tmp_path / "nonexistent.md",
+            behavior_file=tmp_path / "also-missing.md",
+            persona_prompt_dir=tmp_path / "no-persona",
             skill_dirs=[tmp_skills],
         )
-        with pytest.raises(FileNotFoundError):
-            Agent(config)
+        with caplog.at_level("WARNING"):
+            agent = Agent(config)
+        assert "Identity file not found" in caplog.text
+        assert agent is not None
 
 
 class TestSystemPromptCaching:
