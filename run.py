@@ -25,6 +25,7 @@ from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig
 from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
+from onboarding.bootstrap import bootstrap_context
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
@@ -615,6 +616,11 @@ async def main():
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
+
+    # Seed context/ from context.default/ on first run (non-overwriting).
+    # Must run before building the system prompt so a fresh deployment boots
+    # with the baseline identity.md instead of failing.
+    bootstrap_context(Path("./context"))
 
     persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or DEFAULT_PERSONA
     persona = load_persona(persona_name)

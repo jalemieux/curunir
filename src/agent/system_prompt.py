@@ -1,9 +1,12 @@
 # src/agent/system_prompt.py
+import logging
 from pathlib import Path
 
 from src.config import AgentConfig
 from src.persona import prompts_dir
 from src.skills import build_skill_manifest
+
+logger = logging.getLogger(__name__)
 
 
 def build_static_prompt(config: AgentConfig) -> str:
@@ -19,16 +22,26 @@ def build_static_prompt(config: AgentConfig) -> str:
     (identity only). Persona files are read directly from the bundle; they
     do not bootstrap into `context/`.
 
+    Identity is the personality layer only — one of several optional layers
+    (behavior, persona expertise, skill manifest). It is no longer load-bearing
+    for correctness, so a missing identity.md warns rather than failing: the
+    agent boots with a default (faceless) personality. A missing file usually
+    means onboarding hasn't run or context/ wasn't mounted, hence the warning.
+
     Agent.__init__ appends a single boot-time timestamp on top of this so the
     full system block is byte-stable across calls — required for auto-cache
     providers (OpenAI / DeepSeek / xAI / GLM via OpenRouter) to hit the cache.
     """
-    if not config.identity_file.exists():
-        raise FileNotFoundError(
-            f"Identity file not found: {config.identity_file}. "
-            "Curunir requires an identity file to start."
+    parts = []
+    if config.identity_file.exists():
+        parts.append(config.identity_file.read_text())
+    else:
+        logger.warning(
+            "Identity file not found: %s. Booting with a default personality "
+            "(no identity layer). Run onboarding to generate one, or ensure "
+            "context/ is mounted/synced.",
+            config.identity_file,
         )
-    parts = [config.identity_file.read_text()]
 
     prompts = prompts_dir(config.persona)
     if prompts.is_dir():
