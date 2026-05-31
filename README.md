@@ -262,11 +262,15 @@ When the agent loads this skill via `load_skill`, the listed tools are added to 
 
 ## Personas
 
-Run a domain-focused deployment by setting `CURUNIR_PERSONA=<name>`. A persona
-(`personas/<name>/`) curates which skills register, which core tools are
-available, and an extra prompt layer (domain expertise + guardrails) on top of
-the base identity. The shipped example is `finance` — a local, private
-personal-finance assistant. See `personas/finance/README.md`.
+A persona is a deployment bundle: an optional absolute skill allowlist and a
+`prompts/` directory layered on top of `context/identity.md` in the system
+prompt. Select one with `CURUNIR_PERSONA=<name>`. Unset falls back to
+`personas/default/`, which ships the full skill catalog and the baseline
+behavior prompt — so unset is itself a persona, not a special case.
+
+The shipped specialty example is `finance` — a local, private personal-finance
+assistant that curates skills down to analysis/memo/data tools and adds
+domain + guardrails prompts. See `personas/finance/README.md`.
 
 ```bash
 cp personas/finance/.env.finance.example .env

@@ -28,7 +28,6 @@ def test_loads_full_manifest(make_bundle):
         "name: finance\n"
         "description: money helper\n"
         "skills:\n  - identity\n  - financial-analysis\n"
-        "tools:\n  - read\n  - edit\n"
         "keys:\n  - FRED_API_KEY\n",
     )
     p = load_persona("finance")
@@ -36,16 +35,22 @@ def test_loads_full_manifest(make_bundle):
         name="finance",
         description="money helper",
         skills=["identity", "financial-analysis"],
-        tools=["read", "edit"],
         keys=["FRED_API_KEY"],
     )
 
 
-def test_tools_omitted_means_none(make_bundle):
-    make_bundle("min", "name: min\nskills:\n  - identity\n")
-    p = load_persona("min")
-    assert p.tools is None
+def test_skills_omitted_means_none(make_bundle):
+    # Omitting `skills:` is how the default persona allows every skill on disk.
+    make_bundle("open", "name: open\n")
+    p = load_persona("open")
+    assert p.skills is None
     assert p.keys == []
+
+
+def test_skills_empty_list_raises(make_bundle):
+    make_bundle("empty", "name: empty\nskills: []\n")
+    with pytest.raises(ValueError, match="non-empty list"):
+        load_persona("empty")
 
 
 def test_missing_bundle_raises_filenotfound(make_bundle):
@@ -59,23 +64,22 @@ def test_malformed_yaml_raises_valueerror(make_bundle):
         load_persona("bad")
 
 
-def test_missing_skills_raises_valueerror(make_bundle):
-    make_bundle("noskills", "name: noskills\n")
-    with pytest.raises(ValueError, match="at least one skill"):
-        load_persona("noskills")
-
-
 def test_warn_missing_keys_returns_absent_names(make_bundle, caplog):
-    p = Persona("f", "", ["identity"], None, ["FRED_API_KEY", "OTHER"])
+    p = Persona("f", "", ["identity"], ["FRED_API_KEY", "OTHER"])
     with caplog.at_level(logging.WARNING):
         missing = warn_missing_keys(p, {"OTHER": "set"})
     assert missing == ["FRED_API_KEY"]
     assert "FRED_API_KEY" in caplog.text
 
 
+def test_default_bundle_parses_from_repo():
+    # Default persona always ships; omits `skills:` to allow every skill.
+    p = load_persona("default")
+    assert p.name == "default"
+    assert p.skills is None
+
+
 def test_finance_bundle_parses_from_repo():
-    # Loads the real personas/finance/ shipped in the repo (PERSONAS_DIR
-    # default is Path("personas"); no monkeypatch here).
     p = load_persona("finance")
     assert p.name == "finance"
     assert "financial-analysis" in p.skills
