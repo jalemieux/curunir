@@ -30,7 +30,6 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
         main_model_supports_vision=True,
     )
     agent = Agent(config)
-    (config.context_dir / ".onboarded").touch()
 
     in_q: asyncio.Queue = asyncio.Queue()
     out_q: asyncio.Queue = asyncio.Queue()

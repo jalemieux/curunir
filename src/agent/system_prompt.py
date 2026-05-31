@@ -3,17 +3,24 @@ import logging
 from pathlib import Path
 
 from src.config import AgentConfig
+from src.persona import prompts_dir
 from src.skills import build_skill_manifest
 
 logger = logging.getLogger(__name__)
 
 
 def build_static_prompt(config: AgentConfig) -> str:
-    """Build the static portion of the system prompt (identity + behavior + skill manifest).
+    """Build the static portion of the system prompt.
 
-    Identity (persona) and behavior (operating defaults) live in separate
-    files so the `/identity` skill can edit persona without touching
-    behavior. Both are concatenated into the system prompt at boot.
+    Order:
+        context/identity.md   (user-customized assistant persona)
+        personas/<active>/prompts/*.md  (sorted; framework + specialty)
+        skill manifest        (filtered by persona allowlist when set)
+
+    The persona bundle owns everything framework-level — behavior defaults,
+    domain expertise, guardrails. `context/` is the user-edited layer
+    (identity only). Persona files are read directly from the bundle; they
+    do not bootstrap into `context/`.
 
     Identity is the personality layer only — one of several optional layers
     (behavior, persona expertise, skill manifest). It is no longer load-bearing
@@ -36,15 +43,9 @@ def build_static_prompt(config: AgentConfig) -> str:
             config.identity_file,
         )
 
-    # Behavior layer (operating defaults, PR #282): optional, appended if present.
-    if config.behavior_file.exists():
-        parts.append(config.behavior_file.read_text())
-
-    # Persona expertise layer: domain .md files bootstrapped into
-    # context/persona/. Sorted by filename so authors can order with numeric
-    # prefixes (10-domain.md, 20-guardrails.md). Absent dir is skipped.
-    if config.persona_prompt_dir.is_dir():
-        for md in sorted(config.persona_prompt_dir.glob("*.md")):
+    prompts = prompts_dir(config.persona)
+    if prompts.is_dir():
+        for md in sorted(prompts.glob("*.md")):
             parts.append(md.read_text())
 
     manifest = build_skill_manifest(

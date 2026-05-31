@@ -109,12 +109,20 @@ Manifest auto-built at startup from all `SKILL.md` files and included in the sys
 ### Personas (`personas/`, `src/persona.py`)
 
 A persona is a deployment bundle selected at boot via `CURUNIR_PERSONA=<name>`.
-`personas/<name>/persona.yaml` declares an **absolute** skill allowlist
-(filters `load_registry`), an optional core-tool allowlist (drives
-`Agent(tools=...)`), and key *names* for a soft startup warning. Expertise
-`.md` files under `personas/<name>/expertise/` bootstrap into `context/persona/`
-(non-overwriting) and append to the system prompt after identity/behavior.
-Unset `CURUNIR_PERSONA` = today's behavior. API-key *values* are an operator
+There is no "no persona" code path — unset falls back to `personas/default/`,
+which ships the full skill catalog and the baseline behavior prompt.
+
+`personas/<name>/persona.yaml` declares an optional **absolute** skill
+allowlist (omit `skills:` to allow every skill on disk) and key *names* for
+a soft startup warning. Core tools are universal — personas do not curate
+them. The allowlist is plumbed through `build_skill_manifest`, `load_skill`,
+`portal_skill_list`, and the slash-command resolver so a curated persona
+cannot reach skills outside its allowlist.
+
+`personas/<name>/prompts/*.md` is read directly from the bundle (sorted) and
+appended to the system prompt after `context/identity.md`. These files are
+framework/specialty content and are **not** bootstrapped into `context/` —
+only user-edited content lives there. API-key *values* are an operator
 concern (env/.env), never declared in skills or code.
 
 ### Portal Service (`portal/`)

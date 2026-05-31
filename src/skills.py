@@ -107,7 +107,9 @@ def _display_name(name: str) -> str:
     return words[:1].upper() + words[1:]
 
 
-def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
+def portal_skill_list(
+    skill_dirs: list[Path], allowlist: set[str] | None = None
+) -> list[dict]:
     """User-facing skills for the portal Skills panel.
 
     Returns skills that set `portal_summary`, sorted by name. Each entry:
@@ -121,9 +123,10 @@ def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
 
     Starters are a subset of the browse panel: a skill that sets
     `portal_starter` without `portal_summary` is excluded entirely (and a
-    warning is logged). `hidden` skills are excluded regardless.
+    warning is logged). `hidden` skills are excluded regardless. `allowlist`
+    forwards to `load_registry` so a persona's panel matches its allowlist.
     """
-    registry = load_registry(skill_dirs)
+    registry = load_registry(skill_dirs, allowlist)
     out = []
     for skill in registry.values():
         if skill.hidden:
@@ -146,9 +149,18 @@ def portal_skill_list(skill_dirs: list[Path]) -> list[dict]:
     return out
 
 
-def load_skill(name: str, skill_dirs: list[Path]) -> str:
-    """Load full SKILL.md content by name, honoring registry shadowing rules."""
-    registry = load_registry(skill_dirs)
+def load_skill(
+    name: str, skill_dirs: list[Path], allowlist: set[str] | None = None
+) -> str:
+    """Load full SKILL.md content by name, honoring registry shadowing rules.
+
+    `allowlist` forwards to `load_registry` so a persona's skill allowlist is
+    absolute: skills outside it cannot be loaded via this entry point — which
+    is what backs the agent's `load_skill` tool and the `/<skill>` slash
+    command. Without this, the persona only hides skills from the catalog
+    while still letting the agent reach for them.
+    """
+    registry = load_registry(skill_dirs, allowlist)
     skill = registry.get(name)
     if skill is None:
         return f"Skill not found: {name}"

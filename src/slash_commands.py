@@ -39,6 +39,10 @@ class SlashContext:
     channel: str
     reply_address: dict
     skill_dirs: list[Path]
+    skill_allowlist: list[str] | None = None
+
+    def allowlist_set(self) -> set[str] | None:
+        return set(self.skill_allowlist) if self.skill_allowlist else None
 
 
 @dataclass
@@ -95,7 +99,7 @@ async def _help(ctx: SlashContext) -> SlashResult:
     for name in ("help", "skills", "clear"):
         lines.append(f"| `/{name}` | {_HELP[name]} |")
 
-    registry = load_registry(ctx.skill_dirs)
+    registry = load_registry(ctx.skill_dirs, ctx.allowlist_set())
     if registry:
         lines.append("")
         lines.append("## Skill shortcuts")
@@ -114,7 +118,7 @@ async def _help(ctx: SlashContext) -> SlashResult:
 
 
 async def _skills(ctx: SlashContext) -> SlashResult:
-    registry = load_registry(ctx.skill_dirs)
+    registry = load_registry(ctx.skill_dirs, ctx.allowlist_set())
     if not registry:
         return SlashResult(handled=True, outgoing=[_out(ctx, "No skills registered.")])
     lines = [
@@ -175,13 +179,14 @@ async def maybe_handle_slash(
         channel=ctx.channel,
         reply_address=ctx.reply_address,
         skill_dirs=ctx.skill_dirs,
+        skill_allowlist=ctx.skill_allowlist,
     )
 
     handler = INTERCEPTED.get(name)
     if handler is not None:
         return await handler(ctx_with_args)
 
-    registry = load_registry(ctx.skill_dirs)
+    registry = load_registry(ctx.skill_dirs, ctx.allowlist_set())
     if name in registry:
         skill = registry[name]
         if skill.hidden:

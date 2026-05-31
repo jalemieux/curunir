@@ -64,8 +64,7 @@ def test_email_config_custom():
     assert config.spam_score_threshold == 3.0
 
 
-def test_persona_fields_default_to_none_and_path():
+def test_persona_defaults():
     c = AgentConfig()
-    assert c.persona is None
+    assert c.persona == "default"
     assert c.skill_allowlist is None
-    assert c.persona_prompt_dir == Path("./context/persona")

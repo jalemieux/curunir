@@ -31,13 +31,13 @@ def test_no_skills_section_when_empty(tmp_context, tmp_skills, agent_config):
     assert "Available Skills" not in result
 
 
-def test_missing_identity_file_warns_and_builds(tmp_path, tmp_skills, caplog):
+def test_missing_identity_file_warns_and_builds(tmp_path, tmp_skills, caplog, monkeypatch):
     """Identity is the personality layer only — missing it warns rather than
     failing, and the prompt still builds from the remaining layers."""
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", tmp_path / "personas")
     config = AgentConfig(
         identity_file=tmp_path / "nonexistent.md",
-        behavior_file=tmp_path / "also-missing.md",
-        persona_prompt_dir=tmp_path / "no-persona",
+        persona="no-such-persona",
         skill_dirs=[tmp_skills],
     )
     with caplog.at_level("WARNING"):
@@ -46,31 +46,14 @@ def test_missing_identity_file_warns_and_builds(tmp_path, tmp_skills, caplog):
     assert result == ""
 
 
-def test_includes_behavior_file_when_present(tmp_context, tmp_skills, agent_config):
-    behavior = tmp_context / "behavior.md"
-    behavior.write_text("## Guidelines\n- be concise")
-    agent_config.behavior_file = behavior
-
-    result = build_static_prompt(agent_config)
-
-    assert "You are a test assistant." in result
-    assert "be concise" in result
-
-
-def test_missing_behavior_file_is_silently_skipped(tmp_context, tmp_skills, agent_config):
-    agent_config.behavior_file = tmp_context / "does-not-exist.md"
-
-    result = build_static_prompt(agent_config)
-
-    assert "You are a test assistant." in result
-
-
-def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_config):
-    persona_dir = tmp_context / "persona"
-    persona_dir.mkdir()
-    (persona_dir / "20-guardrails.md").write_text("GUARDRAILS BLOCK")
-    (persona_dir / "10-domain.md").write_text("DOMAIN BLOCK")
-    agent_config.persona_prompt_dir = persona_dir
+def test_persona_prompts_appended_sorted(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    personas_root = tmp_path / "personas"
+    prompts = personas_root / "demo" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / "20-guardrails.md").write_text("GUARDRAILS BLOCK")
+    (prompts / "10-domain.md").write_text("DOMAIN BLOCK")
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", personas_root)
+    agent_config.persona = "demo"
 
     result = build_static_prompt(agent_config)
 
@@ -79,8 +62,9 @@ def test_persona_prompt_files_appended_sorted(tmp_context, tmp_skills, agent_con
     assert result.index("DOMAIN BLOCK") < result.index("GUARDRAILS BLOCK")
 
 
-def test_missing_persona_dir_is_silently_skipped(tmp_context, tmp_skills, agent_config):
-    agent_config.persona_prompt_dir = tmp_context / "no-persona"
+def test_missing_persona_prompts_dir_is_silently_skipped(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", tmp_path / "personas")
+    agent_config.persona = "no-such-persona"
     result = build_static_prompt(agent_config)
     assert "You are a test assistant." in result
 
@@ -145,7 +129,6 @@ class TestSessionMemorySnapshot:
         (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[list[dict]] = []
 
@@ -169,7 +152,6 @@ class TestSessionMemorySnapshot:
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 
@@ -199,7 +181,6 @@ class TestSessionMemorySnapshot:
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 
@@ -220,7 +201,6 @@ class TestSessionMemorySnapshot:
     async def test_missing_memory_files_handled_gracefully(self, agent_config):
         """First turn with no memory dir must still call the LLM."""
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 
@@ -234,9 +214,12 @@ class TestSessionMemorySnapshot:
         assert result == "ok"
 
 
-def test_behavior_file_appended_after_identity_if_present(tmp_context, tmp_skills, agent_config):
-    behavior = tmp_context / "behavior.md"
-    behavior.write_text("BEHAVIOR LAYER")
-    agent_config.behavior_file = behavior
+def test_persona_prompts_appended_after_identity(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
+    personas_root = tmp_path / "personas"
+    prompts = personas_root / "demo" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / "behavior.md").write_text("BEHAVIOR LAYER")
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", personas_root)
+    agent_config.persona = "demo"
     result = build_static_prompt(agent_config)
     assert result.index("You are a test assistant.") < result.index("BEHAVIOR LAYER")

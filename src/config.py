@@ -11,15 +11,13 @@ class AgentConfig:
     max_iterations: int = 200
     max_history_chars: int = 250_000
     identity_file: Path = Path("./context/identity.md")
-    behavior_file: Path = Path("./context/behavior.md")
     context_dir: Path = Path("./context")
     usage_db: Path = Path("./context/usage.db")
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
-    persona: str | None = None
+    persona: str = "default"
     skill_allowlist: list[str] | None = None
-    persona_prompt_dir: Path = Path("./context/persona")
     attachment_dir: str = "/tmp/attachments"
     tts_model: str = "tts-1"
     tts_voice: str = "alloy"
