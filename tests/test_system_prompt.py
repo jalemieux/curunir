@@ -129,7 +129,6 @@ class TestSessionMemorySnapshot:
         (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[list[dict]] = []
 
@@ -153,7 +152,6 @@ class TestSessionMemorySnapshot:
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 
@@ -183,7 +181,6 @@ class TestSessionMemorySnapshot:
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 
@@ -204,7 +201,6 @@ class TestSessionMemorySnapshot:
     async def test_missing_memory_files_handled_gracefully(self, agent_config):
         """First turn with no memory dir must still call the LLM."""
         agent = Agent(agent_config)
-        (agent_config.context_dir / ".onboarded").touch()
 
         captured: list[str] = []
 

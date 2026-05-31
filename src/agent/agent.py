@@ -351,14 +351,16 @@ class Agent:
                 self.sessions[session_id] = record["history"]
         history = self.sessions.setdefault(session_id, [])
 
-        # Onboarding gate: first user turn of a fresh session, no .onboarded
-        # marker, not a scheduled task → rewrite the message into an
-        # instruction that kicks off the onboarding orchestrator. Mid-flow
-        # turns have non-empty history and pass through unchanged.
+        # Onboarding gate: first user turn of a fresh session, no identity.md,
+        # not a scheduled task → rewrite the message into an instruction that
+        # kicks off the onboarding orchestrator. identity.md is the personality
+        # layer, decoupled from behavior/persona; its absence is exactly the
+        # "not yet onboarded" signal (onboarding writes it). Mid-flow turns have
+        # non-empty history and pass through unchanged.
         if (
             system_task_prompt is None
             and len(history) == 0
-            and not (self.config.context_dir / ".onboarded").exists()
+            and not self.config.identity_file.exists()
         ):
             message = (
                 "The user has just connected and isn't onboarded yet. "

@@ -196,7 +196,6 @@ async def test_delete_command_extracts_disk_only_conversation(
 @pytest.mark.asyncio
 async def test_agent_worker_persists_conversation_after_turn(agent_config, memory_dir):
     agent = Agent(agent_config)
-    (agent_config.context_dir / ".onboarded").touch()
 
     in_q: asyncio.Queue = asyncio.Queue()
     out_q: asyncio.Queue = asyncio.Queue()
@@ -290,7 +289,6 @@ async def test_scratch_turn_is_not_persisted(agent_config, memory_dir):
     the disk store stays empty for it.
     """
     agent = Agent(agent_config)
-    (agent_config.context_dir / ".onboarded").touch()
 
     in_q: asyncio.Queue = asyncio.Queue()
     out_q: asyncio.Queue = asyncio.Queue()

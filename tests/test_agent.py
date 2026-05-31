@@ -65,7 +65,6 @@ class TestConversationPersistence:
 
     async def test_handle_lazy_loads_prior_history_to_resume(self, agent):
         """Resuming a persisted conversation continues its prior history."""
-        (agent.config.context_dir / ".onboarded").touch()
         cs.save(agent.config.context_dir, "resumed", [
             {"role": "user", "content": "earlier turn"},
             {"role": "assistant", "content": "earlier reply"},
@@ -106,7 +105,6 @@ class TestAgentHandle:
         assert mock_call.call_count == 1
 
     async def test_session_persistence(self, agent):
-        (agent.config.context_dir / ".onboarded").touch()
         response1 = LLMResponse(text="First", tool_calls=None)
         response2 = LLMResponse(text="Second", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[response1, response2]):
@@ -118,7 +116,6 @@ class TestAgentHandle:
         assert history[1]["content"] == "First"
 
     async def test_separate_sessions(self, agent):
-        (agent.config.context_dir / ".onboarded").touch()
         mock_response = LLMResponse(text="Reply", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             await agent.handle("msg1", "session-a")
@@ -441,7 +438,6 @@ class TestAgentHandle:
         assert result == "ok"
 
     async def test_accepts_list_content_and_forwards_to_llm(self, agent):
-        (agent.config.context_dir / ".onboarded").touch()
         captured: dict = {}
 
         async def fake_call_llm(model, messages, tools, **kwargs):
@@ -660,7 +656,6 @@ class TestSystemTaskMode:
 
     async def test_normal_handle_unchanged(self, agent):
         """Ensure regular user messages still work as before."""
-        (agent.config.context_dir / ".onboarded").touch()
         mock_response = LLMResponse(text="Hello!", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
             result = await agent.handle("hi", "normal-session")
@@ -673,8 +668,9 @@ class TestSystemTaskMode:
 class TestOnboardingGate:
     """Hard gate fires on first un-onboarded turn; passes through otherwise."""
 
-    async def test_gate_fires_when_no_marker_and_empty_history(self, agent):
-        """First user message + no .onboarded → message rewritten to onboarding directive."""
+    async def test_gate_fires_when_identity_missing_and_empty_history(self, agent):
+        """First user message + no identity.md → message rewritten to onboarding directive."""
+        agent.config.identity_file.unlink()  # un-onboarded: no personality layer yet
         mock_response = LLMResponse(text="welcome", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hi", "s1")
@@ -685,9 +681,9 @@ class TestOnboardingGate:
         assert "isn't onboarded yet" in user_msgs[0]["content"]
         assert "`onboarding` skill" in user_msgs[0]["content"]
 
-    async def test_gate_stays_quiet_when_marker_exists(self, agent):
-        """If .onboarded exists, user's first message passes through unchanged."""
-        (agent.config.context_dir / ".onboarded").touch()
+    async def test_gate_stays_quiet_when_identity_exists(self, agent):
+        """If identity.md exists, user's first message passes through unchanged."""
+        # The agent fixture's context already has identity.md (= onboarded).
         mock_response = LLMResponse(text="ok", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hi", "s1")

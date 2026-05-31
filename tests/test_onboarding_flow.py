@@ -30,10 +30,10 @@ class TestGateMessageMatchesOrchestrator:
     async def test_gate_directive_names_the_onboarding_skill(self, tmp_path):
         """The text the gate injects must reference the `onboarding` skill by
         name, otherwise the LLM has no way to bridge gate → orchestrator."""
-        identity = tmp_path / "identity.md"
-        identity.write_text("You are a test assistant.")
+        # No identity.md → un-onboarded → the gate fires. (Identity is optional
+        # at boot now, so Agent constructs fine without it.)
         config = AgentConfig(
-            identity_file=identity,
+            identity_file=tmp_path / "identity.md",
             context_dir=tmp_path,
             skill_dirs=[REPO_SKILLS],
         )
