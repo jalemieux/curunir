@@ -31,13 +31,19 @@ def test_no_skills_section_when_empty(tmp_context, tmp_skills, agent_config):
     assert "Available Skills" not in result
 
 
-def test_missing_identity_file_raises(tmp_path, tmp_skills):
+def test_missing_identity_file_warns_and_builds(tmp_path, tmp_skills, caplog, monkeypatch):
+    """Identity is the personality layer only — missing it warns rather than
+    failing, and the prompt still builds from the remaining layers."""
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", tmp_path / "personas")
     config = AgentConfig(
         identity_file=tmp_path / "nonexistent.md",
+        persona="no-such-persona",
         skill_dirs=[tmp_skills],
     )
-    with pytest.raises(FileNotFoundError, match="identity file"):
-        build_static_prompt(config)
+    with caplog.at_level("WARNING"):
+        result = build_static_prompt(config)
+    assert "Identity file not found" in caplog.text
+    assert result == ""
 
 
 def test_persona_prompts_appended_sorted(tmp_context, tmp_skills, agent_config, monkeypatch, tmp_path):
