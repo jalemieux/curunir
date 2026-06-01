@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -95,16 +95,61 @@ app.include_router(ws_agent.router)
 app.include_router(ws_browser.router)
 
 
-_LANDING_DIR = Path(__file__).parent / "static" / "landing"
-_LAUNCH_DIR = Path(__file__).parent / "static" / "launch"
+_STATIC_DIR = Path(__file__).parent / "static"
+_LANDING_DIR = _STATIC_DIR / "landing"
+_LAUNCH_DIR = _STATIC_DIR / "launch"
+
+# Phones get the dedicated mobile UI (#304). The match is deliberately narrow —
+# "Mobile" plus the major phone platforms — so tablets and desktops fall
+# through to the full desktop SPA. It's only a convenience redirect; /m and
+# /?desktop=1 are explicit escape hatches in both directions, so a bad UA match
+# never traps a user.
+_MOBILE_UA = re.compile(
+    r"(iPhone|iPod|Android.*Mobile|Windows Phone|webOS|BlackBerry|"
+    r"IEMobile|Opera Mini)",
+    re.IGNORECASE,
+)
+
+
+def _is_mobile_ua(user_agent: str | None) -> bool:
+    return bool(user_agent and _MOBILE_UA.search(user_agent))
 
 
 @app.get("/")
-async def root(user=Depends(auth.optional_current_user)):
+async def root(request: Request, user=Depends(auth.optional_current_user)):
     if user is None:
         # Public landing page — same file served at /curunir/ for direct linking.
+        # Unauthenticated phone visitors stay here rather than being bounced to
+        # /m (which 401s) — that would trap them with no next step.
         return FileResponse(_LANDING_DIR / "index.html")
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    # Authenticated: redirect phones to the mobile UI unless ?desktop=1 forces
+    # the desktop SPA.
+    if "desktop" not in request.query_params and _is_mobile_ua(
+        request.headers.get("user-agent")
+    ):
+        return RedirectResponse("/m", status_code=307)
+    return FileResponse(_STATIC_DIR / "index.html")
+
+
+@app.get("/m")
+async def mobile(user=Depends(auth.current_user)):
+    """Mobile-first chat UI. Shares the /ws/browser backend with the desktop
+    SPA — frontend split only. Gated by auth like the desktop chat surface."""
+    return FileResponse(_STATIC_DIR / "mobile.html")
+
+
+@app.get("/manifest.json")
+async def manifest():
+    # Served unauthenticated so add-to-homescreen works before the session
+    # cookie is present.
+    return FileResponse(
+        _STATIC_DIR / "manifest.json", media_type="application/manifest+json"
+    )
+
+
+@app.get("/icon.svg")
+async def icon():
+    return FileResponse(_STATIC_DIR / "icon.svg", media_type="image/svg+xml")
 
 
 @app.get("/healthz")
