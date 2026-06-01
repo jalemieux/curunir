@@ -20,7 +20,9 @@ _QUOTA_MSG = "I've hit my allocated quota — please try again later."
 _RATE_LIMIT_MSG = (
     "The LLM provider is rate-limiting me right now. Please try again in a minute."
 )
+_CREDITS_MSG = "My LLM provider is out of credits."
 _QUOTA_SUBSTRINGS = ("key limit", "quota", "monthly limit", "insufficient_quota")
+_CREDITS_SUBSTRINGS = ("insufficient credits", "add more using")
 
 
 def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
@@ -38,6 +40,8 @@ def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
 
     if auth_cls is not None and isinstance(exc, auth_cls):
         return "quota_exhausted", _QUOTA_MSG
+    if status == 402 or any(s in body for s in _CREDITS_SUBSTRINGS):
+        return "credits_exhausted", _CREDITS_MSG
     if status == 403 or any(s in body for s in _QUOTA_SUBSTRINGS):
         return "quota_exhausted", _QUOTA_MSG
     if (rate_limit_cls is not None and isinstance(exc, rate_limit_cls)) or status == 429:
