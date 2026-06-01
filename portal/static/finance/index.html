@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir /finance — Your private financial analyst.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --bg-2: #f0f0ef;
+    --ink: #0a0a0a;
+    --ink-2: #525252;
+    --ink-3: #a3a3a3;
+    --rule: #e5e5e5;
+    --accent: #e63946;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+
+  /* Reusable: 6×6 accent square */
+  .sq {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .sq-ink { background: var(--ink); }
+  .sq-mute { background: var(--ink-3); }
+
+  /* Nav */
+  nav {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+  }
+  nav .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+  }
+  nav a.cta {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 8px 14px;
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  nav a.cta:hover { background: var(--ink); color: var(--bg); }
+
+  /* Hero */
+  .hero {
+    padding: 120px 0 100px;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .hero .side {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.8;
+    padding-top: 12px;
+  }
+  .hero .side .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .hero .side .row .k { color: var(--ink-2); }
+  .hero h1 {
+    font-weight: 500;
+    font-size: clamp(48px, 7vw, 92px);
+    line-height: 0.98;
+    letter-spacing: -0.04em;
+    margin-bottom: 32px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .light { font-weight: 300; color: var(--ink-2); }
+  .hero p {
+    font-size: 19px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 620px;
+    margin-bottom: 40px;
+  }
+  .cta-row { display: flex; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    text-decoration: none;
+    padding: 14px 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: 1px solid var(--ink);
+    transition: all 200ms;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); }
+  .btn .arr { font-family: 'Geist Mono', monospace; font-size: 13px; }
+
+  /* Sections */
+  section {
+    padding: 96px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .sec-head {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 56px;
+    align-items: baseline;
+  }
+  .sec-head .label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sec-head h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.5vw, 40px);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    max-width: 720px;
+  }
+  .sec-head h2 .accent { color: var(--accent); }
+
+  /* What it does */
+  .uses { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .uses .list { border-top: 1px solid var(--rule); }
+  .use {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 20px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .use .n {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .use h3 {
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    letter-spacing: -0.015em;
+  }
+  .use p { color: var(--ink-2); font-size: 15.5px; max-width: 620px; }
+
+  /* Examples — one representative prompt per use case */
+  .examples { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .ex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ex {
+    border: 1px solid var(--ink);
+    background: #fff;
+    padding: 22px 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: background 200ms;
+  }
+  .ex:hover { background: var(--bg-2); }
+  .ex .ex-tag {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ex .ex-q {
+    font-size: 17px;
+    line-height: 1.38;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .ex .ex-q::before {
+    content: "“";
+    color: var(--ink-3);
+    margin-right: 1px;
+  }
+  .ex .ex-q::after {
+    content: "”";
+    color: var(--ink-3);
+    margin-left: 1px;
+  }
+
+  /* Authoritative sources */
+  .sources { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .sources .intro {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 640px;
+    margin-bottom: 28px;
+  }
+  .sources .intro strong { color: var(--ink); font-weight: 600; }
+  .src-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .src {
+    border: 1px solid var(--ink);
+    background: #fff;
+    padding: 22px;
+  }
+  .src .src-kind {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .src .src-name {
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: -0.015em;
+    margin-bottom: 6px;
+  }
+  .src .src-desc {
+    font-size: 14px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+
+  /* Pipeline diagram */
+  .pipe-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .pipe-canvas { background: #fff; border: 1px solid var(--ink); }
+  .tier {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 32px;
+    align-items: center;
+    padding: 28px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .tier:last-child { border-bottom: none; }
+  .tier-label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 500;
+  }
+  .tier-label::before {
+    content: "";
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: var(--accent);
+    margin-bottom: 8px;
+  }
+  .tier-label .sub {
+    display: block;
+    color: var(--ink-3);
+    margin-top: 4px;
+    font-size: 10.5px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+  }
+  .step {
+    border: 1px solid var(--ink);
+    background: #fff;
+    padding: 14px 16px;
+    min-width: 0;
+    position: relative;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .step:hover { background: var(--bg-2); }
+  .step.dashed { border-style: dashed; background: var(--bg); }
+  .step .n {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.14em;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .step.dashed .n { color: var(--ink-3); }
+  .step .name {
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .step .role {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-2);
+    line-height: 1.4;
+  }
+  /* Source spine: 3 parallel data sources, no arrows */
+  .spine-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr) 220px;
+    gap: 20px;
+    align-items: center;
+  }
+  .validate-row .note,
+  .maintain-row .note,
+  .spine-row .note {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .maintain-row .note .pulse {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .build-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    align-items: center;
+  }
+  .build-row .step { margin-right: 22px; }
+  .build-row .step:last-child { margin-right: 0; }
+  .build-row .step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -22px;
+    width: 22px;
+    height: 1px;
+    background: var(--ink);
+    transform: translateY(-50%);
+  }
+  .build-row .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -8px;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--ink);
+    z-index: 1;
+  }
+  .maintain-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 220px;
+    gap: 20px;
+    align-items: center;
+  }
+
+  /* Detail blocks (one per scenario) */
+  .details-head {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin: 64px 0 28px;
+  }
+  .details-head .label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .details-head h3 {
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.015em;
+    max-width: 620px;
+  }
+  .details-head h3 .accent { color: var(--accent); }
+  .details-head h3 .light { color: var(--ink-2); font-weight: 300; }
+
+  .detail {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    border-top: 1px solid var(--rule);
+    padding: 48px 0;
+    scroll-margin-top: 24px;
+  }
+  .detail .anchor {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    line-height: 1.6;
+  }
+  .detail .anchor .step-n {
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .detail .anchor .tier-tag {
+    color: var(--ink);
+    margin-bottom: 14px;
+  }
+  .detail .anchor .skill-id {
+    color: var(--ink-2);
+    text-transform: lowercase;
+    letter-spacing: 0;
+    font-size: 11px;
+  }
+
+  /* Chat block */
+  .chat {
+    max-width: 680px;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .chat .user-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 22px;
+  }
+  .chat .user-msg {
+    background: #f1f1f3;
+    color: #1a1a1a;
+    border-radius: 18px;
+    padding: 10px 18px;
+    font-size: 15px;
+    max-width: 80%;
+    line-height: 1.45;
+  }
+  .chat .assistant p { margin-bottom: 14px; }
+  .chat .assistant p:last-child { margin-bottom: 0; }
+  .chat .assistant strong { font-weight: 600; color: #0a0a0a; }
+  .chat .assistant ul {
+    list-style: disc;
+    padding-left: 22px;
+    margin-bottom: 14px;
+  }
+  .chat .assistant ul li { margin-bottom: 6px; }
+  .chat .assistant code {
+    font-family: ui-monospace, "SF Mono", "Geist Mono", monospace;
+    font-size: 13px;
+    background: #f1f1f3;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .tools-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, "SF Mono", "Geist Mono", monospace;
+    font-size: 12px;
+    color: #555;
+    margin: 14px 0 18px;
+  }
+  .tools-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #b3a8e8;
+  }
+  .tools-pill .count {
+    background: #f1f1f3;
+    padding: 3px 9px;
+    border-radius: 4px;
+    color: #444;
+  }
+  .doc-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #fff;
+    border: 1px solid #e8e8eb;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 0 0 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 150ms;
+  }
+  .doc-card:hover { border-color: #b3a8e8; }
+  .doc-card .doc-icon {
+    width: 42px; height: 42px;
+    background: #ecebfd;
+    color: #6f5fe3;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .doc-card .doc-icon svg { width: 22px; height: 22px; }
+  .doc-card .doc-info { flex: 1; min-width: 0; }
+  .doc-card .doc-name {
+    font-weight: 600;
+    font-size: 14.5px;
+    color: #0a0a0a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .doc-card .doc-sub {
+    font-size: 12.5px;
+    color: #8e8e93;
+    margin-top: 2px;
+  }
+  .doc-card .doc-dl {
+    color: #555;
+    flex-shrink: 0;
+    padding: 6px;
+  }
+  .doc-card .doc-dl svg { width: 18px; height: 18px; display: block; }
+  .chat-actions { display: flex; gap: 8px; }
+  .chat-actions button {
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 12.5px;
+    background: #fff;
+    color: #555;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 5px 14px;
+    cursor: pointer;
+  }
+  .chat-actions button:hover { background: #f8f8f8; }
+  /* Verdict chip — finance-specific accent on a memo's bottom line */
+  .verdict {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    padding: 5px 12px;
+    margin: 2px 0 18px;
+  }
+  .verdict .sq { width: 7px; height: 7px; }
+
+  /* Moat */
+  .moat-body { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  .moat-body p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 640px;
+    margin-bottom: 14px;
+  }
+  .moat-body p strong { color: var(--ink); font-weight: 600; }
+
+  /* Beta */
+  .beta-body { display: grid; grid-template-columns: 200px 1fr; gap: 40px; }
+  form {
+    display: flex;
+    gap: 0;
+    max-width: 480px;
+    border: 1px solid var(--ink);
+  }
+  form input {
+    flex: 1;
+    background: var(--bg);
+    border: none;
+    padding: 14px 16px;
+    font-family: 'Geist', sans-serif;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  form input:focus { outline: none; background: var(--bg-2); }
+  form input::placeholder { color: var(--ink-3); }
+  form button {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    padding: 0 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    transition: background 200ms;
+  }
+  form button:hover { background: var(--accent); }
+  .fine {
+    margin-top: 12px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* Footer */
+  footer {
+    padding: 24px 0;
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  footer a { color: inherit; text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding: 56px 0 64px; }
+    .hero .side { padding-top: 0; }
+    .sec-head, .uses, .examples, .sources, .pipe-wrap, .moat-body, .beta-body,
+    .details-head, .detail { grid-template-columns: 1fr; gap: 24px; }
+    .ex-grid, .src-grid { grid-template-columns: 1fr; }
+    .tier { grid-template-columns: 1fr; gap: 14px; }
+    .build-row { grid-template-columns: 1fr; gap: 16px; }
+    .build-row .step { margin-right: 0; }
+    .build-row .step::after, .build-row .step::before { display: none; }
+    .spine-row, .validate-row, .maintain-row { grid-template-columns: 1fr; }
+    section { padding: 56px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="sq"></span> Curunir</div>
+    <a class="cta" href="#beta">Join the beta</a>
+  </nav>
+
+  <header class="hero">
+    <aside class="side">
+      <div class="row"><span class="sq"></span><span class="k">v0.7 / closed beta</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">summer 2026</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">invite only</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">for investors</span></div>
+    </aside>
+    <div>
+      <h1>Your <span class="accent">private</span><br>financial analyst.</h1>
+      <p>A completely private agent that lives on your own hardware — with a deep bench of tools and skills: live market data, official filings, deep research, valuation, sentiment, and fact-checking. <strong>Your holdings never leave the house.</strong></p>
+      <div class="cta-row">
+        <a class="btn" href="#beta">Request beta access <span class="arr">→</span></a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// examples</div>
+      <h2>Real questions it's <span class="accent">built to answer.</span></h2>
+    </div>
+    <div class="examples">
+      <div></div>
+      <div class="ex-grid">
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Thesis · bull &amp; bear</div>
+          <div class="ex-q">Strongest bull and bear cases for buying SpaceX at its IPO — index-inclusion mechanics, Musk's track record, the Tesla interplay.</div>
+        </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Catalyst · drug → stock</div>
+          <div class="ex-q">What do retatrutide's new TAMs ($105B by 2030) do to Eli Lilly's revenue, earnings, and valuation?</div>
+        </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Macro · deep research</div>
+          <div class="ex-q">Deep research on oil, gold, and US treasuries: current state, six-month scenarios, and where the opportunities are.</div>
+        </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Fact-check · my thesis</div>
+          <div class="ex-q">Fact-check my Bitcoin inflation-and-debasement thesis.</div>
+        </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Prediction markets</div>
+          <div class="ex-q">What does Polymarket say about retatrutide's FDA-approval odds and gold by end of 2026?</div>
+        </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Podcast mining</div>
+          <div class="ex-q">What investment opportunities come out of this week's All-In episode?</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// the foundation</div>
+      <h2>Every thesis stands on <span class="accent">sources you can check.</span></h2>
+    </div>
+    <div class="sources">
+      <div></div>
+      <div>
+        <p class="intro">A thesis is only as strong as what it's built on. Every answer is grounded in primary, authoritative data — pulled live, cited inline, and <strong>fact-checked by a fresh agent before it reaches you.</strong> No vibes, no invented numbers.</p>
+        <div class="src-grid">
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Primary filings</div>
+            <div class="src-name">SEC EDGAR</div>
+            <div class="src-desc">10-K, 10-Q and 8-K filings plus standardized XBRL facts — revenue, EPS, R&amp;D and segment detail straight from the company's own filings.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Market data</div>
+            <div class="src-name">yfinance</div>
+            <div class="src-desc">Live quotes, multiples, fundamentals and analyst estimates — the price and valuation spine behind every comparison.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Macro</div>
+            <div class="src-name">FRED — Federal Reserve</div>
+            <div class="src-desc">Interest rates, inflation, unemployment and FX — the official series that set the discount rate inside every valuation scenario.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Research &amp; verification</div>
+            <div class="src-name">Deep research, fact-checked</div>
+            <div class="src-desc">Decomposes the question, gathers authoritative sources with inline citations, then hands the draft to an independent fact-checker before you see it.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+
+    <!-- Detail blocks header -->
+    <div class="details-head">
+      <div class="label"><span class="sq"></span>// in practice</div>
+      <h3>Real memos, <span class="accent">really produced.</span><br><span class="light">Fact-checked PDFs from actual research sessions — download and read them.</span></h3>
+    </div>
+
+    <!-- 01 — SpaceX IPO -->
+    <div class="detail" id="memo-spacex">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>MEMO 01</div>
+        <div class="tier-tag">DEEP RESEARCH</div>
+        <div class="skill-id">may 24, 2026</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Deep research — the strongest bull and bear cases for buying SpaceX at its IPO. Include Nasdaq index-inclusion mechanics, Musk's track record, and the Tesla interplay.</div></div>
+        <div class="assistant">
+          <p>SPCX targets a June 12, 2026 Nasdaq debut at a $1.75–2 trillion valuation — the largest IPO in history. I built both cases straight from the S-1.</p>
+          <ul>
+            <li><strong>Bull:</strong> reusable launch economics under $2,720/kg, Starlink at $11.4B 2025 revenue and $4.4B operating income, and index-inclusion mechanics that could force passive funds to buy ~19% of the float.</li>
+            <li><strong>Bear:</strong> ~94× revenue on a $4.94B GAAP loss; Musk controls 42% of equity and 85% of the vote — governance risk concentrated in one person.</li>
+            <li><strong>Commentary:</strong> folds in All-In Ep. 274 — Chamath and Gavin Baker lean bullish while flagging the 90-day Anthropic-contract termination risk.</li>
+          </ul>
+          <p>Twelve sections, fact-checked and corrected. Full PDF attached.</p>
+        </div>
+        <div class="verdict"><span class="sq"></span>Verdict — Priced for flawless execution; your call on the odds</div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">S-1 · All-In Ep. 274</span></div>
+        <a class="doc-card" href="/r/SpaceX IPO - Bull Case vs Bear Case (May 24, 2026) - with All-In Podcast Commentary.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">SpaceX at IPO — Bull Case vs Bear Case</div>
+            <div class="doc-sub">Click to download · PDF · with All-In Ep. 274 commentary</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 02 — Retatrutide / LLY -->
+    <div class="detail" id="memo-reta">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>MEMO 02</div>
+        <div class="tier-tag">CATALYST → STOCK</div>
+        <div class="skill-id">may 4–11, 2026</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Is retatrutide a blockbuster or a bust for Eli Lilly (LLY)? Bull case, bear case, and what it does to the stock.</div></div>
+        <div class="assistant">
+          <p>Retatrutide (LY3437943) is Lilly's triple agonist. It posted <strong>28.7% average weight loss at 68 weeks</strong> in Phase 3 — the highest ever recorded, ahead of tirzepatide and semaglutide.</p>
+          <ul>
+            <li><strong>Bull:</strong> best-in-class efficacy; Street peak-sales estimates run $5–30B.</li>
+            <li><strong>Bear:</strong> 18.2% adverse-event discontinuation, cannibalization of Zepbound/Mounjaro, and Novo Nordisk competition.</li>
+            <li><strong>Honest caveat:</strong> the 28.7% comes from TRIUMPH-4, a bariatric/OA population — it may not generalize until the general-obesity trials report.</li>
+          </ul>
+          <p>Stock impact: LLY trades around $963; approval could drive $1,200–1,300 (consensus ~$1,220), a setback −15–25%. Memo attached.</p>
+        </div>
+        <div class="verdict"><span class="sq"></span>Verdict — Partly priced in; asymmetric on the readout</div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">Phase 3 data · yfinance</span></div>
+        <a class="doc-card" href="/r/retatrutide-blockbuster-analysis-2026-05-04.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Retatrutide: Blockbuster or Bust? — LLY</div>
+            <div class="doc-sub">Click to download · PDF · fact-checked</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 03 — Fact-check → gold thesis -->
+    <div class="detail" id="memo-gold">
+      <div class="anchor">
+        <div class="step-n"><span class="sq"></span>MEMO 03</div>
+        <div class="tier-tag">FACT-CHECK → THESIS</div>
+        <div class="skill-id">may 19, 2026</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Fact-check my Bitcoin inflation-and-debasement thesis.</div></div>
+        <div class="assistant">
+          <p>I checked it before agreeing with it — and the data didn't back the inflation-hedge claim. Bitcoin is trading risk-on right now, with roughly a <strong>0.74 correlation to the S&amp;P</strong>. I said so plainly rather than confirm what you already believed.</p>
+          <p>You pivoted to gold, so I built that thesis in the same format — central-bank buying, debasement, and the real-rate backdrop — fact-checked, with three corrections applied before it reached you.</p>
+        </div>
+        <div class="verdict"><span class="sq"></span>Verdict — BTC thesis doesn't hold; the gold thesis does</div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">fact-checked · 3 corrections</span></div>
+        <a class="doc-card" href="/r/investment-thesis-gold-2.pdf">
+          <div class="doc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="doc-info">
+            <div class="doc-name">Gold — Investment Thesis</div>
+            <div class="doc-sub">Click to download · PDF · fact-checked</div>
+          </div>
+          <div class="doc-dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+        </a>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+    <!-- 04 — PE thesis health-check -->
+    <div class="detail" id="memo-pe">
+      <div class="anchor">
+        <div class="step-n"><span class="sq sq-mute"></span>MEMO 04</div>
+        <div class="tier-tag">THESIS HEALTH-CHECK</div>
+        <div class="skill-id">may 19, 2026</div>
+      </div>
+      <div class="chat">
+        <div class="user-row"><div class="user-msg">Health-check my PE fund thesis — Blackstone Secondary X and Life Sciences VI.</div></div>
+        <div class="assistant">
+          <p>Pulled the fund facts, benchmarked the returns, and stress-tested each pillar of your thesis. The pillars hold up — no fundamental rethink needed.</p>
+          <ul>
+            <li><strong>One honest flag:</strong> PE lagged the S&amp;P by about 17 points across 2023–2024. The diversification case is intact, but the recent return gap is real and worth sitting with.</li>
+            <li><strong>Life Sciences VI:</strong> held its final close at $6.3B — oversubscribed, the largest life-sciences fund ever — well above the $5B target in your deck.</li>
+          </ul>
+          <p>Where the evidence was uncomfortable, I showed it rather than smoothing it over.</p>
+        </div>
+        <div class="tools-pill"><span class="dot"></span><span class="count">fund docs · benchmarks</span></div>
+        <div class="chat-actions"><button>Copy</button><button>Print</button></div>
+      </div>
+    </div>
+
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// built on curunir</div>
+      <h2>A <span class="accent">minimal agentic harness.</span> In your house.</h2>
+    </div>
+    <div class="moat-body">
+      <div></div>
+      <div>
+        <p>The finance skills above are one configuration of <strong>Curunir</strong> — a deliberately minimal agentic harness. The same engine that writes an investment memo can run research, scheduling, or anything else you wire into it.</p>
+        <p>It runs on a small device in your home or office. The language models live in the cloud — <strong>but your portfolio, your cost basis, and your thesis notes don't.</strong> They stay on the device, in local memory.</p>
+        <p>Reachable from anywhere — web, CLI, email — through a thin portal that brokers the conversation without copying the data.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="beta">
+    <div class="sec-head">
+      <div class="label"><span class="sq"></span>// closed beta</div>
+      <h2>Summer <span class="accent">2026</span>. Invite only.</h2>
+    </div>
+    <div class="beta-body">
+      <div></div>
+      <div>
+        <form id="betaForm">
+          <input type="email" name="email" required placeholder="you@yourdomain.com">
+          <button type="submit">Request access</button>
+        </form>
+        <div class="fine" id="betaStatus">We read every request.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div><span class="sq"></span> &nbsp;Curunir · © 2026</div>
+    <div><a href="https://smartlayer.ventures">smartlayer.ventures</a></div>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  const form = document.getElementById('betaForm');
+  const status = document.getElementById('betaStatus');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    const email = form.email.value.trim();
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/beta/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email, source: 'finance'}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ok) {
+        form.style.display = 'none';
+        status.textContent = data.created
+          ? 'You\'re on the list. We\'ll be in touch.'
+          : 'Already on the list. We\'ll be in touch.';
+        status.style.color = 'var(--ink)';
+      } else if (r.status === 429) {
+        btn.disabled = false;
+        btn.textContent = 'Request access';
+        status.textContent = 'Too many requests. Try again in a minute.';
+        status.style.color = 'var(--accent)';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Request access';
+        status.textContent = 'Please check your email and try again.';
+        status.style.color = 'var(--accent)';
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Request access';
+      status.textContent = 'Network error. Try again.';
+      status.style.color = 'var(--accent)';
+    }
+  });
+})();
+</script>
+</body>
+</html>

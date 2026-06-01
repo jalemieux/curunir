@@ -97,6 +97,7 @@ app.include_router(ws_browser.router)
 
 _LANDING_DIR = Path(__file__).parent / "static" / "landing"
 _LAUNCH_DIR = Path(__file__).parent / "static" / "launch"
+_FINANCE_DIR = Path(__file__).parent / "static" / "finance"
 
 
 @app.get("/")
@@ -134,3 +135,10 @@ if _LAUNCH_DIR.exists():
             name="launch-reports",
         )
     app.mount("/launch", StaticFiles(directory=_LAUNCH_DIR, html=True), name="launch")
+
+# Persona-specific landing for the finance assistant. Its in-page report
+# links reuse the /r/ mount above (the real memos live in landing/reports),
+# so no separate reports mount is needed. Beta form posts to /beta/signup
+# with source="finance" so admin can segment.
+if _FINANCE_DIR.exists():
+    app.mount("/finance", StaticFiles(directory=_FINANCE_DIR, html=True), name="finance")
