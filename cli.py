@@ -351,6 +351,12 @@ async def run(host: str, port: int, console: Console | None = None,
 
                 stop_spinner()
 
+                # Thinking deltas ride a separate, tagged stream; the terminal
+                # isn't the place for reasoning, so drop them (the final answer
+                # never carries thinking).
+                if data.get("delta") and data.get("thinking"):
+                    continue
+
                 # Streaming delta — append to buffer and update Live region
                 if data.get("delta"):
                     chunk = data.get("content") or ""
