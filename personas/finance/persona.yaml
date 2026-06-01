@@ -10,9 +10,25 @@ skills:
   - fred
   - sec-edgar
   - yfinance
+  # Research, sentiment & forward-looking signal
+  - catalyst-memo
+  - deep-research
+  - fact-checker
+  - polymarket
+  - digest
+  - reddit-research
+  - youtube-transcript
+  - podcast-ingest
+  # Web-search backends the research skills depend on
+  - web-search
+  - xai-search
+  - gemini-search
 
 # Key NAMES only — documentation + soft startup warning. The operator
 # supplies the values via the container environment / .env. See
 # .env.finance.example and README.md.
 keys:
   - FRED_API_KEY
+  - BRAVE_API_KEY   # web-search, reddit-research, digest
+  - XAI_API_KEY     # xai-search, reddit-research
+  - GEMINI_API_KEY  # gemini-search
