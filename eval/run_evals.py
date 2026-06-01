@@ -9,6 +9,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -18,6 +19,22 @@ import websockets
 
 DEFAULT_EVALS_FILE = Path(__file__).parent / "simple_evals.md"
 RESULTS_DIR = Path(__file__).parent / "eval_results"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_pairing_token() -> str | None:
+    """WS pairing token: $CURUNIR_WS_TOKEN, else context/.ws-token (mirrors cli.py).
+
+    The server requires a `{"type":"hello","token":...}` first frame whenever a
+    token is configured; without it the upgrade is closed with 1008 "auth".
+    """
+    env = os.environ.get("CURUNIR_WS_TOKEN")
+    if env:
+        return env.strip() or None
+    try:
+        return (REPO_ROOT / "context" / ".ws-token").read_text().strip() or None
+    except OSError:
+        return None
 
 
 def parse_prompts(path: Path) -> list[dict]:
@@ -96,15 +113,27 @@ async def send_prompt(ws, prompt: str, max_loops: int | None = None) -> dict:
         if data.get("final"):
             break
 
-        # Abort if we've exceeded the tool-call budget for this prompt
+        # Abort if we've exceeded the tool-call budget for this prompt. Cancel
+        # out-of-band via `interrupt` (handled without enqueuing, so it adds no
+        # extra final frame) and keep draining until the one interrupted final —
+        # a mid-stream `reset` injects an extra final and desyncs every prompt
+        # after this one.
         if max_loops is not None and tool_call_count >= max_loops:
             hit_limit = True
-            print(f"  ⚠ eval limit reached ({tool_call_count}/{max_loops} tool calls) — resetting")
-            await ws.send(json.dumps({"content": "", "command": "reset"}))
-            # Drain the reset response
-            async for reset_raw in ws:
-                reset_data = json.loads(reset_raw)
-                if reset_data.get("final"):
+            print(f"  ⚠ eval limit reached ({tool_call_count}/{max_loops} tool calls) — interrupting")
+            await ws.send(json.dumps({"command": "interrupt"}))
+            async for raw2 in ws:
+                data2 = json.loads(raw2)
+                for tc in data2.get("tool_calls") or []:
+                    tool_calls.append(tc)
+                    print(f"  ├─ {tc}")
+                text2 = data2.get("content") or ""
+                if text2:
+                    content_parts.append(text2)
+                    print(text2)
+                if data2.get("stats"):
+                    stats = data2["stats"]
+                if data2.get("final"):
                     break
             break
 
@@ -178,6 +207,14 @@ async def run(
     print(f"Connecting to {uri}...")
 
     async with websockets.connect(uri) as ws:
+        # First frame must be a hello carrying the pairing token, or the server
+        # closes the socket with 1008 "auth" before sending its welcome.
+        hello: dict = {"type": "hello"}
+        token = load_pairing_token()
+        if token is not None:
+            hello["token"] = token
+        await ws.send(json.dumps(hello))
+
         # Read welcome message to get model
         raw = await ws.recv()
         welcome = json.loads(raw)
