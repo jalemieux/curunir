@@ -260,6 +260,26 @@ main {
 }
 .msg { margin-bottom: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .msg .role { display: none; }
+/* Reasoning/thinking: a quiet, collapsed-by-default disclosure that sits
+   above the answer. De-emphasized so it never competes with the reply. */
+.thinking-disclosure {
+  margin: 0 0 8px; font-size: 12.5px; color: var(--header-text);
+  border-left: 2px solid var(--border); padding-left: 10px;
+}
+.thinking-disclosure > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+  opacity: 0.75;
+}
+.thinking-disclosure > summary::-webkit-details-marker { display: none; }
+.thinking-disclosure > summary::before {
+  content: "▸ "; display: inline-block; transition: transform 0.1s;
+}
+.thinking-disclosure[open] > summary::before { content: "▾ "; }
+.thinking-disclosure .thinking-content {
+  margin-top: 6px; white-space: pre-wrap; line-height: 1.5;
+  font-style: italic; opacity: 0.85;
+}
 .msg.user .body {
   background: var(--bubble);
   border-radius: 14px;
@@ -1316,9 +1336,36 @@ function printResponse(bodyEl) {
   window.print();
 }
 
+// Lazily attach a collapsed "Thinking" disclosure to an in-progress bubble,
+// inserted above the answer body. Returns the inner content element that
+// reasoning text accumulates into. Collapsed by default; advanced users can
+// expand it, and it persists (not wiped) once the final answer lands.
+function ensureThinkingDisclosure(msgEl) {
+  let details = msgEl.querySelector(".thinking-disclosure");
+  if (!details) {
+    details = document.createElement("details");
+    details.className = "thinking-disclosure";
+    details.innerHTML =
+      '<summary>Thinking</summary><div class="thinking-content"></div>';
+    const body = msgEl.querySelector(".body");
+    msgEl.insertBefore(details, body);
+  }
+  return details.querySelector(".thinking-content");
+}
+
 function renderAgentChunk(m) {
   if (!inProgressMsg) {
     inProgressMsg = appendMessage("assistant", true);
+  }
+  // Reasoning rides a separate, tagged stream — route it into the quiet
+  // disclosure instead of the answer body so the two never clobber.
+  if (m.thinking) {
+    if (m.delta && m.content) {
+      const tc = ensureThinkingDisclosure(inProgressMsg);
+      tc.textContent = (tc.textContent || "") + m.content;
+    }
+    scrollToBottom();
+    return;
   }
   const body = inProgressMsg.querySelector(".body");
   if (m.delta) {
@@ -1336,6 +1383,10 @@ function renderAgentChunk(m) {
   if (m.final) {
     finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
+    // Auto-collapse the thinking disclosure but keep it in the DOM so
+    // advanced users can re-open it after the answer renders.
+    const disc = inProgressMsg.querySelector(".thinking-disclosure");
+    if (disc) disc.open = false;
     appendResponseActions(inProgressMsg);
     inProgressMsg = null;
     // The turn just completed — refresh the sidebar so a brand-new
@@ -1849,6 +1900,16 @@ function renderScratchChunk(m) {
   if (!scratchInProgressMsg) {
     scratchInProgressMsg = scratchAppendMessage("assistant", true);
   }
+  // Same reasoning routing as the main path: thinking goes into a quiet
+  // disclosure, never the answer body.
+  if (m.thinking) {
+    if (m.delta && m.content) {
+      const tc = ensureThinkingDisclosure(scratchInProgressMsg);
+      tc.textContent = (tc.textContent || "") + m.content;
+    }
+    scratchpadBody.scrollTop = scratchpadBody.scrollHeight;
+    return;
+  }
   const body = scratchInProgressMsg.querySelector(".body");
   if (m.delta) {
     body.dataset.raw = (body.dataset.raw || "") + (m.content || "");
@@ -1859,6 +1920,8 @@ function renderScratchChunk(m) {
   }
   if (m.final) {
     scratchInProgressMsg.classList.remove("thinking");
+    const disc = scratchInProgressMsg.querySelector(".thinking-disclosure");
+    if (disc) disc.open = false;
     scratchInProgressMsg = null;
     scratchTurnPending = false;
     updateScratchpadSendState();
