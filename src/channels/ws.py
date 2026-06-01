@@ -344,6 +344,7 @@ class WebSocketChannel:
             "tool_calls": msg.tool_calls,
             "final": msg.final,
             "delta": msg.delta,
+            "thinking": msg.thinking,
             "attachments": msg.attachments if msg.attachments else None,
             "workflow": msg.workflow,
             "stats": msg.stats,

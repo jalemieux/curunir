@@ -130,19 +130,121 @@ class LLMResponse:
     finish_reason: str | None = None
 
 
+def _reasoning_piece(delta) -> str | None:
+    """Extract a reasoning/thinking chunk from a streaming delta, if any.
+
+    Probes the shapes different providers expose: LiteLLM's normalized
+    ``reasoning_content`` (Anthropic, DeepSeek, OpenRouter), and the
+    Anthropic-native ``thinking_blocks`` list as a fallback. Returns ``None``
+    for non-reasoning models so they see zero behaviour change.
+    """
+    piece = getattr(delta, "reasoning_content", None)
+    if piece:
+        return piece
+    blocks = getattr(delta, "thinking_blocks", None)
+    if blocks:
+        parts = [
+            (b.get("thinking", "") if isinstance(b, dict) else getattr(b, "thinking", ""))
+            for b in blocks
+        ]
+        joined = "".join(p for p in parts if p)
+        if joined:
+            return joined
+    return None
+
+
+def _partial_tail_len(buf: str, tag: str) -> int:
+    """Length of the longest suffix of ``buf`` that is a proper prefix of ``tag``.
+
+    Used to hold back a few trailing chars that might be the start of a tag
+    split across streaming chunk boundaries (e.g. ``buf`` ends with ``"<thi"``).
+    """
+    for k in range(min(len(buf), len(tag) - 1), 0, -1):
+        if buf.endswith(tag[:k]):
+            return k
+    return 0
+
+
+class _ThinkSplitter:
+    """Stream-split inline ``<think>...</think>`` reasoning out of content text.
+
+    Some reasoning models — mostly local llama.cpp/vllm/Ollama endpoints
+    serving DeepSeek-R1, QwQ, Qwen3, etc. — emit their chain-of-thought
+    inline in the content stream wrapped in ``<think></think>`` rather than via
+    a separate reasoning field. Feed each content piece in; the answer text is
+    returned for the reply and the reasoning is returned separately for the
+    thinking sink. Tags may straddle chunk boundaries, so a tail that could be
+    a partial tag is held back until the next piece (or ``flush``).
+    """
+
+    OPEN = "<think>"
+    CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._in_think = False
+
+    def feed(self, piece: str) -> tuple[str, str]:
+        """Consume ``piece``; return ``(answer_text, thinking_text)``."""
+        self._buf += piece
+        answer: list[str] = []
+        thinking: list[str] = []
+        while self._buf:
+            if not self._in_think:
+                idx = self._buf.find(self.OPEN)
+                if idx == -1:
+                    keep = _partial_tail_len(self._buf, self.OPEN)
+                    cut = len(self._buf) - keep
+                    if cut > 0:
+                        answer.append(self._buf[:cut])
+                    self._buf = self._buf[cut:]
+                    break
+                if idx > 0:
+                    answer.append(self._buf[:idx])
+                self._buf = self._buf[idx + len(self.OPEN):]
+                self._in_think = True
+            else:
+                idx = self._buf.find(self.CLOSE)
+                if idx == -1:
+                    keep = _partial_tail_len(self._buf, self.CLOSE)
+                    cut = len(self._buf) - keep
+                    if cut > 0:
+                        thinking.append(self._buf[:cut])
+                    self._buf = self._buf[cut:]
+                    break
+                if idx > 0:
+                    thinking.append(self._buf[:idx])
+                self._buf = self._buf[idx + len(self.CLOSE):]
+                self._in_think = False
+        return "".join(answer), "".join(thinking)
+
+    def flush(self) -> tuple[str, str]:
+        """Drain any held-back remainder at stream end as ``(answer, thinking)``."""
+        rem, self._buf = self._buf, ""
+        if not rem:
+            return "", ""
+        return ("", rem) if self._in_think else (rem, "")
+
+
 async def _consume_stream(
     response_iter,
     on_text_delta: Callable[[str], Awaitable[None]],
+    on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[int, dict], LLMUsage, str | None]:
     """Drain a LiteLLM streaming response.
 
     Returns (full_text, tool_calls_by_index, usage, finish_reason). The last
-    non-null finish_reason seen on any chunk wins.
+    non-null finish_reason seen on any chunk wins. Reasoning chunks are routed
+    to ``on_thinking_delta`` (when provided) and kept out of ``full_text``, so
+    the returned answer never carries the model's thinking.
     """
     text_parts: list[str] = []
     tc_by_index: dict[int, dict] = {}
     usage = LLMUsage()
     finish_reason: str | None = None
+    # Only strip inline <think> tags when a thinking sink is wired up — keeps
+    # behaviour identical for callers that don't separate reasoning.
+    think_splitter = _ThinkSplitter() if on_thinking_delta is not None else None
 
     async for chunk in response_iter:
         if getattr(chunk, "usage", None):
@@ -161,10 +263,22 @@ async def _consume_stream(
             finish_reason = fr
         delta = chunk.choices[0].delta
 
+        reasoning_piece = _reasoning_piece(delta)
+        if reasoning_piece and on_thinking_delta is not None:
+            await on_thinking_delta(reasoning_piece)
+
         text_piece = getattr(delta, "content", None)
         if text_piece:
-            text_parts.append(text_piece)
-            await on_text_delta(text_piece)
+            if think_splitter is not None:
+                answer_piece, think_piece = think_splitter.feed(text_piece)
+                if think_piece:
+                    await on_thinking_delta(think_piece)
+                if answer_piece:
+                    text_parts.append(answer_piece)
+                    await on_text_delta(answer_piece)
+            else:
+                text_parts.append(text_piece)
+                await on_text_delta(text_piece)
 
         delta_tcs = getattr(delta, "tool_calls", None) or []
         for tc in delta_tcs:
@@ -181,6 +295,14 @@ async def _consume_stream(
                 if getattr(fn, "arguments", None):
                     entry["arguments"] += fn.arguments
 
+    if think_splitter is not None:
+        answer_rem, think_rem = think_splitter.flush()
+        if think_rem:
+            await on_thinking_delta(think_rem)
+        if answer_rem:
+            text_parts.append(answer_rem)
+            await on_text_delta(answer_rem)
+
     return "".join(text_parts), tc_by_index, usage, finish_reason
 
 
@@ -191,12 +313,15 @@ async def call_llm(
     api_base: str | None = None,
     openrouter_provider: str | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> LLMResponse:
     """Call LLM via LiteLLM, return normalized response.
 
     When ``on_text_delta`` is provided, switches to streaming mode and fires
-    the callback for each text chunk. Tool calls and usage are still returned
-    as a complete ``LLMResponse``.
+    the callback for each text chunk. ``on_thinking_delta`` (optional) receives
+    the model's reasoning/thinking chunks separately, so they never mix into
+    the answer text. Tool calls and usage are still returned as a complete
+    ``LLMResponse``.
     """
     kwargs = {
         "model": model,
@@ -259,7 +384,8 @@ async def call_llm(
                 raise
 
     if streaming:
-        text, tc_by_index, usage, finish_reason = await _consume_stream(response, on_text_delta)
+        text, tc_by_index, usage, finish_reason = await _consume_stream(
+            response, on_text_delta, on_thinking_delta)
         usage.elapsed_sec = time.monotonic() - t0
         if not usage.model:
             usage.model = model

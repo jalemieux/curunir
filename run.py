@@ -421,6 +421,19 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 final=False,
             ))
 
+        async def on_thinking_delta(chunk: str):
+            # Reasoning streams on a separate, tagged channel so the UI can
+            # route it into a quiet disclosure instead of the answer bubble.
+            await out_queue.put(OutgoingMessage(
+                content=chunk,
+                channel=msg.channel,
+                session_id=msg.session_id,
+                reply_address=msg.reply_address,
+                delta=True,
+                thinking=True,
+                final=False,
+            ))
+
         # Outbound sinks the agent fills during the turn: any files it wants
         # to attach to its reply, and a metadata bag for workflow/stats.
         attachments = []
@@ -442,6 +455,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 on_tool_call=on_tool_call, attachments=attachments,
                 metadata=metadata,
                 on_text_delta=on_text_delta,
+                on_thinking_delta=on_thinking_delta,
             )
         except Exception as e:
             logger.exception("Agent error for session %s: %s", msg.session_id, e)

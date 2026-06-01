@@ -120,15 +120,22 @@ async def test_both_text_and_tool_calls():
 
 
 def _make_stream_chunk(content: str | None = None, tool_call_deltas: list | None = None,
-                       usage: tuple | None = None):
+                       usage: tuple | None = None, reasoning: str | None = None,
+                       thinking_blocks: list | None = None):
     """Build a mock LiteLLM streaming chunk.
 
     tool_call_deltas: list of dicts like {"index": 0, "id": "call_x",
         "function": {"name": "bash", "arguments": "{\"cmd\":"}}.
     usage: tuple (prompt_tokens, completion_tokens, total_tokens) or None.
+    reasoning: text for delta.reasoning_content (None when absent).
+    thinking_blocks: list for delta.thinking_blocks (None when absent).
     """
     delta = MagicMock()
     delta.content = content
+    # Default the reasoning-bearing fields to None so a bare MagicMock doesn't
+    # auto-vivify a truthy attribute and spuriously fire the thinking callback.
+    delta.reasoning_content = reasoning
+    delta.thinking_blocks = thinking_blocks
     if tool_call_deltas is None:
         delta.tool_calls = None
     else:
@@ -231,6 +238,173 @@ async def test_stream_accumulates_tool_call_arguments():
     assert tc["id"] == "call_abc"
     assert tc["function"]["name"] == "bash"
     assert tc["function"]["arguments"] == '{"command": "echo hi"}'
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_fires_thinking_callback_separately():
+    """Reasoning chunks fire on_thinking_delta; answer chunks fire on_text_delta;
+    the returned text contains no reasoning."""
+    chunks = [
+        _make_stream_chunk(reasoning="Let me "),
+        _make_stream_chunk(reasoning="think..."),
+        _make_stream_chunk(content="The "),
+        _make_stream_chunk(content="answer"),
+        _make_stream_chunk(usage=(10, 3, 13)),
+    ]
+
+    text_received: list[str] = []
+    thinking_received: list[str] = []
+
+    async def on_text(t: str):
+        text_received.append(t)
+
+    async def on_thinking(t: str):
+        thinking_received.append(t)
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm(
+            "test-model", [{"role": "user", "content": "hi"}], [],
+            on_text_delta=on_text, on_thinking_delta=on_thinking,
+        )
+
+    assert thinking_received == ["Let me ", "think..."]
+    assert text_received == ["The ", "answer"]
+    assert result.text == "The answer"
+    # Reasoning must never leak into the answer text.
+    assert "think" not in (result.text or "")
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_via_thinking_blocks_fallback():
+    """When reasoning_content is absent, fall back to thinking_blocks."""
+    chunks = [
+        _make_stream_chunk(thinking_blocks=[{"type": "thinking", "thinking": "hmm "}]),
+        _make_stream_chunk(thinking_blocks=[{"type": "thinking", "thinking": "ok"}]),
+        _make_stream_chunk(content="done"),
+        _make_stream_chunk(usage=(5, 1, 6)),
+    ]
+
+    thinking_received: list[str] = []
+
+    async def on_text(t: str):
+        pass
+
+    async def on_thinking(t: str):
+        thinking_received.append(t)
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm(
+            "test-model", [], [],
+            on_text_delta=on_text, on_thinking_delta=on_thinking,
+        )
+
+    assert thinking_received == ["hmm ", "ok"]
+    assert result.text == "done"
+
+
+@pytest.mark.asyncio
+async def test_stream_inline_think_tags_split_to_thinking_channel():
+    """Inline <think>...</think> in content is routed to on_thinking_delta and
+    stripped from the answer text (local reasoning-model shape)."""
+    chunks = [
+        _make_stream_chunk(content="<think>let me "),
+        _make_stream_chunk(content="reason</think>The "),
+        _make_stream_chunk(content="answer"),
+        _make_stream_chunk(usage=(10, 3, 13)),
+    ]
+
+    text_received: list[str] = []
+    thinking_received: list[str] = []
+
+    async def on_text(t: str):
+        text_received.append(t)
+
+    async def on_thinking(t: str):
+        thinking_received.append(t)
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm(
+            "test-model", [], [],
+            on_text_delta=on_text, on_thinking_delta=on_thinking,
+        )
+
+    assert "".join(thinking_received) == "let me reason"
+    assert result.text == "The answer"
+    assert "".join(text_received) == "The answer"
+    assert "think" not in (result.text or "")
+
+
+@pytest.mark.asyncio
+async def test_stream_inline_think_tag_split_across_chunk_boundary():
+    """A <think> tag split across two chunks is still recognized and stripped."""
+    chunks = [
+        _make_stream_chunk(content="<thi"),
+        _make_stream_chunk(content="nk>secret</thin"),
+        _make_stream_chunk(content="k>visible"),
+        _make_stream_chunk(usage=(1, 1, 2)),
+    ]
+
+    text_received: list[str] = []
+    thinking_received: list[str] = []
+
+    async def on_text(t: str):
+        text_received.append(t)
+
+    async def on_thinking(t: str):
+        thinking_received.append(t)
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm(
+            "test-model", [], [],
+            on_text_delta=on_text, on_thinking_delta=on_thinking,
+        )
+
+    assert "".join(thinking_received) == "secret"
+    assert result.text == "visible"
+    # The literal tag fragments must never surface in the answer.
+    assert "<thi" not in result.text and "think" not in result.text
+
+
+@pytest.mark.asyncio
+async def test_stream_without_thinking_callback_keeps_inline_tags_untouched():
+    """No thinking sink → content (including any <think> text) passes through
+    unchanged, preserving back-compat for callers that don't split reasoning."""
+    chunks = [
+        _make_stream_chunk(content="<think>x</think>y"),
+        _make_stream_chunk(usage=(1, 1, 2)),
+    ]
+
+    async def on_text(t: str):
+        pass
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm("test-model", [], [], on_text_delta=on_text)
+
+    assert result.text == "<think>x</think>y"
+
+
+@pytest.mark.asyncio
+async def test_stream_reasoning_without_thinking_callback_is_noop():
+    """Reasoning present but no on_thinking_delta supplied: no crash, answer clean."""
+    chunks = [
+        _make_stream_chunk(reasoning="ignored"),
+        _make_stream_chunk(content="hi"),
+        _make_stream_chunk(usage=(1, 1, 2)),
+    ]
+
+    async def on_text(t: str):
+        pass
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=_async_iter(chunks))
+        result = await call_llm("test-model", [], [], on_text_delta=on_text)
+
+    assert result.text == "hi"
 
 
 @pytest.mark.asyncio
