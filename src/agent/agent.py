@@ -331,6 +331,7 @@ class Agent:
         system_task_prompt: str | None = None,
         metadata: dict | None = None,
         on_text_delta=None,
+        on_thinking_delta=None,
     ) -> str:
         """Process a message and return the agent's response.
 
@@ -436,6 +437,7 @@ class Agent:
                     api_base=self.config.api_base,
                     openrouter_provider=self.config.openrouter_provider,
                     on_text_delta=on_text_delta,
+                    on_thinking_delta=on_thinking_delta,
                 )
             except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e:
                 if not _is_context_overflow(e):
@@ -452,6 +454,7 @@ class Agent:
                         api_base=self.config.api_base,
                         openrouter_provider=self.config.openrouter_provider,
                         on_text_delta=on_text_delta,
+                        on_thinking_delta=on_thinking_delta,
                     )
                 except (litellm.ContextWindowExceededError, litellm.BadRequestError) as e2:
                     if not _is_context_overflow(e2):

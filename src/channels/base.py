@@ -23,6 +23,7 @@ class OutgoingMessage:
     tool_calls: list[str] | None = None
     final: bool = True
     delta: bool = False
+    thinking: bool = False
     attachments: list[dict] | None = None
     workflow: dict | None = None
     stats: dict | None = None

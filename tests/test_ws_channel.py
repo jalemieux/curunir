@@ -413,6 +413,34 @@ async def test_send_delta_defaults_false_in_payload():
         await _stop_channel(task)
 
 
+@pytest.mark.asyncio
+async def test_send_includes_thinking_field():
+    """thinking field from OutgoingMessage is included in the JSON payload,
+    and defaults to False when not set."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT + 11)
+    task = await _start_channel(ch)
+
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT + 11}") as ws:
+            sid = await _read_hello(ws)
+            await ch.send(OutgoingMessage(
+                content="reasoning", channel="cli", session_id=sid,
+                reply_address={}, delta=True, thinking=True, final=False,
+            ))
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+            assert data["thinking"] is True
+
+            await ch.send(OutgoingMessage(
+                content="answer", channel="cli", session_id=sid,
+                reply_address={},
+            ))
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+            assert data["thinking"] is False
+    finally:
+        await _stop_channel(task)
+
+
 # ---------------------------------------------------------------------------
 # Tests: _decode_attachments — inbound attachment validation
 # ---------------------------------------------------------------------------

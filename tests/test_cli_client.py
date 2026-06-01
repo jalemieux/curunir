@@ -221,6 +221,39 @@ async def test_output_renders_attachments():
 
 
 @pytest.mark.asyncio
+async def test_thinking_deltas_are_skipped_not_rendered():
+    """Thinking deltas (delta + thinking) must not crash the CLI and must not
+    surface their reasoning in the rendered answer."""
+    port = _BASE_PORT + 28
+
+    async def handler(ws: websockets.ServerConnection) -> None:
+        async for raw in ws:
+            if json.loads(raw).get("type") == "hello":
+                continue
+            await ws.send(json.dumps({
+                "content": "SECRET_REASONING",
+                "delta": True,
+                "thinking": True,
+                "final": False,
+            }))
+            await ws.send(json.dumps({
+                "content": "clean answer",
+                "tool_calls": [],
+                "final": True,
+                "attachments": None,
+            }))
+
+    console = _make_console_with_input(["hi"])
+
+    async with websockets.serve(handler, "127.0.0.1", port):
+        await cli.run("127.0.0.1", port, console=console)
+
+    output = console.file.getvalue()
+    assert "clean answer" in output
+    assert "SECRET_REASONING" not in output
+
+
+@pytest.mark.asyncio
 async def test_tool_calls_shown_by_default():
     """Tool calls ARE rendered by default (verbose is on)."""
     port = _BASE_PORT + 6
