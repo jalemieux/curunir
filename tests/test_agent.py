@@ -393,6 +393,20 @@ class TestAgentHandle:
         for call in mock_call.call_args_list:
             assert call.kwargs.get("on_text_delta") is cb
 
+    async def test_forwards_on_thinking_delta_to_call_llm(self, agent):
+        mock_response = LLMResponse(text="answer", tool_calls=None)
+
+        async def think_cb(text: str):
+            pass
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_call:
+            result = await agent.handle("hi", "test-session", on_thinking_delta=think_cb)
+
+        assert mock_call.call_count == 1
+        assert mock_call.call_args.kwargs.get("on_thinking_delta") is think_cb
+        # Final returned text is the answer only — thinking never leaks in.
+        assert result == "answer"
+
     async def test_writes_usage_row_per_call_llm(self, agent_config):
         from src.llm import LLMUsage
 

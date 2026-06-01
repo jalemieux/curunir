@@ -614,6 +614,52 @@ async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server
 
 
 @pytest.mark.asyncio
+async def test_thinking_flag_propagates_into_payload(portal_server):
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t"
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        await ch.send(OutgoingMessage(
+            content="reasoning...", channel="portal",
+            session_id=PORTAL_SESSION_ID, reply_address={},
+            delta=True, thinking=True, final=False,
+        ))
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["payload"]["thinking"] is True
+        assert msg["payload"]["delta"] is True
+        assert msg["payload"]["content"] == "reasoning..."
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_thinking_delta_dropped_when_disconnected(portal_server):
+    """A thinking delta is a streaming delta — dropped, not buffered, when
+    there is no connection (parity with answer deltas)."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    await ch.send(OutgoingMessage(
+        content="thinking", channel="portal", session_id="s",
+        reply_address={}, final=False, delta=True, thinking=True,
+    ))
+    assert len(ch._outbound) == 0
+
+
+@pytest.mark.asyncio
 async def test_duplicate_user_message_within_window_enqueued_once():
     """Two identical content frames back-to-back → exactly one
     IncomingMessage enqueued; the second is dropped as a duplicate."""
