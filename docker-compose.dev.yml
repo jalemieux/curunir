@@ -41,3 +41,8 @@ services:
 
   curunir:
     build: .
+    environment:
+      # Persona bundle selected at boot (personas/<name>/persona.yaml).
+      # Unset falls back to personas/default. Override CURUNIR_PERSONA in
+      # .env to develop against a specific persona locally.
+      CURUNIR_PERSONA: ${CURUNIR_PERSONA:-default}
