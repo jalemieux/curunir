@@ -46,8 +46,13 @@ python eval/finance/run_finance_evals.py --id R6,F9      # just these task ids
 python eval/finance/run_finance_evals.py --tag regression # tasks whose tag matches
 python eval/finance/run_finance_evals.py --tag guardrail  # any tag regex works
 python eval/finance/run_finance_evals.py --no-grade       # capture only, skip grading
+python eval/finance/run_finance_evals.py -v               # stream tool calls + text live
 python eval/finance/run_finance_evals.py --host h --port 8765   # remote SUT
 ```
+
+`-v`/`--verbose` prints each task's tool calls (`├─ load_skill: …`,
+`├─ bash: …`) and streamed text as it happens, then the grade — useful for
+watching *why* a task is heading toward pass or fail in real time.
 
 The full suite spends real model tokens on the SUT (the F11 memo alone runs
 ~8–10 min end to end). Use `--id` / `--tag` while iterating; run the full 22
@@ -75,10 +80,15 @@ that provider's key in the env).
 Each task prints `PASS` / `FAIL` / `SLOW` / `ERR` and a one-line reason. The
 saved report comes in two forms:
 
-- `results/finance-<ts>-<model>.md` — a table of `id | name | status | why`.
-- `results/finance-<ts>-<model>.json` — the full capture per task
+- `results/finance-<ts>-<model>.md` — a `## Summary` table
+  (`id | name | status | why`) **followed by a `## Trace` section**: for every
+  task, the full prompt, each tool call, attachments, the agent's complete final
+  text, and per-task stats. A failure can be diagnosed from this file alone.
+- `results/finance-<ts>-<model>.json` — the same capture as structured data
   (`final_text`, `actions`, `attachments`, `wall_ms`, `turns`, `tokens_out`),
-  for digging into *why* something failed.
+  for programmatic diffing across runs.
+
+For a live trace while it runs, add `-v` (see Quick start).
 
 A failure is the agent's, not the harness's — the captured `final_text` and
 `actions` show exactly what the model did. (Baseline on
