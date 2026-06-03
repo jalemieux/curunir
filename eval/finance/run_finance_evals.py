@@ -81,7 +81,7 @@ def _normalize_action(summary: str) -> str:
     return f"{snake}: {rest}".rstrip().rstrip(":").rstrip()
 
 
-async def _drain_until_final(ws, capture: dict | None = None) -> bool:
+async def _drain_until_final(ws, capture: dict | None = None, verbose: bool = False) -> bool:
     """Read frames until exactly ONE `final:true`, then return True.
 
     The agent emits exactly one final frame per turn (OutgoingMessage.final
@@ -95,7 +95,10 @@ async def _drain_until_final(ws, capture: dict | None = None) -> bool:
         data = json.loads(raw)
         if capture is not None:
             for tc in data.get("tool_calls") or []:
-                capture["actions"].append(_normalize_action(tc if isinstance(tc, str) else str(tc)))
+                act = _normalize_action(tc if isinstance(tc, str) else str(tc))
+                capture["actions"].append(act)
+                if verbose:
+                    print(f"    ├─ {act}", flush=True)
             text = data.get("content")
             if text:
                 # The final frame carries the COMPLETE text; deltas carry chunks
@@ -105,8 +108,12 @@ async def _drain_until_final(ws, capture: dict | None = None) -> bool:
                     capture["final_content"] = text
                 else:
                     capture["deltas"].append(text)
+                if verbose and not data.get("final"):
+                    print(text, end="", flush=True)
             for att in data.get("attachments") or []:
                 capture["attachments"].append(att)
+                if verbose:
+                    print(f"\n    [attach] {att.get('name') or att.get('path')}", flush=True)
             if data.get("stats"):
                 capture["stats"] = data["stats"]
         if data.get("final"):
@@ -125,7 +132,7 @@ def _task_timeout(task: dict) -> float:
     return min(600.0, max(180.0, loops * 20.0))
 
 
-async def run_one(ws, task: dict) -> G.Result:
+async def run_one(ws, task: dict, verbose: bool = False) -> G.Result:
     """Send one task's prompt, drain to its single final frame, build a Result."""
     # Clear history so tasks are independent; consume the reset's final ack.
     await ws.send(json.dumps({"content": "", "command": "reset"}))
@@ -137,14 +144,14 @@ async def run_one(ws, task: dict) -> G.Result:
 
     timed_out = False
     try:
-        await asyncio.wait_for(_drain_until_final(ws, cap), _task_timeout(task))
+        await asyncio.wait_for(_drain_until_final(ws, cap, verbose), _task_timeout(task))
     except asyncio.TimeoutError:
         # Cancel out-of-band (interrupt is handled without enqueuing, so it adds
         # no extra final), then drain the one interrupted final to stay synced.
         timed_out = True
         await ws.send(json.dumps({"command": "interrupt"}))
         try:
-            await asyncio.wait_for(_drain_until_final(ws, cap), 90)
+            await asyncio.wait_for(_drain_until_final(ws, cap, verbose), 90)
         except asyncio.TimeoutError:
             pass
 
@@ -206,13 +213,19 @@ async def main_async(args) -> None:
 
         rows = []
         for i, task in enumerate(tasks, 1):
-            print(f"[{i}/{len(tasks)}] {task['id']} {task['name']} … ", end="", flush=True)
-            result = await run_one(ws, task)
+            header = f"[{i}/{len(tasks)}] {task['id']} {task['name']}"
+            # Verbose: header on its own line, then live tool calls / text below;
+            # otherwise keep the compact single-line "header … STATUS why".
+            print(header + ("" if args.verbose else " … "),
+                  end="\n" if args.verbose else "", flush=True)
+            result = await run_one(ws, task, verbose=args.verbose)
             if args.no_grade:
                 status, why = "—", "(not graded)"
             else:
                 status, why = G.grade(task, result)
-            print(f"{STATUS_MARK.get(status, status)} {why}")
+            prefix = "  => " if args.verbose else ""
+            print(f"\n{prefix}{STATUS_MARK.get(status, status)} {why}" if args.verbose
+                  else f"{STATUS_MARK.get(status, status)} {why}")
             rows.append({
                 "id": task["id"], "name": task["name"], "tags": task.get("tags", []),
                 "prompt": task["prompt"], "status": status, "why": why,
@@ -243,11 +256,32 @@ def _report(model: str, rows: list[dict]) -> None:
 
     md = [f"# Finance Eval Results: {model}", "",
           f"- Version: {version()}", f"- Timestamp: {payload['timestamp']}",
-          f"- Summary: {summary}", "", "| id | name | status | why |",
-          "|----|------|--------|-----|"]
+          f"- Summary: {summary}", "", "## Summary", "",
+          "| id | name | status | why |", "|----|------|--------|-----|"]
     for r in rows:
         why = r["why"].replace("|", "\\|")
         md.append(f"| {r['id']} | {r['name']} | {r['status']} | {why} |")
+
+    # Per-task trace: the full prompt, every tool call, attachments, the agent's
+    # final text, and stats — so a failure can be diagnosed from the report
+    # alone, without re-running.
+    md += ["", "## Trace", ""]
+    for r in rows:
+        md.append(f"### {r['id']} {r['name']} — {r['status']}")
+        md += ["", f"- **Why:** {r['why']}",
+               f"- **Tags:** {', '.join(r['tags'])}",
+               f"- **Stats:** {r['wall_ms']:.0f} ms · {r['turns']} turns · "
+               f"{r['tokens_out']} out-tok" + (f" · error={r['error']}" if r['error'] else ""),
+               "", "**Prompt:**", "", "```", r["prompt"], "```", "", "**Actions:**"]
+        if r["actions"]:
+            md += [f"- `{a}`" for a in r["actions"]]
+        else:
+            md.append("- *(none)*")
+        if r["attachments"]:
+            md += ["", "**Attachments:**"] + [f"- `{a}`" for a in r["attachments"]]
+        final_text = r["final_text"] or "*(empty response)*"
+        md += ["", "**Final text:**", "", "```", final_text, "```", "", "---", ""]
+
     out = RESULTS_DIR / f"finance-{ts}-{safe}.md"
     out.write_text("\n".join(md) + "\n")
     print(f"Report: {out}")
@@ -260,6 +294,8 @@ def main() -> None:
     p.add_argument("--tag", help="run only tasks with a tag matching this regex")
     p.add_argument("--id", help="comma-separated task ids, e.g. R1,F3,C2")
     p.add_argument("--no-grade", action="store_true", help="capture only, skip grading")
+    p.add_argument("--verbose", "-v", action="store_true",
+                   help="stream each task's tool calls and text live as it runs")
     asyncio.run(main_async(p.parse_args()))
 
 
