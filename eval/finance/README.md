@@ -77,16 +77,27 @@ that provider's key in the env).
 
 ## Reading the output
 
-Each task prints `PASS` / `FAIL` / `SLOW` / `ERR` and a one-line reason. The
-saved report comes in two forms:
+Each task prints `PASS` / `FAIL` / `SLOW` / `ERR` and a one-line reason. Three
+report files are written per run:
 
-- `results/finance-<ts>-<model>.md` — a `## Summary` table
-  (`id | name | status | why`) **followed by a `## Trace` section**: for every
-  task, the full prompt, each tool call, attachments, the agent's complete final
-  text, and per-task stats. A failure can be diagnosed from this file alone.
+- **`results/finance-<ts>-<model>.html`** — the primary human report. A
+  self-contained page (no external assets) with one collapsible card per task:
+  - the **full grader breakdown** — every sub-check of a composite with its own
+    pass/fail dot and reason, not just the first failure;
+  - the full prompt, every tool call, attachments, and the agent's **complete
+    final text**;
+  - **empty responses are flagged** with a red banner ("EMPTY RESPONSE — the
+    agent returned no text. It ran N turns and emitted M tool calls") plus any
+    runner error — so a blank answer is loud, not silent;
+  - per-task server stats (wall, iterations, llm calls, tokens);
+  - filter by status, filter by tag, free-text search, expand/collapse all.
+
+  Open it in a browser: `open results/finance-<ts>-<model>.html`.
 - `results/finance-<ts>-<model>.json` — the same capture as structured data
-  (`final_text`, `actions`, `attachments`, `wall_ms`, `turns`, `tokens_out`),
-  for programmatic diffing across runs.
+  (`checks`, `final_text`, `actions`, `attachments`, `stats`, `error`), for
+  programmatic diffing across runs.
+- `results/finance-<ts>-<model>.md` — a lightweight `id | name | status | why`
+  table for quick GitHub viewing / diffing.
 
 For a live trace while it runs, add `-v` (see Quick start).
 

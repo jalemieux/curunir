@@ -55,6 +55,7 @@ class Result:
     wall_ms: float = 0.0
     turns: int = 0
     tokens_out: int = 0
+    stats: dict = field(default_factory=dict)  # full stats dict from the server
     error: str | None = None
 
 
@@ -310,16 +311,57 @@ def _apply_budget(task: dict, result: Result, status: str, why: str) -> Verdict:
     return status, why
 
 
+def grade_detailed(task: dict, result: Result) -> tuple[str, str, list[dict]]:
+    """Like grade(), but also return a per-check breakdown for the report.
+
+    Returns (status, why, checks) where `checks` is a list of
+    {label, grader, status, why} — one entry per sub-grader for a composite
+    (ALL evaluated, so the report shows every check, not just the first
+    failure), or a single entry for a simple grader.
+    """
+    grader_name = task.get("grader")
+    if result.error and grader_name != "regex_present" and not task.get("allow_error"):
+        why = f"system error: {result.error}"
+        return FAIL, why, [{"label": "system", "grader": grader_name or "?",
+                            "status": FAIL, "why": why}]
+    if grader_name not in GRADERS:
+        return ERROR, f"unknown grader {grader_name!r}", []
+
+    checks: list[dict] = []
+    if grader_name == "composite":
+        passed = []
+        first_fail = first_error = None
+        slow = False
+        for sub in task["spec"]["all"]:
+            spec = resolve_anchor(sub.get("spec", {}))
+            st, why = GRADERS[sub["grader"]](result, spec)
+            label = sub.get("label", sub["grader"])
+            checks.append({"label": label, "grader": sub["grader"], "status": st, "why": why})
+            if st == FAIL and first_fail is None:
+                first_fail = f"[{label}] {why}"
+            elif st == ERROR and first_error is None:
+                first_error = f"[{label}] {why}"
+            elif st == PASS_SLOW:
+                slow = True
+            if st == PASS:
+                passed.append(f"{label}✓")
+        if first_fail is not None:
+            status, why = FAIL, first_fail
+        elif first_error is not None:
+            status, why = ERROR, first_error
+        else:
+            status, why = (PASS_SLOW if slow else PASS), " ".join(passed)
+    else:
+        spec = resolve_anchor(task.get("spec", {}))
+        status, why = GRADERS[grader_name](result, spec)
+        checks.append({"label": grader_name, "grader": grader_name,
+                       "status": status, "why": why})
+
+    status, why = _apply_budget(task, result, status, why)
+    return status, why, checks
+
+
 def grade(task: dict, result: Result) -> Verdict:
     """Resolve anchors, dispatch the grader, then apply any process budget."""
-    if result.error and task.get("grader") != "regex_present":
-        # An error answer can still legitimately satisfy an error-handling task;
-        # only short-circuit when the task isn't explicitly probing failure text.
-        if not task.get("allow_error"):
-            return FAIL, f"system error: {result.error}"
-    grader_name = task["grader"]
-    if grader_name not in GRADERS:
-        return ERROR, f"unknown grader {grader_name!r}"
-    spec = resolve_anchor(task.get("spec", {}))
-    status, why = GRADERS[grader_name](result, spec)
-    return _apply_budget(task, result, status, why)
+    status, why, _ = grade_detailed(task, result)
+    return status, why
