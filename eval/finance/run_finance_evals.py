@@ -230,6 +230,7 @@ async def main_async(args) -> None:
                   else f"{STATUS_MARK.get(status, status)} {why}")
             rows.append({
                 "id": task["id"], "name": task["name"], "tags": task.get("tags", []),
+                "intent": task.get("intent"), "expected": task.get("expected"),
                 "prompt": task["prompt"], "grader": task.get("grader"),
                 "status": status, "why": why, "checks": checks,
                 "actions": result.actions, "final_text": result.final_text,
@@ -339,6 +340,12 @@ ul.checks li{padding:3px 0;display:flex;gap:8px;align-items:baseline}
 .dot.pass{background:var(--pass)}.dot.fail{background:var(--fail)}
 .dot.slow{background:var(--slow)}.dot.error{background:var(--error)}
 .gname{color:#aaa;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.about{background:#fbfaf5;border:1px solid #ece6d3;border-radius:6px;padding:10px 14px}
+.about p{margin:0 0 8px;font-size:13px;line-height:1.5}
+.about p:last-child{margin-bottom:0}
+.about .lbl{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+ color:#9a8c5c;font-weight:700;margin-bottom:1px}
+.about .gradedby{color:#888;font-size:12px;border-top:1px dashed #e3dcc6;padding-top:7px}
 table.stats{border-collapse:collapse;font-size:12px}
 table.stats td{border:1px solid #eee;padding:3px 10px}
 table.stats td:first-child{color:#888;font-family:ui-monospace,Menlo,monospace}
@@ -378,6 +385,7 @@ def _card_html(r: dict) -> str:
     ft = r.get("final_text") or ""
     is_empty = not ft.strip()
     search = _esc(" ".join([r.get("id", ""), r.get("name", ""), r.get("why", ""),
+                            r.get("intent") or "", r.get("expected") or "",
                             r.get("prompt", ""), ft]).lower())
 
     flag = "<span class='flag-empty'>empty</span>" if is_empty else ""
@@ -389,6 +397,20 @@ def _card_html(r: dict) -> str:
                f"<span class='sstats'>{_esc(mini)}</span></summary>")
 
     b = ["<div class='body'>"]
+
+    intent, expected = r.get("intent"), r.get("expected")
+    if intent or expected:
+        b.append("<div class='sec'><div class='about'>")
+        if intent:
+            b.append(f"<p><span class='lbl'>What this tests</span>{_esc(intent)}</p>")
+        if expected:
+            b.append(f"<p><span class='lbl'>Expected behavior</span>{_esc(expected)}</p>")
+        grader = r.get("grader")
+        if grader:
+            b.append(f"<p class='gradedby'>Graded by <code>{_esc(grader)}</code> — "
+                     "the mechanical version of this contract is in <b>Grader checks</b> below.</p>")
+        b.append("</div></div>")
+
     checks = r.get("checks") or []
     if checks:
         b.append("<div class='sec'><h4>Grader checks</h4><ul class='checks'>")
