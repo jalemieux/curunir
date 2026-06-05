@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 import sys
 from datetime import date
@@ -16,7 +17,7 @@ from src.portfolio import db as pdb
 
 ASSET_CLASSES = {"equity", "real_estate", "collectible", "physical",
                  "cash", "private", "retirement"}
-MARKET_PRICED = {"equity", "physical", "crypto"}
+MARKET_PRICED = {"equity", "physical"}  # crypto tracked as equity (e.g. BTC-USD ticker)
 _REQUIRED = ("class", "label", "value")
 _COLUMNS = ("id", "class", "label", "ticker", "qty", "avg_cost",
             "cost_basis", "value", "value_asof", "acquired", "account", "extra")
@@ -78,12 +79,17 @@ def add_asset(path: str, fields: dict) -> dict:
             "acquired": fields.get("acquired"), "account": fields.get("account"),
             "extra": json.dumps(extra) if isinstance(extra, (dict, list)) else extra,
         }
-        con.execute(
-            f"INSERT INTO assets ({','.join(_COLUMNS)}) "
-            f"VALUES ({','.join('?' for _ in _COLUMNS)})",
-            tuple(record[c] for c in _COLUMNS),
-        )
-        con.commit()
+        try:
+            con.execute(
+                f"INSERT INTO assets ({','.join(_COLUMNS)}) "
+                f"VALUES ({','.join('?' for _ in _COLUMNS)})",
+                tuple(record[c] for c in _COLUMNS),
+            )
+            con.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError(
+                f"an asset already exists with class={fields['class']!r} "
+                f"label={fields['label']!r}")
     finally:
         con.close()
     return {"id": new_id, "warnings": warnings}
@@ -144,8 +150,13 @@ def update_asset(path: str, asset_id: str, fields: dict) -> dict:
 def remove_asset(path: str, asset_id: str) -> dict:
     con = pdb.connect(path)
     try:
-        cur = con.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
-        con.commit()
+        try:
+            cur = con.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+            con.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError(
+                f"cannot remove {asset_id!r}: a liability is linked to it — "
+                f"remove or relink the liability first")
     finally:
         con.close()
     if cur.rowcount == 0:
@@ -254,14 +265,19 @@ def pnl(path: str, cls: str = "collectible", today: str | None = None) -> dict:
             "acquired": a.get("acquired"),
             "long_term": (held >= 1.0) if held is not None else None,
         })
-        value += a["value"] or 0
-        basis += cb or 0
+        value += a["value"] if a["value"] is not None else 0.0
+        basis += cb if cb is not None else 0.0
     return {"class": cls, "cost_basis": round(basis, 2), "value": round(value, 2),
             "unrealized": round(value - basis, 2), "items": items}
 
 
 def query(path: str, sql: str) -> list[dict]:
-    """Run an arbitrary read-only SELECT. Opened mode=ro, so any write raises."""
+    """Run an arbitrary read-only SELECT. Opened mode=ro, and the statement
+    must begin with SELECT/WITH so a single ATTACH/PRAGMA can't escape the
+    read-only contract."""
+    head = sql.lstrip().lstrip("(").upper()
+    if not (head.startswith("SELECT") or head.startswith("WITH")):
+        raise ValueError("query() accepts only read-only SELECT/WITH statements")
     con = pdb.connect(path, readonly=True)
     try:
         return [dict(r) for r in con.execute(sql)]
@@ -275,6 +291,13 @@ def import_rows(path: str, rows: list[dict], account: str | None = None,
     Stamps `account` on each. If `stated_total` is given (the export's account
     value), compares it to the summed imported value and reports a mismatch —
     the deterministic catch for a dropped/miscopied row."""
+    for idx, row in enumerate(rows):
+        miss = [k for k in _REQUIRED if row.get(k) in (None, "")]
+        if miss:
+            raise ValueError(f"row {idx} ({row.get('label','?')}): missing {', '.join(miss)}")
+        if row["class"] not in ASSET_CLASSES:
+            raise ValueError(f"row {idx} ({row.get('label','?')}): unknown class {row['class']!r}")
+
     imported, warnings = 0, []
     for row in rows:
         rec = dict(row)
@@ -306,6 +329,9 @@ def _yfin_quote(ticker: str) -> float:
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     proc = subprocess.run([sys.executable, "skills/yfinance/yfin.py", "quote", ticker],
                           capture_output=True, text=True, timeout=30, cwd=root)
+    if proc.returncode != 0:
+        raise ValueError(f"yfin quote failed for {ticker}: "
+                         f"{proc.stdout.strip() or proc.stderr.strip()}")
     data = json.loads(proc.stdout)
     price = data.get("price") or data.get("last") or data.get("regularMarketPrice")
     if price is None:

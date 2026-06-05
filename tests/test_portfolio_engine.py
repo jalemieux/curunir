@@ -1,4 +1,7 @@
 import sqlite3
+
+import pytest
+
 from src.portfolio import db as pdb
 from src.portfolio import engine
 
@@ -24,7 +27,6 @@ def test_readonly_connection_rejects_writes(tmp_path):
     path = str(tmp_path / "portfolio.db")
     pdb.init_db(path)
     con = pdb.connect(path, readonly=True)
-    import pytest
     with pytest.raises(sqlite3.OperationalError):
         con.execute("INSERT INTO assets(id,class,label,value) VALUES('x','cash','x',1)")
     con.close()
@@ -40,7 +42,6 @@ def test_add_asset_assigns_id_and_persists(tmp_path):
 
 def test_add_asset_requires_class_label_value(tmp_path):
     path = _fresh(tmp_path)
-    import pytest
     with pytest.raises(ValueError):
         engine.add_asset(path, {"class": "cash", "label": "x"})
 
@@ -77,7 +78,6 @@ def test_remove_asset_deletes(tmp_path):
 
 def test_update_unknown_id_raises(tmp_path):
     path = _fresh(tmp_path)
-    import pytest
     with pytest.raises(KeyError):
         engine.update_asset(path, "nope", {"value": 1})
 
@@ -134,7 +134,6 @@ def test_query_is_readonly(tmp_path):
     engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 5})
     rows = engine.query(path, "SELECT label, value FROM assets")
     assert rows == [{"label": "Cash", "value": 5}]
-    import pytest
     with pytest.raises(Exception):
         engine.query(path, "DELETE FROM assets")
 
@@ -182,3 +181,33 @@ def test_render_markdown_has_networth_and_warning(tmp_path):
     md = engine.render_markdown(path)
     assert "do not hand-edit" in md.lower()
     assert "Net Worth" in md and "1,000" in md
+
+
+def test_add_asset_exact_duplicate_raises(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 1})
+    with pytest.raises(ValueError):
+        engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 2})
+
+
+def test_remove_asset_linked_liability_raises(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"id": "house", "class": "real_estate", "label": "House", "value": 1000000})
+    engine.add_liability(path, {"class": "mortgage", "label": "mtg", "balance": 400000, "linked_asset": "house"})
+    with pytest.raises(ValueError):
+        engine.remove_asset(path, "house")
+
+
+def test_import_rows_bad_row_aborts_before_any_insert(tmp_path):
+    path = _fresh(tmp_path)
+    rows = [{"class": "equity", "label": "VOO", "value": 7000},
+            {"class": "bogus", "label": "X", "value": 1}]
+    with pytest.raises(ValueError):
+        engine.import_rows(path, rows)
+    assert engine.list_assets(path) == []  # all-or-nothing
+
+
+def test_query_rejects_non_select(tmp_path):
+    path = _fresh(tmp_path)
+    with pytest.raises(ValueError):
+        engine.query(path, "ATTACH DATABASE '/tmp/evil.db' AS evil")
