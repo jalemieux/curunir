@@ -79,6 +79,10 @@ about*:
   a shift in self-perception) → `core-insights.md`.
 - **About your own voice or persona** as a durable change → append to the
   relevant subsection in `../identity.md`, not memory.
+- **About the owner's assets/holdings/liabilities/net worth** → do NOT append
+  as prose. These live in the tool-maintained balance-sheet store
+  (`portfolio.db`, via the `balance-sheet` capability). `portfolios.md` is a
+  generated read-only view — do not hand-edit it.
 - **A fact that fits none of the above** → route it to a new root-level
   topical file (e.g. `recipes.md`). When you do, you **must** also add a
   row for that file to the Taxonomy table above and, if it answers a
