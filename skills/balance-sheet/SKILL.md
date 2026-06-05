@@ -25,9 +25,15 @@ its property).
 Reach the engine through the `portfolio` tool when it is available to you
 (call it with an `action` and an `args` object). Otherwise run the CLI via
 bash: `python skills/balance-sheet/portfolio.py <cmd>`. Both front the same
-engine. Reads: `networth`, `rollup`, `list`, `show`, `re-equity <id>`, `pnl`,
-`query "<SELECT…>"`, `render`. Writes: `add`, `set`, `rm`, `import_rows`,
-`refresh`.
+engine.
+
+- **Reads:** `networth`, `rollup`, `list`, `show`, `re_equity`, `pnl`,
+  `query` (read-only SELECT), `render`.
+- **Writes:** `add`, `add_liability`, `set`, `rm`, `import_rows`, `refresh`.
+
+Tool actions use the underscore names above. CLI subcommands match but
+hyphenate multi-word names — `re-equity`, `add-liability`, `import-rows`
+(the CLI `import-rows` takes `--rows-file <json>`).
 
 ## Disciplines (non-negotiable)
 

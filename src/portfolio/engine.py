@@ -291,12 +291,19 @@ def import_rows(path: str, rows: list[dict], account: str | None = None,
     Stamps `account` on each. If `stated_total` is given (the export's account
     value), compares it to the summed imported value and reports a mismatch —
     the deterministic catch for a dropped/miscopied row."""
+    seen = set()
+    existing_pairs = {(a["class"], a["label"]) for a in list_assets(path)}
     for idx, row in enumerate(rows):
         miss = [k for k in _REQUIRED if row.get(k) in (None, "")]
         if miss:
             raise ValueError(f"row {idx} ({row.get('label','?')}): missing {', '.join(miss)}")
         if row["class"] not in ASSET_CLASSES:
             raise ValueError(f"row {idx} ({row.get('label','?')}): unknown class {row['class']!r}")
+        pair = (row["class"], row["label"])
+        if pair in seen or pair in existing_pairs:
+            raise ValueError(f"row {idx}: duplicate (class={row['class']!r}, "
+                             f"label={row['label']!r}) within the batch or already stored")
+        seen.add(pair)
 
     imported, warnings = 0, []
     for row in rows:
@@ -361,8 +368,10 @@ def refresh(path: str, quoter=None) -> dict:
 
 
 def render_markdown(path: str) -> str:
-    """A read-only human view of the store, regenerated from the DB. This is
-    the generated `portfolios.md` — never hand-edited."""
+    """Return a markdown view of the store, regenerated from the DB on demand.
+    A caller (the migration step, or a refresh) writes the returned string to
+    `context/memory/portfolios.md` — the generated, read-only view that is
+    never hand-edited. This function itself writes no file."""
     nw = networth(path)
     roll = rollup(path)
     lines = [

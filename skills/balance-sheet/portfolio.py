@@ -49,6 +49,15 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument(f"--{f}", type=float)
     sp = sub.add_parser("set"); sp.add_argument("id"); sp.add_argument("pairs", nargs="+")
     sp = sub.add_parser("rm"); sp.add_argument("id")
+    sp = sub.add_parser("add-liability")
+    for f in ("class", "label", "linked-asset"):
+        sp.add_argument(f"--{f}")
+    for f in ("balance", "apr"):
+        sp.add_argument(f"--{f}", type=float)
+    sp = sub.add_parser("import-rows")
+    sp.add_argument("--rows-file", required=True, help="path to a JSON array of asset rows")
+    sp.add_argument("--account")
+    sp.add_argument("--stated-total", type=float)
     return p
 
 
@@ -75,6 +84,16 @@ def main(argv=None) -> int:
             out = engine.add_asset(db, {k: v for k, v in fields.items() if v is not None})
         elif args.cmd == "set": out = engine.update_asset(db, args.id, _kv(args.pairs))
         elif args.cmd == "rm": out = engine.remove_asset(db, args.id)
+        elif args.cmd == "add-liability":
+            fields = {"class": getattr(args, "class"), "label": args.label,
+                      "balance": args.balance, "apr": args.apr,
+                      "linked_asset": args.linked_asset}
+            out = engine.add_liability(db, {k: v for k, v in fields.items() if v is not None})
+        elif args.cmd == "import-rows":
+            with open(args.rows_file) as f:
+                rows = json.load(f)
+            out = engine.import_rows(db, rows, account=args.account,
+                                     stated_total=args.stated_total)
         else:
             raise ValueError(f"unknown command {args.cmd!r}")
     except Exception as e:  # noqa: BLE001 — surface as JSON, not a traceback

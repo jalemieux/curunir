@@ -211,3 +211,12 @@ def test_query_rejects_non_select(tmp_path):
     path = _fresh(tmp_path)
     with pytest.raises(ValueError):
         engine.query(path, "ATTACH DATABASE '/tmp/evil.db' AS evil")
+
+
+def test_import_rows_duplicate_label_aborts_before_insert(tmp_path):
+    path = _fresh(tmp_path)
+    rows = [{"class": "equity", "label": "VOO", "value": 100},
+            {"class": "equity", "label": "VOO", "value": 200}]
+    with pytest.raises(ValueError):
+        engine.import_rows(path, rows)
+    assert engine.list_assets(path) == []  # truly all-or-nothing
