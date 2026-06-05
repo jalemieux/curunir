@@ -108,3 +108,32 @@ def test_rollup_buckets_net_real_estate_to_equity(tmp_path):
     assert r["collectibles"] == 50000
     assert r["debt"] == 400000
     assert r["net_worth"] == 850000
+
+
+def test_re_equity(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"id": "paladin", "class": "real_estate",
+                            "label": "Paladin", "value": 1558400})
+    engine.add_liability(path, {"class": "mortgage", "label": "Paladin mtg",
+                                "balance": 395309, "linked_asset": "paladin"})
+    assert engine.re_equity(path, "paladin")["equity"] == 1163091
+
+
+def test_pnl_collectibles_holding_period(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "collectible", "label": "Submariner",
+                            "value": 12569, "cost_basis": 9200, "acquired": "2023-04-10"})
+    p = engine.pnl(path, "collectible", today="2026-06-04")
+    assert p["cost_basis"] == 9200 and p["value"] == 12569
+    assert p["unrealized"] == 3369
+    assert p["items"][0]["long_term"] is True
+
+
+def test_query_is_readonly(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 5})
+    rows = engine.query(path, "SELECT label, value FROM assets")
+    assert rows == [{"label": "Cash", "value": 5}]
+    import pytest
+    with pytest.raises(Exception):
+        engine.query(path, "DELETE FROM assets")

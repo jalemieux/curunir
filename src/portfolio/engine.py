@@ -216,3 +216,54 @@ def rollup(path: str) -> dict:
         "debt": round(debt, 2),
         "net_worth": round(assets_total - debt, 2),
     }
+
+
+def re_equity(path: str, property_id: str) -> dict:
+    con = pdb.connect(path)
+    try:
+        a = con.execute("SELECT value FROM assets WHERE id = ? AND class = 'real_estate'",
+                        (property_id,)).fetchone()
+        if a is None:
+            raise KeyError(f"no real_estate asset with id {property_id!r}")
+        d = con.execute("SELECT COALESCE(SUM(balance),0) AS d FROM liabilities "
+                        "WHERE linked_asset = ?", (property_id,)).fetchone()["d"]
+    finally:
+        con.close()
+    return {"value": a["value"], "debt": d, "equity": round(a["value"] - d, 2)}
+
+
+def _years_between(start: str, end: str) -> float:
+    from datetime import date as _d
+    try:
+        s = _d.fromisoformat(start); e = _d.fromisoformat(end)
+    except (TypeError, ValueError):
+        return 0.0
+    return (e - s).days / 365.25
+
+
+def pnl(path: str, cls: str = "collectible", today: str | None = None) -> dict:
+    """Cost basis, unrealized gain, and per-item holding period for a class."""
+    today = today or date.today().isoformat()
+    items, basis, value = [], 0.0, 0.0
+    for a in list_assets(path, cls=cls):
+        cb = a.get("cost_basis")
+        held = _years_between(a.get("acquired"), today) if a.get("acquired") else None
+        items.append({
+            "label": a["label"], "value": a["value"], "cost_basis": cb,
+            "unrealized": round(a["value"] - cb, 2) if cb is not None else None,
+            "acquired": a.get("acquired"),
+            "long_term": (held >= 1.0) if held is not None else None,
+        })
+        value += a["value"] or 0
+        basis += cb or 0
+    return {"class": cls, "cost_basis": round(basis, 2), "value": round(value, 2),
+            "unrealized": round(value - basis, 2), "items": items}
+
+
+def query(path: str, sql: str) -> list[dict]:
+    """Run an arbitrary read-only SELECT. Opened mode=ro, so any write raises."""
+    con = pdb.connect(path, readonly=True)
+    try:
+        return [dict(r) for r in con.execute(sql)]
+    finally:
+        con.close()
