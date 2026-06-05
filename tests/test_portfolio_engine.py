@@ -137,3 +137,25 @@ def test_query_is_readonly(tmp_path):
     import pytest
     with pytest.raises(Exception):
         engine.query(path, "DELETE FROM assets")
+
+
+def test_import_rows_inserts_and_self_checks_ok(tmp_path):
+    path = _fresh(tmp_path)
+    rows = [
+        {"class": "equity", "label": "VOO", "ticker": "VOO", "qty": 10,
+         "cost_basis": 3000, "value": 7000},
+        {"class": "equity", "label": "GLD", "ticker": "GLD", "qty": 5,
+         "cost_basis": 1600, "value": 2200},
+    ]
+    res = engine.import_rows(path, rows, account="brokerage-7942", stated_total=9200)
+    assert res["imported"] == 2
+    assert res["self_check"]["ok"] is True
+    assert len(engine.list_assets(path, account="brokerage-7942")) == 2
+
+
+def test_import_rows_flags_total_mismatch(tmp_path):
+    path = _fresh(tmp_path)
+    rows = [{"class": "equity", "label": "VOO", "value": 7000}]
+    res = engine.import_rows(path, rows, account="brokerage-7942", stated_total=9200)
+    assert res["self_check"]["ok"] is False
+    assert "9200" in res["self_check"]["detail"] or "9,200" in res["self_check"]["detail"]

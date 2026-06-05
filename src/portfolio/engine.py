@@ -267,3 +267,34 @@ def query(path: str, sql: str) -> list[dict]:
         return [dict(r) for r in con.execute(sql)]
     finally:
         con.close()
+
+
+def import_rows(path: str, rows: list[dict], account: str | None = None,
+                stated_total: float | None = None, tolerance: float = 1.0) -> dict:
+    """Bulk-insert mapped rows (e.g. from a brokerage CSV the LLM parsed).
+    Stamps `account` on each. If `stated_total` is given (the export's account
+    value), compares it to the summed imported value and reports a mismatch —
+    the deterministic catch for a dropped/miscopied row."""
+    imported, warnings = 0, []
+    for row in rows:
+        rec = dict(row)
+        if account and not rec.get("account"):
+            rec["account"] = account
+        res = add_asset(path, rec)
+        warnings.extend(f"[{rec.get('label','?')}] {w}" for w in res["warnings"])
+        imported += 1
+
+    self_check = {"ok": True, "detail": "no stated total to check against"}
+    if stated_total is not None:
+        got = sum(float(r.get("value") or 0) for r in rows)
+        ok = abs(got - float(stated_total)) <= tolerance
+        self_check = {
+            "ok": ok,
+            "imported_sum": round(got, 2),
+            "stated_total": float(stated_total),
+            "detail": ("matches stated account total" if ok else
+                       f"imported sum {got:,.2f} != stated total {stated_total:,.2f} "
+                       f"— a row may be missing or miscopied"),
+        }
+    return {"imported": imported, "account": account,
+            "self_check": self_check, "warnings": warnings}
