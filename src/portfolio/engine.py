@@ -104,3 +104,50 @@ def list_assets(path: str, cls: str | None = None, account: str | None = None) -
         return [dict(r) for r in con.execute(sql, params)]
     finally:
         con.close()
+
+
+_UPDATABLE = {"label", "ticker", "qty", "avg_cost", "cost_basis", "value",
+              "value_asof", "acquired", "account", "extra"}
+
+
+def show(path: str, asset_id: str) -> dict:
+    con = pdb.connect(path)
+    try:
+        row = con.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        raise KeyError(f"no asset with id {asset_id!r}")
+    return dict(row)
+
+
+def update_asset(path: str, asset_id: str, fields: dict) -> dict:
+    """Update whitelisted columns on one asset. Raises KeyError if absent."""
+    sets = {k: v for k, v in fields.items() if k in _UPDATABLE}
+    if not sets:
+        raise ValueError(f"no updatable fields in {list(fields)}")
+    if "extra" in sets and isinstance(sets["extra"], (dict, list)):
+        sets["extra"] = json.dumps(sets["extra"])
+    con = pdb.connect(path)
+    try:
+        if con.execute("SELECT 1 FROM assets WHERE id = ?", (asset_id,)).fetchone() is None:
+            raise KeyError(f"no asset with id {asset_id!r}")
+        assigns = ", ".join(f"{k} = ?" for k in sets)
+        con.execute(f"UPDATE assets SET {assigns} WHERE id = ?",
+                    (*sets.values(), asset_id))
+        con.commit()
+    finally:
+        con.close()
+    return show(path, asset_id)
+
+
+def remove_asset(path: str, asset_id: str) -> dict:
+    con = pdb.connect(path)
+    try:
+        cur = con.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+        con.commit()
+    finally:
+        con.close()
+    if cur.rowcount == 0:
+        raise KeyError(f"no asset with id {asset_id!r}")
+    return {"removed": asset_id}

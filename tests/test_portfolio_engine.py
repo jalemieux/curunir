@@ -59,3 +59,24 @@ def test_add_asset_warns_on_near_duplicate_label(tmp_path):
     res = engine.add_asset(path, {"class": "collectible", "label": "Rolex GMT Batman v2",
                                   "value": 16744, "cost_basis": 12500, "acquired": "2022-06-01"})
     assert any("similar" in w.lower() for w in res["warnings"])
+
+
+def test_update_asset_sets_fields(tmp_path):
+    path = _fresh(tmp_path)
+    aid = engine.add_asset(path, {"class": "cash", "label": "Checking", "value": 1000})["id"]
+    engine.update_asset(path, aid, {"value": 1500})
+    assert engine.show(path, aid)["value"] == 1500
+
+
+def test_remove_asset_deletes(tmp_path):
+    path = _fresh(tmp_path)
+    aid = engine.add_asset(path, {"class": "cash", "label": "Checking", "value": 1000})["id"]
+    engine.remove_asset(path, aid)
+    assert engine.list_assets(path) == []
+
+
+def test_update_unknown_id_raises(tmp_path):
+    path = _fresh(tmp_path)
+    import pytest
+    with pytest.raises(KeyError):
+        engine.update_asset(path, "nope", {"value": 1})
