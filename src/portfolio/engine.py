@@ -151,3 +151,68 @@ def remove_asset(path: str, asset_id: str) -> dict:
     if cur.rowcount == 0:
         raise KeyError(f"no asset with id {asset_id!r}")
     return {"removed": asset_id}
+
+
+_LIAB_COLUMNS = ("id", "class", "label", "balance", "apr", "linked_asset")
+RETIREMENT_AS_EQUITY = ("equity", "retirement")
+
+
+def add_liability(path: str, fields: dict) -> dict:
+    for k in ("class", "label", "balance"):
+        if fields.get(k) in (None, ""):
+            raise ValueError(f"missing required liability field: {k}")
+    con = pdb.connect(path)
+    try:
+        base = _slug(fields.get("id") or fields["label"])
+        new_id, i = base, 2
+        existing = {r["id"] for r in con.execute("SELECT id FROM liabilities")}
+        while new_id in existing:
+            new_id, i = f"{base}-{i}", i + 1
+        rec = {"id": new_id, "class": fields["class"], "label": fields["label"],
+               "balance": float(fields["balance"]), "apr": fields.get("apr"),
+               "linked_asset": fields.get("linked_asset")}
+        con.execute(
+            f"INSERT INTO liabilities ({','.join(_LIAB_COLUMNS)}) "
+            f"VALUES ({','.join('?' for _ in _LIAB_COLUMNS)})",
+            tuple(rec[c] for c in _LIAB_COLUMNS))
+        con.commit()
+    finally:
+        con.close()
+    return {"id": new_id}
+
+
+def networth(path: str) -> dict:
+    con = pdb.connect(path)
+    try:
+        return dict(con.execute("SELECT * FROM v_networth").fetchone())
+    finally:
+        con.close()
+
+
+def rollup(path: str) -> dict:
+    """Finance-meaningful buckets: equities (incl. retirement), real-estate
+    EQUITY (property value minus linked mortgages), collectibles, physical,
+    cash, private, debt, and net worth. The model reads this; it never sums."""
+    con = pdb.connect(path)
+    try:
+        by_class = {r["class"]: r["value"]
+                    for r in con.execute("SELECT * FROM v_rollup_by_class")}
+        re_value = by_class.get("real_estate", 0.0)
+        re_debt = con.execute(
+            "SELECT COALESCE(SUM(l.balance),0) AS d FROM liabilities l "
+            "JOIN assets a ON a.id = l.linked_asset WHERE a.class = 'real_estate'"
+        ).fetchone()["d"]
+        debt = con.execute("SELECT COALESCE(SUM(balance),0) AS d FROM liabilities").fetchone()["d"]
+        assets_total = con.execute("SELECT COALESCE(SUM(value),0) AS a FROM assets").fetchone()["a"]
+    finally:
+        con.close()
+    return {
+        "equities": round(sum(by_class.get(c, 0.0) for c in RETIREMENT_AS_EQUITY), 2),
+        "real_estate_equity": round(re_value - re_debt, 2),
+        "collectibles": round(by_class.get("collectible", 0.0), 2),
+        "physical": round(by_class.get("physical", 0.0), 2),
+        "cash": round(by_class.get("cash", 0.0), 2),
+        "private": round(by_class.get("private", 0.0), 2),
+        "debt": round(debt, 2),
+        "net_worth": round(assets_total - debt, 2),
+    }

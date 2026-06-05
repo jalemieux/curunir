@@ -80,3 +80,31 @@ def test_update_unknown_id_raises(tmp_path):
     import pytest
     with pytest.raises(KeyError):
         engine.update_asset(path, "nope", {"value": 1})
+
+
+def test_networth_is_assets_minus_liabilities(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 100000})
+    engine.add_asset(path, {"class": "real_estate", "label": "House", "value": 1000000})
+    engine.add_liability(path, {"class": "mortgage", "label": "House mtg",
+                                "balance": 400000, "linked_asset": "house"})
+    nw = engine.networth(path)
+    assert nw["assets"] == 1100000
+    assert nw["liabilities"] == 400000
+    assert nw["net_worth"] == 700000
+
+
+def test_rollup_buckets_net_real_estate_to_equity(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"id": "house", "class": "real_estate", "label": "House",
+                            "value": 1000000})
+    engine.add_asset(path, {"class": "equity", "label": "VOO", "value": 200000})
+    engine.add_asset(path, {"class": "collectible", "label": "Watch", "value": 50000})
+    engine.add_liability(path, {"class": "mortgage", "label": "mtg",
+                                "balance": 400000, "linked_asset": "house"})
+    r = engine.rollup(path)
+    assert r["real_estate_equity"] == 600000
+    assert r["equities"] == 200000
+    assert r["collectibles"] == 50000
+    assert r["debt"] == 400000
+    assert r["net_worth"] == 850000
