@@ -159,3 +159,26 @@ def test_import_rows_flags_total_mismatch(tmp_path):
     res = engine.import_rows(path, rows, account="brokerage-7942", stated_total=9200)
     assert res["self_check"]["ok"] is False
     assert "9200" in res["self_check"]["detail"] or "9,200" in res["self_check"]["detail"]
+
+
+def test_refresh_reprices_only_market_priced(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "equity", "label": "VOO", "ticker": "VOO",
+                            "qty": 10, "value": 7000})
+    engine.add_asset(path, {"class": "collectible", "label": "Watch", "value": 5000})
+
+    def fake_quote(ticker):
+        return {"VOO": 800.0}[ticker]
+
+    res = engine.refresh(path, quoter=fake_quote)
+    assert res["repriced"] == 1
+    assert engine.show(path, "voo")["value"] == 8000
+    assert engine.show(path, "watch")["value"] == 5000
+
+
+def test_render_markdown_has_networth_and_warning(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "cash", "label": "Cash", "value": 1000})
+    md = engine.render_markdown(path)
+    assert "do not hand-edit" in md.lower()
+    assert "Net Worth" in md and "1,000" in md

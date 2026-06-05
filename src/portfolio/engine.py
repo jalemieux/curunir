@@ -298,3 +298,68 @@ def import_rows(path: str, rows: list[dict], account: str | None = None,
         }
     return {"imported": imported, "account": account,
             "self_check": self_check, "warnings": warnings}
+
+
+def _yfin_quote(ticker: str) -> float:
+    """Default quoter: shell out to the yfinance CLI. Returns the last price."""
+    import os
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    proc = subprocess.run([sys.executable, "skills/yfinance/yfin.py", "quote", ticker],
+                          capture_output=True, text=True, timeout=30, cwd=root)
+    data = json.loads(proc.stdout)
+    price = data.get("price") or data.get("last") or data.get("regularMarketPrice")
+    if price is None:
+        raise ValueError(f"no price in yfin quote for {ticker}: {data}")
+    return float(price)
+
+
+def refresh(path: str, quoter=None) -> dict:
+    """Deterministically re-price market-priced assets (equity/physical/crypto)
+    that carry a ticker and qty: value = qty * live price. Illiquid classes are
+    left untouched. `quoter(ticker)->price` is injectable for tests."""
+    quoter = quoter or _yfin_quote
+    today = date.today().isoformat()
+    repriced, errors = 0, []
+    for a in list_assets(path):
+        if a["class"] not in MARKET_PRICED or not a.get("ticker") or a.get("qty") in (None, ""):
+            continue
+        try:
+            price = quoter(a["ticker"])
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{a['ticker']}: {exc}")
+            continue
+        update_asset(path, a["id"],
+                     {"value": round(float(a["qty"]) * price, 2), "value_asof": today})
+        repriced += 1
+    return {"repriced": repriced, "errors": errors, "asof": today}
+
+
+def render_markdown(path: str) -> str:
+    """A read-only human view of the store, regenerated from the DB. This is
+    the generated `portfolios.md` — never hand-edited."""
+    nw = networth(path)
+    roll = rollup(path)
+    lines = [
+        "# Portfolio (generated — do not hand-edit; source of truth is portfolio.db)",
+        "", "## Net Worth", "",
+        f"- Total assets: {nw['assets']:,.0f}",
+        f"- Total liabilities: {nw['liabilities']:,.0f}",
+        f"- **Net Worth: {nw['net_worth']:,.0f}**", "",
+        "## Rollup by bucket", "",
+        f"- Equities (incl. retirement): {roll['equities']:,.0f}",
+        f"- Real-estate equity: {roll['real_estate_equity']:,.0f}",
+        f"- Collectibles: {roll['collectibles']:,.0f}",
+        f"- Physical: {roll['physical']:,.0f}",
+        f"- Cash: {roll['cash']:,.0f}",
+        f"- Private: {roll['private']:,.0f}",
+        f"- Debt: {roll['debt']:,.0f}", "",
+        "## Holdings", "",
+        "| class | label | qty | cost basis | value | acquired | account |",
+        "|---|---|---:|---:|---:|---|---|",
+    ]
+    for a in list_assets(path):
+        lines.append(
+            f"| {a['class']} | {a['label']} | {a.get('qty') or ''} | "
+            f"{a.get('cost_basis') or ''} | {a['value']:,.0f} | "
+            f"{a.get('acquired') or ''} | {a.get('account') or ''} |")
+    return "\n".join(lines) + "\n"
