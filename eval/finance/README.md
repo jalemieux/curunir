@@ -14,7 +14,7 @@ never internals like "did it call skill X" (except where a routing/privacy
 | `run_finance_evals.py` | Runner: drives the WS channel, builds a `Result`, grades, writes a report. Supports multi-turn `prompts` and `--fixture` seeding |
 | `_pe_gap.py` | Anchor helper for C1 (live forward-P/E gap) |
 | `_networth.py` | Anchor helper for the T family: queries the seeded SQLite store's shared `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views for `total` / `rollup` / `re-equity` / `collectibles` |
-| `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views) — the A/B/D engine builds `context/memory/portfolio.db` from it; the agent and the anchor both read that store |
+| `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views). Seed `context/memory/portfolio.db` from it with `sqlite3` before any tracking task (see [Bootstrap the portfolio store](#bootstrap-the-portfolio-store-one-time-before-p2tw)); the agent and the anchor both read that store |
 | `fixtures/memory/baseline/` | The free-form memory representation of those same holdings, seeded into `context/memory/` for a tracking run |
 | `test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (multi-turn + `reconciles` included; no SUT needed) |
 | `results/` | Timestamped JSON + markdown reports (git-ignored) |
@@ -86,13 +86,41 @@ The truth behind the T-family graders comes from `_networth.py`, which queries
 the **same `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views the
 agent's portfolio engine exposes**, against the seeded SQLite store (the A/B/D
 coordination note's contract — agent and grader read identical views, so they
-can't drift). It depends on that store existing: the engine builds
-`context/memory/portfolio.db` from `fixtures/portfolio.sql`. With the store in
-place (or `CURUNIR_PORTFOLIO_DB` pointed at one), verify the anchors by hand:
+can't drift). Both the agent and the grader's anchor read this one store, so it
+must be seeded from the frozen `fixtures/portfolio.sql` **before** running any
+tracking task.
+
+#### Bootstrap the portfolio store (one-time, before P2/T*/W*)
+
+The fixture is a plain SQL seed (tables + views + the frozen rows). There is no
+make-target — build the store with `sqlite3`. The fixture's `CREATE TABLE`
+statements have no `IF NOT EXISTS`, so they collide with the bare schema
+`init_db()` leaves behind; **build a fresh file**, don't load onto an existing
+one:
 
 ```bash
-python eval/finance/_networth.py total      # {net_worth, assets, liabilities}
+# Default path — both the SUT and the anchor read this by default.
+rm -f context/memory/portfolio.db
+sqlite3 context/memory/portfolio.db < eval/finance/fixtures/portfolio.sql
+```
+
+Then verify the anchors are non-zero (an empty store reports `net_worth: 0` — the
+tell-tale sign the seed never ran):
+
+```bash
+python eval/finance/_networth.py total      # {net_worth: 4135169, assets: 5690169, liabilities: 1555000}
 python eval/finance/_networth.py rollup     # {equities, real_estate_equity, …, total}
+```
+
+**`--fixture baseline` caveat.** That run stashes *all* of `context/memory/`
+aside (see above), which also hides a `portfolio.db` sitting there — the anchor
+would then read an absent store. For baseline runs, seed the store **outside**
+`context/memory/` and point both shells at it via `CURUNIR_PORTFOLIO_DB` (which
+both `_networth.py` and the anchor subprocess honor) so it survives the stash:
+
+```bash
+sqlite3 eval/finance/portfolio.db < eval/finance/fixtures/portfolio.sql
+export CURUNIR_PORTFOLIO_DB=$PWD/eval/finance/portfolio.db   # set in BOTH terminals (SUT + runner)
 ```
 
 #### Two interface modes (CLI vs tool)
