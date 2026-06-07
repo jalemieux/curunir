@@ -55,6 +55,7 @@ class Result:
     wall_ms: float = 0.0
     turns: int = 0
     tokens_out: int = 0
+    stats: dict = field(default_factory=dict)  # full stats dict from the server
     error: str | None = None
 
 
@@ -260,6 +261,75 @@ def llm_judge(result: Result, spec: dict) -> Verdict:
     return status, m.group(2).strip().splitlines()[0][:160] or "(no reason given)"
 
 
+# ── reconciliation (position-tracking suite) ────────────────────────────────
+_SCALE = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6,
+          "b": 1e9, "bn": 1e9, "billion": 1e9, "t": 1e12, "trillion": 1e12}
+
+
+def _money_after(text: str, labels: list[str], window: int = 40) -> float | None:
+    """First dollar figure following any of `labels`, scale-suffix aware.
+
+    Anchors on a label (e.g. "total assets") and grabs the next dollar amount
+    within `window` chars, honouring a trailing scale word so "$4.13M" and
+    "4.13 million" both read as 4_130_000. Returns None if no label matched —
+    which the caller treats as "no clear balance sheet presented".
+    """
+    for lab in labels:
+        m = re.search(
+            lab + r"[^0-9$]{0," + str(window) + r"}\$?\s?(-?[\d,]+(?:\.\d+)?)\s*([A-Za-z]{0,8})",
+            text, re.IGNORECASE,
+        )
+        if not m:
+            continue
+        try:
+            val = float(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        suf = (m.group(2) or "").lower().strip(".")
+        if suf in _SCALE:
+            val *= _SCALE[suf]
+        return val
+    return None
+
+
+def reconciles(result: Result, spec: dict) -> Verdict:
+    """The agent's stated balance sheet must internally add up (and match truth).
+
+    Extracts the agent's stated *total assets*, *total liabilities*, and *net
+    worth* (label-anchored), then asserts `assets − liabilities == net_worth`
+    within `tolerance` dollars. When an anchor resolved `expected` (the true net
+    worth), also asserts the stated net worth matches it within
+    `anchor_tolerance_pct`. If any of the three labels is absent it FAILs — an
+    agent that won't present a clear balance sheet is itself failing the
+    contract (a vague "about $4M" is not a reconciling answer).
+    """
+    text = result.final_text
+    assets = _money_after(text, [r"total\s+assets", r"assets\s+total", r"gross\s+assets"])
+    liab = _money_after(text, [r"total\s+liabilit", r"total\s+debt", r"liabilit"])
+    nw = _money_after(text, [r"total\s+net[\s-]*worth", r"net[\s-]*worth",
+                             r"net\s+liquid\s+(?:net\s+)?worth"])
+    missing = [n for n, v in (("assets", assets), ("liabilities", liab),
+                              ("net worth", nw)) if v is None]
+    if missing:
+        return FAIL, "no clear " + ", ".join(missing) + " figure presented (not a balance sheet)"
+
+    tol = spec.get("tolerance", 1.0)
+    diff = abs((assets - liab) - nw)
+    if diff > tol:
+        return FAIL, (f"does not reconcile: assets {assets:,.0f} − liabilities {liab:,.0f} "
+                      f"= {assets - liab:,.0f} ≠ stated net worth {nw:,.0f} (off ${diff:,.0f})")
+
+    if "expected" in spec:
+        target = float(spec["expected"])
+        atol = spec.get("anchor_tolerance_pct", 2) / 100.0
+        rel = abs(nw - target) / target if target else abs(nw - target)
+        src = " (anchored)" if spec.get("_anchored") else ""
+        if rel > atol:
+            return FAIL, f"net worth {nw:,.0f} is {rel:.1%} off truth {target:,.0f}{src} (tol {atol:.0%})"
+        return PASS, f"reconciles & matches truth: {assets:,.0f} − {liab:,.0f} = {nw:,.0f}{src}"
+    return PASS, f"reconciles: {assets:,.0f} − {liab:,.0f} = {nw:,.0f}"
+
+
 def composite(result: Result, spec: dict) -> Verdict:
     """AND a list of sub-graders. FAIL if any fails; PASS_SLOW if any is slow."""
     slow = False
@@ -285,6 +355,7 @@ GRADERS: dict[str, Callable[[Result, dict], Verdict]] = {
     "regex_present": regex_present,
     "action_used": action_used,
     "llm_judge": llm_judge,
+    "reconciles": reconciles,
     "composite": composite,
 }
 
@@ -310,16 +381,57 @@ def _apply_budget(task: dict, result: Result, status: str, why: str) -> Verdict:
     return status, why
 
 
+def grade_detailed(task: dict, result: Result) -> tuple[str, str, list[dict]]:
+    """Like grade(), but also return a per-check breakdown for the report.
+
+    Returns (status, why, checks) where `checks` is a list of
+    {label, grader, status, why} — one entry per sub-grader for a composite
+    (ALL evaluated, so the report shows every check, not just the first
+    failure), or a single entry for a simple grader.
+    """
+    grader_name = task.get("grader")
+    if result.error and grader_name != "regex_present" and not task.get("allow_error"):
+        why = f"system error: {result.error}"
+        return FAIL, why, [{"label": "system", "grader": grader_name or "?",
+                            "status": FAIL, "why": why}]
+    if grader_name not in GRADERS:
+        return ERROR, f"unknown grader {grader_name!r}", []
+
+    checks: list[dict] = []
+    if grader_name == "composite":
+        passed = []
+        first_fail = first_error = None
+        slow = False
+        for sub in task["spec"]["all"]:
+            spec = resolve_anchor(sub.get("spec", {}))
+            st, why = GRADERS[sub["grader"]](result, spec)
+            label = sub.get("label", sub["grader"])
+            checks.append({"label": label, "grader": sub["grader"], "status": st, "why": why})
+            if st == FAIL and first_fail is None:
+                first_fail = f"[{label}] {why}"
+            elif st == ERROR and first_error is None:
+                first_error = f"[{label}] {why}"
+            elif st == PASS_SLOW:
+                slow = True
+            if st == PASS:
+                passed.append(f"{label}✓")
+        if first_fail is not None:
+            status, why = FAIL, first_fail
+        elif first_error is not None:
+            status, why = ERROR, first_error
+        else:
+            status, why = (PASS_SLOW if slow else PASS), " ".join(passed)
+    else:
+        spec = resolve_anchor(task.get("spec", {}))
+        status, why = GRADERS[grader_name](result, spec)
+        checks.append({"label": grader_name, "grader": grader_name,
+                       "status": status, "why": why})
+
+    status, why = _apply_budget(task, result, status, why)
+    return status, why, checks
+
+
 def grade(task: dict, result: Result) -> Verdict:
     """Resolve anchors, dispatch the grader, then apply any process budget."""
-    if result.error and task.get("grader") != "regex_present":
-        # An error answer can still legitimately satisfy an error-handling task;
-        # only short-circuit when the task isn't explicitly probing failure text.
-        if not task.get("allow_error"):
-            return FAIL, f"system error: {result.error}"
-    grader_name = task["grader"]
-    if grader_name not in GRADERS:
-        return ERROR, f"unknown grader {grader_name!r}"
-    spec = resolve_anchor(task.get("spec", {}))
-    status, why = GRADERS[grader_name](result, spec)
-    return _apply_budget(task, result, status, why)
+    status, why, _ = grade_detailed(task, result)
+    return status, why

@@ -118,6 +118,69 @@ async def test_sync_across_heavy_then_light() -> bool:
     return ok
 
 
+async def test_multi_turn_readback() -> bool:
+    """A `prompts:[...]` task runs as ONE multi-turn session: history is reset
+    once, each prompt is sent in turn, and the graded Result reflects the FINAL
+    reply while tool calls accumulate across the whole exchange (the W family)."""
+    ws = FakeWS()
+    ws.feed(
+        reset_ack(),
+        # turn 1: the write
+        tool_frame("Edit context/memory/portfolios.md"),
+        final("Added the black hollowbody guitar ($9,200 basis, 2023-04-10)."),
+        # turn 2: the readback — this is what the grader scores
+        tool_frame("Read context/memory/portfolios.md"),
+        delta("Cost basis "), delta("is $9,200; "),
+        final("Cost basis is $9,200; acquired 2023-04-10, so it's long-term (~3 years)."),
+    )
+    res = await R.run_one(ws, {"prompts": [
+        "Add a watch: black hollowbody guitar, paid $9,200 on 2023-04-10, now worth $12,569.",
+        "What's the cost basis and holding period on that black hollowbody?",
+    ], "max_loops": 8})
+
+    ok = True
+    ok &= check("graded final_text is the READBACK reply, not the write",
+                "long-term" in res.final_text and "$9,200" in res.final_text, res.final_text)
+    ok &= check("the write turn's reply did NOT leak into final_text",
+                "Added the vintage guitar" not in res.final_text, res.final_text)
+    ok &= check("actions accumulate across BOTH turns",
+                any("edit" in a for a in res.actions) and any("read" in a for a in res.actions),
+                str(res.actions))
+    ok &= check("history reset exactly once for the whole exchange",
+                sum(1 for s in ws.sent if s.get("command") == "reset") == 1,
+                f"{sum(1 for s in ws.sent if s.get('command') == 'reset')} resets")
+    ok &= check("both prompts were sent",
+                sum(1 for s in ws.sent if s.get("content", None) not in ("", None)) == 2,
+                str([s.get("content") for s in ws.sent]))
+
+    # The W1 grader runs on the readback: basis $9,200 + long-term holding.
+    st, why = R.G.numeric_tolerance(res, {"expected": 9200, "tolerance_pct": 1})
+    ok &= check("W1 numeric_tolerance finds the $9,200 basis in the readback", st == R.G.PASS, why)
+    return ok
+
+
+async def test_reconciles_grader() -> bool:
+    """The new `reconciles` grader: a balance sheet must internally add up and
+    match the anchored truth; a vague or drifting answer must fail."""
+    def r(t):
+        return R.G.Result(final_text=t)
+
+    ok = True
+    good = ("Total assets: $5,690,169. Total liabilities: $1,555,000. "
+            "Net worth: $4,135,169.")
+    st, why = R.G.reconciles(r(good), {"expected": 4135169})
+    ok &= check("clean reconciling balance sheet passes", st == R.G.PASS, why)
+
+    drift = ("Total assets $1,199,100, total liabilities $1,195,000, "
+             "net worth $4,021,540.")  # the baseline-style drift
+    st, why = R.G.reconciles(r(drift), {"expected": 4135169})
+    ok &= check("non-reconciling answer fails", st == R.G.FAIL, why)
+
+    st, why = R.G.reconciles(r("Your net worth is roughly $4 million."), {"expected": 4135169})
+    ok &= check("vague answer with no balance sheet fails", st == R.G.FAIL, why)
+    return ok
+
+
 async def test_timeout_interrupts_and_resyncs() -> bool:
     """On timeout the runner must interrupt out-of-band and still drain the one
     interrupted final — keeping the stream synced for the next task."""
@@ -172,12 +235,17 @@ async def test_socket_close_is_not_a_hang() -> bool:
 async def main() -> None:
     print("test_sync_across_heavy_then_light:")
     a = await test_sync_across_heavy_then_light()
+    print("test_multi_turn_readback:")
+    b = await test_multi_turn_readback()
+    print("test_reconciles_grader:")
+    c = await test_reconciles_grader()
     print("test_timeout_interrupts_and_resyncs:")
-    b = await test_timeout_interrupts_and_resyncs()
+    d = await test_timeout_interrupts_and_resyncs()
     print("test_socket_close_is_not_a_hang:")
-    c = await test_socket_close_is_not_a_hang()
-    print(f"\n{'ALL PASS' if a and b and c else 'FAILURES ABOVE'}")
-    sys.exit(0 if (a and b and c) else 1)
+    e = await test_socket_close_is_not_a_hang()
+    results = [a, b, c, d, e]
+    print(f"\n{'ALL PASS' if all(results) else 'FAILURES ABOVE'}")
+    sys.exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":
