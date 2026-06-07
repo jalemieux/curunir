@@ -330,6 +330,44 @@ _OPT_IN_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "portfolio",
+            "description": (
+                "Read and update the owner's balance sheet (assets, "
+                "liabilities, net worth). The engine does all math and writes "
+                "— never compute a total yourself. Reads: networth, rollup, "
+                "list, show, re_equity, pnl, query (read-only SQL), render. "
+                "Writes: add, add_liability, set, rm, import_rows (bulk CSV "
+                "load with an account-total self-check), refresh (re-price "
+                "market holdings). Pass the operation in `action` and its "
+                "parameters in `args`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["networth", "rollup", "list", "show", "re_equity",
+                                 "pnl", "query", "render", "add", "add_liability",
+                                 "set", "rm", "import_rows", "refresh"],
+                        "description": "The operation to run.",
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": (
+                            "Operation parameters, e.g. {class,label,value,...} "
+                            "for add; {id,fields:{...}} for set; "
+                            "{rows:[...],account,stated_total} for import_rows; "
+                            "{sql} for query."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "to_audio",
             "description": (
                 "Rewrite text for natural speech and synthesize it into an "
