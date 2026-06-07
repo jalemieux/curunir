@@ -49,6 +49,48 @@ from eval.finance import finance_graders as G  # noqa: E402
 from eval.finance.finance_tasks import TASKS  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
+CONTEXT_MEMORY = REPO_ROOT / "context" / "memory"
+FIXTURE_MEMORY = Path(__file__).parent / "fixtures" / "memory"
+MEMORY_STASH = CONTEXT_MEMORY.with_name("memory.eval-stash")
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def seed_fixture(name: str):
+    """Stash the real `context/memory/` and seed `fixtures/memory/<name>/` in.
+
+    Returns whether a real-memory stash was created (so restore knows to put it
+    back). The fixture-dependent tasks (P2/T*/W*) cross the memory boundary —
+    the agent reads its STORED portfolio and computes — which is the only way to
+    measure the memory-schema fix. The SUT reads memory on demand via tools, so
+    swapping the directory on disk before sending prompts is enough; no restart.
+    """
+    import shutil
+
+    src = FIXTURE_MEMORY / name
+    if not src.is_dir():
+        raise SystemExit(f"--fixture {name!r}: no such directory {src}")
+    if MEMORY_STASH.exists():
+        raise SystemExit(
+            f"refusing to seed: a stash already exists at {MEMORY_STASH} "
+            "(a prior run aborted before restoring). Move it back to "
+            f"{CONTEXT_MEMORY} by hand, then re-run."
+        )
+    stashed = CONTEXT_MEMORY.exists()
+    if stashed:
+        CONTEXT_MEMORY.rename(MEMORY_STASH)
+    shutil.copytree(src, CONTEXT_MEMORY)
+    return stashed
+
+
+def restore_fixture(stashed: bool) -> None:
+    """Undo seed_fixture: remove the seeded memory, move the real one back."""
+    import shutil
+
+    if CONTEXT_MEMORY.exists():
+        shutil.rmtree(CONTEXT_MEMORY)
+    if stashed and MEMORY_STASH.exists():
+        MEMORY_STASH.rename(CONTEXT_MEMORY)
 
 
 def load_pairing_token() -> str | None:
@@ -134,27 +176,42 @@ def _task_timeout(task: dict) -> float:
 
 
 async def run_one(ws, task: dict, verbose: bool = False) -> G.Result:
-    """Send one task's prompt, drain to its single final frame, build a Result."""
+    """Send a task's prompt(s), drain to the final frame, build a Result.
+
+    A task carries either a single `prompt` (one turn) or `prompts: [...]` — a
+    multi-turn exchange sent sequentially over ONE session (history is reset only
+    once, at the start). Tool calls accumulate across turns so routing stays
+    visible, but the graded `final_text`/`stats` reflect the FINAL reply (the W
+    family grades the readback turn). Existing single-`prompt` tasks are
+    unchanged: a one-element list.
+    """
     # Clear history so tasks are independent; consume the reset's final ack.
     await ws.send(json.dumps({"content": "", "command": "reset"}))
     await _drain_until_final(ws)
 
-    await ws.send(json.dumps({"content": task["prompt"], "command": None}))
+    prompts = task.get("prompts") or [task["prompt"]]
     cap = {"actions": [], "deltas": [], "final_content": None,
            "attachments": [], "stats": None}
 
     timed_out = False
-    try:
-        await asyncio.wait_for(_drain_until_final(ws, cap, verbose), _task_timeout(task))
-    except asyncio.TimeoutError:
-        # Cancel out-of-band (interrupt is handled without enqueuing, so it adds
-        # no extra final), then drain the one interrupted final to stay synced.
-        timed_out = True
-        await ws.send(json.dumps({"command": "interrupt"}))
+    for prompt in prompts:
+        # Reset per-turn text so final_text is the LAST reply, not a concatenation;
+        # actions/attachments deliberately accumulate across the whole exchange.
+        cap["deltas"], cap["final_content"] = [], None
+        await ws.send(json.dumps({"content": prompt, "command": None}))
         try:
-            await asyncio.wait_for(_drain_until_final(ws, cap, verbose), 90)
+            await asyncio.wait_for(_drain_until_final(ws, cap, verbose), _task_timeout(task))
         except asyncio.TimeoutError:
-            pass
+            # Cancel out-of-band (interrupt is handled without enqueuing, so it
+            # adds no extra final), drain the one interrupted final to stay
+            # synced, then abandon any remaining turns.
+            timed_out = True
+            await ws.send(json.dumps({"command": "interrupt"}))
+            try:
+                await asyncio.wait_for(_drain_until_final(ws, cap, verbose), 90)
+            except asyncio.TimeoutError:
+                pass
+            break
 
     final_text = cap["final_content"] or "".join(cap["deltas"])
     # Fold attachment markers into actions so PDF-checking graders catch them
@@ -199,6 +256,28 @@ async def main_async(args) -> None:
         print("No tasks matched the filter.")
         return
 
+    # Fixture-seeded memory (the T/W families read the STORED portfolio). Only
+    # ever for a LOCAL SUT — we cannot touch a remote filesystem — and always
+    # restored, even on error, by the try/finally below.
+    stashed = None
+    if args.fixture:
+        if args.host not in _LOCAL_HOSTS:
+            raise SystemExit(
+                f"--fixture only works against a local SUT (host in {sorted(_LOCAL_HOSTS)}); "
+                f"got --host {args.host}. It seeds context/memory/ on this machine."
+            )
+        stashed = seed_fixture(args.fixture)
+        print(f"Seeded fixture memory '{args.fixture}' → context/memory/ "
+              f"(real memory stashed: {bool(stashed)})\n")
+    try:
+        await _run_suite(args, tasks)
+    finally:
+        if args.fixture:
+            restore_fixture(stashed)
+            print("Restored real context/memory/.")
+
+
+async def _run_suite(args, tasks: list[dict]) -> None:
     uri = f"ws://{args.host}:{args.port}"
     print(f"Connecting to {uri} — {len(tasks)} task(s)\n")
     async with websockets.connect(uri, max_size=None) as ws:
@@ -231,7 +310,8 @@ async def main_async(args) -> None:
             rows.append({
                 "id": task["id"], "name": task["name"], "tags": task.get("tags", []),
                 "intent": task.get("intent"), "expected": task.get("expected"),
-                "prompt": task["prompt"], "grader": task.get("grader"),
+                "prompt": task.get("prompt") or "\n--- (next turn) ---\n".join(task.get("prompts", [])),
+                "grader": task.get("grader"),
                 "status": status, "why": why, "checks": checks,
                 "actions": result.actions, "final_text": result.final_text,
                 "attachments": [a.get("name") or a.get("path") for a in result.attachments],
@@ -240,21 +320,25 @@ async def main_async(args) -> None:
                 "error": result.error,
             })
 
-    _report(model, rows)
+    _report(model, rows, getattr(args, "interface", None))
 
 
-def _report(model: str, rows: list[dict]) -> None:
+def _report(model: str, rows: list[dict], interface: str | None = None) -> None:
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     summary = "  ".join(f"{STATUS_MARK.get(k, k).strip()}={v}" for k, v in sorted(counts.items()))
-    print(f"\n{'='*64}\nSUMMARY  {summary}\n{'='*64}")
+    label = f"  [interface: {interface}]" if interface else ""
+    print(f"\n{'='*64}\nSUMMARY  {summary}{label}\n{'='*64}")
 
     RESULTS_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    safe = re.sub(r"[^\w.-]", "_", model)
+    # Tag the interface into the slug so the two-mode (CLI vs tool) runs land in
+    # separate files and diff cleanly — the suite is identical across modes; only
+    # the SUT's portfolio surface differs (see the A/B/D coordination note).
+    safe = re.sub(r"[^\w.-]", "_", model) + (f"-{interface}" if interface else "")
     payload = {
-        "version": version(), "model": model,
+        "version": version(), "model": model, "interface": interface,
         "timestamp": datetime.now(timezone.utc).isoformat(), "results": rows,
     }
     (RESULTS_DIR / f"finance-{ts}-{safe}.json").write_text(json.dumps(payload, indent=2, default=str))
@@ -262,9 +346,11 @@ def _report(model: str, rows: list[dict]) -> None:
     # Markdown: lightweight summary table for quick GitHub viewing / diffing.
     # The verbose, interactive trace lives in the HTML report.
     md = [f"# Finance Eval Results: {model}", "",
-          f"- Version: {version()}", f"- Timestamp: {payload['timestamp']}",
-          f"- Summary: {summary}", "", "| id | name | status | why |",
-          "|----|------|--------|-----|"]
+          f"- Version: {version()}", f"- Timestamp: {payload['timestamp']}"]
+    if interface:
+        md.append(f"- Interface: {interface}")
+    md += [f"- Summary: {summary}", "", "| id | name | status | why |",
+           "|----|------|--------|-----|"]
     for r in rows:
         md.append(f"| {r['id']} | {r['name']} | {r['status']} | {r['why'].replace('|', '\\|')} |")
     (RESULTS_DIR / f"finance-{ts}-{safe}.md").write_text("\n".join(md) + "\n")
@@ -472,7 +558,8 @@ def _html_report(payload: dict, counts: dict, summary: str) -> str:
     header = (
         "<header><h1>Finance Persona Evals</h1>"
         f"<div class='meta'>model <code>{_esc(payload['model'])}</code> · "
-        f"version <code>{_esc(payload.get('version'))}</code> · {_esc(payload.get('timestamp'))}</div>"
+        + (f"interface <code>{_esc(payload.get('interface'))}</code> · " if payload.get("interface") else "")
+        + f"version <code>{_esc(payload.get('version'))}</code> · {_esc(payload.get('timestamp'))}</div>"
         f"<div class='chips'>{''.join(chips)}</div>"
         f"<div class='tags'>{tags}</div>"
         "<div class='controls'><input id='q' placeholder='filter by id, name, reason, prompt, text…'>"
@@ -493,6 +580,12 @@ def main() -> None:
     p.add_argument("--tag", help="run only tasks with a tag matching this regex")
     p.add_argument("--id", help="comma-separated task ids, e.g. R1,F3,C2")
     p.add_argument("--no-grade", action="store_true", help="capture only, skip grading")
+    p.add_argument("--fixture", metavar="NAME",
+                   help="seed fixtures/memory/NAME/ into context/memory/ for the run "
+                        "(e.g. 'baseline'); local SUT only, real memory restored on exit")
+    p.add_argument("--interface", choices=["cli", "tool"],
+                   help="label this run's portfolio surface (the SUT's adapter is configured "
+                        "separately); tags the report so the two-mode comparison diffs cleanly")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="stream each task's tool calls and text live as it runs")
     asyncio.run(main_async(p.parse_args()))
