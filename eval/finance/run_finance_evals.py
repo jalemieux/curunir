@@ -243,6 +243,23 @@ def select(args) -> list[dict]:
     return tasks
 
 
+def list_tasks(tasks: list[dict]) -> None:
+    """Print a compact id/grader/tags/name table for `tasks` and return.
+
+    Honors --id/--tag (it receives the already-filtered list from select()), so
+    `--list --tag regression` previews exactly what a real run would execute.
+    """
+    if not tasks:
+        print("No tasks matched the filter.")
+        return
+    print(f"{len(tasks)} tasks\n")
+    print(f"{'id':<5}{'grader':<16}{'tags':<32}name")
+    print("-" * 80)
+    for t in tasks:
+        tags = ",".join(t.get("tags", []))
+        print(f"{t['id']:<5}{t['grader']:<16}{tags:<32}{t['name']}")
+
+
 def version() -> str:
     try:
         return subprocess.check_output(["git", "describe", "--tags", "--always"], text=True).strip()
@@ -579,6 +596,8 @@ def main() -> None:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--tag", help="run only tasks with a tag matching this regex")
     p.add_argument("--id", help="comma-separated task ids, e.g. R1,F3,C2")
+    p.add_argument("--list", action="store_true",
+                   help="list matching tasks (id/grader/tags/name) and exit — no server needed")
     p.add_argument("--no-grade", action="store_true", help="capture only, skip grading")
     p.add_argument("--fixture", metavar="NAME",
                    help="seed fixtures/memory/NAME/ into context/memory/ for the run "
@@ -588,7 +607,11 @@ def main() -> None:
                         "separately); tags the report so the two-mode comparison diffs cleanly")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="stream each task's tool calls and text live as it runs")
-    asyncio.run(main_async(p.parse_args()))
+    args = p.parse_args()
+    if args.list:
+        list_tasks(select(args))
+        return
+    asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
