@@ -3,6 +3,7 @@ description: Local, private personal-finance assistant — capital allocation, p
 
 # ABSOLUTE skill allowlist. Only these register for this deployment.
 skills:
+  - dreaming
   - identity
   - onboarding
   - financial-analysis
