@@ -9,11 +9,14 @@ never internals like "did it call skill X" (except where a routing/privacy
 
 | File | Role |
 |------|------|
-| `finance_tasks.py` | 22 tasks as data: `{id, name, tags, prompt, max_loops, grader, spec, budget}` |
-| `finance_graders.py` | Pure graders `(result, spec) -> (status, why)`; `GRADERS` dispatch + `grade()` |
-| `run_finance_evals.py` | Runner: drives the WS channel, builds a `Result`, grades, writes a report |
+| `finance_tasks.py` | Tasks as data: `{id, name, tags, prompt`/`prompts, max_loops, grader, spec, budget}`. R/F/C = market data; **P/T/W = position-tracking** (the owner's balance sheet) |
+| `finance_graders.py` | Pure graders `(result, spec) -> (status, why)`; `GRADERS` dispatch + `grade()`. Includes `reconciles` (balance-sheet must add up) |
+| `run_finance_evals.py` | Runner: drives the WS channel, builds a `Result`, grades, writes a report. Supports multi-turn `prompts` and `--fixture` seeding |
 | `_pe_gap.py` | Anchor helper for C1 (live forward-P/E gap) |
-| `test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (no SUT needed) |
+| `_networth.py` | Anchor helper for the T family: queries the seeded SQLite store's shared `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views for `total` / `rollup` / `re-equity` / `collectibles` |
+| `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views) — the A/B/D engine builds `context/memory/portfolio.db` from it; the agent and the anchor both read that store |
+| `fixtures/memory/baseline/` | The free-form memory representation of those same holdings, seeded into `context/memory/` for a tracking run |
+| `test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (multi-turn + `reconciles` included; no SUT needed) |
 | `results/` | Timestamped JSON + markdown reports (git-ignored) |
 
 ## Quick start
@@ -55,8 +58,61 @@ python eval/finance/run_finance_evals.py --host h --port 8765   # remote SUT
 watching *why* a task is heading toward pass or fail in real time.
 
 The full suite spends real model tokens on the SUT (the F11 memo alone runs
-~8–10 min end to end). Use `--id` / `--tag` while iterating; run the full 22
+~8–10 min end to end). Use `--id` / `--tag` while iterating; run the full suite
 only when you want a complete baseline.
+
+### Position-tracking tasks (the P/T/W families)
+
+The `tracking`-tagged tasks (P2, T1–T5, W1–W3) ask about the *owner's* balance
+sheet, so they must read a **seeded portfolio fixture** from memory rather than
+being handed numbers in-prompt — that's the only way they measure the
+memory-schema fix. `--fixture <name>` stashes the real `context/memory/`, seeds
+`fixtures/memory/<name>/` in, runs, and **restores on exit** (even on error):
+
+```bash
+# Baseline (free-form memory): expect many T/W reds — that is the point.
+python eval/finance/run_finance_evals.py --tag tracking --fixture baseline
+python eval/finance/run_finance_evals.py --id P1            # P1 is stateless; run it separately
+```
+
+`--fixture` is **local-SUT only** — it touches this machine's filesystem and
+refuses if `--host` is non-local. The fixture values are **frozen** (a
+balance-sheet benchmark must be reproducible); the agent is expected to use the
+stored values, not re-fetch live. The W family is **multi-turn** (`prompts: […]`
+sent over one session — a write turn, then a readback turn the grader scores),
+replaying the incremental-addition scenario that caused the real drift.
+
+The truth behind the T-family graders comes from `_networth.py`, which queries
+the **same `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views the
+agent's portfolio engine exposes**, against the seeded SQLite store (the A/B/D
+coordination note's contract — agent and grader read identical views, so they
+can't drift). It depends on that store existing: the engine builds
+`context/memory/portfolio.db` from `fixtures/portfolio.sql`. With the store in
+place (or `CURUNIR_PORTFOLIO_DB` pointed at one), verify the anchors by hand:
+
+```bash
+python eval/finance/_networth.py total      # {net_worth, assets, liabilities}
+python eval/finance/_networth.py rollup     # {equities, real_estate_equity, …, total}
+```
+
+#### Two interface modes (CLI vs tool)
+
+Once the A/B/D portfolio engine ships, the same balance sheet is reachable two
+ways — a **CLI adapter** and an **opt-in tool adapter** — and this suite is the
+judge of which surface wins. The tasks grade at the boundary (correct net worth
+in `final_text`), so they don't change between modes; only the SUT's
+configuration does. Run the suite once per surface and tag each run so the
+reports diff cleanly:
+
+```bash
+# (configure the SUT for the CLI surface, then)
+python eval/finance/run_finance_evals.py --tag tracking --fixture baseline --interface cli
+# (reconfigure the SUT for the tool surface, then)
+python eval/finance/run_finance_evals.py --tag tracking --fixture baseline --interface tool
+```
+
+`--interface` only labels the report (filename + header); the winner is the
+surface with the better pass-rate and tool-call efficiency.
 
 ### Verify the runner itself (no server, no tokens)
 
