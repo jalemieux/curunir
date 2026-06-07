@@ -60,17 +60,27 @@ class Result:
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-_NUM_RE = re.compile(r"-?\$?\d[\d,]*(?:\.\d+)?")
+_NUM_RE = re.compile(r"(-?\$?\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]{0,8})")
 
 
 def _numbers(text: str) -> list[float]:
-    """All numeric tokens in `text`, as floats (commas and $ stripped)."""
+    """All numeric tokens in `text`, as floats — scale-suffix aware.
+
+    A trailing magnitude word is folded in, so "$3.10 trillion" reads as
+    3.1e12 rather than a bare 3.1 — otherwise `_closest` matching a market cap
+    picks an unrelated small number (e.g. the share price) in the same answer.
+    `_SCALE` is defined below in the reconciliation section.
+    """
     out = []
-    for tok in _NUM_RE.findall(text):
+    for m in _NUM_RE.finditer(text):
         try:
-            out.append(float(tok.replace(",", "").replace("$", "")))
+            val = float(m.group(1).replace(",", "").replace("$", ""))
         except ValueError:
-            pass
+            continue
+        suf = (m.group(2) or "").lower().strip(".")
+        if suf in _SCALE:
+            val *= _SCALE[suf]
+        out.append(val)
     return out
 
 
