@@ -51,7 +51,11 @@ TASKS: list[dict] = [
         "prompt": "What is Apple (AAPL) trading at right now? Give me the price.",
         "max_loops": 5,
         "grader": "action_used",
-        "spec": {"require_any": ["yfin.py quote", "yfin.py", "yfinance"]},
+        # Must route through the catalog (load_skill) AND make the real data call
+        # (yfin.py). The path isn't documented anywhere but the skill, so running
+        # yfin.py without loading it means the agent globbed around the catalog;
+        # a hand-rolled `import yfinance` does neither.
+        "spec": {"require": ["load_skill: yfinance", "yfin.py"]},
         # Doubles as an efficiency tripwire: a bare price is ~1 data call.
         "budget": {"max_actions": 4},
     },
@@ -63,13 +67,23 @@ TASKS: list[dict] = [
         "tags": ["regression", "data-spine"],
         "prompt": "What is NVIDIA's (NVDA) trailing P/E ratio? Just the number, sourced.",
         "max_loops": 5,
-        "grader": "numeric_tolerance",
+        "grader": "composite",
         "spec": {
-            "tolerance_pct": 8,  # price moves between anchor and answer
-            "anchor": {
-                "cmd": ["python", "skills/yfinance/yfin.py", "multiples", "NVDA"],
-                "json_path": "trailing_pe",
-            },
+            "all": [
+                # Must reach the P/E via the yfinance skill — load it from the
+                # catalog AND make the data call. The bare numeric check never
+                # saw the hand-rolled-`import yfinance` bypass.
+                {"label": "used-yfin", "grader": "action_used",
+                 "spec": {"require": ["load_skill: yfinance", "yfin.py"]}},
+                {"label": "pe-matches-live", "grader": "numeric_tolerance",
+                 "spec": {
+                     "tolerance_pct": 8,  # price moves between anchor and answer
+                     "anchor": {
+                         "cmd": ["python", "skills/yfinance/yfin.py", "multiples", "NVDA"],
+                         "json_path": "trailing_pe",
+                     },
+                 }},
+            ]
         },
     },
     {
@@ -98,14 +112,24 @@ TASKS: list[dict] = [
         "tags": ["regression", "data-spine"],
         "prompt": "Look up the SEC CIK number for Eli Lilly (ticker LLY).",
         "max_loops": 5,
-        "grader": "exact_match",
+        "grader": "composite",
         "spec": {
-            "extract_regex": r"(\d{5,10})",
-            "normalize": "lstrip0",
-            "anchor": {
-                "cmd": ["python", "skills/sec-edgar/edgar.py", "lookup", "LLY"],
-                "json_path": "cik",
-            },
+            "all": [
+                # Must resolve the CIK via the edgar skill — load it from the
+                # catalog AND make the lookup call, not ad-hoc curl/scrape of
+                # sec.gov (the bare exact_match never checked how it got there).
+                {"label": "used-edgar", "grader": "action_used",
+                 "spec": {"require": ["load_skill: sec-edgar", "edgar.py"]}},
+                {"label": "cik-matches", "grader": "exact_match",
+                 "spec": {
+                     "extract_regex": r"(\d{5,10})",
+                     "normalize": "lstrip0",
+                     "anchor": {
+                         "cmd": ["python", "skills/sec-edgar/edgar.py", "lookup", "LLY"],
+                         "json_path": "cik",
+                     },
+                 }},
+            ]
         },
     },
     {
@@ -131,7 +155,7 @@ TASKS: list[dict] = [
         "spec": {
             "all": [
                 {"label": "fetched-multiples", "grader": "action_used",
-                 "spec": {"require_any": ["yfin.py", "yfinance"]}},
+                 "spec": {"require": ["load_skill: yfinance", "yfin.py"]}},
                 {"label": "shows-a-multiple", "grader": "regex_present",
                  "spec": {"require": [r"\bP/?E\b", r"\d{1,2}(?:\.\d+)?x?"]}},
                 {"label": "not-a-buy-directive", "grader": "regex_present",
@@ -303,7 +327,10 @@ TASKS: list[dict] = [
                 # legitimate path. The cap-matches-live check below is the real
                 # anti-fabrication guard.
                 {"label": "actually-fetched", "grader": "action_used",
-                 "spec": {"require_any": ["yfin.py", "yfinance",
+                 # A live fetch counts (the contract is "not from memory"), but a
+                 # hand-rolled `import yfinance` does not — only yfin.py or a real
+                 # web fetch of the quote page.
+                 "spec": {"require_any": ["yfin.py",
                                           "finance.yahoo.com", "web_fetch"]}},
                 {"label": "cap-matches-live", "grader": "numeric_tolerance",
                  "spec": {"tolerance_pct": 10,
