@@ -178,7 +178,21 @@ awk '
 wc -l -w -c /tmp/yt_<id>.txt
 ```
 
-Then `read(file_path="/tmp/yt_<id>.txt")` to load it into context.
+**Size-gate before loading.** Look at the `wc -l -w -c` stats you just
+printed and decide the path — do **not** unconditionally `read` the whole
+file:
+
+- **Single-call budget:** ~50k words / ~300KB (same threshold as
+  `youtube-transcript`, step 110). This is guidance, not a hard constant —
+  scale it down for a small-context `MODEL` and up for a large one. The
+  point is that one summarization request (transcript + prompt + reply)
+  must fit comfortably inside the model's context window.
+- **Under budget** → `read(file_path="/tmp/yt_<id>.txt")` to load the
+  whole transcript into context, and use the **short path** in step 4.
+- **Over budget** → do **not** read the file whole (that is exactly what
+  overflows the request on multi-hour episodes). Record the line count
+  from `wc -l` and proceed to the **long (map-reduce) path** in step 4,
+  which reads the transcript in line-range chunks.
 
 If the `.vtt` file doesn't exist (no captions), log and skip the episode.
 
@@ -214,6 +228,12 @@ rewrite the whole file.
 
 ### 4. Summarize and tag topics
 
+The size gate in step 1 picks the path. Both paths produce the **same
+output contract** — a 5–10 bullet summary plus 2–5 topic slugs — which
+feeds step 6 (index update), **not** the per-episode file.
+
+#### Short path (under budget)
+
 Single LLM call against the **transcript** (which you loaded in step 1):
 
 > Produce a 5–10 bullet summary of the substantive points discussed in
@@ -232,8 +252,67 @@ Single LLM call against the **transcript** (which you loaded in step 1):
 > TOPICS: slug-a, slug-b, slug-c
 > ```
 
-The summary and topics feed step 6 (index update), **not** the
-per-episode file.
+#### Long (map-reduce) path (over budget)
+
+For a multi-hour episode the transcript is too large to load whole (the
+exact failure that motivated this gate — a single request can blow past
+the model's context window). Never `read` the whole file here. Instead,
+**map** over line-range chunks and **reduce** the partials.
+
+**4a. Compute chunk line-ranges.** From the `wc -l` line count, split the
+file into chunks of ~25–30k words each (well under the single-call
+budget, since a chunk must still fit one sub-agent's window). `read` /
+`delegate` are line-based, so convert: estimate words-per-line from the
+`wc -w` / `wc -l` ratio, pick a chunk size in **lines**, and add a small
+overlap (~50–100 lines) between consecutive chunks so a discussion split
+across a boundary isn't fragmented. Example: a 9,000-line file at a ~3k
+words-per-1k-lines density → ~3 chunks of ~3,000 lines with 75-line
+overlap (lines 1–3000, 2925–5925, 5850–9000).
+
+**4b. Map — summarize each chunk in a sub-agent.** For each chunk,
+`delegate` a sub-agent so the chunk's raw text lands in the **sub-agent's
+own** context window and only compact partial bullets return to the main
+loop (this keeps the orchestrating context small — the whole point of the
+gate). Give each sub-agent a task like:
+
+> Use the `read` tool with `offset=<start>` and `limit=<count>` to load
+> lines `<start>`–`<end>` of `/tmp/yt_<id>.txt` (a podcast transcript
+> chunk — do not read the whole file, do not pipe it through bash).
+> Produce 4–8 bullets capturing the substantive points discussed in this
+> chunk. Bullets only, no preamble.
+
+Collect the returned bullets from every chunk. (Fallback if `delegate`
+is awkward in a given run: loop inline — `read` each `offset`/`limit`
+range yourself and summarize it to bullets before reading the next. This
+accumulates only the small partial bullets in the main context, not raw
+text, so it's acceptable; `delegate` is preferred because it keeps even
+the chunk text out of the orchestrator.)
+
+**4c. Reduce — synthesize the partials.** Make one LLM call over the
+**collected partial bullets** (not the transcript) to produce the final
+output, reusing the same taxonomy/return-format contract as the short
+path:
+
+> Below are partial bullet summaries from consecutive chunks of one
+> podcast episode. Synthesize them into a single 5–10 bullet summary of
+> the substantive points across the **whole** episode (merge duplicates,
+> keep coverage of both early and late material). Then produce 2–5
+> kebab-case topic slugs (lowercase, hyphenated, no punctuation).
+>
+> Prefer slugs from this existing taxonomy if any fit; only invent a
+> new slug when nothing in the list matches: `<list contents of
+> summaries/topics/ if the dir exists>`
+>
+> Partial bullets:
+> `<concatenated chunk bullets>`
+>
+> Return:
+> ```
+> SUMMARY:
+> - ...
+> - ...
+> TOPICS: slug-a, slug-b, slug-c
+> ```
 
 ### 5. Write the per-episode file
 
@@ -262,7 +341,33 @@ YAML quoting: episode titles often contain `:`, so single-quote them
 and double any embedded single quote. Lists with comma-containing
 names: quote individual entries.
 
-Use `write` (not `edit`) — this is a fresh file each time.
+**Short path (under budget)** — the transcript is already in context, so
+use the `write` tool (not `edit`) with the body above, transcript inlined.
+Fresh file each time.
+
+**Long path (over budget)** — do **not** inline the transcript: the
+`write` tool would re-load the whole transcript into context and
+reintroduce the exact overflow the step-4 gate avoids. Assemble the file
+**on disk** instead, so the transcript never enters context — write the
+frontmatter, then append the transcript file-to-file with bash:
+
+```bash
+EP="context/workspace/podcasts/<slug>/<YYYY-MM-DD>-<episode-slug>.md"
+cat > "$EP" <<'EOF'
+---
+podcast: <show.name>
+episode_title: '<title with single quotes doubled>'
+date: <YYYY-MM-DD>
+hosts: [<...>]
+guests: [<...>]
+url: https://www.youtube.com/watch?v=<id>
+---
+EOF
+cat /tmp/yt_<id>.txt >> "$EP"
+```
+
+(The heredoc only emits the small frontmatter to bash output; the
+transcript is appended file-to-file and is never piped through stdout.)
 
 ### 6. Update indexes
 
@@ -407,6 +512,12 @@ transcript files on disk.
       file in the `.bak` files. If found, reuse it.
    3. Otherwise, regenerate the summary + topic slugs by running
       step 4 of the per-episode ingest against the transcript body.
+      Apply the **same size gate** as step 1 here: `wc -l -w -c` the
+      per-episode file first; under budget → load and use the short
+      path, over budget → use the map-reduce path (chunked `read` /
+      `delegate`). A multi-hour episode's on-disk transcript overflows
+      just as readily during rebuild as during ingest, so this recovery
+      path inherits the map-reduce path automatically.
    4. Upsert into `timeline.md`, `by-podcast/<slug>.md`, and every
       `topics/<topic>.md` it touches.
 4. Report which files were rebuilt and which reused prior summaries.
@@ -474,6 +585,16 @@ it to `true` after configuring at least one show with Mode B.
 - **Piping the transcript through bash stdout.** Bash truncates at
   30k chars. Always: pipeline → file → `read` tool. (Same rule as
   `youtube-transcript`.)
+- **Loading a multi-hour transcript whole into context to summarize it.**
+  A long episode's transcript (50k+ words) plus the prompt can exceed the
+  model's context window and the whole ingest fails. Gate on the step-1
+  `wc` stats: under budget → single `read` + single call; over budget →
+  map-reduce over line-range chunks (`read` `offset`/`limit`, one
+  `delegate` sub-agent per chunk) and synthesize the partials. The
+  per-episode file write (step 5) must also go file-to-file (`cat >>`) on
+  the long path — inlining the transcript through the `write` tool
+  reintroduces the same overflow. Cross-reference the chunking warning in
+  `youtube-transcript` (step 110).
 - **Appending an ID to `.seen-ids.txt` before the per-episode file is
   on disk.** A crash between the append and the write means the
   episode is silently lost next run. Append the ID last.
