@@ -1,12 +1,17 @@
 ---
 name: yfinance
-description: "Use when fetching equity data from Yahoo Finance — fundamentals, prices, valuation multiples, peers, options, dividends, analyst estimates. Trigger phrases: 'current price of X', 'P/E for X', 'revenue/earnings of X', 'how does X compare to peers', 'price history of X'."
+description: "Use to pull hard, real market data on public equities — live/historical prices, fundamentals (revenue, earnings, margins, balance sheet, cash flow), valuation multiples, peers, options, dividends, analyst estimates. Reach for this instead of answering equity questions from memory; the numbers must come from the live source. Trigger phrases: 'current price of X', 'P/E for X', 'revenue/earnings of X', 'how does X compare to peers', 'price history of X'."
 ---
 
-# Yahoo Finance (yfinance)
+# Equity market data (via yfinance)
 
-Fetch equity data via the `yfinance` Python package. No API key required, but Yahoo
-throttles aggressively — keep requests focused and cache results inside a session.
+Use this skill whenever you need **hard, sourced numbers on a public company or ETF** —
+never answer equity price/fundamental/valuation questions from memory or training data.
+The data comes from the `yfinance` Python package (which scrapes Yahoo Finance) — that's
+the implementation; the point is to get a live, citable value with an `as_of` date.
+
+No API key required, but the source throttles aggressively — keep requests focused and
+cache results inside a session.
 
 The driver is `yfin.py` at the skill root. Every subcommand prints JSON to stdout,
 errors print `{"error": "...", "hint": "..."}` and exit 1, usage errors exit 2.
