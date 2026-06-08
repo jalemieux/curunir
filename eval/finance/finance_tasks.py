@@ -11,7 +11,7 @@ Run with `CURUNIR_PERSONA=finance`. Each task is a dict:
                (write → readback); the grader scores the FINAL reply
     max_loops— tool-call budget enforced by the harness (hard stop, like the
                existing simple_evals); keep generous enough to finish.
-    grader   — dispatch key into finance_graders.GRADERS
+    grader   — dispatch key into eval.harness.graders.GRADERS
     spec     — grader config (may carry an `anchor` recomputed at grade time)
     budget   — optional process budget; a correct run over it scores PASS-SLOW
 

@@ -4,7 +4,7 @@ Reproduces the bug that corrupted the last run — a heavy task desyncing every
 task after it — using a fake WebSocket that replays the exact frame sequence the
 real server emits. No model calls, no SUT, no token spend.
 
-    python eval/finance/test_runner_sync.py
+    python eval/harness/test_runner_sync.py
 """
 
 import asyncio
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import eval.finance.run_finance_evals as R  # noqa: E402
+import eval.harness.runner as R  # noqa: E402  (R.G is the graders module)
 
 
 class FakeWS:
