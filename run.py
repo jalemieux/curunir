@@ -611,6 +611,7 @@ async def main():
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
+    max_tool_result_chars = os.environ.get("MAX_TOOL_RESULT_CHARS")
     max_iterations = os.environ.get("MAX_ITERATIONS")
     attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
     tts_model = os.environ.get("TTS_MODEL")
@@ -636,6 +637,7 @@ async def main():
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
+        **({"max_tool_result_chars": int(max_tool_result_chars)} if max_tool_result_chars else {}),
         **({"max_iterations": int(max_iterations)} if max_iterations else {}),
         **({"attachment_dir": attachment_dir} if attachment_dir else {}),
         **({"tts_model": tts_model} if tts_model else {}),
