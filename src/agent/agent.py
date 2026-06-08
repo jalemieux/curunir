@@ -152,7 +152,13 @@ def _is_context_overflow(exc: Exception) -> bool:
     if isinstance(exc, litellm.ContextWindowExceededError):
         return True
     msg = str(exc).lower()
-    return "context limit" in msg or "prompt is too long" in msg or "exceed" in msg and "token" in msg
+    return (
+        "context limit" in msg
+        or "prompt is too long" in msg
+        or "maximum context length" in msg
+        or "you requested about" in msg
+        or ("exceed" in msg and "token" in msg)
+    )
 
 
 def _parse_skill_tools(skill_content: str) -> list[str]:
