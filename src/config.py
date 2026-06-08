@@ -10,6 +10,7 @@ class AgentConfig:
     openrouter_provider: str | None = None
     max_iterations: int = 200
     max_history_chars: int = 250_000
+    max_tool_result_chars: int = 100_000
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     usage_db: Path = Path("./context/usage.db")
