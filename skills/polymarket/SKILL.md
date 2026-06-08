@@ -1,7 +1,6 @@
 ---
 name: polymarket
 description: "Use to get hard, real-money implied probabilities on forward-looking or uncertain outcomes — elections, geopolitical events, policy decisions, macro outcomes, sports, awards, anything a betting market prices. Reach for this instead of guessing odds from memory; the probability must come from the live market. Trigger phrases: 'prediction markets', 'Polymarket', 'Polymarket odds', 'implied probability', 'betting markets say', 'what are the odds of'. Also cite alongside qualitative sources inside deep-research / deep-research-guided when the question is forward-looking."
-hidden: true
 ---
 
 # Prediction-market probabilities (via Polymarket)
