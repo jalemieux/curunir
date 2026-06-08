@@ -37,6 +37,8 @@ Curunir is a configurable agentic LLM framework for building digital assistants.
 
 Context overflow is caught from LiteLLM exceptions; history is adaptively trimmed to half of `MAX_HISTORY_CHARS` (125k by default) and retried once. An empty LLM response (no text, no tool calls) is retried, then nudged with `"Continue."`, then fails.
 
+**Per-tool-result cap (defense-in-depth).** `_cap_tool_result` truncates any single tool result longer than `max_tool_result_chars` (env `MAX_TOOL_RESULT_CHARS`, default 100k chars ≈ 25k tokens) *before* it enters history, appending a marker that nudges the model to re-read with `read` offset/limit or `grep`. This is independent of `_trim_history` (which only drops whole message groups and can't shrink one oversized message), so a single uncapped `read`/`bash`/`web_fetch` result can't blow past the context window and poison the session. Lower it for small-context models.
+
 **Usage accounting.** After each successful `call_llm`, a `UsageRecord` (prompt/completion/cached/reasoning/image/audio tokens, `cost_usd`, `elapsed_sec`) is written to SQLite `context/usage.db` via `asyncio.to_thread` (see Usage Tracking below).
 
 **Cancellation.** `Agent.request_cancel(session_id)` sets a per-session `asyncio.Event` that the loop checks at the top of each iteration and before the tool batch starts. Channels call this out-of-band when the user requests a stop (the in_queue is blocked while `handle()` runs). Because the batch is dispatched with a single `asyncio.gather()`, a cancel that arrives **before** the batch starts stubs every call in it with an `(interrupted)` tool response (so each `tool_call_id` has a matching response); once the batch is in flight, all calls run to completion — there is no mid-batch skip. On the next iteration the outer cancel check fires, an `(interrupted)` assistant turn is appended, and `handle()` returns `"(interrupted)"`.
@@ -190,5 +192,6 @@ See `.env.example` for full list. Critical ones:
 - `VISION_MODEL` — fallback vision model when `MODEL` is text-only. At boot, `litellm.supports_vision(MODEL)` is checked; if false, image attachments are described by `VISION_MODEL` and the description is sent to `MODEL` as text. If unset, images become a `[file (image, NKB) — no vision model configured]` text marker.
 - `EMAIL_ENABLED`, `DEADSIMPLE_API_KEY`, `DEADSIMPLE_INBOX_ID`, `DEADSIMPLE_API_BASE` (default `https://api.deadsimple.email`), `EMAIL_ALLOWED_SENDERS`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_POLL_INTERVAL`, `EMAIL_STATE_FILE` — for the deadsimple.email channel (no Google/Gmail vars anymore)
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
+- `MAX_TOOL_RESULT_CHARS` — per-tool-result truncation cap in chars (default 100000 ≈ 25k tokens; defense-in-depth, lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
 - `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.

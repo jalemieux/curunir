@@ -98,6 +98,18 @@ Run the bash command `python -c "import nonexistent_module"` and handle whatever
 Search for the pattern "zzz_no_match_zzz" across the entire codebase. What do you conclude?
 ```
 
+<!--
+Tool-result truncation recovery. The per-tool-result cap (MAX_TOOL_RESULT_CHARS,
+default 100000) truncates an oversized read/bash/web_fetch result before it
+enters history and appends a "use read offset/limit, or grep to narrow" marker.
+This eval checks the model recovers from that marker instead of looping or
+giving up. To force truncation on a small file, run the instance with a low cap
+(e.g. MAX_TOOL_RESULT_CHARS=4000) — see the PR's cross-model recovery table.
+-->
+```max_loops=8
+Read the file docs/superpowers/plans/2026-04-30-curunir-portal.md and tell me the date in its filename and the first heading. If a tool result comes back truncated, recover by narrowing the read (offset/limit or grep) rather than re-reading the whole file.
+```
+
 ---
 
 ## Output Quality
