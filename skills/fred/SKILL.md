@@ -1,12 +1,16 @@
 ---
 name: fred
-description: "Use when fetching US macroeconomic data from FRED (Federal Reserve Economic Data) — interest rates, treasury yields, inflation (CPI), GDP, unemployment, sector indices, FX rates. Trigger phrases: '10y treasury', 'fed funds rate', 'CPI', 'unemployment rate', 'discount rate inputs', 'macro context'."
+description: "Use to get hard, authoritative US macroeconomic data — interest rates, treasury yields, inflation (CPI/PCE), GDP, unemployment, sector indices, FX rates. Reach for this instead of answering macro questions from memory; the figure must come from the live source. Trigger phrases: '10y treasury', 'fed funds rate', 'CPI', 'unemployment rate', 'discount rate inputs', 'macro context'."
 ---
 
-# FRED (St. Louis Fed)
+# US macroeconomic data (via FRED)
 
-Fetch macroeconomic time-series from the FRED API. Requires `FRED_API_KEY` in
-`.env` (free at https://fred.stlouisfed.org/docs/api/api_key.html).
+Use this skill whenever you need a **hard, sourced US macro figure** — rates, yields,
+inflation, GDP, unemployment, FX — never answer from memory or training data. The data
+comes from FRED (Federal Reserve Economic Data, St. Louis Fed) — the implementation and
+the authoritative source. Every figure carries an observation date so you can cite it.
+
+Requires `FRED_API_KEY` in `.env` (free at https://fred.stlouisfed.org/docs/api/api_key.html).
 
 The driver is `fred.py` at the skill root. Every subcommand prints JSON to stdout,
 errors print `{"error": "...", "hint": "..."}` and exit 1, usage errors exit 2.
