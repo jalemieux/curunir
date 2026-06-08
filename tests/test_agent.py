@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _trim_history
+from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _is_context_overflow, _trim_history
 from src.llm import LLMResponse
 
 
@@ -506,6 +506,51 @@ class TestTrimHistoryMultimodal:
         _trim_history(history, max_chars=5_000)
         assert len(history) == 2
         assert history[0]["content"][0]["text"] == "recent"
+
+
+class TestIsContextOverflow:
+    def test_openrouter_max_context_message(self):
+        import litellm
+
+        msg = (
+            "This endpoint's maximum context length is 128000 tokens. "
+            "However, you requested about 1900000 tokens (1899000 of text "
+            "input, 1000 in the system prompt). Please reduce the length "
+            "of either one."
+        )
+        exc = litellm.BadRequestError(
+            message=msg,
+            model="openrouter/anthropic/claude-3.5-sonnet",
+            llm_provider="openrouter",
+        )
+        assert _is_context_overflow(exc) is True
+
+    def test_context_window_exceeded_error(self):
+        import litellm
+
+        exc = litellm.ContextWindowExceededError(
+            message="too long",
+            model="gpt-4",
+            llm_provider="openai",
+        )
+        assert _is_context_overflow(exc) is True
+
+    def test_generic_context_limit_message(self):
+        assert _is_context_overflow(Exception("context limit reached")) is True
+
+    def test_exceeds_tokens_message(self):
+        assert (
+            _is_context_overflow(
+                Exception("This exceeds the maximum number of tokens allowed")
+            )
+            is True
+        )
+
+    def test_prompt_too_long_message(self):
+        assert _is_context_overflow(Exception("prompt is too long")) is True
+
+    def test_unrelated_error_not_overflow(self):
+        assert _is_context_overflow(ValueError("nope")) is False
 
 
 class TestDelegateToolExecution:
