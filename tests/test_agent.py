@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _estimate_chars, _trim_history
+from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _trim_history
 from src.llm import LLMResponse
 
 
@@ -871,3 +871,116 @@ class TestSystemPromptCaching:
         assert stats["prompt_tokens"] == 1000
         assert stats["cached_prompt_tokens"] == 400
         assert stats["cache_hit_rate"] == 0.4
+
+
+class TestCapToolResult:
+    """Unit tests for the pure _cap_tool_result helper."""
+
+    def test_under_cap_passthrough(self):
+        content = "short result"
+        assert _cap_tool_result(content, 100) == content
+
+    def test_exactly_at_cap_passthrough(self):
+        content = "x" * 100
+        assert _cap_tool_result(content, 100) == content
+
+    def test_one_over_cap_truncates(self):
+        content = "x" * 101
+        capped = _cap_tool_result(content, 100)
+        assert capped.startswith("x" * 100)
+        assert "truncated 1 chars" in capped
+        assert len(capped) > 100  # marker appended
+
+    def test_far_over_cap_reports_dropped_count(self):
+        content = "y" * 500
+        capped = _cap_tool_result(content, 100)
+        assert capped.startswith("y" * 100)
+        assert "truncated 400 chars" in capped
+
+    def test_empty_passthrough(self):
+        assert _cap_tool_result("", 100) == ""
+
+    def test_none_passthrough(self):
+        assert _cap_tool_result(None, 100) is None
+
+
+class TestToolResultCapInHistory:
+    """The cap is applied to tool results before they enter history."""
+
+    async def test_oversized_tool_result_is_truncated_in_history(self, agent_config):
+        agent_config.max_tool_result_chars = 1000
+        agent = Agent(agent_config)
+
+        big = "Z" * 50_000
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_big",
+                "type": "function",
+                "function": {"name": "read", "arguments": json.dumps({"file_path": "/tmp/x"})},
+            }],
+        )
+        final = LLMResponse(text="done", tool_calls=None)
+
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value=big), \
+             patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, final]):
+            result = await agent.handle("read it", "s1")
+
+        assert result == "done"
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        # Truncated body + marker only.
+        assert len(tool_msg["content"]) <= agent_config.max_tool_result_chars + 200
+        assert "truncated 49000 chars" in tool_msg["content"]
+
+    async def test_oversized_result_does_not_reach_provider(self, agent_config):
+        agent_config.max_tool_result_chars = 1000
+        agent = Agent(agent_config)
+
+        big = "Z" * 50_000
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_big",
+                "type": "function",
+                "function": {"name": "read", "arguments": json.dumps({"file_path": "/tmp/x"})},
+            }],
+        )
+        final = LLMResponse(text="done", tool_calls=None)
+
+        mock_call = AsyncMock(side_effect=[tool_response, final])
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value=big), \
+             patch("src.agent.agent.call_llm", new=mock_call):
+            await agent.handle("read it", "s1")
+
+        # Second call_llm (post-tool) must not carry the full 50k payload.
+        second_call_messages = mock_call.call_args_list[1].kwargs.get("messages") \
+            or mock_call.call_args_list[1].args[1]
+        tool_entries = [m for m in second_call_messages if m.get("role") == "tool"]
+        assert tool_entries
+        assert all(len(m["content"]) <= agent_config.max_tool_result_chars + 200 for m in tool_entries)
+        assert big not in "".join(m["content"] for m in tool_entries)
+
+    async def test_under_cap_result_stored_verbatim(self, agent_config):
+        agent_config.max_tool_result_chars = 100_000
+        agent = Agent(agent_config)
+
+        small = "small output here"
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_small",
+                "type": "function",
+                "function": {"name": "read", "arguments": json.dumps({"file_path": "/tmp/x"})},
+            }],
+        )
+        final = LLMResponse(text="done", tool_calls=None)
+
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value=small), \
+             patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, final]):
+            await agent.handle("read it", "s1")
+
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        assert tool_msg["content"] == small
+        assert "truncated" not in tool_msg["content"]
