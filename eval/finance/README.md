@@ -5,28 +5,27 @@ behavior at the boundary** — real user prompts in, graded pass/fail out —
 never internals like "did it call skill X" (except where a routing/privacy
 *contract* genuinely is the action taken).
 
+> The shared machinery — the graded engine, run flags, report format, statuses,
+> the grader catalog, anchoring, and the `Result` contract — is documented once
+> in [`eval/README.md`](../README.md). This file covers only what's specific to
+> the finance suite.
+
 ## Files
 
 | File | Role |
 |------|------|
 | `finance_tasks.py` | Tasks as data: `{id, name, tags, prompt`/`prompts, max_loops, grader, spec, budget}`. R/F/C = market data; **P/T/W = position-tracking** (the owner's balance sheet) |
-| `finance_graders.py` | Pure graders `(result, spec) -> (status, why)`; `GRADERS` dispatch + `grade()`. Includes `reconciles` (balance-sheet must add up) |
-| `run_finance_evals.py` | Runner: drives the WS channel, builds a `Result`, grades, writes a report. Supports multi-turn `prompts` and `--fixture` seeding |
+| `run_finance_evals.py` | Thin shim: builds the finance `SuiteConfig` and calls `eval.harness.runner.main` |
 | `_pe_gap.py` | Anchor helper for C1 (live forward-P/E gap) |
 | `_networth.py` | Anchor helper for the T family: queries the seeded SQLite store's shared `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views for `total` / `rollup` / `re-equity` / `collectibles` |
-| `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views). Seed `context/memory/portfolio.db` from it with `sqlite3` before any tracking task (see [Bootstrap the portfolio store](#bootstrap-the-portfolio-store-one-time-before-p2tw)); the agent and the anchor both read that store |
+| `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views). Seed `context/memory/portfolio.db` from it before any tracking task (see [Bootstrap the portfolio store](#bootstrap-the-portfolio-store-one-time-before-p2tw)); the agent and the anchor both read that store |
 | `fixtures/memory/baseline/` | The free-form memory representation of those same holdings, seeded into `context/memory/` for a tracking run |
-| `test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (multi-turn + `reconciles` included; no SUT needed) |
-| `results/` | Timestamped JSON + markdown reports (git-ignored) |
+| `results/` | Timestamped JSON + markdown + HTML reports (git-ignored) |
 
 ## Quick start
 
-The runner is a **headless WebSocket client** — it talks to a running curunir
-instance over `ws://localhost:8765`, the same channel the CLI uses. So you need
-the server running first, then run the suite against it from another shell.
-
 ```bash
-# 0. (one-time) activate the venv and make sure keys are set in .env
+# 0. (one-time) activate the venv and set keys in .env
 source .venv/bin/activate
 #    .env must have:  ANTHROPIC_API_KEY  (the Claude judge)
 #                     FRED_API_KEY / BRAVE_API_KEY / XAI_API_KEY / GEMINI_API_KEY
@@ -36,32 +35,16 @@ source .venv/bin/activate
 CURUNIR_PERSONA=finance python run.py
 
 # 2. Terminal B — run the graded suite against it
-python eval/finance/run_finance_evals.py
+python eval/finance/run_finance_evals.py            # full suite
+python eval/finance/run_finance_evals.py --id R6,F9 # a subset while iterating
+python eval/finance/run_finance_evals.py --tag regression
 ```
 
-That prints a live status line per task and, at the end, a summary plus the path
-to a saved report under `eval/finance/results/`.
+See [`eval/README.md`](../README.md) for the full flag list, the report format,
+and the judge-model setup. The full suite spends real model tokens on the SUT
+(the F11 memo alone runs ~8–10 min end to end), so iterate with `--id` / `--tag`.
 
-### Run a subset (cheaper)
-
-```bash
-python eval/finance/run_finance_evals.py --id R6,F9      # just these task ids
-python eval/finance/run_finance_evals.py --tag regression # tasks whose tag matches
-python eval/finance/run_finance_evals.py --tag guardrail  # any tag regex works
-python eval/finance/run_finance_evals.py --no-grade       # capture only, skip grading
-python eval/finance/run_finance_evals.py -v               # stream tool calls + text live
-python eval/finance/run_finance_evals.py --host h --port 8765   # remote SUT
-```
-
-`-v`/`--verbose` prints each task's tool calls (`├─ load_skill: …`,
-`├─ bash: …`) and streamed text as it happens, then the grade — useful for
-watching *why* a task is heading toward pass or fail in real time.
-
-The full suite spends real model tokens on the SUT (the F11 memo alone runs
-~8–10 min end to end). Use `--id` / `--tag` while iterating; run the full suite
-only when you want a complete baseline.
-
-### Position-tracking tasks (the P/T/W families)
+## Position-tracking tasks (the P/T/W families)
 
 The `tracking`-tagged tasks (P2, T1–T5, W1–W3) ask about the *owner's* balance
 sheet, so they must read a **seeded portfolio fixture** from memory rather than
@@ -84,13 +67,11 @@ replaying the incremental-addition scenario that caused the real drift.
 
 The truth behind the T-family graders comes from `_networth.py`, which queries
 the **same `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views the
-agent's portfolio engine exposes**, against the seeded SQLite store (the A/B/D
-coordination note's contract — agent and grader read identical views, so they
-can't drift). Both the agent and the grader's anchor read this one store, so it
-must be seeded from the frozen `fixtures/portfolio.sql` **before** running any
-tracking task.
+agent's portfolio engine exposes**, against the seeded SQLite store. Both the
+agent and the grader's anchor read this one store, so it must be seeded from the
+frozen `fixtures/portfolio.sql` **before** running any tracking task.
 
-#### Bootstrap the portfolio store (one-time, before P2/T*/W*)
+### Bootstrap the portfolio store (one-time, before P2/T*/W*)
 
 The fixture is a plain SQL seed (tables + views + the frozen rows). There is no
 make-target — build the store with `sqlite3`. The fixture's `CREATE TABLE`
@@ -123,7 +104,7 @@ sqlite3 eval/finance/portfolio.db < eval/finance/fixtures/portfolio.sql
 export CURUNIR_PORTFOLIO_DB=$PWD/eval/finance/portfolio.db   # set in BOTH terminals (SUT + runner)
 ```
 
-#### Two interface modes (CLI vs tool)
+### Two interface modes (CLI vs tool)
 
 Once the A/B/D portfolio engine ships, the same balance sheet is reachable two
 ways — a **CLI adapter** and an **opt-in tool adapter** — and this suite is the
@@ -142,85 +123,15 @@ python eval/finance/run_finance_evals.py --tag tracking --fixture baseline --int
 `--interface` only labels the report (filename + header); the winner is the
 surface with the better pass-rate and tool-call efficiency.
 
-### Verify the runner itself (no server, no tokens)
+## The task families — the four sources applied to finance
 
-The runner's WS frame handling is covered by a fake-socket test that replays the
-exact server frame sequence — run it after touching `run_finance_evals.py`:
-
-```bash
-python eval/finance/test_runner_sync.py
-```
-
-### The judge model
-
-`llm_judge` tasks are graded by a **Claude model, separate from the system under
-test** (a model grading its own output is an eval anti-pattern). The runner
-loads `.env`, so the default `anthropic/claude-sonnet-4-6` works as long as
-`ANTHROPIC_API_KEY` is set. Override with `JUDGE_MODEL=<litellm-model-id>` (and
-that provider's key in the env).
-
-## Reading the output
-
-Each task prints `PASS` / `FAIL` / `SLOW` / `ERR` and a one-line reason. Three
-report files are written per run:
-
-- **`results/finance-<ts>-<model>.html`** — the primary human report. A
-  self-contained page (no external assets) with one collapsible card per task:
-  - the **full grader breakdown** — every sub-check of a composite with its own
-    pass/fail dot and reason, not just the first failure;
-  - the full prompt, every tool call, attachments, and the agent's **complete
-    final text**;
-  - **empty responses are flagged** with a red banner ("EMPTY RESPONSE — the
-    agent returned no text. It ran N turns and emitted M tool calls") plus any
-    runner error — so a blank answer is loud, not silent;
-  - per-task server stats (wall, iterations, llm calls, tokens);
-  - filter by status, filter by tag, free-text search, expand/collapse all.
-
-  Open it in a browser: `open results/finance-<ts>-<model>.html`.
-- `results/finance-<ts>-<model>.json` — the same capture as structured data
-  (`checks`, `final_text`, `actions`, `attachments`, `stats`, `error`), for
-  programmatic diffing across runs.
-- `results/finance-<ts>-<model>.md` — a lightweight `id | name | status | why`
-  table for quick GitHub viewing / diffing.
-
-For a live trace while it runs, add `-v` (see Quick start).
-
-A failure is the agent's, not the harness's — the captured `final_text` and
-`actions` show exactly what the model did. (Baseline on
-`openrouter/z-ai/glm-5-turbo`: 19 pass, 2 fail, 1 slow — F3 gave a bare buy/sell
-directive under "don't hedge" pressure; F2 didn't route an event seed to
-catalyst-memo; F11 produced a correct memo but over the 10-min budget.)
-
-## Troubleshooting
-
-| Symptom | Cause / fix |
-|---------|-------------|
-| `received 1008 (policy violation) auth` | The WS pairing token wasn't sent. The runner reads `context/.ws-token` (or `$CURUNIR_WS_TOKEN`) — make sure the server wrote it and you're running from the repo root, or export `CURUNIR_WS_TOKEN`. |
-| `1001 (going away)` mid-run | The server stopped/restarted. Restart `run.py` and re-run. |
-| Judge tasks all `ERR … no JUDGE_MODEL/MODEL` | `ANTHROPIC_API_KEY` missing from `.env`, or set `JUDGE_MODEL` to a model whose key you have. |
-| A data-spine task fails to fetch | The relevant skill's key is unset (e.g. `FRED_API_KEY` for R3). Anchored graders also need the same CLIs to run locally. |
-| Connecting to wrong instance | Default is `localhost:8765`; pass `--host/--port` for a remote SUT. Make sure it was started with `CURUNIR_PERSONA=finance`. |
-
-## Statuses
-
-- **pass** — outcome contract satisfied.
-- **fail** — contract violated.
-- **pass-slow** — *correct but over a process budget* (wall-clock / tool-calls /
-  turns). A distinct signal, never folded into fail: it is the exact axis that
-  decomposition and perf work move. Tasks R1, F9 (tool-call budgets) and F11
-  (10-min wall budget) carry budgets.
-- **error** — the grader itself could not run (e.g. judge model unreachable).
-
-## How the suite is built — the four sources
-
-Tasks are generated from failure-first thinking, not "what features exist?":
+(The general methodology is in [`eval/README.md`](../README.md#how-a-suite-is-built--the-four-sources); here is how it maps onto the finance suite.)
 
 1. **Regression tripwires** (`R1`–`R7`) — one deliberately easy task per core
    capability (each data CLI, web search, the financial-analysis and
-   investment-memo orchestrators). Tripwires that go red the instant a refactor
-   breaks a basic path.
-2. **Failure-mode probes** (`F1`–`F11`) — the highest-value source. One prompt
-   per known pathology of *this* design:
+   investment-memo orchestrators).
+2. **Failure-mode probes** (`F1`–`F11`) — one prompt per known pathology of
+   *this* design:
    - **mis-route** — `F1` (a recommendation must hit `investment-memo`, not
      `deep-research`), `F2` (an event seed must hit `catalyst-memo`).
    - **guardrails** — `F3` no regulated advice, `F4` never execute/simulate a
@@ -230,34 +141,29 @@ Tasks are generated from failure-first thinking, not "what features exist?":
    - **dropped work** — `F8` show arithmetic + citations, `F10` surface a
      thesis's named disconfirming evidence, `F11` keep the Fact-Check Addendum.
    - **over-orchestration** — `F9` a trivial lookup must not spin up a memo.
-3. **Composition points** (`C1`–`C4`) — tasks that force two+ capabilities to
-   chain, where bugs cluster: two-ticker comparable (`C1`), catalyst →
+3. **Composition points** (`C1`–`C4`) — two-ticker comparable (`C1`), catalyst →
    winners/losers + odds (`C2`), analysis pulling a real FRED discount rate
    (`C3`), position-tracking ⋈ tax-timing (`C4`).
-4. **Grader-first** — applied as a filter: every task above has a crisp
-   discriminating grader, or it was sharpened until it did.
+4. **Position-tracking** (`P*`/`T*`/`W*`) — the owner's balance sheet; see above.
 
-## Anchoring (no hardcoded mutable answers)
+### Anchors
 
-Where the right answer moves with live data, the grader **recomputes** it from
-the *same* CLI the agent uses, via the task's `anchor` field:
+The finance suite's live-data anchors (see [Anchoring](../README.md#anchoring-no-hardcoded-mutable-answers)):
 
 - `R2` trailing P/E, `F7` market cap → `yfinance/yfin.py multiples`
 - `R4` CIK (frozen, exact) → `sec-edgar/edgar.py lookup`
 - `C1` forward-P/E gap → `_pe_gap.py`
+- `T*` net worth / rollup → `_networth.py` (the seeded portfolio store)
 
-This keeps the eval valid across data reseeds and stops the eval and the agent
-from silently drifting apart. Frozen facts (the CIK) are the only exact matches.
+## A note on baselines
 
-## The `Result` contract
+A failure is the agent's, not the harness's — the captured `final_text` and
+`actions` show exactly what the model did. (Baseline on
+`openrouter/z-ai/glm-5-turbo`: 19 pass, 2 fail, 1 slow — F3 gave a bare buy/sell
+directive under "don't hedge" pressure; F2 didn't route an event seed to
+catalyst-memo; F11 produced a correct memo but over the 10-min budget.)
 
-The runner hands each grader a `Result` with `final_text`, `actions` (streamed
-tool-call summary strings like `load_skill: investment-memo` or
-`bash: python skills/yfinance/yfin.py quote AAPL`), `wall_ms`, `turns`,
-`tokens_out`, `error`. Any harness that can populate those fields can reuse
-`finance_graders.py` unchanged.
-
-## Adding a task
+## Adding a finance task
 
 1. Write the **grader first** — if you can't state a discriminating pass/fail
    check, the prompt is too vague; sharpen it.
