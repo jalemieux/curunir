@@ -173,3 +173,43 @@ class TestErrors:
             result = exec_web_fetch({"url": "https://example.com/bad"}, agent_config)
         assert "Error fetching" in result
         assert "https://example.com/bad" in result
+
+
+class TestUrlValidation:
+    def test_oversized_dns_label_does_not_raise(self, agent_config):
+        # A single DNS label longer than 63 bytes makes the stdlib IDNA codec
+        # raise UnicodeError("label too long") when httpx encodes the host.
+        # This reproduces the production crash; web_fetch must return a string.
+        label = "nippon-life-insurance-company-enters-into-strategic-partnership-with-blackstone"
+        url = f"https://www.{label}/"
+        result = exec_web_fetch({"url": url}, agent_config)
+        assert isinstance(result, str)
+        assert "not a valid URL" in result or "Error" in result
+        assert url in result
+
+    def test_oversized_label_reaches_httpx_still_handled(self, agent_config):
+        # Even if pre-flight validation were bypassed, a UnicodeError raised
+        # from httpx.get must be caught and returned, never propagated.
+        url = "https://example.com/ok"
+        with patch("src.tools.web_fetch.httpx.get",
+                   side_effect=UnicodeError("label too long")):
+            result = exec_web_fetch({"url": url}, agent_config)
+        assert "Error fetching" in result
+        assert url in result
+
+    def test_non_http_scheme_rejected(self, agent_config):
+        result = exec_web_fetch({"url": "ftp://example.com/file"}, agent_config)
+        assert "not a valid URL" in result
+        assert "ftp://example.com/file" in result
+
+    def test_missing_host_rejected(self, agent_config):
+        result = exec_web_fetch({"url": "https:///path-only"}, agent_config)
+        assert "not a valid URL" in result
+
+    def test_invalid_url_value_error_handled(self, agent_config):
+        url = "https://example.com/ok"
+        with patch("src.tools.web_fetch.httpx.get",
+                   side_effect=httpx.InvalidURL("bad url")):
+            result = exec_web_fetch({"url": url}, agent_config)
+        assert "Error fetching" in result
+        assert url in result

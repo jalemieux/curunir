@@ -1,6 +1,7 @@
 # src/tools/web_fetch.py
 import io
 import logging
+from urllib.parse import urlsplit
 
 import httpx
 import pypdf
@@ -14,6 +15,39 @@ logger = logging.getLogger(__name__)
 _MAX_CONTENT_CHARS = 20_000  # ~5k tokens
 _TIMEOUT = 30
 _PDF_MAGIC = b"%PDF-"
+_MAX_DNS_LABEL = 63  # bytes; the IDNA codec raises "label too long" past this
+
+
+def _validate_url(url: str) -> str | None:
+    """Return an error string if the URL is structurally unfetchable, else None.
+
+    Catches hallucinated/malformed URLs (e.g. a hostname whose dot-separated
+    label exceeds 63 bytes) before httpx encodes the host as IDNA and raises a
+    bare UnicodeError("label too long").
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError as e:
+        return f"Error: {url} is not a valid URL ({e})"
+
+    if parts.scheme not in ("http", "https"):
+        return f"Error: {url} is not a valid URL (scheme must be http or https)"
+
+    try:
+        host = parts.hostname
+    except ValueError as e:
+        return f"Error: {url} is not a valid URL ({e})"
+    if not host:
+        return f"Error: {url} is not a valid URL (missing host)"
+
+    for label in host.split("."):
+        if len(label.encode("utf-8")) > _MAX_DNS_LABEL:
+            return (
+                f"Error: {url} is not a valid URL "
+                f"(hostname label exceeds {_MAX_DNS_LABEL} characters)"
+            )
+
+    return None
 
 
 def exec_web_fetch(args: dict, config: AgentConfig) -> str:
@@ -22,12 +56,16 @@ def exec_web_fetch(args: dict, config: AgentConfig) -> str:
     if not url:
         return "Error: 'url' is required"
 
+    validation_error = _validate_url(url)
+    if validation_error:
+        return validation_error
+
     try:
         resp = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True, headers={
             "User-Agent": "Mozilla/5.0 (compatible; research-agent/1.0)",
         })
         resp.raise_for_status()
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL, UnicodeError, ValueError) as e:
         return f"Error fetching {url}: {e}"
 
     content_type = resp.headers.get("content-type", "").lower()
