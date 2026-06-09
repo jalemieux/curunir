@@ -104,6 +104,17 @@ async def ws_browser(ws: WebSocket) -> None:
                         "delta": False,
                         "session_id": session_id,
                     }))
+                else:
+                    # Bootstrap/housekeeping frame (history_request,
+                    # skills_request, conversations_request, …) dropped because
+                    # the agent hasn't dialed in yet — the cold-start race
+                    # behind #334. The client recovers by re-issuing these on
+                    # the agent's offline→online transition; log it so the
+                    # condition is visible in portal logs.
+                    logger.info(
+                        "control frame dropped (agent offline)",
+                        extra={"user_id": user.id, "command": command},
+                    )
     except WebSocketDisconnect:
         pass
     finally:
