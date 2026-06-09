@@ -1,23 +1,18 @@
 # tests/test_digest_ledger.py
 """Smoke tests for the digest skill's on-disk artifacts.
 
-The skill at skills/digest/SKILL.md depends on two structural artifacts:
-the bundled SKILL.md itself and the seeded URL ledger in
-context.default/memory/digest-ai-sent.md. These tests guard the assumptions
-the skill prose makes about those files (frontmatter, Inputs contract, header
-line, append format that grep -F can hit on the URL).
+The skill at skills/digest/SKILL.md depends on the bundled SKILL.md itself.
+These tests guard the assumptions the skill prose makes about that file
+(frontmatter, Inputs contract, topic-scoped ledger naming).
 """
 
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 from src.skills import load_registry, parse_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_PATH = REPO_ROOT / "skills" / "digest" / "SKILL.md"
-LEDGER_SEED = REPO_ROOT / "context.default" / "memory" / "digest-ai-sent.md"
 
 
 def test_skill_is_discoverable():
@@ -66,37 +61,6 @@ def test_skill_has_inputs_contract_with_topic():
     assert "## Inputs" in body, "skill must have an Inputs section"
     inputs_section = body.split("## Inputs", 1)[1]
     assert "Topic" in inputs_section, "Inputs section must name the Topic input"
-
-
-def test_ledger_seed_has_header():
-    text = LEDGER_SEED.read_text()
-    first_line = text.splitlines()[0]
-    assert first_line.startswith("#"), "seed file must start with a markdown header"
-    assert "ledger" in first_line.lower()
-
-
-def test_ledger_append_format_is_grep_friendly(tmp_path):
-    """The skill instructs the agent to append `<DATE> <URL>` lines and to
-    dedup by `grep -F <url>`. Confirm a sample append round-trips through
-    grep -F and that the date prefix is parseable as ISO."""
-    ledger = tmp_path / "digest-ai-sent.md"
-    shutil.copy2(LEDGER_SEED, ledger)
-
-    sample_url = "https://example.com/article-abc"
-    sample_date = "2026-05-05"
-    with ledger.open("a") as f:
-        f.write(f"{sample_date} {sample_url}\n")
-
-    result = subprocess.run(
-        ["grep", "-F", sample_url, str(ledger)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert sample_url in result.stdout
-    matched_date = result.stdout.split()[0]
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", matched_date)
-    assert matched_date == sample_date
 
 
 def test_default_schedule_entry_is_disabled():
