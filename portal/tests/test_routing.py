@@ -188,6 +188,37 @@ async def test_stale_unregister_does_not_broadcast_offline():
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_request_dropped_before_agent_then_status_online_on_connect():
+    """The ordering invariant the client-side #334 fix keys off.
+
+    On a cold start the browser connects before the agent container has
+    dialed in. The browser's bootstrap frames (history/skills/conversations)
+    are forwarded while no agent socket exists — forward_to_agent returns
+    False and the frame is silently dropped (no chat-bubble, no exception).
+    Moments later the agent registers and the *only* signal the browser gets
+    is a single agent_status:online broadcast. The client uses that rising
+    edge to re-issue the dropped bootstrap requests.
+    """
+    rt = RoutingTable()
+    browser = FakeWS()
+    await rt.add_browser(42, browser)
+
+    # Bootstrap request arrives while the agent is offline → dropped, no raise.
+    forwarded = await rt.forward_to_agent(
+        42, json.dumps({"command": "conversations_request"})
+    )
+    assert forwarded is False
+    # No chat-bubble or other frame is produced as a side effect of the drop.
+    assert browser.sent == []
+
+    # Agent dials in: the browser's sole signal is one agent_status:online.
+    agent = FakeWS()
+    await rt.register_agent(42, agent)
+    statuses = [json.loads(s) for s in browser.sent]
+    assert statuses == [{"type": "agent_status", "status": "online"}]
+
+
+@pytest.mark.asyncio
 async def test_online_agent_user_ids_reports_connected_agents():
     rt = RoutingTable()
     await rt.register_agent(1, FakeWS())
