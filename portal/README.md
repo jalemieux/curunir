@@ -16,6 +16,31 @@ The container dials *out* to the portal on startup. The portal multiplexes
 each browser session to the matching container. See `docs/superpowers/plans/2026-04-30-curunir-portal.md`
 for the full design.
 
+## Browser UIs: desktop and mobile
+
+The portal serves two browser front-ends over the **same** `/ws/browser`
+WebSocket backend — the split is frontend-only, no backend changes:
+
+- **`/`** → `static/index.html`, the desktop-first SPA (sidebar + chat).
+- **`/m`** → `static/mobile.html`, a mobile-first, conversation-list-first SPA
+  (#304). The home view is the tappable conversation list; chat opens only on
+  an explicit selection (tap a row or "New conversation"), so the active
+  `session_id` is always a visible choice rather than an invisible
+  `localStorage` carry-over. It locks the viewport (`maximum-scale=1`,
+  `user-scalable=no`, 16px inputs) to stop iOS auto/pinch-zoom, pads against
+  the notch/home bar via safe-area insets, and ships a minimal PWA manifest
+  (`/manifest.json`) for add-to-homescreen / standalone display.
+
+Both are auth-gated (signed-cookie session). When an authenticated request to
+`/` carries a phone User-Agent, the portal issues a `307` redirect to `/m`;
+`/?desktop=1` forces the desktop UI as an escape hatch, and `/m` can always be
+opened directly. The UA redirect never fires for unauthenticated visitors —
+they stay on the public landing page rather than being bounced to `/m`.
+
+Native touch interactions shipped in v1: a bottom-sheet conversation switcher,
+pull-to-refresh on the list, and animated view transitions. Swipe-to-delete,
+voice (#292), and a service worker are intentionally deferred to follow-ups.
+
 ## Prerequisites
 
 - Docker (with `docker compose`)
