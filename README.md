@@ -125,6 +125,13 @@ portal deploys independently to render.com from its own GHCR image
 (`ghcr.io/jalemieux/curunir-portal`). See **[docs/deployment.md](docs/deployment.md)**
 for the host layout, the GHCR login flow, and `scripts/deploy.sh`.
 
+### Local LLM backend
+
+To run against a local model server (llama.cpp, Ollama, vLLM, LM Studio)
+instead of a hosted API — including Apple Silicon GPU offload, context/swap
+tuning, capping reasoning tokens, and the Docker `host.docker.internal`
+wiring — see **[docs/local-llm.md](docs/local-llm.md)**.
+
 ### CLI controls
 
 | Input | Effect |

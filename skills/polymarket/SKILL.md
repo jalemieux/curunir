@@ -1,13 +1,14 @@
 ---
 name: polymarket
-description: "Use when fetching live prediction-market data for forward-looking topics — elections, geopolitical events, policy decisions, macro outcomes, sports, awards, anything where a real-money betting market expresses an implied probability. Trigger phrases: 'prediction markets', 'Polymarket', 'Polymarket odds', 'implied probability', 'betting markets say', 'what are the odds of'. Also cite alongside qualitative sources inside deep-research / deep-research-guided when the question is forward-looking."
-hidden: true
+description: "Use to get hard, real-money implied probabilities on forward-looking or uncertain outcomes — elections, geopolitical events, policy decisions, macro outcomes, sports, awards, anything a betting market prices. Reach for this instead of guessing odds from memory; the probability must come from the live market. Trigger phrases: 'prediction markets', 'Polymarket', 'Polymarket odds', 'implied probability', 'betting markets say', 'what are the odds of'. Also cite alongside qualitative sources inside deep-research / deep-research-guided when the question is forward-looking."
 ---
 
-# Polymarket
+# Prediction-market probabilities (via Polymarket)
 
-Fetch live prediction-market questions, outcomes, and implied probabilities
-from Polymarket's public Gamma API. No API key required.
+Use this skill whenever you need a **hard, sourced implied probability for an uncertain
+or forward-looking outcome** — never estimate odds from memory or training data. The data
+comes from Polymarket's public Gamma API (the implementation); the point is a live,
+citable probability with a `fetched_at` timestamp. No API key required.
 
 The driver is `polymarket.py` at the skill root. Every subcommand prints JSON
 to stdout; errors print `{"error": "...", "hint": "..."}` and exit 1; usage

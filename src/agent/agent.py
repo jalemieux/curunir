@@ -127,12 +127,38 @@ def _trim_history(history: list[dict], max_chars: int = _DEFAULT_MAX_HISTORY_CHA
                 del history[1]
 
 
+def _cap_tool_result(content: str, max_chars: int) -> str:
+    """Cap a single tool result before it enters history (defense-in-depth).
+
+    `_trim_history` only drops whole message groups from the front; it cannot
+    shrink one oversized message, and a giant tool result is always the newest
+    message. An uncapped read/bash/web_fetch result larger than the context
+    window therefore crashes the turn and (interactively) poisons the session.
+    This per-result cap turns that hard crash into a recoverable, model-actionable
+    truncation. Slicing by character is safe — `content` is already decoded text.
+    """
+    if content is None or len(content) <= max_chars:
+        return content
+    dropped = len(content) - max_chars
+    marker = (
+        f"\n\n[... truncated {dropped} chars — "
+        "use read offset/limit, or grep to narrow, before reading again ...]"
+    )
+    return content[:max_chars] + marker
+
+
 def _is_context_overflow(exc: Exception) -> bool:
     """Check if an exception is a context window / input length overflow."""
     if isinstance(exc, litellm.ContextWindowExceededError):
         return True
     msg = str(exc).lower()
-    return "context limit" in msg or "prompt is too long" in msg or "exceed" in msg and "token" in msg
+    return (
+        "context limit" in msg
+        or "prompt is too long" in msg
+        or "maximum context length" in msg
+        or "you requested about" in msg
+        or ("exceed" in msg and "token" in msg)
+    )
 
 
 def _parse_skill_tools(skill_content: str) -> list[str]:
@@ -571,7 +597,7 @@ class Agent:
                             return {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
-                                "content": "(interrupted)",
+                                "content": _cap_tool_result("(interrupted)", self.config.max_tool_result_chars),
                                 "_tool_name": name,
                             }
 
@@ -607,7 +633,7 @@ class Agent:
                         return {
                             "role": "tool",
                             "tool_call_id": tool_call["id"],
-                            "content": result,
+                            "content": _cap_tool_result(result, self.config.max_tool_result_chars),
                             "_tool_name": name,
                         }
 

@@ -54,6 +54,38 @@ class TestClassifyProviderError:
         assert result is not None
         assert result[0] == "quota_exhausted"
 
+    def test_402_status_is_credits_exhausted(self):
+        exc = litellm.APIError(
+            status_code=402,
+            message="Payment Required",
+            llm_provider="openrouter",
+            model="test",
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        category, msg = result
+        assert category == "credits_exhausted"
+        assert msg == llm_module._CREDITS_MSG
+
+    def test_insufficient_credits_body_is_credits_exhausted(self):
+        # The real OpenRouter 402 body string from the incident log.
+        exc = RuntimeError(
+            "Insufficient credits. Add more using https://openrouter.ai/settings/credits"
+        )
+        result = classify_provider_error(exc)
+        assert result is not None
+        category, msg = result
+        assert category == "credits_exhausted"
+        assert msg == llm_module._CREDITS_MSG
+
+    def test_credits_message_is_provider_neutral(self):
+        exc = RuntimeError(
+            "Insufficient credits. Add more using https://openrouter.ai/settings/credits"
+        )
+        _, msg = classify_provider_error(exc)
+        assert "openrouter" not in msg.lower()
+        assert "http" not in msg.lower()
+
 
 @pytest.mark.asyncio
 async def test_text_response():

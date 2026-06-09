@@ -1,0 +1,33 @@
+name: marketing
+description: Go-to-market assistant for builders — product onboarding, ICP & positioning, GTM planning, competitive intelligence, and demand validation.
+
+# ABSOLUTE skill allowlist. Only these register for this deployment.
+skills:
+  - identity
+  - onboarding
+  # GTM pipeline (onboard -> position -> plan)
+  - gtm-onboard-ingest
+  - gtm-position-segment
+  - gtm-plan
+  # Competitive intelligence + ongoing maintenance
+  - gtm-competitive-landscape
+  - gtm-competitive-monitor
+  - gtm-reassess
+  # Demand validation
+  - gtm-smoke-test
+  # Dependent skills the GTM pipeline calls
+  - web-search
+  - xai-search
+  - gemini-search
+  - reddit-research
+  - linkedin-research
+  - playwright
+  - humanizer        # gtm-smoke-test: de-AI listing copy
+
+# Key NAMES only — documentation + soft startup warning. The operator
+# supplies the values via the container environment / .env. See
+# .env.marketing.example and README.md.
+keys:
+  - BRAVE_API_KEY   # web-search, reddit-research, linkedin-research
+  - XAI_API_KEY     # xai-search, reddit-research
+  - GEMINI_API_KEY  # gemini-search

@@ -33,11 +33,15 @@ Curunir is a configurable agentic LLM framework for building digital assistants.
 
 ### Core Loop (`src/agent/agent.py`)
 
-`Agent.handle()` is the heart: receive message → trim history (250k char limit) → build system prompt → call LLM (via LiteLLM) → execute tool calls sequentially → loop (max 200 iterations) → return response.
+`Agent.handle()` is the heart: receive message → trim history (250k char limit) → build system prompt → call LLM (via LiteLLM) → execute the tool-call batch concurrently → loop (max 200 iterations) → return response. Tool calls in a single batch run in parallel via `asyncio.gather()`; results map back 1:1 to `tool_call_id` to satisfy the chat schema. History char estimation charges a fixed ~2000 chars per image block so image-heavy sessions age out of the window alongside text.
 
-Context overflow is caught from LiteLLM exceptions; history is adaptively trimmed to 125k chars and retried.
+Context overflow is caught from LiteLLM exceptions; history is adaptively trimmed to half of `MAX_HISTORY_CHARS` (125k by default) and retried once. An empty LLM response (no text, no tool calls) is retried, then nudged with `"Continue."`, then fails.
 
-**Cancellation.** `Agent.request_cancel(session_id)` sets a per-session `asyncio.Event` that the loop checks at the top of each iteration and before each tool call within a batch. Channels call this out-of-band when the user requests a stop (the in_queue is blocked while `handle()` runs). The in-flight LLM call and the currently-executing tool run to completion, but any remaining tool calls in the batch are skipped and stubbed with an `(interrupted)` tool response so every `tool_call_id` has a matching response (chat schemas require this). On the next iteration the outer cancel check fires, an `(interrupted)` assistant turn is appended, and `handle()` returns `"(interrupted)"`.
+**Per-tool-result cap (defense-in-depth).** `_cap_tool_result` truncates any single tool result longer than `max_tool_result_chars` (env `MAX_TOOL_RESULT_CHARS`, default 100k chars ≈ 25k tokens) *before* it enters history, appending a marker that nudges the model to re-read with `read` offset/limit or `grep`. This is independent of `_trim_history` (which only drops whole message groups and can't shrink one oversized message), so a single uncapped `read`/`bash`/`web_fetch` result can't blow past the context window and poison the session. Lower it for small-context models.
+
+**Usage accounting.** After each successful `call_llm`, a `UsageRecord` (prompt/completion/cached/reasoning/image/audio tokens, `cost_usd`, `elapsed_sec`) is written to SQLite `context/usage.db` via `asyncio.to_thread` (see Usage Tracking below).
+
+**Cancellation.** `Agent.request_cancel(session_id)` sets a per-session `asyncio.Event` that the loop checks at the top of each iteration and before the tool batch starts. Channels call this out-of-band when the user requests a stop (the in_queue is blocked while `handle()` runs). Because the batch is dispatched with a single `asyncio.gather()`, a cancel that arrives **before** the batch starts stubs every call in it with an `(interrupted)` tool response (so each `tool_call_id` has a matching response); once the batch is in flight, all calls run to completion — there is no mid-batch skip. On the next iteration the outer cancel check fires, an `(interrupted)` assistant turn is appended, and `handle()` returns `"(interrupted)"`.
 
 ### Message Flow
 
@@ -56,11 +60,13 @@ Wires everything together in a TaskGroup with concurrent coroutines: channel lis
 ### Channels (`src/channels/`)
 
 - **WebSocket** (`ws.py`): Primary CLI interface on port 8765. Session ID is fixed `"cli"`. Binds `127.0.0.1` by default; gated by an Origin allowlist (localhost + missing/`null`) and a pairing token written to `context/.ws-token` (mode 0600). The CLI auto-loads the token from that file or `CURUNIR_WS_TOKEN`; `WS_ALLOWED_ORIGINS` extends the allowlist. Docker compose overrides `WS_HOST=0.0.0.0` so the published port works inside the container — network isolation + the token are the access controls there.
-- **Email** (`email.py`): Gmail via Google Workspace service account. Session ID is thread ID. Polls inbox every 60s.
+- **Email** (`email.py`): [deadsimple.email](https://deadsimple.email) REST API via `DeadsimpleClient` (`deadsimple.py`) — **not** Gmail/Google. Session ID is thread ID. Polls every 60s (`EMAIL_POLL_INTERVAL`) using a persisted `(created_at, message_id)` watermark (`_email_state.py`) because the list endpoint isn't strictly newest-first. Sender allowlist + spam-score filter on inbound; recipient allowlist + idempotency keys on outbound. Configured by `DEADSIMPLE_API_KEY` / `DEADSIMPLE_INBOX_ID` (see Key Environment Variables).
 - **Portal** (`portal.py`): Outbound WebSocket to a hosted portal (`CURUNIR_PORTAL_URL` + `CURUNIR_PORTAL_TOKEN`). Container dials portal; portal multiplexes browser ↔ container. Session ID is `"portal"`. See `portal/` directory for the portal service.
 - **Router** (`router.py`): Routes outgoing messages back to the originating channel.
 
 Channels implement a protocol: `async start()` to listen, `async send(msg)` to respond.
+
+**Shared helpers.** `deadsimple.py` (REST client: pagination, 429 retry, recipient allowlist, idempotency keys), `_attachments.py` (decode/stage/enrich pipeline shared by WS + Portal, with symlink / Windows-reserved-name / Unicode-normalization defenses and per-type size caps), and `_email_state.py` (atomic watermark persistence) back the channels above.
 
 **Interrupts.** WS and Portal channels accept an optional `cancel_session=agent.request_cancel` callback. When the client sends `{"command": "interrupt"}`, the channel routes it directly to the callback instead of enqueuing it (the agent_worker is blocked inside `handle()` and wouldn't drain the queue in time). The CLI (`cli.py`) wires Ctrl-C to send this frame while the agent is busy, via `loop.add_signal_handler(SIGINT, ...)`. While the prompt is active, prompt_toolkit reads Ctrl-C as a key in raw mode so the signal handler doesn't fire there — Ctrl-C at the prompt still exits.
 
@@ -68,12 +74,13 @@ Channels implement a protocol: `async start()` to listen, `async send(msg)` to r
 
 **Default tools:** glob, grep, read, edit, write, bash, load_skill, web_fetch, delegate, schedule, attach
 
-**Opt-in tools** (unlocked when a skill requests them): to_audio
+**Opt-in tools** (unlocked when a skill's frontmatter `tools:` requests them): `to_audio`, `portfolio`
 
 - Schemas registered in `schemas.py` via `_register()`
 - Dispatch in `dispatcher.py` routes by name to executor functions
-- Sync executors wrapped in `asyncio.to_thread()`; async executors awaited directly
-- `delegate` spawns a sub-agent (sub-agents cannot delegate further)
+- Sync executors wrapped in `asyncio.to_thread()`; async executors (e.g. `delegate`) awaited directly
+- `delegate` spawns a sub-agent restricted to `_SUB_AGENT_TOOLS` (no `delegate`, so sub-agents cannot recurse)
+- Opt-in unlock is session-scoped: when `load_skill` runs, the skill's `tools:` are added to that session's tool set and schemas refresh for the next iteration
 
 See [`src/tools/README.md`](src/tools/README.md) for detailed documentation on the tool registry, dispatch pipeline, executor implementations, and how to add new tools.
 
@@ -106,11 +113,19 @@ appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+### Slash Commands (`src/slash_commands.py`)
+
+Two-layer dispatcher, invoked by `ws.py` and `portal.py` before a message reaches the agent. (1) An **intercepted** registry of LLM-free handlers: `/help`, `/skills`, `/clear` (aliases `/new`, `/reset`). (2) A **skill-forcing fallback**: `/<skill-name>` is rewritten into a synthetic `"Use the <skill> skill. {args}"` prompt. Hidden skills route via an explicit `load_skill` instruction with "do not substitute another skill" language to stop the model from pattern-matching to a similarly-named visible skill. The persona allowlist is enforced here too — `/<skill>` outside the active persona's allowlist is rejected.
+
 ### Personas (`personas/`, `src/persona.py`)
 
 A persona is a deployment bundle selected at boot via `CURUNIR_PERSONA=<name>`.
 There is no "no persona" code path — unset falls back to `personas/default/`,
-which ships the full skill catalog and the baseline behavior prompt.
+which ships the full skill catalog and the baseline behavior prompt. Three
+bundles ship today: **`default`** (full catalog, no allowlist), **`finance`**
+(balance-sheet / position-tracking + research; allowlists ~27 skills, declares
+`FRED_API_KEY` / `BRAVE_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY`), and
+**`marketing`** (GTM pipeline + competitive intel; allowlists ~25 skills).
 
 `personas/<name>/persona.yaml` declares an optional **absolute** skill
 allowlist (omit `skills:` to allow every skill on disk) and key *names* for
@@ -119,15 +134,21 @@ them. The allowlist is plumbed through `build_skill_manifest`, `load_skill`,
 `portal_skill_list`, and the slash-command resolver so a curated persona
 cannot reach skills outside its allowlist.
 
-`personas/<name>/prompts/*.md` is read directly from the bundle (sorted) and
-appended to the system prompt after `context/identity.md`. These files are
-framework/specialty content and are **not** bootstrapped into `context/` —
-only user-edited content lives there. API-key *values* are an operator
-concern (env/.env), never declared in skills or code.
+`personas/<name>/prompts/*.md` is read directly from the bundle (sorted by
+filename, e.g. `10-domain.md` then `20-guardrails.md`) and appended to the
+system prompt after `context/identity.md`. **This is where framework behavior
+now lives** — the legacy `context/behavior.md` is no longer read (see Context
+Directory). These files are framework/specialty content and are **not**
+bootstrapped into `context/` — only user-edited content lives there. API-key
+*values* are an operator concern (env/.env), never declared in skills or code.
 
 ### Portal Service (`portal/`)
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
+
+### Portfolio / Balance-Sheet Engine (`src/portfolio/`)
+
+Deterministic SQLite-backed personal balance sheet, powering the finance persona's "position tracking is tool-backed, never prose" rule. `db.py` defines a wide `assets` table + `liabilities` table and three canned views — `v_networth`, `v_rollup_by_class`, `v_collectibles_pnl` — so reads never re-sum. `engine.py` holds all logic: validated writes (`add_asset`/`update_asset`/`remove_asset`/`add_liability`/`import_rows`), reads (`networth`/`rollup`/`list`/`show`/`re_equity`/`pnl`/`query`), deterministic `refresh()` re-pricing market classes via yfinance, and markdown rendering. Real-estate equity nets linked mortgages so the rollup sums to net worth without double-counting. The store lives at `context/memory/portfolio.db`. Three surfaces reach the engine: the opt-in `portfolio` tool (`src/tools/portfolio_tool.py`, `{action, args}` → JSON; unlocked by the `balance-sheet` skill), a CLI (`skills/balance-sheet/portfolio.py`), and the `balance-sheet` skill itself.
 
 ### Memory (`src/memory_extractor.py`, `src/memory_indexer.py`)
 
@@ -135,7 +156,7 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 
 ### Context Directory (`context/`)
 
-Local directory containing `identity.md` (agent persona, required), `behavior.md` (operating defaults — capabilities, guidelines, deliverables, memory protocol, scheduling, skill-creation rules; optional, silently skipped if missing), `memory/` (persistent facts), and `schedules.json` (cron tasks). The system prompt concatenates `identity.md` + `behavior.md` at boot. The `/identity` skill only edits `identity.md`; `behavior.md` is hand-edited. Use `sync-context.sh` to rsync from a remote machine before starting.
+Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), `schedules.json` (cron tasks), and the runtime SQLite stores `portfolio.db` / `usage.db`. The system prompt reads `identity.md` (then layers `personas/<active>/prompts/*.md` on top — see Personas). **`behavior.md` is no longer read at boot** — framework behavior moved into the persona bundle's `prompts/`; a stray `context/behavior.md` has no effect. The `/identity` skill only edits `identity.md`. Use `sync-context.sh` to rsync from a remote machine before starting.
 
 ### Onboarding (`onboarding/`)
 
@@ -145,11 +166,17 @@ See [`onboarding/README.md`](onboarding/README.md) for the user-facing flow and 
 
 ### Evals (`eval/`)
 
-`python eval/run_evals.py` runs LLM-graded eval suites defined in `simple_evals.md` and `advanced_evals.md`. Supports `--max-loops` per prompt. Results written to `eval/eval_results/`.
+`python eval/run_evals.py` runs capture-only suites defined in `simple_evals.md` and `advanced_evals.md` (streamed to `eval/eval_results/`, no grading; supports `--max-loops` and resume).
+
+The **graded** harness is persona-agnostic and lives in `eval/harness/`: `graders.py` (pure-function + LLM-judge graders, the `GRADERS` registry, `Result`/`grade_detailed`) and `runner.py` (a `SuiteConfig` + the generic WS-drive / grade / interactive-HTML-report engine; `python eval/harness/test_runner_sync.py` is the zero-cost frame-sync regression). A persona suite is a thin shim that builds a `SuiteConfig(name, title, tasks, results_dir, fixture_memory_dir)` and calls `runner.main`. Two ship: **`eval/finance/`** (`run_finance_evals.py` + `finance_tasks.py`, ~34 tasks) and **`eval/default/`** (`run_default_evals.py` + `default_tasks.py`, currently an empty `TASKS` placeholder to be populated from the capture-only prompts). The runner drives a running instance over `ws://localhost:8765`, grades with the shared graders + an LLM judge (separate from the system-under-test), and emits a self-contained interactive HTML report. The finance R/F/C/P/T/W task taxonomy (regression / failure-mode / composition / position-tracking / reconciliation / multi-turn-write) is anchored against the same portfolio CLI the agent uses, so grader and agent can't drift; position-tracking tasks seed `fixtures/portfolio.sql` into `context/memory/` and restore on exit. See `eval/finance/README.md`.
 
 ### Scheduling (`src/scheduler.py`)
 
-Cron tasks in `context/schedules.json` evaluated every second via croniter. When due, agent processes the task prompt via `handle()` in system-task mode.
+Cron tasks in `context/schedules.json` (fields: `id`, `cron`, optional `skill`, `prompt`, `enabled`, plus run metadata) evaluated every ~60s via croniter. When due, the scheduler stamps `last_attempt_at` *before* dispatch (so a slow/crashed task doesn't re-fire), optionally prepends the named skill's `SKILL.md` to the prompt, and runs `handle()` in system-task mode under a per-run `sched:<id>:<ts>` session id; `last_run`/`last_status` advance only on success.
+
+### Usage Tracking (`src/usage_store.py`, `src/usage.py`)
+
+`UsageStore` (WAL-mode SQLite at `context/usage.db`, `config.usage_db`) gets one `UsageRecord` per `call_llm` — written from the agent in a background thread. `python -m src.usage` reports it: `--window` (default `7d`), `--by model|day`, `--db PATH`. Tracks all token classes (incl. cached/reasoning), `cost_usd` (nullable; set when the provider returns one), and latency.
 
 ## Testing Patterns
 
@@ -165,7 +192,8 @@ See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `VISION_MODEL` — fallback vision model when `MODEL` is text-only. At boot, `litellm.supports_vision(MODEL)` is checked; if false, image attachments are described by `VISION_MODEL` and the description is sent to `MODEL` as text. If unset, images become a `[file (image, NKB) — no vision model configured]` text marker.
-- `EMAIL_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_DELEGATED_USER`, `EMAIL_ALLOWED_SENDERS` — for email channel
+- `EMAIL_ENABLED`, `DEADSIMPLE_API_KEY`, `DEADSIMPLE_INBOX_ID`, `DEADSIMPLE_API_BASE` (default `https://api.deadsimple.email`), `EMAIL_ALLOWED_SENDERS`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_POLL_INTERVAL`, `EMAIL_STATE_FILE` — for the deadsimple.email channel (no Google/Gmail vars anymore)
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
+- `MAX_TOOL_RESULT_CHARS` — per-tool-result truncation cap in chars (default 100000 ≈ 25k tokens; defense-in-depth, lower for small-context models)
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
 - `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.
