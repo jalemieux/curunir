@@ -620,13 +620,30 @@ class Agent:
                                 "_tool_name": name,
                             }
 
-                        result = await execute_tool_call(
-                            name,
-                            args,
-                            self.config,
-                            attachments=attachments,
-                            on_tool_call=on_tool_call,
-                        )
+                        try:
+                            result = await execute_tool_call(
+                                name,
+                                args,
+                                self.config,
+                                attachments=attachments,
+                                on_tool_call=on_tool_call,
+                            )
+                        except Exception as exc:
+                            # Systemic backstop: no single tool's unanticipated
+                            # exception may crash the turn. asyncio.gather runs
+                            # with return_exceptions=False, so a raise here would
+                            # propagate out of handle() and kill the session.
+                            # Turn it into a model-visible tool error instead.
+                            logger.warning("[%s] tool %s raised: %s", sid, name, exc)
+                            return {
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": _cap_tool_result(
+                                    f"Error: tool '{name}' failed: {exc}",
+                                    self.config.max_tool_result_chars,
+                                ),
+                                "_tool_name": name,
+                            }
 
                         result_preview = result[:200] if result else "(empty)"
                         logger.debug("[%s] tool result: %s", sid, result_preview)
