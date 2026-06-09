@@ -913,6 +913,10 @@ if (!sessionId || sessionId === SCRATCH_SESSION_ID) {
 }
 let ws = null;
 let agentOnline = false;
+// True once bootstrapSync() has run for the current online period. Reset
+// whenever the agent goes offline, so the next offline→online edge re-syncs
+// exactly once (and onopen's own sync doesn't double-fire). See #334.
+let bootstrappedOnline = false;
 let staged = []; // {filename, mime_type, data (base64), size}
 let inProgressMsg = null; // current assistant DOM node
 // While replaying a history_snapshot: the assistant bubble being built, so
@@ -950,7 +954,21 @@ applyTheme(document.documentElement.getAttribute("data-theme") || "light");
 function setStatus(state) {
   statusDot.className = "dot " + state;
   statusText.textContent = state;
+  const wasOnline = agentOnline;
   agentOnline = state === "online";
+  // Recover the bootstrap requests that were dropped when the browser
+  // connected before the agent container had dialed in: on the agent's
+  // offline→online transition, re-issue history/skills/conversations. The
+  // browser↔portal socket stays open across an agent cold-start, so onopen
+  // (the only other trigger) never re-fires for this case (#334). The
+  // bootstrappedOnline flag dedupes against onopen's own sync and against
+  // repeated online frames within one online period.
+  if (agentOnline && !wasOnline) {
+    if (!bootstrappedOnline) bootstrapSync();
+    bootstrappedOnline = true;
+  } else if (!agentOnline) {
+    bootstrappedOnline = false;
+  }
   if (!agentOnline && inProgressMsg) {
     finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
@@ -997,6 +1015,34 @@ function updateComposerMode() {
   }
 }
 
+// === Bootstrap sync ===
+// Pull the agent-side snapshots for this tab — transcript history, the skill
+// list, and the conversation sidebar. Fired on socket open AND on the agent's
+// offline→online transition (setStatus); the latter recovers the first-load
+// requests dropped when the browser connected before the agent had dialed in
+// (#334). All sends are guarded on an open socket so a transition fired on a
+// half-open socket is a no-op rather than a throw. Idempotent: every request
+// is a snapshot read.
+function bootstrapSync() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Announce this tab's session_id (binds the socket on the portal) and pull
+  // the agent-side history for it. The portal forwards this user_message
+  // frame to the container's PortalChannel, which sees command=history_request
+  // and responds with a history_snapshot tagged with the same session_id.
+  ws.send(JSON.stringify({
+    content: "",
+    command: "history_request",
+    session_id: sessionId,
+  }));
+  // Fetch the skill list now so the empty-state starters are ready on first
+  // paint (the skills picker also requests this lazily).
+  ws.send(JSON.stringify({
+    command: "skills_request", session_id: sessionId,
+  }));
+  // Pull the conversation list for the sidebar.
+  requestConversations();
+}
+
 // === WS connect ===
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -1005,26 +1051,13 @@ function connect() {
 
   ws.onopen = () => {
     backoff = 1000;
-    // Announce this tab's session_id (binds the socket on the portal)
-    // and pull the agent-side history for it. The portal forwards this
-    // user_message frame to the container's PortalChannel, which sees
-    // command=history_request and responds with a history_snapshot
-    // tagged with the same session_id.
-    ws.send(JSON.stringify({
-      content: "",
-      command: "history_request",
-      session_id: sessionId,
-    }));
-    // Fetch the skill list now so the empty-state starters are ready on
-    // first paint (the skills picker also requests this lazily).
-    ws.send(JSON.stringify({
-      command: "skills_request", session_id: sessionId,
-    }));
-    // Pull the conversation list for the sidebar.
-    requestConversations();
+    // Pull the agent-side snapshots for this tab (history, skills,
+    // conversations). Also re-fired on the agent's offline→online edge.
+    bootstrapSync();
     // Discard any stale server-side scratch from before this page load so
     // the Scratchpad opens empty next time. Idempotent: no-op when nothing
-    // is there.
+    // is there. Page-load housekeeping, not per-agent-connect state — stays
+    // in onopen only.
     sendScratchDiscard();
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
