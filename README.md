@@ -187,6 +187,17 @@ Every finalized agent response in the portal carries a Copy / Print action row. 
 
 See **[portal/README.md](portal/README.md)** for portal deployment and the local `docker compose --profile portal up` dev path.
 
+#### Talking to peers (talk-to-peer skill)
+
+The **talk-to-peer** skill lets a running instance converse with *another* running curunir instance over its WebSocket channel — the peer just sees a normal user. Peers are configured by the operator in one env var:
+
+```bash
+CURUNIR_PEERS={"bob":{"url":"ws://bob-host:8765","token":"<bob's context/.ws-token>"}}
+CURUNIR_SELF_NAME=alice   # peer-side session id is peer:<self-name>
+```
+
+The agent refers to peers by name (`peer.py --list`, `peer.py --peer bob "..."`); the back-and-forth loop is the agent's own reasoning loop, and a stable session id keeps the peer remembering the exchange across the per-message reconnects. No core/channel changes — it's a standalone WS client at `skills/talk-to-peer/peer.py`.
+
 ## Attachments
 
 Channels accept file uploads (portal drag-drop / file picker, email MIME parts, CLI paths) and stage them as a manifest on the inbound message. `run.py:build_multimodal_content` then converts that manifest into LiteLLM content blocks before the agent sees the message.
