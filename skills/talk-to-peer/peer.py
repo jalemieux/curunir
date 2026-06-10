@@ -61,3 +61,48 @@ def resolve_peer(peers: dict, name: str) -> dict:
         available = ", ".join(peer_names(peers)) or "(none configured)"
         raise PeerError(f"unknown peer {name!r}; available: {available}")
     return peers[name]
+
+
+async def send_to_peer(
+    url: str,
+    token: str | None,
+    session_id: str,
+    message: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> str:
+    """Connect to *url*, send *message*, return the peer's final reply text.
+
+    Sends a hello frame (with *token* and a stable *session_id* so the peer
+    keeps one continuing conversation across the per-message reconnects), then
+    a content frame, then reads frames until one carries ``final: true``,
+    accumulating streamed ``delta`` chunks. Falls back to the final frame's
+    ``content`` for non-streaming servers. Raises PeerError on timeout,
+    connection failure, or a close before any final frame.
+    """
+    async def _converse() -> str:
+        async with websockets.connect(url, max_size=_MAX_SIZE) as ws:
+            hello: dict = {"type": "hello", "session_id": session_id}
+            if token:
+                hello["token"] = token
+            await ws.send(json.dumps(hello))
+            await ws.send(json.dumps({"content": message}))
+
+            parts: list[str] = []
+            async for raw in ws:
+                data = json.loads(raw)
+                if data.get("type") == "hello":
+                    continue
+                if data.get("delta"):
+                    parts.append(data.get("content") or "")
+                    continue
+                if data.get("final"):
+                    text = "".join(parts).strip()
+                    return text or (data.get("content") or "").strip()
+            raise PeerError("connection closed before a final reply")
+
+    try:
+        return await asyncio.wait_for(_converse(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise PeerError(f"no final reply within {timeout:.0f}s") from exc
+    except (OSError, websockets.exceptions.WebSocketException) as exc:
+        raise PeerError(f"connection to {url} failed: {exc}") from exc
