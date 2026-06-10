@@ -106,3 +106,66 @@ async def send_to_peer(
         raise PeerError(f"no final reply within {timeout:.0f}s") from exc
     except (OSError, websockets.exceptions.WebSocketException) as exc:
         raise PeerError(f"connection to {url} failed: {exc}") from exc
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Talk to another curunir instance (a configured peer).",
+    )
+    p.add_argument(
+        "--list", action="store_true",
+        help="List configured peer names and exit.",
+    )
+    p.add_argument(
+        "--peer", help="Name of the peer to message (from CURUNIR_PEERS).",
+    )
+    p.add_argument(
+        "message", nargs="?", help="Message text to send to the peer.",
+    )
+    p.add_argument(
+        "--session",
+        help="Override the session id sent to the peer "
+             "(default: peer:<self-name>).",
+    )
+    p.add_argument(
+        "--self-name",
+        default=os.environ.get("CURUNIR_SELF_NAME", "curunir"),
+        help="This instance's label, used to derive the peer session id.",
+    )
+    p.add_argument(
+        "--timeout", type=float, default=_DEFAULT_TIMEOUT,
+        help="Seconds to wait for the peer's final reply.",
+    )
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    try:
+        peers = parse_peers(os.environ.get("CURUNIR_PEERS"))
+        if args.list:
+            names = peer_names(peers)
+            print("\n".join(names) if names else "(no peers configured)")
+            return 0
+        if not args.peer or not args.message:
+            raise PeerError(
+                'usage: peer.py --peer <name> "<message>"  (or --list)'
+            )
+        info = resolve_peer(peers, args.peer)
+        session_id = args.session or f"peer:{args.self_name}"
+        reply = asyncio.run(send_to_peer(
+            url=info["url"],
+            token=info.get("token"),
+            session_id=session_id,
+            message=args.message,
+            timeout=args.timeout,
+        ))
+        print(reply)
+        return 0
+    except PeerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
