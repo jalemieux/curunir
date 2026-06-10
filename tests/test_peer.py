@@ -121,3 +121,57 @@ async def test_send_to_peer_connection_refused():
         await peer.send_to_peer(
             "ws://127.0.0.1:1", None, "peer:x", "hi", timeout=2
         )
+
+
+def test_main_list_prints_names_no_secrets(monkeypatch, capsys):
+    monkeypatch.setenv(
+        "CURUNIR_PEERS",
+        '{"bob": {"url": "ws://b:8765", "token": "sek"}, "amy": {"url": "ws://a"}}',
+    )
+    rc = peer.main(["--list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "amy" in out and "bob" in out
+    assert "ws://" not in out      # never leak urls
+    assert "sek" not in out        # never leak tokens
+
+
+def test_main_list_empty(monkeypatch, capsys):
+    monkeypatch.delenv("CURUNIR_PEERS", raising=False)
+    rc = peer.main(["--list"])
+    assert rc == 0
+    assert "no peers configured" in capsys.readouterr().out
+
+
+def test_main_unknown_peer_returns_error(monkeypatch, capsys):
+    monkeypatch.setenv("CURUNIR_PEERS", '{"bob": {"url": "ws://b"}}')
+    rc = peer.main(["--peer", "ghost", "hi"])
+    assert rc == 1
+    assert "unknown peer" in capsys.readouterr().err
+
+
+def test_main_missing_message_returns_error(monkeypatch, capsys):
+    monkeypatch.setenv("CURUNIR_PEERS", '{"bob": {"url": "ws://b"}}')
+    rc = peer.main(["--peer", "bob"])
+    assert rc == 1
+    assert "usage" in capsys.readouterr().err
+
+
+def test_main_derives_session_from_self_name(monkeypatch):
+    monkeypatch.setenv("CURUNIR_PEERS", '{"bob": {"url": "ws://b", "token": "t"}}')
+    captured = {}
+
+    async def fake_send(*, url, token, session_id, message, timeout):
+        captured.update(
+            url=url, token=token, session_id=session_id,
+            message=message, timeout=timeout,
+        )
+        return "ok"
+
+    monkeypatch.setattr(peer, "send_to_peer", fake_send)
+    rc = peer.main(["--peer", "bob", "hello peer", "--self-name", "alice"])
+    assert rc == 0
+    assert captured["session_id"] == "peer:alice"
+    assert captured["url"] == "ws://b"
+    assert captured["token"] == "t"
+    assert captured["message"] == "hello peer"
