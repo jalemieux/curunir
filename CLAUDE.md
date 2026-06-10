@@ -142,6 +142,14 @@ Directory). These files are framework/specialty content and are **not**
 bootstrapped into `context/` — only user-edited content lives there. API-key
 *values* are an operator concern (env/.env), never declared in skills or code.
 
+Every persona bundle ships the same **no-general-knowledge guardrail**: the
+agent must ground external factual claims in a tool/skill result (memory →
+skills → `web_fetch`) rather than answering from training, unless the user
+explicitly asks for its own opinion or recall. It lives in each bundle's
+prompts (`default/prompts/behavior.md`, `finance`/`marketing`
+`prompts/20-guardrails.md`) — there is no shared cross-persona prompt layer, so
+the canonical wording is repeated per bundle by design.
+
 ### Portal Service (`portal/`)
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
