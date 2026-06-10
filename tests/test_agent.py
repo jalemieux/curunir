@@ -184,6 +184,34 @@ class TestAgentHandle:
         assert tool_msg["tool_call_id"] == "call_bad"
         assert "not valid JSON" in tool_msg["content"]
 
+    async def test_tool_executor_exception_does_not_crash(self, agent):
+        # A tool executor raising an unanticipated exception must become a
+        # model-visible tool error, not propagate out of handle() and kill the
+        # turn (the systemic backstop for the IDNA "label too long" crash).
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_boom",
+                "type": "function",
+                "function": {"name": "web_fetch", "arguments": json.dumps({"url": "https://example.com"})},
+            }],
+        )
+        recovery = LLMResponse(text="recovered after tool error", tool_calls=None)
+
+        async def boom(*a, **k):
+            raise RuntimeError("label too long")
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, recovery]), \
+             patch("src.agent.agent.execute_tool_call", new=boom):
+            result = await agent.handle("fetch something", "s1")
+
+        assert result == "recovered after tool error"
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        assert tool_msg["tool_call_id"] == "call_boom"
+        assert "web_fetch" in tool_msg["content"]
+        assert "label too long" in tool_msg["content"]
+
     async def test_empty_response_returns_error(self, agent):
         empty = LLMResponse(text=None, tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=empty) as mock_call:
