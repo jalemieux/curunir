@@ -24,6 +24,9 @@ def email_config(tmp_path):
         attachment_dir=str(tmp_path / "attachments"),
         state_file=tmp_path / "email_state.json",
         spam_score_threshold=5.0,
+        send_max_retries=5,
+        send_retry_backoff_sec=0.0,  # immediate retries keep drain tests deterministic
+        failure_alert_threshold=5,
     )
 
 
@@ -708,3 +711,350 @@ async def test_send_logs_and_returns_on_deadsimple_error(email_config, in_queue,
         reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
     )
     await ch.send(msg)  # does not raise
+
+
+# --- Outbound retry / dead-letter ledger ---------------------------------
+
+from src.channels._email_state import EmailState
+
+_UTC = timezone.utc
+
+
+async def _poll_one_inbound(ch, client, mid="m1", ts="2026-05-14T15:31:00Z"):
+    """Drive one poll that enqueues a single inbound and records it in the ledger."""
+    client.list_messages.return_value = {
+        "messages": [_msg(mid, ts=ts)], "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda m: _detail(m)
+    ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
+    await ch._poll_once()
+    incoming = in_queue_drain(ch)
+    return incoming
+
+
+def in_queue_drain(ch):
+    items = []
+    while not ch.in_queue.empty():
+        items.append(ch.in_queue.get_nowait())
+    return items
+
+
+@pytest.mark.asyncio
+async def test_poll_records_pending_before_enqueue(email_config, in_queue):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    await _poll_one_inbound(ch, client, mid="m1")
+    assert "m1" in ch.state.pending
+    pr = ch.state.pending["m1"]
+    assert pr.status == "queued"
+    assert pr.reply_address["in_reply_to"] == "m1"
+
+
+@pytest.mark.asyncio
+async def test_send_success_acks_ledger_entry(email_config, in_queue):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    await _poll_one_inbound(ch, client, mid="m1")
+    assert "m1" in ch.state.pending
+
+    msg = _outgoing("answer", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
+    await ch.send(msg)
+
+    client.send_reply.assert_awaited_once()
+    assert "m1" not in ch.state.pending  # acked
+
+
+@pytest.mark.asyncio
+async def test_send_failure_records_retry_not_dropped(email_config, in_queue):
+    """Acceptance criterion 3: a failed send must NOT silently drop the message."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    await _poll_one_inbound(ch, client, mid="m1")
+
+    client.send_reply.side_effect = DeadsimpleError("dns outage")
+    msg = _outgoing("the answer", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
+    await ch.send(msg)
+
+    # Recoverable: still in the ledger, marked for retry, payload stored.
+    assert "m1" in ch.state.pending
+    pr = ch.state.pending["m1"]
+    assert pr.status == "retry"
+    assert pr.reply_payload["text_body"] == "the answer"
+
+
+@pytest.mark.asyncio
+async def test_failed_send_then_drain_resends_and_clears(email_config, in_queue):
+    """After a transient outage, the drain loop re-sends the stored reply."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    await _poll_one_inbound(ch, client, mid="m1")
+
+    client.send_reply.side_effect = DeadsimpleError("outage")
+    msg = _outgoing("the answer", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
+    await ch.send(msg)
+    assert ch.state.pending["m1"].status == "retry"
+
+    # Outage clears.
+    client.send_reply.side_effect = None
+    client.send_reply.reset_mock()
+    await ch._drain_retries()
+
+    client.send_reply.assert_awaited_once()
+    kwargs = client.send_reply.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m1"
+    assert kwargs["text_body"] == "the answer"
+    assert "m1" not in ch.state.pending  # acked after successful re-send
+
+
+@pytest.mark.asyncio
+async def test_failed_send_not_reenqueued_by_later_poll(email_config, in_queue):
+    """Criterion 2: an unanswered message is recoverable, not re-enqueued."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    await _poll_one_inbound(ch, client, mid="m1")
+    client.send_reply.side_effect = DeadsimpleError("outage")
+    await ch.send(_outgoing("answer", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"}))
+    assert "m1" in ch.state.pending
+
+    # Same message reappears in a later listing (cursor already past it).
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")], "next_cursor": None}
+    await ch._poll_once()
+    assert in_queue_drain(ch) == []  # not re-enqueued
+
+
+@pytest.mark.asyncio
+async def test_poll_ledger_dedup_skips_pending_but_advances_cursor(email_config, in_queue):
+    """A message already in the ledger is not re-enqueued, but the cursor still advances."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    # Pre-seed a pending entry and put the cursor behind it.
+    ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
+    ch.state.add_pending(
+        "m1", created_at=datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC),
+        thread_id="t1",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
+
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")], "next_cursor": None}
+    await ch._poll_once()
+
+    assert in_queue_drain(ch) == []  # ledger dedup: not re-enqueued
+    assert ch.state.cursor_message_id == "m1"  # cursor advanced past it
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_after_max_retries(email_config, in_queue, caplog):
+    import logging
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.config.send_max_retries = 2
+    ch._escalate_hook = MagicMock()
+    await _poll_one_inbound(ch, client, mid="m1")
+
+    client.send_reply.side_effect = DeadsimpleError("persistent outage")
+    await ch.send(_outgoing("answer", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"}))
+    assert ch.state.pending["m1"].status == "retry"
+
+    with caplog.at_level(logging.ERROR):
+        await ch._drain_retries()  # 2nd attempt -> dead-letter
+
+    assert ch.state.pending["m1"].status == "dead"
+    ch._escalate_hook.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_escalation_fires_once_at_threshold(email_config, in_queue):
+    client = AsyncMock()
+    client.send_reply.side_effect = DeadsimpleError("down")
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.config.failure_alert_threshold = 3
+    ch._escalate_hook = MagicMock()
+
+    for i in range(5):
+        await ch.send(_outgoing("a", reply_address={
+            "to": "alice@example.com", "subject": "re", "in_reply_to": f"x{i}"}))
+
+    ch._escalate_hook.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_send_success_resets_failure_counter(email_config, in_queue):
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.config.failure_alert_threshold = 3
+    ch._escalate_hook = MagicMock()
+
+    client.send_reply.side_effect = DeadsimpleError("down")
+    for i in range(2):
+        await ch.send(_outgoing("a", reply_address={
+            "to": "alice@example.com", "subject": "re", "in_reply_to": f"x{i}"}))
+    # A success resets the consecutive counter so the threshold is never hit.
+    client.send_reply.side_effect = None
+    await ch.send(_outgoing("ok", reply_address={
+        "to": "alice@example.com", "subject": "re", "in_reply_to": "x-ok"}))
+    client.send_reply.side_effect = DeadsimpleError("down")
+    for i in range(2):
+        await ch.send(_outgoing("a", reply_address={
+            "to": "alice@example.com", "subject": "re", "in_reply_to": f"y{i}"}))
+
+    ch._escalate_hook.assert_not_called()
+
+
+# --- Startup boot-state classifier + ledger re-drive ---------------------
+
+async def _run_start_briefly(ch, sleep=0.05):
+    task = asyncio.create_task(ch.start())
+    await asyncio.sleep(sleep)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_start_corrupt_state_does_not_fast_forward(email_config, in_queue, caplog):
+    import logging
+    # Corrupt the state file before the channel loads it.
+    email_config.state_file.parent.mkdir(parents=True, exist_ok=True)
+    email_config.state_file.write_text("{ this is not json")
+
+    client = AsyncMock()
+    client.validate_inbox.return_value = {"data": {"email": "bot@x"}}
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    assert ch.state.corrupt is True
+    ch._escalate_hook = MagicMock()
+
+    with caplog.at_level(logging.ERROR):
+        await ch.start()  # returns without entering the poll loop
+
+    client.list_messages.assert_not_called()      # did NOT poll
+    assert ch.state.cursor_created_at is None      # did NOT fast-forward
+    ch._escalate_hook.assert_called_once()
+    assert any("corrupt" in r.message.lower() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_start_first_run_fast_forwards(email_config, in_queue):
+    """A genuine first run (no state file) is allowed to skip pre-existing mail."""
+    client = AsyncMock()
+    client.validate_inbox.return_value = {"data": {"email": "bot@x"}}
+    client.list_messages.return_value = {"messages": [], "next_cursor": None}
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    assert ch.state.corrupt is False
+
+    await _run_start_briefly(ch)
+
+    assert ch.state.cursor_created_at is not None  # fast-forwarded to now
+
+
+@pytest.mark.asyncio
+async def test_start_redrives_queued_entry(email_config, in_queue):
+    """A queued ledger entry (agent crashed pre-reply) is re-enqueued on boot."""
+    seed = EmailState.load(email_config.state_file)
+    seed.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "c0")
+    seed.add_pending(
+        "m1", created_at=datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC),
+        thread_id="t1",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
+    seed.save()
+
+    client = AsyncMock()
+    client.validate_inbox.return_value = {"data": {"email": "bot@x"}}
+    client.list_messages.return_value = {"messages": [], "next_cursor": None}
+    client.get_message.side_effect = lambda m: _detail(m)
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+
+    await _run_start_briefly(ch)
+
+    items = in_queue_drain(ch)
+    assert any(i.reply_address["in_reply_to"] == "m1" for i in items)
+
+
+@pytest.mark.asyncio
+async def test_start_redrives_retry_entry_resends_stored_reply(email_config, in_queue):
+    """A retry ledger entry (send crashed) re-sends its stored reply on boot."""
+    seed = EmailState.load(email_config.state_file)
+    seed.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "c0")
+    seed.add_pending(
+        "m2", created_at=datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC),
+        thread_id="t1",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m2"})
+    seed.mark_retry(
+        "m2",
+        reply_payload={"to": "alice@example.com", "subject": "Re: hi",
+                       "text_body": "stored reply", "html_body": None, "attachment_paths": []},
+        next_retry_at=datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC))  # due in the past
+    seed.save()
+
+    client = AsyncMock()
+    client.validate_inbox.return_value = {"data": {"email": "bot@x"}}
+    client.list_messages.return_value = {"messages": [], "next_cursor": None}
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+
+    await _run_start_briefly(ch)
+
+    client.send_reply.assert_awaited()
+    kwargs = client.send_reply.await_args.kwargs
+    assert kwargs["in_reply_to"] == "m2"
+    assert kwargs["text_body"] == "stored reply"
+    assert "m2" not in ch.state.pending  # acked
+
+
+@pytest.mark.asyncio
+async def test_poll_get_message_failure_does_not_advance_cursor(email_config, in_queue):
+    """A transient detail-fetch failure must NOT silently drop the inbound.
+
+    Reproducer for the second silent-drop path: the cursor must not advance
+    past a message whose get_message() raised, so it is retried next poll.
+    """
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")], "next_cursor": None}
+    client.get_message.side_effect = DeadsimpleError("transient 503")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
+
+    await ch._poll_once()
+
+    assert in_queue_drain(ch) == []
+    assert "m1" not in ch.state.pending  # not falsely tracked
+    # Cursor NOT advanced past m1 — still after the cursor, so it is re-polled.
+    assert ch.state.is_after_cursor(datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC), "m1")
+
+
+@pytest.mark.asyncio
+async def test_poll_transient_failure_pins_cursor_but_processes_newer(email_config, in_queue):
+    """An older message's transient failure pins the cursor, yet a newer
+    message still gets enqueued (and is not lost: cursor stays behind both)."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [
+            _msg("m_new", ts="2026-05-14T15:35:00Z"),
+            _msg("m_old", ts="2026-05-14T15:31:00Z"),
+        ],
+        "next_cursor": None,
+    }
+
+    def _get(mid):
+        if mid == "m_old":
+            raise DeadsimpleError("503")
+        return _detail(mid)
+    client.get_message.side_effect = _get
+
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
+
+    await ch._poll_once()
+
+    items = in_queue_drain(ch)
+    assert [i.reply_address["in_reply_to"] for i in items] == ["m_new"]
+    # Cursor pinned behind the failed older message so it is retried.
+    assert ch.state.is_after_cursor(datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC), "m_old")
