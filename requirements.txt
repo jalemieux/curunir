@@ -8,6 +8,8 @@ trafilatura
 pypdf[crypto]
 python-docx
 websockets
+fastapi
+uvicorn[standard]
 pytest
 pytest-asyncio
 croniter

@@ -20,10 +20,11 @@ from src.agent.agent import Agent
 from src.agent.scratch import SCRATCH_SESSION_ID, is_scratch
 from src.channels.base import OutgoingMessage
 from src.channels.email import EmailChannel
+from src.channels.local_web import LocalWebChannel
 from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
-from src.config import AgentConfig, EmailChannelConfig
+from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
 from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
 from onboarding.bootstrap import bootstrap_context
 from src.document_text import docx_to_text_block, pdf_to_text_block
@@ -731,6 +732,35 @@ async def main():
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
+
+    # Local web console (conditional). Loopback-bound, operator-only; reuses
+    # the same .ws-token pairing token and Origin allowlist as the WS channel.
+    local_web_config = LocalWebConfig(
+        enabled=os.environ.get("LOCAL_UI_ENABLED", "false").lower() == "true",
+        host=os.environ.get("LOCAL_UI_HOST", "127.0.0.1"),
+        port=int(os.environ.get("LOCAL_UI_PORT", "8766")),
+    )
+    if local_web_config.enabled:
+        local_web_channel = LocalWebChannel(
+            in_queue=in_queue,
+            config=config,
+            host=local_web_config.host,
+            port=local_web_config.port,
+            model=config.model,
+            cancel_session=agent.request_cancel,
+            allowed_origins=ws_allowed_origins,
+            pairing_token=ws_pairing_token,
+            history_provider=lambda sid: agent.history_snapshot(sid),
+            skills_provider=lambda: portal_skill_list(
+                agent.config.skill_dirs,
+                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
+            ),
+        )
+        channels["local_web"] = local_web_channel
+        logger.info(
+            "Local web console enabled on http://%s:%d/?token=%s",
+            local_web_config.host, local_web_config.port, ws_pairing_token,
+        )
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
