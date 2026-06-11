@@ -87,6 +87,13 @@ def test_finance_bundle_parses_from_repo():
     assert p.skills  # non-empty absolute allowlist
 
 
+def test_finance_bundle_allows_tax_strategy():
+    # The finance persona advertises "tax strategy" — the backing skill must be
+    # in its absolute allowlist (and on disk, per the check below).
+    p = load_persona("finance")
+    assert "tax-strategy" in p.skills
+
+
 def test_finance_bundle_skills_exist_on_disk():
     # Every allowlisted skill must resolve to a skills/<name>/SKILL.md so a
     # typo in persona.yaml is caught instead of silently dropping a skill.

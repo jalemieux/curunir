@@ -5,7 +5,8 @@ Local, private personal-finance assistant. Activated with
 
 ## What it curates
 
-- **Skills** — see `persona.yaml` `skills:` (analysis, memos, FRED, EDGAR,
+- **Skills** — see `persona.yaml` `skills:` (analysis, memos, tax-strategy,
+  FRED, EDGAR,
   yfinance, plus a research layer: catalyst-memo, deep-research,
   fact-checker, polymarket, digest, reddit-research, youtube-transcript,
   podcast-ingest, and the web-search/xai-search/gemini-search backends).
