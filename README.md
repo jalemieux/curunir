@@ -168,7 +168,9 @@ DEADSIMPLE_INBOX_ID=<inbox-uuid>
 EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
-The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The polling watermark is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
+The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The discovery cursor is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
+
+Delivery is decoupled from discovery so an outbound failure can't silently drop a message. Every inbound is recorded in a durable **pending-reply ledger** in the same state file the moment it is queued, and only cleared once its reply is confirmed sent. If a reply send fails (DNS/network/5xx outage), the computed reply is stored and re-sent with exponential backoff (`EMAIL_SEND_RETRY_BACKOFF`, default 30s) up to `EMAIL_SEND_MAX_RETRIES` (default 5) attempts before being dead-lettered and escalated at ERROR; `EMAIL_FAILURE_ALERT_THRESHOLD` (default 5) consecutive failures also escalates. On restart the ledger is re-driven (unanswered inbound re-enqueued, failed sends re-sent). A genuine first run skips pre-existing mail, but a *corrupt* state file is never fast-forwarded — the channel alerts and waits for an operator to repair or remove it.
 
 See `.env.example` for the full list of email-related variables.
 

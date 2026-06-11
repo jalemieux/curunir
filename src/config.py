@@ -39,3 +39,11 @@ class EmailChannelConfig:
     attachment_dir: str = "/tmp/attachments"
     state_file: Path = Path("./context/email_state.json")
     spam_score_threshold: float = 5.0
+    # Outbound send-failure recovery. A failed reply is recorded in the
+    # pending-reply ledger and re-sent by the poll-tick drain loop up to
+    # send_max_retries total attempts (exponential backoff seeded by
+    # send_retry_backoff_sec) before being dead-lettered.
+    send_max_retries: int = 5
+    send_retry_backoff_sec: float = 30.0
+    # Consecutive send/poll failures before an ERROR-level escalation fires.
+    failure_alert_threshold: int = 5
