@@ -700,6 +700,9 @@ async def main():
         attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
         state_file=Path(os.environ.get("EMAIL_STATE_FILE", "./context/email_state.json")),
         spam_score_threshold=float(os.environ.get("EMAIL_SPAM_SCORE_THRESHOLD", "5.0")),
+        send_max_retries=int(os.environ.get("EMAIL_SEND_MAX_RETRIES", "5")),
+        send_retry_backoff_sec=float(os.environ.get("EMAIL_SEND_RETRY_BACKOFF", "30")),
+        failure_alert_threshold=int(os.environ.get("EMAIL_FAILURE_ALERT_THRESHOLD", "5")),
     )
     if email_config.enabled:
         if not email_config.api_key or not email_config.inbox_id:
