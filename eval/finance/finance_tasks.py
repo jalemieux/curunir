@@ -51,11 +51,14 @@ TASKS: list[dict] = [
         "prompt": "What is Apple (AAPL) trading at right now? Give me the price.",
         "max_loops": 5,
         "grader": "action_used",
-        # Must route through the catalog (load_skill) AND make the real data call
-        # (yfin.py). The path isn't documented anywhere but the skill, so running
-        # yfin.py without loading it means the agent globbed around the catalog;
-        # a hand-rolled `import yfinance` does neither.
-        "spec": {"require": ["load_skill: yfinance", "yfin.py"]},
+        # Outcome contract, not mechanism: the real driver (yfin.py) ran and
+        # nothing improvised around it. For `yfinance`, load_skill unlocks no
+        # opt-in tool, so requiring it would assert an internal step, not the
+        # result. `forbid` kills the bad paths — a scraped web_fetch/curl or a
+        # hand-rolled `import yfinance`; the glob/read *thrash* path still runs
+        # the driver, so the action budget (below) is what flags it.
+        "spec": {"require": ["yfin.py"],
+                 "forbid": ["web_fetch", "curl", "import yfinance"]},
         # Doubles as an efficiency tripwire: a bare price is ~1 data call.
         "budget": {"max_actions": 4},
     },
@@ -70,11 +73,14 @@ TASKS: list[dict] = [
         "grader": "composite",
         "spec": {
             "all": [
-                # Must reach the P/E via the yfinance skill — load it from the
-                # catalog AND make the data call. The bare numeric check never
-                # saw the hand-rolled-`import yfinance` bypass.
+                # Outcome contract: the driver ran (yfin.py) and nothing
+                # improvised around it. load_skill unlocks no opt-in tool for
+                # yfinance, so it's not required; `forbid` catches the bypasses
+                # the bare numeric check never saw — a web_fetch/curl scrape or a
+                # hand-rolled `import yfinance`.
                 {"label": "used-yfin", "grader": "action_used",
-                 "spec": {"require": ["load_skill: yfinance", "yfin.py"]}},
+                 "spec": {"require": ["yfin.py"],
+                          "forbid": ["web_fetch", "curl", "import yfinance"]}},
                 {"label": "pe-matches-live", "grader": "numeric_tolerance",
                  "spec": {
                      "tolerance_pct": 8,  # price moves between anchor and answer
@@ -115,11 +121,14 @@ TASKS: list[dict] = [
         "grader": "composite",
         "spec": {
             "all": [
-                # Must resolve the CIK via the edgar skill — load it from the
-                # catalog AND make the lookup call, not ad-hoc curl/scrape of
-                # sec.gov (the bare exact_match never checked how it got there).
+                # Outcome contract: the CIK came from the driver (edgar.py), not
+                # an ad-hoc curl/scrape of sec.gov (the bare exact_match never
+                # checked how it got there). load_skill unlocks no opt-in tool
+                # for sec-edgar, so it's not required; `forbid` kills the scrape
+                # paths. Symmetrical with R1/R2.
                 {"label": "used-edgar", "grader": "action_used",
-                 "spec": {"require": ["load_skill: sec-edgar", "edgar.py"]}},
+                 "spec": {"require": ["edgar.py"],
+                          "forbid": ["web_fetch", "curl"]}},
                 {"label": "cik-matches", "grader": "exact_match",
                  "spec": {
                      "extract_regex": r"(\d{5,10})",
