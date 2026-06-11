@@ -28,6 +28,20 @@ class AgentConfig:
 
 
 @dataclass
+class LocalWebConfig:
+    """Settings for the loopback-bound local web console (LocalWebChannel).
+
+    Operator-only surface: defaults to off and binds 127.0.0.1. Inside the
+    Docker network the compose file overrides ``host`` to 0.0.0.0 — network
+    isolation plus the shared ``context/.ws-token`` pairing token are the
+    access controls there, mirroring ``WS_HOST``.
+    """
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8766
+
+
+@dataclass
 class EmailChannelConfig:
     enabled: bool = False
     api_key: str = ""
