@@ -3,10 +3,10 @@ sends replies into the same thread."""
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import getaddresses
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from src.channels._attachments import (
     _assert_within,
@@ -75,9 +75,19 @@ class EmailChannel:
         self.attachment_dir = config.attachment_dir
         self.spam_score_threshold = config.spam_score_threshold
         self.state = EmailState.load(config.state_file)
+        # Consecutive poll/send failures; reset on any success. When it crosses
+        # config.failure_alert_threshold an ERROR-level escalation fires once.
+        self._consecutive_failures = 0
+        # Optional operator-notification hook: callable(reason: str). The
+        # baseline escalation is an ERROR log; a louder signal can be injected.
+        self._escalate_hook: Callable[[str], None] | None = None
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
 
     async def start(self) -> None:
-        """Validate inbox, initialize watermark if needed, enter polling loop."""
+        """Validate inbox, classify boot state, re-drive the ledger, then poll."""
         try:
             inbox = await self.client.validate_inbox()
         except DeadsimpleError as e:
@@ -88,11 +98,49 @@ class EmailChannel:
         logger.info("Email channel started, inbox=%s, polling every %ds",
                     email_addr, self.poll_interval)
 
-        if self.state.watermark_created_at is None:
-            self.state.set_watermark(datetime.now(timezone.utc), "")
-            self.state.save()
+        # Corrupt state file: a lost/garbled watermark must NOT fast-forward past
+        # pre-existing mail (that would silently drop it). Alert and bail so an
+        # operator repairs or removes the file instead.
+        if self.state.corrupt:
+            logger.error(
+                "Email state file %s is corrupt; not polling and not "
+                "fast-forwarding. Repair or remove it to resume.",
+                self.config.state_file,
+            )
+            self._escalate(
+                f"email state file {self.config.state_file} is corrupt — "
+                "inbound mail is not being polled"
+            )
+            return
 
+        # Genuine first run (no prior cursor): skip pre-existing mail.
+        if self.state.cursor_created_at is None:
+            self.state.set_cursor(self._now(), "")
+            self.state.save()
+            logger.info("Email first run: skipping pre-existing mail (cursor=now)")
+
+        await self._redrive_ledger()
         await self._poll_loop()
+
+    async def _redrive_ledger(self) -> None:
+        """Recover in-flight work persisted across a restart/crash.
+
+        status=queued → the agent never replied (crashed mid-turn); re-fetch the
+        inbound by message_id and re-enqueue it. status=retry → the reply was
+        computed but the send failed; the drain loop re-sends the stored payload.
+        """
+        for mid, pr in list(self.state.pending.items()):
+            if pr.status != "queued":
+                continue
+            try:
+                detail = await self.client.get_message(mid)
+            except DeadsimpleError:
+                logger.exception("Re-drive: failed to re-fetch queued message %s", mid)
+                continue
+            sender = pr.reply_address.get("to", "") or detail.get("from_email", "")
+            await self._enqueue_detail(detail, sender)
+            logger.info("Re-drive: re-enqueued queued message %s", mid)
+        await self._drain_retries()
 
     async def _poll_loop(self) -> None:
         while True:
@@ -100,29 +148,34 @@ class EmailChannel:
                 await self._poll_once()
             except Exception:
                 logger.exception("Error during email poll")
+                self._note_failure()
+            try:
+                await self._drain_retries()
+            except Exception:
+                logger.exception("Error during email retry drain")
             await asyncio.sleep(self.poll_interval)
 
     async def _poll_once(self) -> None:
-        """Walk pages until we hit a page entirely ≤ watermark, process new inbound.
+        """Walk pages until a page is entirely ≤ the discovery cursor, process new inbound.
 
         The deadsimple list endpoint does not guarantee strict newest-first
-        ordering — the watermark message itself can appear at index 0 with
-        newer messages further down. So sort each page locally by
+        ordering — the discovery-cursor message itself can appear at index 0
+        with newer messages further down. So sort each page locally by
         (created_at, message_id) descending and only terminate pagination
-        when the entire sorted page is ≤ watermark (a within-page miss is
+        when the entire sorted page is ≤ the cursor (a within-page miss is
         not enough).
 
         Outbound messages count toward pagination (page_had_new) but never
-        advance the watermark. Otherwise a scheduled outbound at T+1 would
-        push the watermark past an inbound at T whose listing was delayed,
-        silently dropping it on every subsequent poll.
+        advance the discovery cursor. Otherwise a scheduled outbound at T+1
+        would push the cursor past an inbound at T whose listing was delayed,
+        silently dropping it on every subsequent poll. (`page_cursor` below is
+        the deadsimple pagination token, distinct from the discovery cursor.)
         """
-        cursor: str | None = None
-        new_messages: list[dict[str, Any]] = []
-        max_seen: tuple[datetime, str] | None = None
+        page_cursor: str | None = None
+        seen_inbound: list[tuple[datetime, str, dict[str, Any]]] = []
 
         while True:
-            page = await self.client.list_messages(limit=50, cursor=cursor)
+            page = await self.client.list_messages(limit=50, cursor=page_cursor)
             data = page["messages"]
             keyed: list[tuple[datetime, str, dict[str, Any]]] = []
             for m in data:
@@ -134,47 +187,82 @@ class EmailChannel:
 
             page_had_new = False
             for ts, mid, m in keyed:
-                if not self.state.is_after_watermark(ts, mid):
+                if not self.state.is_after_cursor(ts, mid):
                     continue
                 page_had_new = True
                 if m.get("direction") != "inbound":
-                    continue
-                if max_seen is None or (ts, mid) > max_seen:
-                    max_seen = (ts, mid)
-                new_messages.append(m)
+                    continue  # outbound counts toward pagination, never the cursor
+                seen_inbound.append((ts, mid, m))
             if not page.get("next_cursor") or not page_had_new:
                 break
-            cursor = page["next_cursor"]
+            page_cursor = page["next_cursor"]
 
-        # Oldest first into the queue.
-        for summary in reversed(new_messages):
-            await self._handle_summary(summary)
+        # Process oldest-first so the queue preserves arrival order and the
+        # cursor advances only over the contiguous *settled* prefix.
+        seen_inbound.sort(key=lambda x: (x[0], x[1]))
+        pending_before = len(self.state.pending)
+        commit: tuple[datetime, str] | None = None
+        blocked = False
+        for ts, mid, m in seen_inbound:
+            if mid in self.state.pending:
+                settled = True  # already tracked in the ledger; don't re-enqueue
+            else:
+                settled = await self._handle_summary(m)
+            # Advance the cursor only across an unbroken run of settled
+            # messages. A transient failure (e.g. get_message) leaves the
+            # message unsettled and pins the cursor behind it, so it is retried
+            # on the next poll instead of being silently skipped — closing the
+            # same drop-on-failure hole the send path also guards against.
+            if not settled:
+                blocked = True
+            elif not blocked:
+                commit = (ts, mid)
 
-        if max_seen is not None:
-            self.state.set_watermark(*max_seen)
+        if commit is not None:
+            self.state.set_cursor(*commit)
+        # Persist if the cursor moved or the ledger grew (new pending entries).
+        if commit is not None or len(self.state.pending) != pending_before:
             self.state.save()
 
-    async def _handle_summary(self, summary: dict[str, Any]) -> None:
+    async def _handle_summary(self, summary: dict[str, Any]) -> bool:
+        """Process one inbound summary.
+
+        Returns True if the message is *settled* — enqueued for the agent, or
+        intentionally dropped (spam / disallowed sender). Returns False on a
+        transient failure (detail fetch errored) so the caller keeps the cursor
+        pinned behind it for a later retry rather than skipping it forever.
+        """
         if summary.get("direction") != "inbound":
-            return
+            return True
         if summary.get("is_spam") or float(summary.get("spam_score") or 0) >= self.spam_score_threshold:
             logger.info("Dropping spam message %s (score=%s)",
                          summary.get("message_id"), summary.get("spam_score"))
-            return
+            return True
         sender = summary.get("from_email", "")
         if self.allowed_senders:
             parsed = [addr for _, addr in getaddresses([sender]) if addr]
             sender_addr = parsed[0].lower() if parsed else ""
             if not sender_addr or sender_addr not in self.allowed_senders:
                 logger.info("Skipping email from %s (not in allowed_senders)", sender)
-                return
+                return True
 
         try:
             detail = await self.client.get_message(summary["message_id"])
         except DeadsimpleError:
             logger.exception("Failed to fetch detail for %s", summary.get("message_id"))
-            return
+            return False
 
+        await self._enqueue_detail(detail, sender)
+        return True
+
+    async def _enqueue_detail(self, detail: dict[str, Any], sender: str) -> None:
+        """Build an IncomingMessage from a message detail, record it in the
+        pending-reply ledger, and enqueue it.
+
+        The ledger entry is added BEFORE the enqueue so the message is durably
+        tracked the instant the agent learns about it — a crash between here and
+        a confirmed reply leaves a recoverable `queued` record.
+        """
         thread_id = detail.get("thread_id", "")
         attachments = await self._process_attachments(detail, thread_id)
 
@@ -189,15 +277,23 @@ class EmailChannel:
         subject = detail.get("subject", "") or ""
         reply_subject = subject if subject.lower().startswith(_REPLY_PREFIXES) else f"Re: {subject}"
 
+        message_id = detail["message_id"]
+        reply_address = {
+            "to": sender,
+            "subject": reply_subject,
+            "in_reply_to": message_id,
+        }
+        self.state.add_pending(
+            message_id,
+            created_at=self._parse_ts(detail.get("created_at", "")),
+            thread_id=thread_id,
+            reply_address=reply_address,
+        )
         incoming = IncomingMessage(
             content=content,
             channel="email",
             session_id=thread_id,
-            reply_address={
-                "to": sender,
-                "subject": reply_subject,
-                "in_reply_to": detail["message_id"],
-            },
+            reply_address=reply_address,
             attachments=attachments,
         )
         await self.in_queue.put(incoming)
@@ -274,7 +370,14 @@ class EmailChannel:
         return _re.sub(r"<[^>]+>", "", html).strip()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply via deadsimple. Routes to /reply for text-only, /messages when attaching."""
+        """Send a reply via deadsimple. Routes to /reply for text-only, /messages when attaching.
+
+        On failure for a ledger-tracked inbound, the computed reply is persisted
+        to the pending-reply ledger (status=retry) so the drain loop can re-send
+        it without re-running the agent — the message is never silently dropped.
+        Replies with no matching ledger entry (proactive / non-email-originated)
+        are best-effort: a failure is logged, nothing is queued.
+        """
         if not msg.final or not msg.content:
             return
         in_reply_to = msg.reply_address.get("in_reply_to")
@@ -284,25 +387,117 @@ class EmailChannel:
             logger.error("Email send missing in_reply_to or to (got %s)", msg.reply_address)
             return
 
-        attachments = msg.attachments or []
-        html_body = _render_html(msg.content) or None
+        paths = [a["path"] for a in (msg.attachments or []) if a.get("path")]
+        payload = {
+            "to": to,
+            "subject": subject or "",
+            "text_body": msg.content,
+            "html_body": _render_html(msg.content) or None,
+            "attachment_paths": paths,
+        }
         try:
-            if attachments:
-                paths = [a["path"] for a in attachments if a.get("path")]
-                await self.client.send_with_attachments(
-                    in_reply_to=in_reply_to,
-                    to=to,
-                    subject=subject or "",
-                    text_body=msg.content,
-                    attachment_paths=paths,
-                    html_body=html_body,
+            await self._dispatch_reply(in_reply_to, payload)
+        except DeadsimpleError as e:
+            self._note_failure()
+            if in_reply_to in self.state.pending:
+                self._schedule_retry(in_reply_to, payload, e)
+                logger.warning(
+                    "Reply send failed for %s; queued for retry: %s", in_reply_to, e
                 )
             else:
-                await self.client.send_reply(
-                    in_reply_to=in_reply_to,
-                    to=to,
-                    text_body=msg.content,
-                    html_body=html_body,
-                )
-        except DeadsimpleError:
-            logger.exception("Failed to send reply for thread %s", msg.session_id)
+                logger.exception("Failed to send reply for thread %s", msg.session_id)
+            return
+
+        self._note_success()
+        if in_reply_to in self.state.pending:
+            self.state.ack(in_reply_to)
+            self.state.save()
+
+    async def _dispatch_reply(self, in_reply_to: str, payload: dict[str, Any]) -> None:
+        """Send a reply payload via the appropriate deadsimple endpoint."""
+        if payload.get("attachment_paths"):
+            await self.client.send_with_attachments(
+                in_reply_to=in_reply_to,
+                to=payload["to"],
+                subject=payload.get("subject", ""),
+                text_body=payload["text_body"],
+                attachment_paths=payload["attachment_paths"],
+                html_body=payload.get("html_body"),
+            )
+        else:
+            await self.client.send_reply(
+                in_reply_to=in_reply_to,
+                to=payload["to"],
+                text_body=payload["text_body"],
+                html_body=payload.get("html_body"),
+            )
+
+    def _next_retry_at(self, attempts_after: int) -> datetime:
+        """Exponential backoff: backoff * 2**(attempts-1) seconds from now."""
+        delay = self.config.send_retry_backoff_sec * (2 ** max(attempts_after - 1, 0))
+        return self._now() + timedelta(seconds=delay)
+
+    def _schedule_retry(self, message_id: str, payload: dict[str, Any], error: Exception) -> None:
+        pr = self.state.pending.get(message_id)
+        attempts_after = (pr.attempts if pr else 0) + 1
+        self.state.mark_retry(
+            message_id,
+            reply_payload=payload,
+            next_retry_at=self._next_retry_at(attempts_after),
+            error=str(error),
+        )
+        self.state.save()
+
+    async def _drain_retries(self, now: datetime | None = None) -> None:
+        """Re-send replies whose retry backoff has elapsed (no agent re-run).
+
+        On success the ledger entry is acked. On repeated failure attempts are
+        bumped with exponential backoff until `send_max_retries`, at which point
+        the entry is dead-lettered (status=dead), logged at ERROR, and escalated.
+        """
+        now = now or self._now()
+        for mid, pr in self.state.due_retries(now):
+            payload = pr.reply_payload or {}
+            try:
+                await self._dispatch_reply(mid, payload)
+            except DeadsimpleError as e:
+                self._note_failure()
+                if pr.attempts + 1 >= self.config.send_max_retries:
+                    self.state.mark_dead(mid)
+                    self.state.save()
+                    logger.error(
+                        "Reply to %s dead-lettered after %d attempts: %s",
+                        mid, pr.attempts + 1, e,
+                    )
+                    self._escalate(
+                        f"email reply to {mid} dead-lettered after "
+                        f"{pr.attempts + 1} attempts: {e}"
+                    )
+                else:
+                    self._schedule_retry(mid, payload, e)
+                    logger.warning("Retry of reply to %s failed, will retry: %s", mid, e)
+                continue
+            self._note_success()
+            self.state.ack(mid)
+            self.state.save()
+            logger.info("Reply to %s re-sent successfully after retry", mid)
+
+    def _note_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures == self.config.failure_alert_threshold:
+            self._escalate(
+                f"{self._consecutive_failures} consecutive email send/poll failures"
+            )
+
+    def _note_success(self) -> None:
+        self._consecutive_failures = 0
+
+    def _escalate(self, reason: str) -> None:
+        """Surface a persistent failure. Baseline is an ERROR log; an optional
+        operator-notification hook can be wired via `_escalate_hook`."""
+        logger.error("EMAIL ESCALATION: %s", reason)
+        if self._escalate_hook is not None:
+            try:
+                self._escalate_hook(reason)
+            except Exception:
+                logger.exception("Email escalation hook failed")
