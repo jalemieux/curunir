@@ -14,6 +14,7 @@ import websockets
 from src.channels.base import OutgoingMessage
 from src.channels import portal as portal_mod
 from src.channels.portal import PORTAL_SESSION_ID, PortalChannel
+from src.skills import portal_skill_list
 
 
 @pytest.fixture
@@ -749,6 +750,67 @@ async def test_skills_request_command_triggers_snapshot(portal_server):
         assert msg["skills"] == []
     finally:
         task.cancel()
+
+
+def _write_portal_skill(parent, name, summary):
+    """Create skills/<name>/SKILL.md with a portal_summary (browse-panel gate)."""
+    d = parent / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: agent desc for {name}\n"
+        f'portal_summary: "{summary}"\n---\n# {name}\n'
+    )
+
+
+@pytest.mark.asyncio
+async def test_skills_snapshot_respects_persona_allowlist(portal_server, tmp_path):
+    """The channel-level guard the issue asks for: build the skills_provider
+    exactly as run.py does — from a persona-style allowlist — and assert the
+    skills_snapshot the browser receives contains only allowlisted skills.
+
+    Closes the gap between the passing portal_skill_list unit test and the
+    failing finance deployment: if the provider ever drops the allowlist arg
+    (the regression), an out-of-allowlist skill like `superheroes` leaks into
+    the panel and this test fails.
+    """
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    # In-allowlist, finance-style panel skills.
+    for name in ("balance-sheet", "financial-analysis"):
+        _write_portal_skill(skills_dir, name, f"{name} for the panel")
+    # Out-of-allowlist skills that ALSO set portal_summary — these must not
+    # appear once the allowlist is applied.
+    for name in ("superheroes", "gemini-image"):
+        _write_portal_skill(skills_dir, name, f"{name} for the panel")
+
+    allowlist = ["balance-sheet", "financial-analysis"]
+    # Construct the provider the SAME way run.py does (run.py:722-725).
+    provider = lambda: portal_skill_list(
+        [skills_dir], set(allowlist) if allowlist else None
+    )
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+        skills_provider=provider,
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        await portal_server["send"]({"type": "skills_request"})
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        msg = json.loads(raw)
+        assert msg["type"] == "skills_snapshot"
+        names = [s["name"] for s in msg["skills"]]
+        assert names == ["balance-sheet", "financial-analysis"]
+        assert "superheroes" not in names
+        assert "gemini-image" not in names
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @pytest.mark.asyncio
