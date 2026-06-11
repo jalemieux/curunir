@@ -170,3 +170,15 @@ catalyst-memo; F11 produced a correct memo but over the 10-min budget.)
 2. Add the task dict to `finance_tasks.TASKS` with source + symptom **tags**.
 3. If the answer can change with data, add an `anchor` instead of a constant.
 4. If *how* it succeeds matters (speed/cost), add a `budget`.
+
+### `action_used` convention: outcome contract vs. tool-gating (issue #340)
+
+For a data skill where `load_skill` unlocks **no** opt-in tool (`yfinance`,
+`sec-edgar`), assert the **outcome**, not the mechanism: `require` the driver
+(`yfin.py`/`edgar.py`) and `forbid` the improvised paths (`web_fetch`, `curl`,
+`import yfinance`). Requiring the literal `load_skill: <skill>` there asserts an
+internal step the user never sees and over-fires on the glob/read *thrash* path
+(which the action `budget` already catches as PASS-SLOW). Keep the strict
+`load_skill: <skill>` requirement only where loading is **load-bearing** — e.g.
+`balance-sheet`, whose `tools:` unlock the `portfolio` tool and the persona
+allowlist, so glob+read would be a real bug, not a stylistic one.
