@@ -728,6 +728,23 @@ async def main():
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
+        # One-shot boot snapshot of what the Skills panel will show, so a
+        # deployment can be diagnosed from logs alone (issue #342). The
+        # provider above recomputes this live per request; this is the same
+        # computation, logged once. `allowlist=none (unfiltered)` ⇒ persona
+        # not applied (check CURUNIR_PERSONA); correct allowlist but
+        # out-of-persona skills present ⇒ image predates the allowlist wiring.
+        _panel = portal_skill_list(
+            config.skill_dirs,
+            set(config.skill_allowlist) if config.skill_allowlist else None,
+        )
+        logger.info(
+            "Portal skills panel: %d skill(s) [persona=%s, allowlist=%s]: %s",
+            len(_panel), persona_name,
+            f"{len(config.skill_allowlist)} skills"
+            if config.skill_allowlist else "none (unfiltered)",
+            ", ".join(s["name"] for s in _panel),
+        )
 
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
