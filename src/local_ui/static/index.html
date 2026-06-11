@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Curunir — Local Console</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/highlight.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #e6edf3;
+    --muted: #8b949e; --accent: #2f81f7; --user: #1f6feb; --ok: #3fb950;
+    --warn: #d29922; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg);
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .status { font-size: 12px; color: var(--muted); }
+  header .status.online { color: var(--ok); }
+  header .status.offline { color: var(--err); }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  nav button:hover { color: var(--fg); }
+  nav button.active { color: var(--fg); background: var(--bg); border-color: var(--border); }
+  main { flex: 1; overflow: hidden; position: relative; }
+  .tab { display: none; height: 100%; overflow: auto; padding: 16px; }
+  .tab.active { display: block; }
+  .tab#tab-chat { padding: 0; display: none; flex-direction: column; }
+  .tab#tab-chat.active { display: flex; }
+
+  /* Chat */
+  #messages { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; white-space: normal; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user); color: #fff; }
+  .msg.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
+  .msg .body p:first-child { margin-top: 0; } .msg .body p:last-child { margin-bottom: 0; }
+  .msg pre { background: #010409; padding: 10px; border-radius: 6px; overflow: auto; }
+  .tools { font-size: 12px; color: var(--muted); margin-top: 6px; font-family: ui-monospace, monospace; }
+  .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); }
+  .composer textarea {
+    flex: 1; resize: none; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit; max-height: 160px;
+  }
+  .composer button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 0 18px; cursor: pointer; font-weight: 600;
+  }
+  .composer button:disabled { opacity: .5; cursor: default; }
+
+  /* Read panels */
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .controls { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  select, .controls input {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font: inherit;
+  }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; min-width: 140px; }
+  .card .label { font-size: 12px; color: var(--muted); }
+  .card .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+  .muted { color: var(--muted); }
+  .err { color: var(--err); }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; }
+  .badge.on { background: rgba(63,185,80,.15); color: var(--ok); }
+  .badge.off { background: rgba(139,148,158,.15); color: var(--muted); }
+  .mem-layout { display: flex; gap: 16px; height: 100%; }
+  .mem-tree { width: 280px; flex-shrink: 0; overflow: auto; }
+  .mem-tree ul { list-style: none; padding-left: 16px; margin: 0; }
+  .mem-tree > ul { padding-left: 0; }
+  .mem-tree li { padding: 2px 0; }
+  .mem-tree .file { cursor: pointer; color: var(--accent); }
+  .mem-tree .file:hover { text-decoration: underline; }
+  .mem-tree .dir { color: var(--fg); font-weight: 600; }
+  .mem-view { flex: 1; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Curunir</h1>
+  <span class="status" id="status">connecting…</span>
+  <nav>
+    <button data-tab="chat" class="active">Chat</button>
+    <button data-tab="usage">Usage</button>
+    <button data-tab="portfolio">Balance Sheet</button>
+    <button data-tab="memory">Memory</button>
+    <button data-tab="schedules">Schedules</button>
+  </nav>
+</header>
+<main>
+  <div class="tab active" id="tab-chat">
+    <div id="messages"></div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
+      <button id="send">Send</button>
+    </div>
+  </div>
+  <div class="tab" id="tab-usage"><h2>Token Usage &amp; Cost</h2>
+    <div class="controls">
+      <label>Window
+        <select id="usage-window">
+          <option value="1d">1d</option><option value="7d" selected>7d</option>
+          <option value="30d">30d</option><option value="24h">24h</option>
+        </select>
+      </label>
+      <label>Group by
+        <select id="usage-by"><option value="model">model</option><option value="day">day</option></select>
+      </label>
+    </div>
+    <div id="usage-body"></div>
+  </div>
+  <div class="tab" id="tab-portfolio"><h2>Balance Sheet</h2><div id="portfolio-body"></div></div>
+  <div class="tab" id="tab-memory"><h2>Memory</h2>
+    <div class="mem-layout">
+      <div class="mem-tree" id="memory-tree"></div>
+      <div class="mem-view" id="memory-view"><span class="muted">Select a file.</span></div>
+    </div>
+  </div>
+  <div class="tab" id="tab-schedules"><h2>Scheduled Tasks</h2><div id="schedules-body"></div></div>
+</main>
+<script>
+// === Auth token ===
+// The operator opens http://host:port/?token=XXX. We read it once and reuse
+// it for every /api and /ws call. (On loopback this is just the pairing gate.)
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const SESSION_ID = "local";
+
+function apiUrl(path, params = {}) {
+  const u = new URL(path, location.origin);
+  if (TOKEN) u.searchParams.set("token", TOKEN);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  return u;
+}
+async function apiGet(path, params) {
+  const r = await fetch(apiUrl(path, params));
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+const fmtUsd = (n) => "$" + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum = (n) => (n ?? 0).toLocaleString();
+const fmtMoney = (n) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+// === Tabs ===
+const tabs = document.querySelectorAll("nav button");
+const loaders = { usage: loadUsage, portfolio: loadPortfolio, memory: loadMemory, schedules: loadSchedules };
+tabs.forEach((b) => b.addEventListener("click", () => {
+  tabs.forEach((x) => x.classList.remove("active"));
+  b.classList.add("active");
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  const name = b.dataset.tab;
+  document.getElementById("tab-" + name).classList.add("active");
+  if (loaders[name]) loaders[name]();
+}));
+
+// === Usage panel ===
+document.getElementById("usage-window").addEventListener("change", loadUsage);
+document.getElementById("usage-by").addEventListener("change", loadUsage);
+async function loadUsage() {
+  const el = document.getElementById("usage-body");
+  const window = document.getElementById("usage-window").value;
+  const by = document.getElementById("usage-by").value;
+  el.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const data = await apiGet("/api/usage", { window, by });
+    if (!data.rows.length) { el.innerHTML = '<span class="muted">No usage in window.</span>'; return; }
+    const key = by === "day" ? "day" : "model";
+    const cols = [["calls", fmtNum], ["prompt_tokens", fmtNum], ["completion_tokens", fmtNum],
+      ["cached_prompt_tokens", fmtNum], ["reasoning_tokens", fmtNum], ["cost_usd", fmtUsd], ["elapsed_sec", (n) => n.toFixed(1) + "s"]];
+    const head = `<tr><th>${key}</th>${cols.map(([c]) => `<th class="num">${c}</th>`).join("")}</tr>`;
+    const body = data.rows.map((r) =>
+      `<tr><td>${r[key]}</td>${cols.map(([c, f]) => `<td class="num">${f(r[c])}</td>`).join("")}</tr>`).join("");
+    const sum = (c) => data.rows.reduce((a, r) => a + (r[c] || 0), 0);
+    const tot = `<tr><td><b>TOTAL</b></td>${cols.map(([c, f]) => `<td class="num"><b>${f(sum(c))}</b></td>`).join("")}</tr>`;
+    el.innerHTML = `<table>${head}${body}${tot}</table>`;
+  } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === Portfolio panel ===
+async function loadPortfolio() {
+  const el = document.getElementById("portfolio-body");
+  el.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const d = await apiGet("/api/portfolio");
+    if (!d.available) { el.innerHTML = '<span class="muted">No portfolio store yet.</span>'; return; }
+    const nw = d.networth, roll = d.rollup;
+    const cards = `<div class="cards">
+      <div class="card"><div class="label">Assets</div><div class="value">${fmtMoney(nw.assets)}</div></div>
+      <div class="card"><div class="label">Liabilities</div><div class="value">${fmtMoney(nw.liabilities)}</div></div>
+      <div class="card"><div class="label">Net Worth</div><div class="value">${fmtMoney(nw.net_worth)}</div></div>
+    </div>`;
+    const rollKeys = ["equities", "real_estate_equity", "collectibles", "physical", "cash", "private", "debt"];
+    const rollRows = rollKeys.map((k) =>
+      `<tr><td>${k.replace(/_/g, " ")}</td><td class="num">${fmtMoney(roll[k])}</td></tr>`).join("");
+    const assetRows = d.assets.map((a) =>
+      `<tr><td>${a.class}</td><td>${a.label}</td><td class="num">${a.cost_basis != null ? fmtMoney(a.cost_basis) : ""}</td><td class="num">${fmtMoney(a.value)}</td><td>${a.account || ""}</td></tr>`).join("");
+    el.innerHTML = cards +
+      `<h2>Rollup</h2><table>${rollRows}</table>` +
+      `<h2 style="margin-top:16px">Holdings</h2><table>
+        <tr><th>class</th><th>label</th><th class="num">cost basis</th><th class="num">value</th><th>account</th></tr>${assetRows}</table>`;
+  } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === Memory panel ===
+async function loadMemory() {
+  const treeEl = document.getElementById("memory-tree");
+  treeEl.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const tree = await apiGet("/api/memory");
+    treeEl.innerHTML = "";
+    treeEl.appendChild(renderTree(tree));
+  } catch (e) { treeEl.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+function renderTree(nodes) {
+  const ul = document.createElement("ul");
+  for (const n of nodes) {
+    const li = document.createElement("li");
+    if (n.type === "dir") {
+      const span = document.createElement("span");
+      span.className = "dir"; span.textContent = n.name + "/";
+      li.appendChild(span);
+      li.appendChild(renderTree(n.children || []));
+    } else {
+      const span = document.createElement("span");
+      span.className = "file"; span.textContent = n.name;
+      span.addEventListener("click", () => openMemoryFile(n.relpath));
+      li.appendChild(span);
+    }
+    ul.appendChild(li);
+  }
+  return ul;
+}
+async function openMemoryFile(relpath) {
+  const view = document.getElementById("memory-view");
+  view.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const d = await apiGet("/api/memory/file", { path: relpath });
+    view.innerHTML = marked.parse(d.content || "");
+  } catch (e) { view.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === Schedules panel ===
+async function loadSchedules() {
+  const el = document.getElementById("schedules-body");
+  el.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const tasks = await apiGet("/api/schedules");
+    if (!tasks.length) { el.innerHTML = '<span class="muted">No scheduled tasks.</span>'; return; }
+    const rows = tasks.map((t) =>
+      `<tr><td>${t.id}</td><td><code>${t.cron || ""}</code></td><td>${t.skill || ""}</td>
+       <td><span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span></td>
+       <td>${t.next_fire ? new Date(t.next_fire).toLocaleString() : "—"}</td>
+       <td>${t.last_status || ""}</td></tr>`).join("");
+    el.innerHTML = `<table><tr><th>id</th><th>cron</th><th>skill</th><th>state</th><th>next fire</th><th>last status</th></tr>${rows}</table>`;
+  } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === Chat (same wire protocol as the portal) ===
+const messagesEl = document.getElementById("messages");
+const inputEl = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const statusEl = document.getElementById("status");
+let ws = null, backoff = 1000, assistantEl = null, assistantRaw = "";
+
+function setStatus(s) {
+  statusEl.textContent = s;
+  statusEl.className = "status " + (s === "online" ? "online" : s === "offline" ? "offline" : "");
+}
+function appendMessage(role) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.innerHTML = '<div class="body"></div>';
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return el;
+}
+function renderHistory(messages) {
+  messagesEl.innerHTML = ""; assistantEl = null;
+  for (const m of messages) {
+    if (m.role === "user") {
+      appendMessage("user").querySelector(".body").textContent = m.content || "";
+    } else if (m.role === "assistant") {
+      const el = appendMessage("assistant");
+      if (m.content) el.querySelector(".body").innerHTML = marked.parse(m.content);
+      if (m.tool_calls && m.tool_calls.length) addTools(el, m.tool_calls);
+    } else if (m.role === "system") {
+      appendMessage("assistant").querySelector(".body").innerHTML = `<em class="muted">${m.content}</em>`;
+    }
+  }
+}
+function addTools(el, calls) {
+  let t = el.querySelector(".tools");
+  if (!t) { t = document.createElement("div"); t.className = "tools"; el.appendChild(t); }
+  t.textContent = "⚙ " + calls.join(" · ");
+}
+function renderChunk(msg) {
+  if (!assistantEl) { assistantEl = appendMessage("assistant"); assistantRaw = ""; }
+  if (msg.tool_calls && msg.tool_calls.length) addTools(assistantEl, msg.tool_calls);
+  if (msg.delta && msg.content) {
+    assistantRaw += msg.content;
+    assistantEl.querySelector(".body").innerHTML = marked.parse(assistantRaw);
+  } else if (msg.content) {
+    assistantRaw = msg.content;
+    assistantEl.querySelector(".body").innerHTML = marked.parse(assistantRaw);
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (msg.final) { assistantEl = null; sendBtn.disabled = false; }
+}
+function onServerMessage(msg) {
+  if (msg.type === "agent_status") { setStatus(msg.status); return; }
+  if (msg.type === "history_snapshot") { renderHistory(msg.messages || []); return; }
+  if (msg.type === "skills_snapshot") { return; }
+  if (msg.session_id && msg.session_id !== SESSION_ID) return;
+  renderChunk(msg);
+}
+function wsUrl() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const t = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : "";
+  return `${proto}//${location.host}/ws/browser${t}`;
+}
+function connect() {
+  ws = new WebSocket(wsUrl());
+  setStatus("connecting…");
+  ws.onopen = () => {
+    backoff = 1000;
+    ws.send(JSON.stringify({ content: "", command: "history_request", session_id: SESSION_ID }));
+  };
+  ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
+  ws.onclose = () => { setStatus("offline"); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  appendMessage("user").querySelector(".body").textContent = text;
+  const frame = text.startsWith("/")
+    ? { command: "slash", text, session_id: SESSION_ID }
+    : { content: text, session_id: SESSION_ID };
+  ws.send(JSON.stringify(frame));
+  inputEl.value = ""; inputEl.style.height = "auto"; sendBtn.disabled = true;
+}
+sendBtn.addEventListener("click", sendMessage);
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+inputEl.addEventListener("input", () => {
+  inputEl.style.height = "auto"; inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+});
+connect();
+</script>
+</body>
+</html>

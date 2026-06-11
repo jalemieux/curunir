@@ -63,8 +63,16 @@ services:
       # Override the publish line below to `127.0.0.1:8765:8765` to keep
       # the port off your LAN.
       WS_HOST: ${WS_HOST:-0.0.0.0}
+      # Local web console (operator-only read panels + chat). Off by default;
+      # set LOCAL_UI_ENABLED=true in .env to publish it. Binds 0.0.0.0 inside
+      # the container for the same reason as WS_HOST — Docker network isolation
+      # plus the shared .ws-token pairing token are the access controls.
+      LOCAL_UI_ENABLED: ${LOCAL_UI_ENABLED:-false}
+      LOCAL_UI_HOST: ${LOCAL_UI_HOST:-0.0.0.0}
+      LOCAL_UI_PORT: ${LOCAL_UI_PORT:-8766}
     ports:
       - "8765:8765"
+      - "8766:8766"
     volumes:
       - ./secrets:/secrets:ro              # OAuth tokens, credentials (read-only)
       - ./workspace:/app/workspace         # Workspace persistence

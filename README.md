@@ -63,7 +63,8 @@ curunir/
 ├── cli.py                  # Standalone WebSocket CLI client
 ├── src/
 │   ├── agent/              # Core agent loop and system prompt builder
-│   ├── channels/           # CLI/WS, Email, Portal channels and router
+│   ├── channels/           # CLI/WS, Email, Portal, Local Web UI channels and router
+│   ├── local_ui/           # Loopback web console: read adapters + static SPA
 │   ├── tools/              # Tool schemas, dispatch, and executors
 │   ├── config.py           # AgentConfig dataclass
 │   ├── llm.py              # LLM interface (LiteLLM)
@@ -188,6 +189,20 @@ CURUNIR_PORTAL_TOKEN=<bearer-token-issued-by-portal>
 Every finalized agent response in the portal carries a Copy / Print action row. Copy writes the response markdown to the clipboard; Print opens the browser's print dialog on a clean, paper-styled copy of that response, which can then be saved as a PDF.
 
 See **[portal/README.md](portal/README.md)** for portal deployment and the local `docker compose --profile portal up` dev path.
+
+#### Local Web UI (operator console served from the container)
+
+A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.json`), and the `context/memory/` tree. It reuses the portal chat frontend and wire protocol but bridges `/ws/browser` straight into the local agent queues.
+
+Off by default. Enable it with:
+
+```bash
+LOCAL_UI_ENABLED=true
+# LOCAL_UI_HOST=127.0.0.1   # 0.0.0.0 inside Docker (compose sets this)
+# LOCAL_UI_PORT=8766
+```
+
+It binds loopback and reuses the WS channel's `context/.ws-token` pairing token and Origin allowlist — no separate auth. Open it at `http://localhost:8766/?token=<token>` (the token is printed in the startup log and stored in `context/.ws-token`). v1 is **read-only panels + chat**; edits stay with the existing tools/skills.
 
 ## Attachments
 
