@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<!-- Viewport lock (#304, problem #1): maximum-scale + user-scalable=no stops
-     iOS auto-zoom on input focus and pinch-zoom-jacking; viewport-fit=cover
-     lets us pad against the notch / home indicator with safe-area insets. -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!-- viewport-fit=cover lets us pad against the notch / home indicator with
+     safe-area insets. We deliberately do NOT lock zoom via the viewport
+     (#355, problem #1): iOS Safari has ignored those flags since iOS 10, and
+     locking zoom only harms accessibility. Double-tap-to-zoom — the gesture
+     that made the first tap on a control "do nothing" — is killed per-control
+     with `touch-action: manipulation` instead. Matches desktop index.html. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#4f46e5">
 <!-- PWA / add-to-homescreen (standalone display). iOS reads these meta tags
      rather than the manifest for standalone launch. -->
@@ -89,6 +92,12 @@ body {
   overscroll-behavior: none;
 }
 button { font-family: inherit; color: inherit; cursor: pointer; }
+/* Opt every tappable control out of double-tap-to-zoom (#355, problem #1).
+   Without this, iOS Safari delays each tap ~300ms to see if it's the first
+   half of a double-tap-zoom, so the first tap appears to do nothing. Scoped
+   to controls (not `*`) so it can't interfere with the pull-to-refresh /
+   list-scroll touch handlers. */
+button, .conv-row, .skill-row, .es-starter { touch-action: manipulation; }
 
 /* === Views ============================================================== */
 .view {
@@ -511,6 +520,10 @@ let sessionId = crypto.randomUUID();
 let chatOpen = false;
 let ws = null;
 let agentOnline = false;
+// True once bootstrapSync() has run for the current online period. Reset
+// whenever the agent goes offline, so the next offline→online edge re-syncs
+// exactly once (and onopen's own sync doesn't double-fire). See #334 / #355.
+let bootstrappedOnline = false;
 let staged = [];
 let inProgressMsg = null;
 let historyAssistant = null;
@@ -543,7 +556,21 @@ applyTheme(document.documentElement.getAttribute("data-theme") || "light");
 function setStatus(state) {
   statusDot.className = "status-dot " + state;
   statusDot.title = "agent " + state;
+  const wasOnline = agentOnline;
   agentOnline = state === "online";
+  // Recover the bootstrap frames that were dropped when the browser connected
+  // before the agent container had dialed in (#355, problem #2 — the mobile
+  // analog of #334). The browser↔portal socket stays open across an agent
+  // cold-start, so ws.onopen never re-fires; instead we re-issue
+  // conversations/skills/history on the agent's offline→online edge. The
+  // bootstrappedOnline flag dedupes against onopen's own sync and against
+  // repeated online frames within one online period.
+  if (agentOnline && !wasOnline) {
+    if (!bootstrappedOnline) bootstrapSync();
+    bootstrappedOnline = true;
+  } else if (!agentOnline) {
+    bootstrappedOnline = false;
+  }
   if (!agentOnline && inProgressMsg) {
     finalizeActivity(inProgressMsg);
     inProgressMsg.classList.remove("stopping");
@@ -582,6 +609,25 @@ function updateComposerMode() {
   }
 }
 
+// === Bootstrap sync ===
+// Pull everything the current view needs from the agent: the conversation list
+// and skill catalog (for the home view's empty-state starters), plus the open
+// chat's transcript. Fired from ws.onopen AND re-fired on the agent's
+// offline→online edge in setStatus (#355, problem #2) — the onopen frames are
+// dropped if the agent container hasn't dialed into the portal yet. The
+// readyState guards in requestConversations/requestHistory make a half-open
+// socket a no-op rather than a throw. Idempotent: every request is a snapshot
+// read.
+function bootstrapSync() {
+  requestConversations();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: "skills_request", session_id: sessionId }));
+  }
+  // If a chat is open (across a reconnect, or the user tapped into a
+  // conversation while the agent was still connecting), re-pull its transcript.
+  if (chatOpen) requestHistory();
+}
+
 // === WS connect ===
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -589,13 +635,7 @@ function connect() {
   setStatus("reconnecting");
   ws.onopen = () => {
     backoff = 1000;
-    // Bind the socket (via the session_id on these frames) and pull what the
-    // home view needs: the conversation list and the skill catalog (for the
-    // empty-state starters). History is fetched only when a chat is opened.
-    requestConversations();
-    ws.send(JSON.stringify({ command: "skills_request", session_id: sessionId }));
-    // If a chat was already open across a reconnect, re-pull its transcript.
-    if (chatOpen) requestHistory();
+    bootstrapSync();
   };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {
