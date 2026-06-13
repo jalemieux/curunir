@@ -171,6 +171,16 @@
   .sched-body .edit-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
   .sched-body .edit-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
   .sched-body .edit-form textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; resize: vertical; }
+  /* Transient "Fired <id>" confirmation for the Run-now test fire. */
+  #sched-toast {
+    position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+    background: var(--panel); color: var(--fg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 10px 16px; font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s;
+    pointer-events: none;
+  }
+  #sched-toast.show { opacity: 1; transform: translateY(0); }
 </style>
 </head>
 <body>
@@ -504,6 +514,7 @@ function schedViewBody(t) {
     </div>
     <div class="prompt-render">${md(t.prompt)}</div>
     <div class="row-actions">
+      <button class="btn" data-act="run" data-id="${esc(t.id)}">Run now</button>
       <button class="btn" data-act="edit" data-id="${esc(t.id)}">Edit</button>
       <button class="btn" data-act="toggle" data-id="${esc(t.id)}">${t.enabled ? "Disable" : "Enable"}</button>
       <button class="btn danger" data-act="delete" data-id="${esc(t.id)}">Delete</button>
@@ -530,6 +541,11 @@ async function onSchedAction(act, id) {
     if (act === "edit") { _schedEdit = id; await loadSchedules(); return; }  // loadSchedules wires the preview
     if (act === "cancel") { _schedEdit = null; await loadSchedules(); return; }
     if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`); await loadSchedules(); return; }
+    if (act === "run") {
+      // Fire-and-forget test fire — metadata is untouched, so no list reload.
+      await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/run`);
+      schedToast(`Fired ${id}`); return;
+    }
     if (act === "delete") {
       if (!confirm(`Delete schedule '${id}'?`)) return;
       await apiSend("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
@@ -545,6 +561,18 @@ async function onSchedAction(act, id) {
       _schedEdit = null; await loadSchedules(); return;
     }
   } catch (e) { errAt(e.message); }
+}
+function schedToast(msg) {
+  let el = document.getElementById("sched-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "sched-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 2500);
 }
 function wireEditPreview() {
   const cron = document.getElementById("esched-cron");

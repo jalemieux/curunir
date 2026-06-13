@@ -764,6 +764,7 @@ async def main():
             port=local_web_config.port,
             model=config.model,
             persona=persona.name,
+            agent=agent,
             cancel_session=agent.request_cancel,
             allowed_origins=ws_allowed_origins,
             pairing_token=ws_pairing_token,
