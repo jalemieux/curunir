@@ -162,6 +162,23 @@ def test_ws_accepts_with_good_token(client):
         assert msg["status"] == "online"
 
 
+def test_ws_meta_frame_carries_model_and_persona(config):
+    """After 'online', the console receives a meta frame for the header."""
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        model="anthropic/x", persona="finance",
+    )
+    with TestClient(ch.app) as c:
+        with c.websocket_connect(
+            f"/ws/browser?token={TOKEN}", headers=GOOD_ORIGIN
+        ) as ws:
+            assert json.loads(ws.receive_text())["type"] == "agent_status"
+            meta = json.loads(ws.receive_text())
+            assert meta["type"] == "meta"
+            assert meta["model"] == "anthropic/x"
+            assert meta["persona"] == "finance"
+
+
 def test_ws_no_token_configured_allows_connection(config):
     # pairing_token=None disables the gate (mirrors ws.py).
     ch = LocalWebChannel(in_queue=asyncio.Queue(), config=config, pairing_token=None)

@@ -28,6 +28,11 @@
     border-bottom: 1px solid var(--border); background: var(--panel);
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .persona-tag {
+    display: none; margin-left: 8px; padding: 1px 7px; border-radius: 5px;
+    border: 1px solid var(--warn); color: var(--warn); font-size: 11px;
+    font-weight: 600; letter-spacing: 0.3px; vertical-align: middle;
+  }
   nav { display: flex; gap: 4px; margin-left: auto; }
   nav button {
     background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -75,7 +80,7 @@
 </head>
 <body>
 <header>
-  <h1>Curunir</h1>
+  <h1>Curunir<span id="persona-tag" class="persona-tag"></span></h1>
   <nav>
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
@@ -256,9 +261,25 @@ function wsUrl() {
   return `${proto}//${location.host}/ws/browser${t}`;
 }
 let chat;
+function setPersonaTag(persona) {
+  const el = document.getElementById("persona-tag");
+  if (!el) return;
+  if (persona) {
+    el.textContent = persona;
+    el.style.display = "inline-block";
+  } else {
+    el.textContent = "";
+    el.style.display = "none";
+  }
+}
+
 const conn = createConnection({
   url: wsUrl,
-  onFrame: (msg) => chat && chat.handleFrame(msg),
+  onFrame: (msg) => {
+    // The header (persona/model) is the page's concern, not the chat pane's.
+    if (msg && msg.type === "meta") { setPersonaTag(msg.persona); return; }
+    chat && chat.handleFrame(msg);
+  },
   onStatus: (state) => chat && chat.setStatus(state),
   onOpen: () => chat && chat.bootstrap(),
 });
