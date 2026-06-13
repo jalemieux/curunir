@@ -39,3 +39,26 @@ def test_cli_import_rows_from_file(tmp_path):
     rc, out = _run(tmp_path, "import-rows", "--rows-file", str(f),
                    "--account", "brk", "--stated-total", "9200")
     assert rc == 0 and json.loads(out)["self_check"]["ok"] is True
+
+
+def test_cli_buy_sell_trades_realized(tmp_path):
+    rc, out = _run(tmp_path, "buy", "--ticker", "SPCX", "--qty", "100",
+                   "--price", "150", "--trade-date", "2024-01-10")
+    assert rc == 0
+    lot = json.loads(out)["asset_id"]
+    rc, out = _run(tmp_path, "sell", lot, "--qty", "40", "--price", "170",
+                   "--trade-date", "2026-06-13")
+    assert rc == 0 and json.loads(out)["realized_pnl"] == 800
+    rc, out = _run(tmp_path, "trades", "--ticker", "SPCX")
+    assert rc == 0 and len(json.loads(out)) == 2
+    rc, out = _run(tmp_path, "realized", "--year", "2026")
+    assert rc == 0 and json.loads(out)["total"] == 800
+
+
+def test_cli_sell_oversell_errors(tmp_path):
+    rc, out = _run(tmp_path, "buy", "--ticker", "VOO", "--qty", "5",
+                   "--price", "500", "--trade-date", "2026-01-01")
+    lot = json.loads(out)["asset_id"]
+    rc, out = _run(tmp_path, "sell", lot, "--qty", "6", "--price", "510",
+                   "--trade-date", "2026-02-01")
+    assert rc == 1 and "error" in json.loads(out)
