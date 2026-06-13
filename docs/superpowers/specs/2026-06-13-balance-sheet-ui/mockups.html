@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Balance Sheet UI — Mockups</title>
+<style>
+  /* Theme tokens copied verbatim from chat.css so these mockups match the
+     real Local Console exactly. */
+  :root {
+    --bg:#ffffff; --fg:#1a1a1f; --accent:#4f46e5; --border:#e5e7eb;
+    --border-strong:#d1d5db; --panel:#f4f4f8; --muted:#6b7280;
+    --ok:#16a34a; --warn:#b8860b; --err:#dc2626;
+  }
+  [data-theme="dark"] {
+    --bg:#0a0a12; --fg:#e0e0e0; --accent:#6366f1; --border:#1a1a22;
+    --border-strong:#2a2a3e; --panel:#12121c; --muted:#888;
+    --ok:#4ade80; --warn:#d29922; --err:#f87171;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--fg);
+  }
+  /* mock console chrome */
+  .chrome-head { display:flex; align-items:center; gap:12px; padding:10px 16px;
+    border-bottom:1px solid var(--border); background:var(--panel); position:sticky; top:0; z-index:20; }
+  .chrome-head h1 { font-size:15px; margin:0; font-weight:600; }
+  .switch { display:flex; gap:4px; margin-left:auto; }
+  .switch button, .theme-btn { background:transparent; border:1px solid transparent; color:var(--muted);
+    padding:6px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .switch button:hover, .theme-btn:hover { color:var(--fg); }
+  .switch button.active { color:var(--fg); background:var(--bg); border-color:var(--border); }
+  .theme-btn { border:1px solid var(--border-strong); }
+
+  .stage { padding:20px 24px; max-width:1180px; margin:0 auto; }
+  .opt { display:none; }
+  .opt.active { display:block; }
+  .opt-note { font-size:12px; color:var(--muted); border-left:2px solid var(--accent);
+    padding:4px 0 4px 12px; margin-bottom:18px; }
+
+  h2 { font-size:16px; margin:0 0 12px; }
+  h3 { font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted);
+    margin:22px 0 10px; font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  td.num,th.num { text-align:right; }
+  .muted { color:var(--muted); }
+  .pos { color:var(--ok); }
+  .neg { color:var(--err); }
+
+  /* hero + cards */
+  .hero { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:4px; }
+  .hero .nw { font-size:38px; font-weight:700; letter-spacing:-1px; }
+  .hero .delta { font-size:15px; font-weight:600; }
+  .cards { display:flex; gap:12px; flex-wrap:wrap; margin:14px 0 4px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:12px 16px; min-width:150px; flex:1; }
+  .card .label { font-size:12px; color:var(--muted); }
+  .card .value { font-size:22px; font-weight:600; margin-top:4px; }
+  .card .sub { font-size:12px; color:var(--muted); margin-top:2px; }
+
+  /* allocation bar */
+  .alloc-bar { display:flex; height:28px; border-radius:7px; overflow:hidden; margin:6px 0 12px;
+    border:1px solid var(--border); }
+  .alloc-seg { height:100%; }
+  .alloc-legend { display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; }
+  .alloc-legend .it { display:flex; align-items:center; gap:6px; }
+  .swatch { width:11px; height:11px; border-radius:3px; flex-shrink:0; }
+  .alloc-legend .pct { color:var(--muted); }
+
+  /* group accordion (Option A) */
+  .grp { border:1px solid var(--border); border-radius:10px; background:var(--panel);
+    margin-bottom:10px; overflow:hidden; }
+  .grp-head { display:grid; grid-template-columns:14px 1fr auto auto; align-items:center; gap:12px;
+    padding:11px 14px; cursor:pointer; user-select:none; }
+  .grp-head:hover { background:var(--bg); }
+  .grp-name { font-weight:600; }
+  .grp-name .cnt { color:var(--muted); font-weight:400; font-size:12px; margin-left:6px; }
+  .grp-sub { font-size:12px; color:var(--muted); }
+  .grp-tot { font-weight:600; font-variant-numeric:tabular-nums; }
+  .caret { color:var(--muted); transition:transform .15s; }
+  .grp.open .caret { transform:rotate(90deg); }
+  .grp-body { display:none; padding:0 6px 6px; }
+  .grp.open .grp-body { display:block; }
+  .grp-body table th, .grp-body table td { padding:5px 10px; }
+
+  .badge { font-size:10.5px; padding:1px 7px; border-radius:10px; white-space:nowrap; }
+  .badge.lt { background:rgba(74,222,128,.15); color:var(--ok); }
+  .badge.st { background:rgba(210,153,34,.18); color:var(--warn); }
+  .badge.buy { background:rgba(99,102,241,.18); color:var(--accent); }
+  .badge.sell { background:rgba(210,153,34,.18); color:var(--warn); }
+
+  /* sub-tabs (Option B) */
+  .subnav { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:18px; }
+  .subnav button { background:transparent; border:none; border-bottom:2px solid transparent;
+    color:var(--muted); padding:8px 14px; cursor:pointer; font-size:13.5px; font-weight:600; }
+  .subnav button:hover { color:var(--fg); }
+  .subnav button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  .subview { display:none; }
+  .subview.active { display:block; }
+  .filters { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
+  .filters select, .filters input { background:var(--bg); color:var(--fg);
+    border:1px solid var(--border); border-radius:6px; padding:5px 8px; font:inherit; }
+  .seg-tot-row td { font-weight:600; border-top:1px solid var(--border-strong); border-bottom:none; }
+
+  /* master-detail (Option C) */
+  .md { display:grid; grid-template-columns:240px 1fr; gap:18px; }
+  .md-rail { border:1px solid var(--border); border-radius:10px; background:var(--panel);
+    overflow:hidden; align-self:start; }
+  .md-rail .rail-grp { font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--muted); padding:10px 14px 4px; font-weight:600; }
+  .md-rail .rail-it { display:flex; justify-content:space-between; gap:8px; padding:8px 14px;
+    cursor:pointer; border-left:2px solid transparent; font-size:13px; }
+  .md-rail .rail-it:hover { background:var(--bg); }
+  .md-rail .rail-it.active { background:var(--bg); border-left-color:var(--accent); color:var(--fg); }
+  .md-rail .rail-it .v { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .md-pane .detail { display:none; }
+  .md-pane .detail.active { display:block; }
+  .lots-card { border:1px solid var(--border); border-radius:10px; background:var(--panel);
+    padding:14px 16px; margin-bottom:14px; }
+  .kpi-row { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:8px; }
+  .kpi .k { font-size:12px; color:var(--muted); }
+  .kpi .v { font-size:18px; font-weight:600; }
+</style>
+</head>
+<body>
+<div class="chrome-head">
+  <h1>Curunir — Local Console</h1>
+  <span class="muted" style="font-size:12px">Balance Sheet · mockups</span>
+  <div class="switch">
+    <button data-opt="a" class="active">A · Dashboard</button>
+    <button data-opt="b">B · Sub-tabs</button>
+    <button data-opt="c">C · Explorer</button>
+  </div>
+  <button class="theme-btn" id="themeBtn">◐ theme</button>
+</div>
+
+<div class="stage">
+
+  <!-- ============ OPTION A: single-scroll dashboard ============ -->
+  <section class="opt active" id="opt-a">
+    <div class="opt-note"><b>Option A — Dashboard.</b> One scrollable page. Net-worth hero → allocation bar →
+      holdings grouped into collapsible class sections with per-group subtotals → recent trades + realized P/L.
+      Everything visible top-to-bottom; least clicking.</div>
+
+    <div class="hero">
+      <div class="nw">$2,484,300</div>
+      <div class="delta pos">▲ $18,420 (0.75%) today</div>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">Assets</div><div class="value">$2,731,800</div></div>
+      <div class="card"><div class="label">Liabilities</div><div class="value">$247,500</div></div>
+      <div class="card"><div class="label">Net Worth</div><div class="value">$2,484,300</div></div>
+      <div class="card"><div class="label">Unrealized gain</div><div class="value pos">+$312,640</div><div class="sub">on $1.02M basis</div></div>
+    </div>
+
+    <h3>Allocation</h3>
+    <div class="alloc-bar" id="allocA"></div>
+    <div class="alloc-legend" id="allocLegA"></div>
+
+    <h3>Holdings</h3>
+    <div id="groupsA"></div>
+
+    <h3>Recent trades</h3>
+    <div class="cards" style="margin-bottom:12px">
+      <div class="card"><div class="label">Realized — short-term</div><div class="value pos">+$4,210</div></div>
+      <div class="card"><div class="label">Realized — long-term</div><div class="value pos">+$22,880</div></div>
+      <div class="card"><div class="label">Realized — total (2026)</div><div class="value pos">+$27,090</div><div class="sub">14 sell trades</div></div>
+    </div>
+    <table id="tradesA"></table>
+  </section>
+
+  <!-- ============ OPTION B: sub-tabs ============ -->
+  <section class="opt" id="opt-b">
+    <div class="opt-note"><b>Option B — Sub-tabs.</b> Balance Sheet gets its own inner nav:
+      <i>Overview · Holdings · Trades</i>. Each view is focused and full-width with its own filters —
+      less scrolling, more room per table.</div>
+
+    <div class="subnav">
+      <button data-sub="ov" class="active">Overview</button>
+      <button data-sub="hold">Holdings</button>
+      <button data-sub="trades">Trades</button>
+    </div>
+
+    <div class="subview active" id="sub-ov">
+      <div class="hero"><div class="nw">$2,484,300</div><div class="delta pos">▲ $18,420 (0.75%) today</div></div>
+      <div class="cards">
+        <div class="card"><div class="label">Assets</div><div class="value">$2,731,800</div></div>
+        <div class="card"><div class="label">Liabilities</div><div class="value">$247,500</div></div>
+        <div class="card"><div class="label">Unrealized gain</div><div class="value pos">+$312,640</div></div>
+        <div class="card"><div class="label">Realized (2026)</div><div class="value pos">+$27,090</div></div>
+      </div>
+      <h3>Allocation</h3>
+      <div class="alloc-bar" id="allocB"></div>
+      <div class="alloc-legend" id="allocLegB"></div>
+      <h3>Top movers today</h3>
+      <table id="moversB"></table>
+    </div>
+
+    <div class="subview" id="sub-hold">
+      <div class="filters">
+        <select><option>All accounts</option><option>Taxable</option><option>401(k)</option><option>Roth IRA</option></select>
+        <select><option>All classes</option><option>Equity</option><option>Cash</option><option>Real estate</option><option>Collectible</option></select>
+        <input placeholder="Filter by ticker / label…" style="flex:1" />
+        <select><option>Sort: Value ↓</option><option>Unrealized ↓</option><option>Ticker A–Z</option></select>
+      </div>
+      <table id="holdB"></table>
+    </div>
+
+    <div class="subview" id="sub-trades">
+      <div class="filters">
+        <select><option>All sides</option><option>Buys</option><option>Sells</option></select>
+        <input placeholder="Ticker…" style="max-width:120px" />
+        <select><option>2026</option><option>2025</option><option>All years</option></select>
+        <span class="muted" style="margin-left:auto">Realized 2026: <b class="pos">+$27,090</b>
+          <span style="margin-left:8px">ST <span class="pos">+$4,210</span> · LT <span class="pos">+$22,880</span></span></span>
+      </div>
+      <table id="tradesB"></table>
+    </div>
+  </section>
+
+  <!-- ============ OPTION C: master-detail explorer ============ -->
+  <section class="opt" id="opt-c">
+    <div class="opt-note"><b>Option C — Explorer.</b> Left rail lists classes &amp; accounts; right pane shows the
+      detail for the selection. Click a holding to drill into its lots and the trade history for that ticker.
+      Power-user / drill-down oriented.</div>
+
+    <div class="md">
+      <div class="md-rail" id="railC"></div>
+      <div class="md-pane">
+        <div class="detail active" id="det-equities">
+          <h2>Equities <span class="muted" style="font-size:13px;font-weight:400">· $1,842,000 · 74% of assets</span></h2>
+          <div class="kpi-row">
+            <div class="kpi"><div class="k">Market value</div><div class="v">$1,842,000</div></div>
+            <div class="kpi"><div class="k">Cost basis</div><div class="v">$1,265,000</div></div>
+            <div class="kpi"><div class="k">Unrealized</div><div class="v pos">+$577,000</div></div>
+          </div>
+          <table id="eqC"></table>
+          <h3>Trade history · NVDA (selected lot)</h3>
+          <table id="eqTradesC"></table>
+        </div>
+        <div class="detail" id="det-other">
+          <h2 class="muted">Select a holding to see its lots &amp; trades</h2>
+          <p class="muted">In the real build, each rail item swaps this pane: cash shows balances by account,
+            real estate shows value/mortgage/equity, collectibles show cost vs. appraised value &amp; holding period.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // ---- sample data (shapes mirror engine.list_assets / trade_history) ----
+  const fmt = (n) => (n<0?"-":"")+"$"+Math.abs(n).toLocaleString("en-US",{maximumFractionDigits:0});
+  const fmt2 = (n) => (n<0?"-":"")+"$"+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const signed = (n) => (n>=0?"+":"")+fmt(n);
+
+  const ALLOC = [
+    {k:"Equities",       v:1842000, c:"#6366f1"},
+    {k:"Real estate eq.",v:402500,  c:"#22c55e"},
+    {k:"Cash",           v:128000,  c:"#06b6d4"},
+    {k:"Collectibles",   v:74800,   c:"#d29922"},
+    {k:"Private",        v:37000,   c:"#a855f7"},
+  ];
+  const groups = [
+    {name:"Equities", cls:"equity", total:1842000, sub:"+$577,000 unrealized",
+     cols:["Ticker","Qty","Avg cost","Price","Value","Unrealized","Acct"],
+     rows:[
+       ["NVDA","420","$285.10","$498.50","$209,370","+$89,562","Taxable",1],
+       ["AAPL","900","$142.30","$214.80","$193,320","+$65,250","Taxable",1],
+       ["VOO","1,180","$398.20","$512.40","$604,632","+$134,756","401(k)",1],
+       ["MSFT","380","$310.00","$441.20","$167,656","+$49,856","Roth IRA",1],
+     ]},
+    {name:"Cash", cls:"cash", total:128000, sub:"3 accounts",
+     cols:["Account","","","","Value","",""],
+     rows:[
+       ["Checking","","","","$24,000","","",0],
+       ["High-yield savings","","","","$96,000","","",0],
+       ["Brokerage sweep","","","","$8,000","","",0],
+     ]},
+    {name:"Real estate", cls:"real_estate", total:402500, sub:"value $650,000 − mortgage $247,500",
+     cols:["Property","","","Value","Mortgage","Equity","Acct"],
+     rows:[
+       ["Primary residence","","","$650,000","$247,500","$402,500","",2],
+     ]},
+    {name:"Collectibles", cls:"collectible", total:74800, sub:"+$18,300 unrealized",
+     cols:["Item","","Cost","","Value","Unrealized","Held"],
+     rows:[
+       ["black hollowbody guitar","","$12,500","","$19,800","+$7,300","LT",3],
+       ["1965 Gibson SG","","$9,000","","$14,000","+$5,000","LT",3],
+       ["Art — local series","","$35,000","","$41,000","+$6,000","LT",3],
+     ]},
+  ];
+  const trades = [
+    ["2026-06-10","sell","NVDA","80","$498.50","$39,880","+$17,072","LT"],
+    ["2026-06-09","buy","MSFT","120","$441.20","$52,944","",""],
+    ["2026-05-28","sell","AAPL","100","$214.80","$21,480","+$7,250","LT"],
+    ["2026-05-21","buy","NVDA","100","$472.00","$47,200","",""],
+    ["2026-04-30","sell","TSLA","60","$182.40","$10,944","-$2,140","ST"],
+    ["2026-04-02","buy","VOO","80","$505.10","$40,408","",""],
+  ];
+
+  // ---- allocation bar + legend ----
+  function renderAlloc(barId, legId) {
+    const tot = ALLOC.reduce((s,a)=>s+a.v,0);
+    document.getElementById(barId).innerHTML = ALLOC.map(a =>
+      `<div class="alloc-seg" style="width:${(a.v/tot*100).toFixed(1)}%;background:${a.c}" title="${a.k}"></div>`).join("");
+    document.getElementById(legId).innerHTML = ALLOC.map(a =>
+      `<span class="it"><span class="swatch" style="background:${a.c}"></span>${a.k}
+        <span class="pct">${(a.v/tot*100).toFixed(0)}% · ${fmt(a.v)}</span></span>`).join("");
+  }
+  renderAlloc("allocA","allocLegA");
+  renderAlloc("allocB","allocLegB");
+
+  // ---- Option A: grouped accordion ----
+  function cellClass(v){ return /^\+/.test(v)?"num pos":(/^-\$|^-/.test(v)&&v!=="")?"num neg":"num"; }
+  document.getElementById("groupsA").innerHTML = groups.map((g,gi) => {
+    const head = `<div class="grp-head"><span class="caret">▸</span>
+      <span class="grp-name">${g.name}<span class="cnt">${g.rows.length}</span></span>
+      <span class="grp-sub">${g.sub}</span>
+      <span class="grp-tot">${fmt(g.total)}</span></div>`;
+    const ths = g.cols.map((c,i)=>`<th class="${i>0?'num':''}" style="${c?'':'width:0'}">${c}</th>`).join("");
+    const trs = g.rows.map(r => "<tr>"+r.slice(0,7).map((c,i)=>{
+      if(i===0) return `<td>${c}</td>`;
+      if(["LT","ST"].includes(c)) return `<td class="num"><span class="badge ${c.toLowerCase()}">${c}</span></td>`;
+      return `<td class="${cellClass(c)}">${c}</td>`;
+    }).join("")+"</tr>").join("");
+    return `<div class="grp${gi===0?' open':''}">${head}<div class="grp-body"><table><tr>${ths}</tr>${trs}</table></div></div>`;
+  }).join("");
+
+  // trades table renderer (shared by A and B)
+  function tradeRows() {
+    return trades.map(t => {
+      const [date,side,tk,qty,price,amt,realized,term] = t;
+      const rcell = realized ? `<td class="num ${/^\+/.test(realized)?'pos':'neg'}">${realized}</td>` : `<td class="num muted">—</td>`;
+      const tcell = term ? `<span class="badge ${term.toLowerCase()}">${term}</span>` : "";
+      return `<tr><td>${date}</td><td><span class="badge ${side}">${side.toUpperCase()}</span></td>
+        <td>${tk}</td><td class="num">${qty}</td><td class="num">${price}</td>
+        <td class="num">${amt}</td>${rcell}<td class="num">${tcell}</td></tr>`;
+    }).join("");
+  }
+  const tradeHead = `<tr><th>Date</th><th>Side</th><th>Ticker</th><th class="num">Qty</th>
+    <th class="num">Price</th><th class="num">Amount</th><th class="num">Realized</th><th class="num">Term</th></tr>`;
+  document.getElementById("tradesA").innerHTML = tradeHead + tradeRows();
+  document.getElementById("tradesB").innerHTML = tradeHead + tradeRows();
+
+  // ---- Option B: holdings flat sortable + movers ----
+  const allHoldings = [];
+  groups.forEach(g => { if(g.cls==="equity"||g.cls==="collectible") g.rows.forEach(r=>allHoldings.push([g.name,...r])); });
+  document.getElementById("holdB").innerHTML =
+    `<tr><th>Class</th><th>Holding</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Unrealized</th><th>Account</th></tr>` +
+    groups.flatMap(g => {
+      const rows = g.rows.map(r => {
+        const label=r[0], qty=g.cls==="equity"?r[1]:"", value=r[4]||r[3], un=r[5]||"", acct=r[6]||r[r.length-2]||"";
+        const unCell = un ? `<td class="num ${/^\+/.test(un)?'pos':'neg'}">${un}</td>` : `<td class="num muted">—</td>`;
+        return `<tr><td class="muted">${g.name}</td><td>${label}</td><td class="num">${qty}</td>
+          <td class="num">${value}</td>${unCell}<td>${typeof acct==="string"?acct:""}</td></tr>`;
+      }).join("");
+      return rows + `<tr class="seg-tot-row"><td></td><td>${g.name} subtotal</td><td></td>
+        <td class="num">${fmt(g.total)}</td><td></td><td></td></tr>`;
+    }).join("");
+  document.getElementById("moversB").innerHTML =
+    `<tr><th>Ticker</th><th class="num">Price</th><th class="num">Day Δ</th><th class="num">Day Δ %</th></tr>` +
+    [["NVDA","$498.50","+$12.40","+2.55%",1],["VOO","$512.40","+$3.10","+0.61%",1],
+     ["AAPL","$214.80","-$1.20","-0.55%",0]].map(m =>
+      `<tr><td>${m[0]}</td><td class="num">${m[1]}</td>
+        <td class="num ${m[4]?'pos':'neg'}">${m[2]}</td><td class="num ${m[4]?'pos':'neg'}">${m[3]}</td></tr>`).join("");
+
+  // ---- Option C: rail + equities detail ----
+  const rail = [
+    {grp:"Classes", items:[["Equities","$1,842,000","equities",1],["Cash","$128,000","other",0],
+      ["Real estate","$402,500","other",0],["Collectibles","$74,800","other",0],["Private","$37,000","other",0]]},
+    {grp:"Accounts", items:[["Taxable","$402,690","other",0],["401(k)","$604,632","other",0],
+      ["Roth IRA","$167,656","other",0]]},
+  ];
+  document.getElementById("railC").innerHTML = rail.map(sec =>
+    `<div class="rail-grp">${sec.grp}</div>` + sec.items.map(it =>
+      `<div class="rail-it${it[3]?' active':''}" data-det="${it[2]}"><span>${it[0]}</span><span class="v">${it[1]}</span></div>`).join("")
+  ).join("");
+  document.getElementById("eqC").innerHTML =
+    `<tr><th>Ticker</th><th class="num">Qty</th><th class="num">Avg cost</th><th class="num">Price</th>
+      <th class="num">Value</th><th class="num">Unrealized</th><th>Account</th></tr>` +
+    groups[0].rows.map((r,i) =>
+      `<tr style="${i===0?'box-shadow:inset 2px 0 0 var(--accent)':''}"><td>${r[0]}</td><td class="num">${r[1]}</td>
+        <td class="num">${r[2]}</td><td class="num">${r[3]}</td><td class="num">${r[4]}</td>
+        <td class="num pos">${r[5]}</td><td>${r[6]}</td></tr>`).join("");
+  document.getElementById("eqTradesC").innerHTML = tradeHead +
+    trades.filter(t=>t[2]==="NVDA").map(t => {
+      const [date,side,tk,qty,price,amt,realized,term]=t;
+      const rcell = realized?`<td class="num ${/^\+/.test(realized)?'pos':'neg'}">${realized}</td>`:`<td class="num muted">—</td>`;
+      return `<tr><td>${date}</td><td><span class="badge ${side}">${side.toUpperCase()}</span></td><td>${tk}</td>
+        <td class="num">${qty}</td><td class="num">${price}</td><td class="num">${amt}</td>${rcell}
+        <td class="num">${term?`<span class="badge ${term.toLowerCase()}">${term}</span>`:""}</td></tr>`;
+    }).join("");
+
+  // ---- interactions ----
+  document.querySelectorAll(".switch button").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".switch button").forEach(x=>x.classList.remove("active"));
+    document.querySelectorAll(".opt").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    document.getElementById("opt-"+b.dataset.opt).classList.add("active");
+  });
+  document.querySelectorAll(".grp-head").forEach(h => h.onclick = () => h.parentElement.classList.toggle("open"));
+  document.querySelectorAll(".subnav button").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".subnav button").forEach(x=>x.classList.remove("active"));
+    document.querySelectorAll(".subview").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    document.getElementById("sub-"+b.dataset.sub).classList.add("active");
+  });
+  document.querySelectorAll(".rail-it").forEach(it => it.onclick = () => {
+    document.querySelectorAll(".rail-it").forEach(x=>x.classList.remove("active"));
+    it.classList.add("active");
+    document.querySelectorAll(".md-pane .detail").forEach(x=>x.classList.remove("active"));
+    document.getElementById("det-"+(it.dataset.det==="equities"?"equities":"other")).classList.add("active");
+  });
+  document.getElementById("themeBtn").onclick = () => {
+    const h=document.documentElement;
+    h.dataset.theme = h.dataset.theme==="dark"?"light":"dark";
+  };
+</script>
+</body>
+</html>

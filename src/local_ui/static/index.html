@@ -128,6 +128,42 @@
   .mem-tree .dir { color: var(--fg); font-weight: 600; }
   .mem-view { flex: 1; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 
+  /* Balance Sheet dashboard */
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .pf-hero { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+  .pf-nw { font-size: 36px; font-weight: 700; letter-spacing: -1px; }
+  .pf-nw-label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .pf-asof { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .pf-pos { color: var(--ok); }
+  .pf-neg { color: var(--err); }
+  .pf-bar { display: flex; height: 26px; border-radius: 7px; overflow: hidden;
+    border: 1px solid var(--border); margin: 4px 0 12px; }
+  .pf-seg { height: 100%; }
+  .pf-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; margin-bottom: 4px; }
+  .pf-legend .it { display: flex; align-items: center; gap: 6px; }
+  .pf-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .pf-legend .pct { color: var(--muted); }
+  .pf-legend .pf-liab { margin-left: auto; color: var(--muted); }
+  .pf-grp { border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+    margin-bottom: 10px; overflow: hidden; }
+  .pf-grp-head { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center;
+    gap: 12px; padding: 11px 14px; cursor: pointer; user-select: none; }
+  .pf-grp-head:hover { background: var(--bg); }
+  .pf-grp-name { font-weight: 600; }
+  .pf-grp-name .cnt { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .pf-grp-sub { font-size: 12px; color: var(--muted); }
+  .pf-grp-tot { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pf-caret { color: var(--muted); transition: transform .15s; }
+  .pf-grp.open .pf-caret { transform: rotate(90deg); }
+  .pf-grp-body { display: none; padding: 0 6px 6px; }
+  .pf-grp.open .pf-grp-body { display: block; }
+  .pf-grp-body th, .pf-grp-body td { padding: 5px 10px; }
+  .pf-badge { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .pf-badge.lt { background: rgba(74,222,128,.15); color: var(--ok); }
+  .pf-badge.st { background: rgba(210,153,34,.18); color: var(--warn); }
+  .pf-badge.buy { background: rgba(99,102,241,.18); color: var(--accent); }
+  .pf-badge.sell { background: rgba(210,153,34,.18); color: var(--warn); }
+
   /* Schedules editor */
   button.btn {
     background: var(--bg); color: var(--fg); border: 1px solid var(--border);
@@ -330,28 +366,146 @@ async function loadUsage() {
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
 
-// === Portfolio panel ===
+// === Portfolio panel (single-page balance-sheet dashboard) ===
+const PF_MONEY = (n) => (n < 0 ? "-$" : "$") + Math.abs(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+// Per-share figures (avg cost, trade price) — cents are meaningful here.
+const PF_PX = (n) => n == null ? "" : "$" + (+n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PF_QTY = (n) => n == null ? "" : (+n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+// Signed gain cell: green positive, red negative, em-dash when basis unknown.
+const PF_GAIN = (n) => n == null
+  ? '<span class="muted">—</span>'
+  : `<span class="${n >= 0 ? "pf-pos" : "pf-neg"}">${(n >= 0 ? "+" : "−") + "$" + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>`;
+
+// net-worth-composition palette (allocation bar + legend)
+const PF_ALLOC = [
+  { key: "equities", label: "Equities", color: "#6366f1" },
+  { key: "real_estate_equity", label: "Real estate eq.", color: "#22c55e" },
+  { key: "cash", label: "Cash", color: "#06b6d4" },
+  { key: "collectibles", label: "Collectibles", color: "#d29922" },
+  { key: "physical", label: "Physical", color: "#8b5cf6" },
+  { key: "private", label: "Private", color: "#a855f7" },
+];
+
+// Holdings groups: each maps one-or-more asset classes to tuned columns.
+// Retirement folds into Equities (mirrors engine.rollup).
+const PF_GROUPS = [
+  { name: "Equities", classes: ["equity", "retirement"], kind: "equity" },
+  { name: "Cash", classes: ["cash"], kind: "cash" },
+  { name: "Real estate", classes: ["real_estate"], kind: "realestate" },
+  { name: "Collectibles", classes: ["collectible"], kind: "valued" },
+  { name: "Physical", classes: ["physical"], kind: "valued" },
+  { name: "Private", classes: ["private"], kind: "plain" },
+];
+
+function pfUnreal(a) {
+  return (a.cost_basis == null || a.cost_basis === "") ? null : (a.value || 0) - a.cost_basis;
+}
+
+function pfGroupTable(kind, rows) {
+  let head, body;
+  if (kind === "equity") {
+    head = `<th>Ticker</th><th class="num">Qty</th><th class="num">Avg cost</th><th class="num">Value</th><th class="num">Unrealized</th><th>Account</th>`;
+    body = rows.map((a) => `<tr><td>${esc(a.ticker || a.label)}</td><td class="num">${PF_QTY(a.qty)}</td>` +
+      `<td class="num">${PF_PX(a.avg_cost)}</td><td class="num">${PF_MONEY(a.value)}</td>` +
+      `<td class="num">${PF_GAIN(pfUnreal(a))}</td><td>${esc(a.account || "")}</td></tr>`).join("");
+  } else if (kind === "cash") {
+    head = `<th>Account</th><th class="num">Value</th>`;
+    body = rows.map((a) => `<tr><td>${esc(a.label)}${a.account ? ' <span class="muted">· ' + esc(a.account) + "</span>" : ""}</td><td class="num">${PF_MONEY(a.value)}</td></tr>`).join("");
+  } else if (kind === "realestate") {
+    head = `<th>Property</th><th class="num">Value</th><th>Account</th>`;
+    body = rows.map((a) => `<tr><td>${esc(a.label)}</td><td class="num">${PF_MONEY(a.value)}</td><td>${esc(a.account || "")}</td></tr>`).join("");
+  } else if (kind === "valued") {
+    head = `<th>Item</th><th class="num">Cost</th><th class="num">Value</th><th class="num">Unrealized</th><th>Acquired</th>`;
+    body = rows.map((a) => `<tr><td>${esc(a.label)}</td><td class="num">${a.cost_basis != null ? PF_MONEY(a.cost_basis) : ""}</td>` +
+      `<td class="num">${PF_MONEY(a.value)}</td><td class="num">${PF_GAIN(pfUnreal(a))}</td><td>${esc(a.acquired || "")}</td></tr>`).join("");
+  } else {
+    head = `<th>Label</th><th class="num">Value</th><th>Account</th>`;
+    body = rows.map((a) => `<tr><td>${esc(a.label)}</td><td class="num">${PF_MONEY(a.value)}</td><td>${esc(a.account || "")}</td></tr>`).join("");
+  }
+  return `<table><tr>${head}</tr>${body}</table>`;
+}
+
+function pfTradesTable(trades) {
+  const term = (t) => t.long_term == null ? "" : `<span class="pf-badge ${t.long_term ? "lt" : "st"}">${t.long_term ? "LT" : "ST"}</span>`;
+  const rows = trades.map((t) => {
+    const amt = (t.qty != null && t.price != null) ? PF_MONEY(t.qty * t.price) : "";
+    const realized = t.side === "sell" ? PF_GAIN(t.realized_pnl) : '<span class="muted">—</span>';
+    return `<tr><td>${esc(t.trade_date)}</td><td><span class="pf-badge ${t.side}">${t.side.toUpperCase()}</span></td>` +
+      `<td>${esc(t.ticker)}</td><td class="num">${PF_QTY(t.qty)}</td><td class="num">${PF_PX(t.price)}</td>` +
+      `<td class="num">${amt}</td><td class="num">${realized}</td><td class="num">${term(t)}</td></tr>`;
+  }).join("");
+  return `<table><tr><th>Date</th><th>Side</th><th>Ticker</th><th class="num">Qty</th>` +
+    `<th class="num">Price</th><th class="num">Amount</th><th class="num">Realized</th><th class="num">Term</th></tr>${rows}</table>`;
+}
+
 async function loadPortfolio() {
   const el = document.getElementById("portfolio-body");
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
     const d = await apiGet("/api/portfolio");
     if (!d.available) { el.innerHTML = '<span class="muted">No portfolio store yet.</span>'; return; }
-    const nw = d.networth, roll = d.rollup;
+    const nw = d.networth, roll = d.rollup, un = d.unrealized;
+
+    // Hero + staleness caveat.
+    const asof = d.as_of
+      ? `<div class="pf-asof">Values as of ${esc(d.as_of.oldest)}${d.as_of.oldest !== d.as_of.newest ? " – " + esc(d.as_of.newest) : ""}</div>`
+      : "";
+    const hero = `<div class="pf-hero"><div class="pf-nw">${PF_MONEY(nw.net_worth)}</div>
+      <div class="pf-nw-label">net worth</div></div>${asof}`;
     const cards = `<div class="cards">
-      <div class="card"><div class="label">Assets</div><div class="value">${fmtMoney(nw.assets)}</div></div>
-      <div class="card"><div class="label">Liabilities</div><div class="value">${fmtMoney(nw.liabilities)}</div></div>
-      <div class="card"><div class="label">Net Worth</div><div class="value">${fmtMoney(nw.net_worth)}</div></div>
+      <div class="card"><div class="label">Assets</div><div class="value">${PF_MONEY(nw.assets)}</div></div>
+      <div class="card"><div class="label">Liabilities</div><div class="value">${PF_MONEY(nw.liabilities)}</div></div>
+      <div class="card"><div class="label">Net worth</div><div class="value">${PF_MONEY(nw.net_worth)}</div></div>
+      <div class="card"><div class="label">Unrealized gain</div><div class="value">${un ? PF_GAIN(un.unrealized) : "—"}</div>
+        <div class="sub">${un ? "on " + PF_MONEY(un.cost_basis) + " basis" : ""}</div></div>
     </div>`;
-    const rollKeys = ["equities", "real_estate_equity", "collectibles", "physical", "cash", "private", "debt"];
-    const rollRows = rollKeys.map((k) =>
-      `<tr><td>${k.replace(/_/g, " ")}</td><td class="num">${fmtMoney(roll[k])}</td></tr>`).join("");
-    const assetRows = d.assets.map((a) =>
-      `<tr><td>${a.class}</td><td>${a.label}</td><td class="num">${a.cost_basis != null ? fmtMoney(a.cost_basis) : ""}</td><td class="num">${fmtMoney(a.value)}</td><td>${a.account || ""}</td></tr>`).join("");
-    el.innerHTML = cards +
-      `<h2>Rollup</h2><table>${rollRows}</table>` +
-      `<h2 style="margin-top:16px">Holdings</h2><table>
-        <tr><th>class</th><th>label</th><th class="num">cost basis</th><th class="num">value</th><th>account</th></tr>${assetRows}</table>`;
+
+    // Allocation bar (net-worth composition) + legend; debt shown separately.
+    const segs = PF_ALLOC.map((s) => ({ ...s, v: Math.max(0, roll[s.key] || 0) })).filter((s) => s.v > 0);
+    const allocTot = segs.reduce((a, s) => a + s.v, 0) || 1;
+    const bar = `<div class="pf-bar">${segs.map((s) =>
+      `<div class="pf-seg" style="width:${(s.v / allocTot * 100).toFixed(2)}%;background:${s.color}" title="${s.label}"></div>`).join("")}</div>`;
+    const legend = `<div class="pf-legend">${segs.map((s) =>
+      `<span class="it"><span class="pf-swatch" style="background:${s.color}"></span>${s.label}` +
+      `<span class="pct">${(s.v / allocTot * 100).toFixed(0)}% · ${PF_MONEY(s.v)}</span></span>`).join("")}` +
+      `<span class="it pf-liab">Liabilities <span class="pct">${PF_MONEY(roll.debt)}</span></span></div>`;
+
+    // Holdings — collapsible groups with per-class columns + subtotals.
+    const byClass = {};
+    for (const a of d.assets) (byClass[a.class] = byClass[a.class] || []).push(a);
+    const groupsHtml = PF_GROUPS.map((g, i) => {
+      const rows = g.classes.flatMap((c) => byClass[c] || []);
+      if (!rows.length) return "";
+      const subtotal = rows.reduce((s, a) => s + (a.value || 0), 0);
+      const gainSum = rows.reduce((s, a) => { const u = pfUnreal(a); return u == null ? s : s + u; }, 0);
+      const hasGain = rows.some((a) => pfUnreal(a) != null);
+      const sub = hasGain ? `<span class="pf-grp-sub">${PF_GAIN(gainSum)} unrealized</span>` : "";
+      return `<div class="pf-grp${i === 0 ? " open" : ""}">
+        <div class="pf-grp-head"><span class="pf-caret">▸</span>
+          <span class="pf-grp-name">${g.name}<span class="cnt">${rows.length}</span></span>
+          ${sub}<span class="pf-grp-tot">${PF_MONEY(subtotal)}</span></div>
+        <div class="pf-grp-body">${pfGroupTable(g.kind, rows)}</div></div>`;
+    }).join("");
+
+    // Trades + realized P&L (fiscal year to date).
+    const r = d.realized || { short_term: 0, long_term: 0, total: 0, count: 0 };
+    const tradeCards = `<div class="cards">
+      <div class="card"><div class="label">Realized — short-term</div><div class="value">${PF_GAIN(r.short_term)}</div></div>
+      <div class="card"><div class="label">Realized — long-term</div><div class="value">${PF_GAIN(r.long_term)}</div></div>
+      <div class="card"><div class="label">Realized — total (${d.year})</div><div class="value">${PF_GAIN(r.total)}</div>
+        <div class="sub">${r.count} sell trade${r.count === 1 ? "" : "s"}</div></div>
+    </div>`;
+    const tradesBody = (d.trades && d.trades.length)
+      ? pfTradesTable(d.trades)
+      : `<span class="muted">No trades recorded for ${d.year}.</span>`;
+
+    el.innerHTML = hero + cards +
+      `<h3>Allocation</h3>${bar}${legend}` +
+      `<h3>Holdings</h3>${groupsHtml}` +
+      `<h3>Trades — ${d.year} to date</h3>${tradeCards}${tradesBody}`;
+
+    el.querySelectorAll(".pf-grp-head").forEach((h) =>
+      h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
 
