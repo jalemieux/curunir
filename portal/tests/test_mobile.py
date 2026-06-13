@@ -39,9 +39,12 @@ async def test_mobile_serves_shell_when_authed(client):
     body = resp.content
     # Reuses the existing browser WS protocol — no backend change.
     assert b"/ws/browser" in body
-    # Viewport lock kills iOS auto-zoom / pinch-zoom (problem #1).
-    assert b"maximum-scale=1" in body
-    assert b"user-scalable=no" in body
+    # Viewport matches desktop: device-width + safe-area, no zoom lock (#355).
+    # iOS ignores user-scalable=no anyway; the real double-tap-zoom fix is
+    # touch-action on controls, and locking zoom only harms accessibility.
+    assert b"width=device-width" in body
+    assert b"viewport-fit=cover" in body
+    assert b"user-scalable=no" not in body
     # PWA shell from day one.
     assert b"/manifest.json" in body
     assert b"apple-mobile-web-app-capable" in body
@@ -114,10 +117,16 @@ async def test_root_mobile_ua_unauth_does_not_redirect_to_m(client):
 
 # --- Static shell guards ----------------------------------------------------
 
-def test_mobile_shell_locks_viewport():
+def test_mobile_shell_disables_double_tap_zoom():
+    # Bug #355(1): the first tap on a control did nothing because iOS Safari
+    # held it ~300ms waiting for a double-tap-to-zoom. The fix opts tappable
+    # controls out of the zoom gesture with `touch-action: manipulation`
+    # (which also removes the click delay) instead of the OS-ignored
+    # `user-scalable=no` / `maximum-scale` viewport flags.
     src = _MOBILE_HTML.read_text()
-    assert "maximum-scale=1" in src
-    assert "user-scalable=no" in src
+    assert "touch-action: manipulation" in src
+    assert "user-scalable=no" not in src
+    assert "maximum-scale" not in src
 
 
 def test_mobile_shell_is_conversation_list_first():
@@ -125,3 +134,14 @@ def test_mobile_shell_is_conversation_list_first():
     # must request the conversation list on connect.
     src = _MOBILE_HTML.read_text()
     assert "conversations_request" in src
+
+
+def test_mobile_shell_rebootstraps_on_agent_online():
+    # Bug #355(2): the browser↔portal socket opens before the agent container
+    # has dialed in, so the bootstrap frames sent in ws.onopen are forwarded
+    # to nothing and dropped — leaving blank list/chat shells. Mirror the
+    # desktop #334 fix: a bootstrapSync() helper re-issued on the agent's
+    # offline→online edge, deduped by a bootstrappedOnline epoch flag.
+    src = _MOBILE_HTML.read_text()
+    assert "bootstrapSync" in src
+    assert "bootstrappedOnline" in src
