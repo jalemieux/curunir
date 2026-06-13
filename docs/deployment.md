@@ -150,8 +150,7 @@ In the render dashboard, the `curunir-portal` service needs:
   same GHCR PAT used by curunir hosts, scoped to `read:packages`).
 - **Image:** `ghcr.io/jalemieux/curunir-portal:<tag>`.
 - **Env vars:** as documented in `portal/render.yaml` (`DATABASE_URL`,
-  `PORTAL_SECRET_KEY`, `PORTAL_BASE_URL`, `EMAIL_API_KEY`, `EMAIL_FROM`,
-  `ADMIN_EMAILS`).
+  `PORTAL_SECRET_KEY`, `PORTAL_BASE_URL`, `ADMIN_EMAILS`).
 
 ### Deploying a new image
 
