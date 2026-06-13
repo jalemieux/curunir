@@ -59,6 +59,7 @@ class LocalWebChannel:
         host: str = "127.0.0.1",
         port: int = 8766,
         model: str = "",
+        persona: str = "",
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
@@ -71,6 +72,7 @@ class LocalWebChannel:
         self.host = host
         self.port = port
         self.model = model
+        self.persona = persona
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -184,6 +186,10 @@ class LocalWebChannel:
         self._socket = ws
         logger.info("Local web console connected")
         await ws.send_text(json.dumps({"type": "agent_status", "status": "online"}))
+        # Surface the active model/persona so the console header can label them.
+        await ws.send_text(json.dumps(
+            {"type": "meta", "model": self.model, "persona": self.persona}
+        ))
 
         async def respond(frame: dict) -> None:
             await ws.send_text(json.dumps(frame))
