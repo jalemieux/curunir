@@ -64,6 +64,7 @@ class WebSocketChannel:
         host: str = "127.0.0.1",
         port: int = 8765,
         model: str = "",
+        persona: str = "",
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
@@ -73,6 +74,7 @@ class WebSocketChannel:
         self.host = host
         self.port = port
         self.model = model
+        self.persona = persona
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
@@ -124,6 +126,8 @@ class WebSocketChannel:
         payload: dict = {"type": "hello", "session_id": session_id}
         if self.model:
             payload["model"] = self.model
+        if self.persona:
+            payload["persona"] = self.persona
         try:
             await websocket.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
