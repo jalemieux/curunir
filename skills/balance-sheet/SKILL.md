@@ -1,8 +1,8 @@
 ---
 name: balance-sheet
-description: "Use to track the owner's personal balance sheet — holdings across every asset class (equities, real estate, collectibles, physical/commodities, cash, private/PE), liabilities, cost basis, and net worth. Trigger phrases: 'what's my net worth', 'track my <asset>', 'add this to my portfolio', 'what's my equity in <property>', 'my watch collection value', 'import my brokerage CSV', 'how much <ticker> do I own', 'refresh my values', 'reconcile my accounts'. This is the owner's own book — distinct from financial-analysis (public companies) and investment-memo (theses)."
+description: "Use to track the owner's personal portfolio — holdings across every asset class (equities, real estate, collectibles, physical/commodities, cash, private/PE), liabilities, trades (buys/sells + realized P/L), cost basis, and net worth. Trigger phrases: 'what's my net worth', 'track my <asset>', 'add this to my portfolio', 'what's my equity in <property>', 'my watch collection value', 'import my brokerage CSV', 'how much <ticker> do I own', 'refresh my values', 'reconcile my accounts', 'I bought <ticker>', 'I sold <n> shares at <price>', 'log my trade', 'record a buy/sell', 'what's my realized gain', 'my trade history', 'realized P&L this year'. This is the owner's own book — distinct from financial-analysis (public companies) and investment-memo (theses)."
 tools: portfolio
-portal_summary: "Track your assets, liabilities, and net worth"
+portal_summary: "Track your assets, liabilities, trades, and net worth"
 ---
 
 # Balance Sheet
