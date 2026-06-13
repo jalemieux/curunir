@@ -45,18 +45,56 @@ def _is_due(task: dict, now: float) -> bool:
         return False
 
 
-async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -> None:
-    """Run a single scheduled task. Called via asyncio.create_task() for concurrency."""
+def _build_prompt(config, task: dict) -> str:
+    """Compute the system-task prompt, prepending the named skill if any.
+    Shared by the scheduler loop and the run-now path so both fire identically."""
+    prompt = task["prompt"]
+    if task.get("skill"):
+        allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
+        skill_content = load_skill(task["skill"], config.skill_dirs, allowlist=allowlist)
+        if not skill_content.startswith("Skill not found"):
+            prompt = skill_content + "\n\n" + prompt
+    return prompt
+
+
+async def fire_task(agent, config, task: dict, *, record_run: bool,
+                    session_id: str) -> None:
+    """Fire one scheduled task via ``agent.handle()`` in system-task mode.
+
+    The single reusable node behind both the scheduler loop and the local-UI
+    "Run now" route — a real fire and a test fire share the exact same path
+    (skill prepend → ``handle()``). They differ only in policy, gated by
+    ``record_run``:
+
+    - ``record_run=True`` (scheduler): stamp ``mark_attempt`` before dispatch
+      and ``mark_run`` on completion — this counts as the scheduled run.
+    - ``record_run=False`` (run-now test fire): stamp **neither**, leaving the
+      cron cadence and next-due untouched.
+
+    Always fire-and-forget safe: a failure is logged (and recorded only when
+    ``record_run``) but never propagates out of the coroutine.
+    """
+    task_id = task["id"]
+    prompt = _build_prompt(config, task)
+
+    if record_run:
+        # Mark the attempt before dispatch so a slow or crashed task does not
+        # re-fire on the next tick. last_run only advances on success.
+        engine.mark_attempt(_db(config), task_id, int(time.time()))
+
     try:
         await agent.handle(
             message="",
             session_id=session_id,
             system_task_prompt=prompt,
         )
-        engine.mark_run(_db(config), task_id, int(time.time()), "success")
-        logger.info("Scheduled task completed: %s", task_id)
+        if record_run:
+            engine.mark_run(_db(config), task_id, int(time.time()), "success")
+        logger.info("Scheduled task completed: %s (record_run=%s)",
+                    task_id, record_run)
     except Exception as e:
-        engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
+        if record_run:
+            engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
         logger.error("Scheduled task failed: %s — %s", task_id, e)
 
 
@@ -74,25 +112,15 @@ async def _check_and_fire(agent) -> list[str]:
             continue
 
         task_id = task["id"]
-        prompt = task["prompt"]
+        session_id = f"sched:{task_id}:{int(now)}"
 
-        # Load skill content if specified
-        if task.get("skill"):
-            allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
-            skill_content = load_skill(task["skill"], config.skill_dirs,
-                                       allowlist=allowlist)
-            if not skill_content.startswith("Skill not found"):
-                prompt = skill_content + "\n\n" + prompt
-
-        timestamp = int(now)
-        session_id = f"sched:{task_id}:{timestamp}"
-
-        # Mark the attempt before dispatch so a slow or crashed task does not
-        # re-fire on the next tick. last_run only advances on success.
-        engine.mark_attempt(_db(config), task_id, timestamp)
-
+        # fire_task stamps mark_attempt synchronously (before its first await)
+        # under record_run=True, so a second tick in the same loop iteration
+        # sees this task as no-longer-due and can't double-fire it.
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
-        asyncio.create_task(_run_task(agent, config, task_id, session_id, prompt))
+        asyncio.create_task(fire_task(
+            agent, config, task, record_run=True, session_id=session_id,
+        ))
         fired.append(task_id)
 
     return fired

@@ -12,6 +12,7 @@ directly:
 - ``POST /api/schedules`` → create a cron task (``schedule_store.engine.create``)
 - ``PUT /api/schedules/{id}`` → edit cron/prompt/skill/enabled (``engine.update``)
 - ``POST /api/schedules/{id}/toggle`` → flip enabled (``engine.toggle``)
+- ``POST /api/schedules/{id}/run`` → test-fire now (``scheduler.fire_task``, record_run=False)
 - ``DELETE /api/schedules/{id}`` → remove a task (``engine.delete``)
 - ``GET /api/memory``     → ``context/memory/`` tree
 - ``GET /api/memory/file``→ one memory file (path-traversal guarded)
@@ -35,6 +36,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -73,6 +75,7 @@ class LocalWebChannel:
         model: str = "",
         persona: str = "",
         uploads_dir: str | None = None,
+        agent=None,
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
         pairing_token: str | None = None,
@@ -89,6 +92,9 @@ class LocalWebChannel:
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
+        # The local agent, needed to drive a "Run now" test-fire (same path the
+        # chat bridge uses to reach the agent).
+        self.agent = agent
         self.cancel_session = cancel_session
         self.allowed_origins: frozenset[str] = (
             frozenset(allowed_origins) if allowed_origins is not None
@@ -219,6 +225,31 @@ class LocalWebChannel:
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse(row)
+
+        @app.post("/api/schedules/{task_id}/run")
+        async def api_schedule_run(
+            task_id: str, request: Request
+        ) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            task = next(
+                (t for t in sengine.load(self._schedules_db()) if t["id"] == task_id),
+                None,
+            )
+            if task is None:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            # Fire-and-forget test fire: record_run=False leaves cron cadence /
+            # next-due untouched, and a disabled task still fires (no enabled
+            # check). Shares the scheduler's exact path via scheduler.fire_task.
+            from src import scheduler
+            session_id = f"sched:{task_id}:{int(time.time())}"
+            asyncio.create_task(scheduler.fire_task(
+                self.agent, self.config, task,
+                record_run=False, session_id=session_id,
+            ))
+            return JSONResponse(
+                {"status": "started", "id": task_id}, status_code=202
+            )
 
         @app.delete("/api/schedules/{task_id}")
         async def api_schedule_delete(
