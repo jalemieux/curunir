@@ -772,6 +772,12 @@ async def main():
                 agent.config.skill_dirs,
                 set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
             ),
+            # conversations_snapshot() already drops email + scratch; the extra
+            # filter drops scheduled-task transcripts (interactive only).
+            conversations_provider=lambda: [
+                c for c in agent.conversations_snapshot()
+                if not str(c.get("session_id", "")).startswith("sched:")
+            ],
         )
         channels["local_web"] = local_web_channel
         logger.info(

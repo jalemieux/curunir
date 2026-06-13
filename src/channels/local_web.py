@@ -20,8 +20,14 @@ directly:
 Security mirrors ``ws.py``: an Origin allowlist (loopback by default) plus the
 shared ``context/.ws-token`` pairing token. The REST routes require the token
 (``?token=`` query or ``X-Curunir-Token`` header); ``/ws/browser`` requires
-both an allowed Origin and the token. Single-user, single-session by design —
-no multiplexing, no Postgres, no sign-in.
+both an allowed Origin and the token. Single-user, single-socket — but the
+socket drives many conversations: ``/ws/browser`` resolves ``session_id``
+per-frame (``payload.session_id`` → ``LOCAL_SESSION_ID``), so the SPA's
+conversation sidebar can list/switch/create/delete conversations the same way
+the portal does. A ``conversations_request`` is answered with a
+``conversations_snapshot``; delete routes through the existing ``clear``
+command (extract-then-delete) rather than a raw store delete. No multiplexing,
+no Postgres, no sign-in.
 """
 from __future__ import annotations
 
@@ -72,6 +78,7 @@ class LocalWebChannel:
         pairing_token: str | None = None,
         history_provider: Callable[[str], list[dict]] | None = None,
         skills_provider: Callable[[], list[dict]] | None = None,
+        conversations_provider: Callable[[], list[dict]] | None = None,
     ):
         self.in_queue = in_queue
         self.config = config
@@ -90,6 +97,7 @@ class LocalWebChannel:
         self.pairing_token = pairing_token
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
+        self.conversations_provider = conversations_provider or (lambda: [])
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
         self.app = self._build_app()
@@ -307,27 +315,33 @@ class LocalWebChannel:
         ``IncomingMessage`` for the agent worker. ``respond`` sends a frame
         back to the browser (used for snapshots); it is None in headless
         unit tests that only assert enqueue behavior.
+
+        The session id is resolved per-frame (``payload.session_id`` →
+        ``LOCAL_SESSION_ID``), so one browser socket drives many conversations
+        — the sidebar switches/creates/deletes by sending a different
+        ``session_id``. Snapshot frames echo the requested ``sid`` so the chat
+        module's per-session filter accepts them.
         """
         command = payload.get("command")
+        sid = payload.get("session_id") or LOCAL_SESSION_ID
 
         if command == "interrupt":
-            delivered = bool(
-                self.cancel_session and self.cancel_session(LOCAL_SESSION_ID)
-            )
+            delivered = bool(self.cancel_session and self.cancel_session(sid))
             logger.info(
-                "Interrupt requested for local session (delivered=%s)", delivered
+                "Interrupt requested for local session %s (delivered=%s)",
+                sid, delivered,
             )
             return
 
         if command == "history_request":
             if respond is not None:
-                messages = self.history_provider(LOCAL_SESSION_ID)
+                messages = self.history_provider(sid)
                 for m in messages:
                     if m.get("attachments"):
                         _enrich_attachments(m["attachments"], os.getcwd())
                 await respond({
                     "type": "history_snapshot",
-                    "session_id": LOCAL_SESSION_ID,
+                    "session_id": sid,
                     "messages": messages,
                 })
             return
@@ -336,8 +350,17 @@ class LocalWebChannel:
             if respond is not None:
                 await respond({
                     "type": "skills_snapshot",
-                    "session_id": LOCAL_SESSION_ID,
+                    "session_id": sid,
                     "skills": self.skills_provider(),
+                })
+            return
+
+        if command == "conversations_request":
+            if respond is not None:
+                await respond({
+                    "type": "conversations_snapshot",
+                    "session_id": sid,
+                    "conversations": self.conversations_provider(),
                 })
             return
 
@@ -345,7 +368,7 @@ class LocalWebChannel:
             await self.in_queue.put(IncomingMessage(
                 content=payload.get("text", ""),
                 channel="local_web",
-                session_id=LOCAL_SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 command="slash",
             ))
@@ -357,20 +380,20 @@ class LocalWebChannel:
             await self.send(OutgoingMessage(
                 content=f"Attachment rejected: {err}",
                 channel="local_web",
-                session_id=LOCAL_SESSION_ID,
+                session_id=sid,
                 reply_address={},
                 final=True,
             ))
             return
 
         manifest = (
-            _stage_attachments(decoded, LOCAL_SESSION_ID, self.uploads_dir)
+            _stage_attachments(decoded, sid, self.uploads_dir)
             if decoded else None
         )
         await self.in_queue.put(IncomingMessage(
             content=payload.get("content", ""),
             channel="local_web",
-            session_id=LOCAL_SESSION_ID,
+            session_id=sid,
             reply_address={},
             command=command or None,
             attachments=manifest,
