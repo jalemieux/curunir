@@ -16,6 +16,8 @@ from src.channels.local_web import LocalWebChannel
 from src.config import AgentConfig
 from src.portfolio import db as pdb
 from src.portfolio import engine
+from src.schedule_store import db as sdb
+from src.schedule_store import engine as sengine
 from src.usage_store import UsageRecord, UsageStore
 
 
@@ -31,6 +33,7 @@ def config(tmp_path):
         identity_file=ctx / "identity.md",
         context_dir=ctx,
         usage_db=ctx / "usage.db",
+        schedules_db=ctx / "schedules.db",
         portfolio_db=str(ctx / "memory" / "portfolio.db"),
     )
     # Seed a bit of each store so the REST endpoints have data to return.
@@ -42,9 +45,11 @@ def config(tmp_path):
     store.close()
     pdb.init_db(cfg.portfolio_db)
     engine.add_asset(cfg.portfolio_db, {"class": "cash", "label": "Bank", "value": 100})
-    (ctx / "schedules.json").write_text(json.dumps([
+    sdb.init_db(str(cfg.schedules_db))
+    sengine.create(
+        str(cfg.schedules_db),
         {"id": "t", "cron": "0 7 * * *", "prompt": "p", "enabled": True},
-    ]))
+    )
     (ctx / "memory" / "profile.md").write_text("# Profile")
     return cfg
 
@@ -114,6 +119,146 @@ def test_api_schedules(client):
     body = r.json()
     assert body[0]["id"] == "t"
     assert body[0]["next_fire"]
+
+
+# --- schedule mutations ----------------------------------------------------
+
+
+def _schedule_ids(client):
+    r = client.get("/api/schedules", headers={"X-Curunir-Token": TOKEN})
+    return [s["id"] for s in r.json()]
+
+
+def test_create_schedule(client):
+    r = client.post(
+        "/api/schedules",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"id": "new", "cron": "0 9 * * *", "prompt": "do it"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "new"
+    assert body["cron"] == "0 9 * * *"
+    assert body["enabled"] is True
+    assert "new" in _schedule_ids(client)
+
+
+def test_create_schedule_bad_cron_400(client):
+    r = client.post(
+        "/api/schedules",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"id": "bad", "cron": "not a cron", "prompt": "p"},
+    )
+    assert r.status_code == 400
+    assert "error" in r.json()
+
+
+def test_create_schedule_duplicate_400(client):
+    r = client.post(
+        "/api/schedules",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"id": "t", "cron": "0 9 * * *", "prompt": "p"},
+    )
+    assert r.status_code == 400
+    assert "error" in r.json()
+
+
+def test_create_schedule_missing_field_400(client):
+    r = client.post(
+        "/api/schedules",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"id": "x", "cron": "0 9 * * *"},
+    )
+    assert r.status_code == 400
+
+
+def test_create_schedule_skill_not_allowed_400(config):
+    config.skill_allowlist = ["allowed-skill"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    with TestClient(ch.app) as c:
+        r = c.post(
+            "/api/schedules",
+            headers={"X-Curunir-Token": TOKEN},
+            json={"id": "x", "cron": "0 9 * * *", "prompt": "p",
+                  "skill": "forbidden"},
+        )
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+
+def test_update_schedule(client):
+    r = client.put(
+        "/api/schedules/t",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"cron": "30 8 * * *", "prompt": "changed"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["cron"] == "30 8 * * *"
+    assert body["prompt"] == "changed"
+
+
+def test_update_schedule_bad_cron_400(client):
+    r = client.put(
+        "/api/schedules/t",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"cron": "nope"},
+    )
+    assert r.status_code == 400
+
+
+def test_update_schedule_not_found_400(client):
+    r = client.put(
+        "/api/schedules/missing",
+        headers={"X-Curunir-Token": TOKEN},
+        json={"prompt": "x"},
+    )
+    assert r.status_code == 400
+
+
+def test_toggle_schedule_flips_enabled(client):
+    r = client.post("/api/schedules/t/toggle", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    assert r.json()["enabled"] is False
+    r2 = client.post("/api/schedules/t/toggle", headers={"X-Curunir-Token": TOKEN})
+    assert r2.json()["enabled"] is True
+
+
+def test_toggle_schedule_not_found_400(client):
+    r = client.post(
+        "/api/schedules/missing/toggle", headers={"X-Curunir-Token": TOKEN}
+    )
+    assert r.status_code == 400
+
+
+def test_delete_schedule(client):
+    r = client.delete("/api/schedules/t", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    assert "t" not in _schedule_ids(client)
+
+
+def test_delete_schedule_not_found_400(client):
+    r = client.delete("/api/schedules/missing", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 400
+
+
+def test_schedule_mutations_require_token(client):
+    # No token / wrong token rejected on every mutating route.
+    assert client.post(
+        "/api/schedules", json={"id": "z", "cron": "0 9 * * *", "prompt": "p"}
+    ).status_code == 401
+    assert client.put(
+        "/api/schedules/t", json={"prompt": "x"},
+        headers={"X-Curunir-Token": "wrong"},
+    ).status_code == 401
+    assert client.post("/api/schedules/t/toggle").status_code == 401
+    assert client.delete(
+        "/api/schedules/t", headers={"X-Curunir-Token": "wrong"}
+    ).status_code == 401
+    # Nothing mutated.
+    assert _schedule_ids(client) == ["t"]
 
 
 def test_api_memory_tree(client):

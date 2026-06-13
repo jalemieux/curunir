@@ -193,7 +193,7 @@ See **[portal/README.md](portal/README.md)** for portal deployment and the local
 
 #### Local Web UI (operator console served from the container)
 
-A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.json`), and the `context/memory/` tree. Its chat tab is built on a **shared, reusable chat module** (`src/local_ui/static/{connection,chat}.js` + `chat.css`) that speaks the same wire protocol as the portal and bridges `/ws/browser` straight into the local agent queues. The module gives the local console full chat parity with the portal — light/dark theme toggle, the live tool ticker, attachments (drag/drop/paste), and the skills picker. It is the canonical source the portal frontend will adopt in a later phase (see `docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md`).
+A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.db`), and the `context/memory/` tree. The Schedules tab is also **editable** — create, edit, enable/disable, and delete cron tasks through token-gated REST routes that delegate to the same `schedule_store.engine` the `schedule` tool uses (a client-side cron preview shows the next runs as you type; the server stays authoritative for validation). Its chat tab is built on a **shared, reusable chat module** (`src/local_ui/static/{connection,chat}.js` + `chat.css`) that speaks the same wire protocol as the portal and bridges `/ws/browser` straight into the local agent queues. The module gives the local console full chat parity with the portal — light/dark theme toggle, the live tool ticker, attachments (drag/drop/paste), and the skills picker. It is the canonical source the portal frontend will adopt in a later phase (see `docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md`).
 
 Off by default. Enable it with:
 
@@ -203,7 +203,7 @@ LOCAL_UI_ENABLED=true
 # LOCAL_UI_PORT=8766
 ```
 
-It binds loopback and reuses the WS channel's `context/.ws-token` pairing token and Origin allowlist — no separate auth. Open it at `http://localhost:8766/?token=<token>` (the token is printed in the startup log and stored in `context/.ws-token`). v1 is **read-only panels + chat**; edits stay with the existing tools/skills.
+It binds loopback and reuses the WS channel's `context/.ws-token` pairing token and Origin allowlist — no separate auth. Open it at `http://localhost:8766/?token=<token>` (the token is printed in the startup log and stored in `context/.ws-token`). The console is **read panels + chat + schedule editing**; all other writes stay with the existing tools/skills.
 
 ## Attachments
 
