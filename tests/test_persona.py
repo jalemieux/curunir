@@ -100,3 +100,26 @@ def test_finance_bundle_skills_exist_on_disk():
     p = load_persona("finance")
     for name in p.skills:
         assert (Path("skills") / name / "SKILL.md").exists(), name
+
+
+def test_companion_bundle_parses_from_repo():
+    p = load_persona("companion")
+    assert p.name == "companion"
+    assert p.skills  # non-empty absolute allowlist
+    # The companion grounds technique suggestions in research.
+    assert "deep-research" in p.skills
+    assert "web-search" in p.skills
+
+
+def test_companion_bundle_declares_search_key():
+    # web-search backend needs BRAVE_API_KEY; the bundle documents it.
+    p = load_persona("companion")
+    assert "BRAVE_API_KEY" in p.keys
+
+
+def test_companion_bundle_skills_exist_on_disk():
+    # Every allowlisted skill must resolve to a skills/<name>/SKILL.md so a
+    # typo in persona.yaml is caught instead of silently dropping a skill.
+    p = load_persona("companion")
+    for name in p.skills:
+        assert (Path("skills") / name / "SKILL.md").exists(), name
