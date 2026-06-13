@@ -114,6 +114,48 @@ def test_portfolio_overview_missing_db(config):
     out = readers.portfolio_overview(config)
     assert out["available"] is False
     assert out["assets"] == []
+    assert out["trades"] == []
+    assert out["realized"] is None
+    assert out["unrealized"] is None
+    assert out["as_of"] is None
+
+
+def test_portfolio_overview_trades_and_unrealized(config):
+    path = config.portfolio_db
+    pdb.init_db(path)
+    # A lot bought in 2024, partly sold this year and last year.
+    lot = engine.record_buy(path, {"ticker": "AAA", "qty": 20, "price": 100,
+                                   "trade_date": "2024-01-01"})["asset_id"]
+    engine.record_sell(path, {"asset_id": lot, "qty": 5, "price": 150,
+                              "trade_date": "2025-06-01"})   # prior FY
+    engine.record_sell(path, {"asset_id": lot, "qty": 5, "price": 200,
+                              "trade_date": f"{datetime.now().year}-03-01"})  # this FY
+
+    out = readers.portfolio_overview(config)
+    assert out["available"] is True
+    # unrealized mirrors the engine exactly.
+    assert out["unrealized"] == engine.unrealized(path)
+    # realized cards are this calendar year only (the prior-year sell excluded).
+    yr = datetime.now().year
+    assert out["realized"] == engine.realized_pnl(path, year=yr)
+    # trades list is FY-to-date (newest-first), same window as realized.
+    assert out["trades"] == engine.trade_history(path, since=f"{yr}-01-01")
+    assert all(str(t["trade_date"]).startswith(str(yr)) for t in out["trades"])
+    # as_of spans the holdings' value_asof dates.
+    asof = out["as_of"]
+    assert asof is not None and asof["oldest"] <= asof["newest"]
+
+
+def test_portfolio_overview_year_override(config):
+    path = config.portfolio_db
+    pdb.init_db(path)
+    lot = engine.record_buy(path, {"ticker": "AAA", "qty": 10, "price": 100,
+                                   "trade_date": "2024-01-01"})["asset_id"]
+    engine.record_sell(path, {"asset_id": lot, "qty": 5, "price": 150,
+                              "trade_date": "2025-06-01"})
+    out = readers.portfolio_overview(config, year=2025)
+    assert out["realized"]["total"] == 250
+    assert out["trades"] == engine.trade_history(path, since="2025-01-01")
 
 
 # --- schedules -------------------------------------------------------------

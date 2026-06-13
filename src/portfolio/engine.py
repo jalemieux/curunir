@@ -271,6 +271,22 @@ def pnl(path: str, cls: str = "collectible", today: str | None = None) -> dict:
             "unrealized": round(value - basis, 2), "items": items}
 
 
+def unrealized(path: str) -> dict:
+    """Portfolio-wide cost basis, market value, and unrealized gain over every
+    asset that records a cost_basis. Assets without a cost_basis are excluded
+    from BOTH sides (a gain can't be computed), matching pnl(). Keeps the math
+    in the engine so the UI never re-sums and can't drift."""
+    basis = value = 0.0
+    for a in list_assets(path):
+        cb = a.get("cost_basis")
+        if cb in (None, ""):
+            continue
+        basis += float(cb)
+        value += float(a["value"]) if a["value"] is not None else 0.0
+    return {"cost_basis": round(basis, 2), "value": round(value, 2),
+            "unrealized": round(value - basis, 2)}
+
+
 def query(path: str, sql: str) -> list[dict]:
     """Run an arbitrary read-only SELECT. Opened mode=ro, and the statement
     must begin with SELECT/WITH so a single ATTACH/PRAGMA can't escape the

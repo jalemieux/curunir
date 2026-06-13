@@ -375,3 +375,33 @@ def test_realized_pnl_filters_by_year(tmp_path):
                               "trade_date": "2026-06-01"})   # +500 in 2026
     assert engine.realized_pnl(path, year=2025)["total"] == 250
     assert engine.realized_pnl(path, year=2026)["total"] == 500
+
+
+def test_unrealized_sums_assets_with_cost_basis(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "equity", "label": "Acme",
+                            "value": 1000, "cost_basis": 600})
+    engine.add_asset(path, {"class": "collectible", "label": "Watch",
+                            "value": 300, "cost_basis": 500})  # at a loss
+    r = engine.unrealized(path)
+    assert r["cost_basis"] == 1100
+    assert r["value"] == 1300
+    assert r["unrealized"] == 200
+
+
+def test_unrealized_excludes_assets_without_cost_basis(tmp_path):
+    path = _fresh(tmp_path)
+    engine.add_asset(path, {"class": "equity", "label": "Acme",
+                            "value": 1000, "cost_basis": 600})
+    engine.add_asset(path, {"class": "cash", "label": "Checking", "value": 5000})
+    r = engine.unrealized(path)
+    # Cash (no cost_basis) is excluded from BOTH sides.
+    assert r["cost_basis"] == 600
+    assert r["value"] == 1000
+    assert r["unrealized"] == 400
+
+
+def test_unrealized_empty_store(tmp_path):
+    path = _fresh(tmp_path)
+    assert engine.unrealized(path) == {"cost_basis": 0.0, "value": 0.0,
+                                       "unrealized": 0.0}
