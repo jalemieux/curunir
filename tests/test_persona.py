@@ -102,6 +102,50 @@ def test_finance_bundle_skills_exist_on_disk():
         assert (Path("skills") / name / "SKILL.md").exists(), name
 
 
+def _skills_depending_on_email_send() -> set[str]:
+    """Skills whose delivery step loads the `email-send` skill.
+
+    Auto-discovered by scanning each skill's SKILL.md for an `email-send`
+    reference so a new delivery-capable skill is covered without editing this
+    test. `email-send` itself is excluded.
+    """
+    depends = set()
+    for skill_md in Path("skills").glob("*/SKILL.md"):
+        name = skill_md.parent.name
+        if name == "email-send":
+            continue
+        if "email-send" in skill_md.read_text():
+            depends.add(name)
+    return depends
+
+
+def test_email_send_dependency_is_discoverable():
+    # Guards the test below: if no skill references email-send the invariant is
+    # vacuous and silently stops protecting anything. `digest` is the anchor.
+    assert "digest" in _skills_depending_on_email_send()
+
+
+@pytest.mark.parametrize(
+    "persona_name",
+    [p.parent.name for p in Path("personas").glob("*/persona.yaml")],
+)
+def test_persona_allowlisting_a_delivery_skill_also_allows_email_send(persona_name):
+    # A curated allowlist that includes a skill whose delivery step loads
+    # `email-send` MUST also allowlist `email-send` — otherwise load_skill
+    # rejects it and the scheduled digest is generated but never sent (the
+    # finance scheduled-email outage). Personas with no allowlist (skills=None)
+    # already reach every skill, so they're exempt.
+    p = load_persona(persona_name)
+    if p.skills is None:
+        return
+    needs_email_send = _skills_depending_on_email_send() & set(p.skills)
+    if needs_email_send:
+        assert "email-send" in p.skills, (
+            f"persona '{persona_name}' allowlists {sorted(needs_email_send)} "
+            f"(which load email-send) but not email-send itself"
+        )
+
+
 def test_companion_bundle_parses_from_repo():
     p = load_persona("companion")
     assert p.name == "companion"
