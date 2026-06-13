@@ -213,6 +213,21 @@ import { createChat } from "/static/chat.js";
 // it for every /api and /ws call. (On loopback this is just the pairing gate.)
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 
+// crypto.randomUUID() is a *secure-context-only* API — undefined when the page
+// is served over plain HTTP from a non-loopback host (e.g. http://host.local).
+// The local UI is reached exactly that way (LOCAL_UI_HOST=0.0.0.0, LAN host),
+// so we fall back to an RFC4122 v4 built from crypto.getRandomValues(), which
+// *is* available in insecure contexts. Without this the whole module throws at
+// init and the page renders blank.
+function uuid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0"));
+  return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
+}
+
 // === Conversation state (multi-conversation) ===
 // The active session id is read live by chat.js via getSessionId(). On first
 // load after the multi-conversation upgrade there's no stored id, so we mint a
@@ -221,7 +236,7 @@ const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const SESSION_KEY = "curunir-local-session-id";
 let activeSessionId = localStorage.getItem(SESSION_KEY);
 if (!activeSessionId) {
-  activeSessionId = crypto.randomUUID();
+  activeSessionId = uuid();
   localStorage.setItem(SESSION_KEY, activeSessionId);
 }
 let conversations = [];  // latest conversations_snapshot, drives the sidebar
@@ -615,7 +630,7 @@ function switchConversation(id) {
 function startNew() {
   // Mint a fresh id — no `clear`, so the prior conversation is kept and stays
   // in the sidebar. It joins the list once its first turn completes.
-  activeSessionId = crypto.randomUUID();
+  activeSessionId = uuid();
   localStorage.setItem(SESSION_KEY, activeSessionId);
   chat.rebind();
   renderConversations();
