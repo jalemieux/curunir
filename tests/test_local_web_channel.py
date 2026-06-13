@@ -261,6 +261,71 @@ def test_schedule_mutations_require_token(client):
     assert _schedule_ids(client) == ["t"]
 
 
+# --- run now (test-fire) ---------------------------------------------------
+
+
+def test_run_now_fires_task(client, channel, monkeypatch):
+    calls = []
+
+    async def fake_fire(agent, config, task, *, record_run, session_id):
+        calls.append({"task": task, "record_run": record_run,
+                      "session_id": session_id})
+
+    monkeypatch.setattr("src.scheduler.fire_task", fake_fire)
+
+    r = client.post("/api/schedules/t/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 202
+    assert r.json()["status"] == "started"
+    assert r.json()["id"] == "t"
+
+    assert len(calls) == 1
+    assert calls[0]["record_run"] is False
+    assert calls[0]["task"]["id"] == "t"
+    assert calls[0]["session_id"].startswith("sched:t:")
+
+
+def test_run_now_unknown_id_404(client, monkeypatch):
+    monkeypatch.setattr("src.scheduler.fire_task", lambda *a, **k: None)
+    r = client.post("/api/schedules/missing/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 404
+
+
+def test_run_now_requires_token(client):
+    assert client.post("/api/schedules/t/run").status_code == 401
+    assert client.post(
+        "/api/schedules/t/run", headers={"X-Curunir-Token": "wrong"}
+    ).status_code == 401
+
+
+def test_run_now_disabled_task_still_fires(client, channel, monkeypatch):
+    # Disable the task first, then run-now must still fire it.
+    client.post("/api/schedules/t/toggle", headers={"X-Curunir-Token": TOKEN})
+    calls = []
+
+    async def fake_fire(agent, config, task, *, record_run, session_id):
+        calls.append(task)
+
+    monkeypatch.setattr("src.scheduler.fire_task", fake_fire)
+    r = client.post("/api/schedules/t/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 202
+    assert len(calls) == 1
+
+
+def test_run_now_leaves_metadata_untouched(channel, config):
+    # End-to-end with the real store + a mocked handle: a test-fire must not
+    # stamp last_run / last_attempt_at.
+    from unittest.mock import AsyncMock
+
+    channel.agent = AsyncMock()
+    with TestClient(channel.app) as c:
+        r = c.post("/api/schedules/t/run", headers={"X-Curunir-Token": TOKEN})
+        assert r.status_code == 202
+        rows = c.get("/api/schedules", headers={"X-Curunir-Token": TOKEN}).json()
+    row = next(s for s in rows if s["id"] == "t")
+    assert row["last_run"] == 0
+    assert row["last_attempt_at"] == 0
+
+
 def test_api_memory_tree(client):
     r = client.get("/api/memory", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200

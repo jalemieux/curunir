@@ -7,7 +7,7 @@ import pytest
 
 from src.schedule_store import db as sdb
 from src.schedule_store import engine
-from src.scheduler import _check_and_fire, _is_due
+from src.scheduler import _check_and_fire, _is_due, fire_task
 
 
 @pytest.fixture
@@ -60,6 +60,79 @@ class TestIsDue:
     def test_old_schedule_without_last_attempt_still_due(self):
         task = {"cron": "* * * * *", "last_run": 0}
         assert _is_due(task, time.time()) is True
+
+
+class TestFireTask:
+    async def test_record_run_stamps_attempt_and_run(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        task = engine.list_schedules(schedule_db)[0]
+
+        await fire_task(
+            mock_agent, agent_config, task,
+            record_run=True, session_id="sched:t1:123",
+        )
+
+        mock_agent.handle.assert_called_once()
+        kwargs = mock_agent.handle.call_args.kwargs
+        assert kwargs["system_task_prompt"] == "do it"
+        assert kwargs["session_id"] == "sched:t1:123"
+
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_attempt_at"] > 0
+        assert row["last_run"] > 0
+        assert row["last_status"] == "success"
+
+    async def test_test_fire_stamps_neither(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        task = engine.list_schedules(schedule_db)[0]
+
+        await fire_task(
+            mock_agent, agent_config, task,
+            record_run=False, session_id="sched:t1:123",
+        )
+
+        mock_agent.handle.assert_called_once()
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_attempt_at"] == 0
+        assert row["last_run"] == 0
+        assert row["last_status"] is None
+
+    async def test_test_fire_does_not_record_failure(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+        task = engine.list_schedules(schedule_db)[0]
+
+        # Must not raise out of the coroutine, and must not stamp metadata.
+        await fire_task(
+            mock_agent, agent_config, task,
+            record_run=False, session_id="sched:t1:123",
+        )
+
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_attempt_at"] == 0
+        assert row["last_run"] == 0
+        assert row["last_status"] is None
+
+    async def test_test_fire_prepends_skill(self, schedule_db, agent_config, tmp_skills):
+        skill_dir = tmp_skills / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: test\n---\nDo special things.")
+        _seed(schedule_db, skill="my-skill")
+        mock_agent = AsyncMock()
+        task = engine.list_schedules(schedule_db)[0]
+
+        await fire_task(
+            mock_agent, agent_config, task,
+            record_run=False, session_id="sched:t1:123",
+        )
+
+        prompt = mock_agent.handle.call_args.kwargs["system_task_prompt"]
+        assert "Do special things." in prompt
+        assert "do it" in prompt
 
 
 class TestCheckAndFire:
