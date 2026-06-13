@@ -12,7 +12,7 @@
 <link id="cu-hljs-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css" disabled />
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/highlight.min.js"></script>
 <!-- Shared chat-pane styles + console theme tokens (light default / dark). -->
-<link rel="stylesheet" href="./chat.css" />
+<link rel="stylesheet" href="/static/chat.css" />
 <style>
   /* Read-panel chrome only. Theme tokens (--bg, --fg, --border, --panel,
      --muted, --accent, --ok, --err …) come from chat.css so the panels
@@ -116,8 +116,8 @@
 </main>
 
 <script type="module">
-import { createConnection } from "./connection.js";
-import { createChat } from "./chat.js";
+import { createConnection } from "/static/connection.js";
+import { createChat } from "/static/chat.js";
 
 // === Auth token ===
 // The operator opens http://host:port/?token=XXX. We read it once and reuse

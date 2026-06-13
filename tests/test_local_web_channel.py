@@ -73,6 +73,26 @@ def test_root_serves_spa(client):
     assert "text/html" in r.headers["content-type"]
 
 
+def test_spa_assets_are_served(client):
+    """Every local js/css asset the SPA references must be fetchable.
+
+    Regression: the chat module was extracted into chat.js/chat.css/
+    connection.js, but index.html referenced them with ``./`` paths that
+    resolve to ``/chat.js`` while StaticFiles is mounted at ``/static`` —
+    so every module 404'd and the chat pane rendered blank.
+    """
+    import re
+    from urllib.parse import urljoin
+
+    html = client.get("/").text
+    refs = re.findall(r'["\']([^"\']+\.(?:js|css))["\']', html)
+    local = [r for r in refs if not r.startswith("http")]
+    assert local, "expected the SPA to reference local js/css assets"
+    for ref in local:
+        url = urljoin("/", ref)
+        assert client.get(url).status_code == 200, f"{ref} -> {url} 404'd"
+
+
 def test_api_usage(client):
     r = client.get("/api/usage", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200
