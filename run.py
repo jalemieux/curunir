@@ -32,7 +32,7 @@ from src.llm import describe_image
 from src.memory_extractor import extract_learnings
 from src.schedule_store import db as schedule_db
 from src.schedule_store import engine as schedule_engine
-from src.scheduler import run_scheduler
+from src.scheduler import fire_task, run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.usage_store import UsageStore
@@ -778,6 +778,11 @@ async def main():
                 c for c in agent.conversations_snapshot()
                 if not str(c.get("session_id", "")).startswith("sched:")
             ],
+            # "Run now": fire-and-forget the task as the scheduler would, but as
+            # a test-fire (record_run=False) so the cron cadence is untouched.
+            task_runner=lambda task: asyncio.create_task(
+                fire_task(agent, config, task, record_run=False)
+            ),
         )
         channels["local_web"] = local_web_channel
         logger.info(

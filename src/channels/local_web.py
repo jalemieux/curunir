@@ -79,6 +79,7 @@ class LocalWebChannel:
         history_provider: Callable[[str], list[dict]] | None = None,
         skills_provider: Callable[[], list[dict]] | None = None,
         conversations_provider: Callable[[], list[dict]] | None = None,
+        task_runner: Callable[[dict], None] | None = None,
     ):
         self.in_queue = in_queue
         self.config = config
@@ -98,6 +99,10 @@ class LocalWebChannel:
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
+        # Fire-and-forget starter for a single scheduled task (the "Run now"
+        # button). The wiring in run.py schedules scheduler.fire_task; the
+        # channel just holds the capability so it stays decoupled from the agent.
+        self.task_runner = task_runner
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
         self.app = self._build_app()
@@ -231,6 +236,28 @@ class LocalWebChannel:
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse({"ok": True, "id": task_id})
+
+        @app.post("/api/schedules/{task_id}/run")
+        async def api_schedule_run(
+            task_id: str, request: Request
+        ) -> JSONResponse:
+            # Fire a task on demand, exactly as the scheduler would, but as a
+            # test-fire: run-metadata is NOT stamped (see run.py wiring), so the
+            # cron cadence is untouched. Fire-and-forget — returns immediately.
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            task = next(
+                (t for t in sengine.load(self._schedules_db()) if t["id"] == task_id),
+                None,
+            )
+            if task is None:
+                return JSONResponse(
+                    {"error": f"unknown schedule: {task_id}"}, status_code=404)
+            if self.task_runner is None:
+                return JSONResponse(
+                    {"error": "task runner not configured"}, status_code=503)
+            self.task_runner(task)
+            return JSONResponse({"status": "started", "id": task_id}, status_code=202)
 
         @app.get("/api/memory")
         async def api_memory(request: Request) -> JSONResponse:

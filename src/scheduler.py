@@ -45,19 +45,54 @@ def _is_due(task: dict, now: float) -> bool:
         return False
 
 
-async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -> None:
-    """Run a single scheduled task. Called via asyncio.create_task() for concurrency."""
+def _build_task_prompt(config, task: dict) -> str:
+    """The effective prompt for a task: the named skill's content (if any,
+    resolved through the persona allowlist) prepended to the task's prompt."""
+    prompt = task["prompt"]
+    if task.get("skill"):
+        allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
+        skill_content = load_skill(task["skill"], config.skill_dirs,
+                                   allowlist=allowlist)
+        if not skill_content.startswith("Skill not found"):
+            prompt = skill_content + "\n\n" + prompt
+    return prompt
+
+
+async def fire_task(agent, config, task: dict, *, record_run: bool = True,
+                    session_id: str | None = None):
+    """Run one task through ``agent.handle()`` exactly as the scheduler does.
+
+    The single reusable firing node shared by the scheduler loop and the
+    local-UI "Run now" button. Loads + prepends the task's skill, runs in
+    system-task mode under a ``sched:<id>:<ts>`` session, and returns the
+    agent's response (``None`` on failure).
+
+    ``record_run`` gates run-metadata: when True, ``last_run``/``last_status``
+    are stamped via ``mark_run`` (the scheduler loop also stamps
+    ``mark_attempt`` *before* dispatch). When False — the manual "Run now"
+    path — no metadata is written, so the task's cron cadence is untouched.
+
+    Exceptions from ``handle()`` are swallowed (logged, and recorded via
+    ``mark_run`` only when ``record_run``) so a fire-and-forget background task
+    can never crash its caller. Dispatched via ``asyncio.create_task()``."""
+    task_id = task["id"]
+    prompt = _build_task_prompt(config, task)
+    sid = session_id or f"sched:{task_id}:{int(time.time())}"
     try:
-        await agent.handle(
+        response = await agent.handle(
             message="",
-            session_id=session_id,
+            session_id=sid,
             system_task_prompt=prompt,
         )
-        engine.mark_run(_db(config), task_id, int(time.time()), "success")
+        if record_run:
+            engine.mark_run(_db(config), task_id, int(time.time()), "success")
         logger.info("Scheduled task completed: %s", task_id)
+        return response
     except Exception as e:
-        engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
+        if record_run:
+            engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
         logger.error("Scheduled task failed: %s — %s", task_id, e)
+        return None
 
 
 async def _check_and_fire(agent) -> list[str]:
@@ -74,16 +109,6 @@ async def _check_and_fire(agent) -> list[str]:
             continue
 
         task_id = task["id"]
-        prompt = task["prompt"]
-
-        # Load skill content if specified
-        if task.get("skill"):
-            allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
-            skill_content = load_skill(task["skill"], config.skill_dirs,
-                                       allowlist=allowlist)
-            if not skill_content.startswith("Skill not found"):
-                prompt = skill_content + "\n\n" + prompt
-
         timestamp = int(now)
         session_id = f"sched:{task_id}:{timestamp}"
 
@@ -92,7 +117,8 @@ async def _check_and_fire(agent) -> list[str]:
         engine.mark_attempt(_db(config), task_id, timestamp)
 
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
-        asyncio.create_task(_run_task(agent, config, task_id, session_id, prompt))
+        asyncio.create_task(
+            fire_task(agent, config, task, record_run=True, session_id=session_id))
         fired.append(task_id)
 
     return fired

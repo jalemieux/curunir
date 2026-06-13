@@ -7,7 +7,7 @@ import pytest
 
 from src.schedule_store import db as sdb
 from src.schedule_store import engine
-from src.scheduler import _check_and_fire, _is_due
+from src.scheduler import _check_and_fire, _is_due, fire_task
 
 
 @pytest.fixture
@@ -218,3 +218,85 @@ class TestCheckAndFire:
         assert "t1" in fired
         assert "t2" in fired
         assert mock_agent.handle.call_count == 2
+
+
+class TestFireTask:
+    """fire_task is the reusable node behind both the scheduler loop and the
+    local-UI 'Run now' button. It runs a task through agent.handle() exactly as
+    the scheduler does; run-metadata is stamped only when record_run is set."""
+
+    def _task(self, **over):
+        t = {"id": "t1", "cron": "* * * * *", "prompt": "do it",
+             "skill": None, "enabled": True}
+        t.update(over)
+        return t
+
+    async def test_record_run_stamps_metadata(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        mock_agent.handle.return_value = "result text"
+
+        resp = await fire_task(mock_agent, agent_config, self._task(),
+                               record_run=True)
+
+        assert resp == "result text"
+        kw = mock_agent.handle.call_args.kwargs
+        assert kw["system_task_prompt"] == "do it"
+        assert kw["session_id"].startswith("sched:t1:")
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_run"] > 0
+        assert row["last_status"] == "success"
+
+    async def test_no_record_leaves_metadata_untouched(self, schedule_db, agent_config):
+        # The 'Run now' path: run the task but never touch cadence fields.
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        mock_agent.handle.return_value = "ok"
+
+        resp = await fire_task(mock_agent, agent_config, self._task(),
+                               record_run=False)
+
+        assert resp == "ok"
+        mock_agent.handle.assert_called_once()
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_run"] == 0
+        assert row["last_attempt_at"] == 0
+        assert row["last_status"] is None
+
+    async def test_prepends_skill_content(self, schedule_db, agent_config, tmp_skills):
+        skill_dir = tmp_skills / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: test\n---\nDo special things.")
+        _seed(schedule_db, skill="my-skill")
+        mock_agent = AsyncMock()
+
+        await fire_task(mock_agent, agent_config, self._task(skill="my-skill"),
+                        record_run=False)
+
+        prompt = mock_agent.handle.call_args.kwargs["system_task_prompt"]
+        assert "Do special things." in prompt
+        assert "do it" in prompt
+
+    async def test_no_record_on_exception_leaves_metadata(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+
+        # Swallows like the scheduler loop does (so a background task can't crash).
+        resp = await fire_task(mock_agent, agent_config, self._task(),
+                               record_run=False)
+
+        assert resp is None
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_run"] == 0
+        assert row["last_status"] is None
+
+    async def test_honors_explicit_session_id(self, schedule_db, agent_config):
+        _seed(schedule_db)
+        mock_agent = AsyncMock()
+
+        await fire_task(mock_agent, agent_config, self._task(),
+                        record_run=False, session_id="sched:t1:manual")
+
+        assert mock_agent.handle.call_args.kwargs["session_id"] == "sched:t1:manual"

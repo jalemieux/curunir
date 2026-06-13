@@ -262,6 +262,23 @@ async function apiSend(method, path, body) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
+// Lightweight transient notification (no dependency; injects its own styles once).
+let _toastEl = null;
+function toast(msg) {
+  if (!_toastEl) {
+    _toastEl = document.createElement("div");
+    _toastEl.style.cssText =
+      "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);" +
+      "background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;" +
+      "font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3);z-index:1000;" +
+      "opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw;";
+    document.body.appendChild(_toastEl);
+  }
+  _toastEl.textContent = msg;
+  _toastEl.style.opacity = "1";
+  clearTimeout(_toastEl._t);
+  _toastEl._t = setTimeout(() => { _toastEl.style.opacity = "0"; }, 3000);
+}
 const fmtUsd = (n) => "$" + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtNum = (n) => (n ?? 0).toLocaleString();
 const fmtMoney = (n) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -443,6 +460,7 @@ function viewRow(t) {
     <td>${t.next_fire ? new Date(t.next_fire).toLocaleString() : "—"}</td>
     <td>${esc(t.last_status)}</td>
     <td class="row-actions">
+      <button class="btn" data-act="run" data-id="${esc(t.id)}" title="Fire this task now, exactly as the scheduler would (does not affect its schedule)">Run now</button>
       <button class="btn" data-act="edit" data-id="${esc(t.id)}">Edit</button>
       <button class="btn" data-act="toggle" data-id="${esc(t.id)}">${t.enabled ? "Disable" : "Enable"}</button>
       <button class="btn danger" data-act="delete" data-id="${esc(t.id)}">Delete</button>
@@ -466,6 +484,13 @@ async function onSchedAction(act, id) {
   try {
     if (act === "edit") { _schedEdit = id; await loadSchedules(); wireEditPreview(); return; }
     if (act === "cancel") { _schedEdit = null; await loadSchedules(); return; }
+    if (act === "run") {
+      // Fire-and-forget: the task runs in the background, exactly as the
+      // scheduler fires it. It's a test-fire — the cron cadence is untouched.
+      const r = await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/run`);
+      toast(`Fired '${r.id}' — running in the background.`);
+      return;
+    }
     if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`); await loadSchedules(); return; }
     if (act === "delete") {
       if (!confirm(`Delete schedule '${id}'?`)) return;

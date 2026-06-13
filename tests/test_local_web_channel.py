@@ -244,6 +244,45 @@ def test_delete_schedule_not_found_400(client):
     assert r.status_code == 400
 
 
+def _runner_channel(config, calls):
+    return LocalWebChannel(
+        in_queue=asyncio.Queue(),
+        config=config,
+        pairing_token=TOKEN,
+        task_runner=lambda task: calls.append(task),
+    )
+
+
+def test_run_schedule_invokes_runner(config):
+    calls = []
+    with TestClient(_runner_channel(config, calls).app) as c:
+        r = c.post("/api/schedules/t/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 202
+    assert r.json() == {"status": "started", "id": "t"}
+    assert len(calls) == 1
+    assert calls[0]["id"] == "t"
+
+
+def test_run_schedule_works_when_disabled(config):
+    # 'Run now' must fire even a disabled task — you test before enabling.
+    sengine.toggle(str(config.schedules_db), "t")  # disable
+    calls = []
+    with TestClient(_runner_channel(config, calls).app) as c:
+        r = c.post("/api/schedules/t/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 202
+    assert len(calls) == 1
+
+
+def test_run_schedule_unknown_404(client):
+    r = client.post("/api/schedules/nope/run", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 404
+
+
+def test_run_schedule_requires_token(client):
+    r = client.post("/api/schedules/t/run")
+    assert r.status_code == 401
+
+
 def test_schedule_mutations_require_token(client):
     # No token / wrong token rejected on every mutating route.
     assert client.post(
