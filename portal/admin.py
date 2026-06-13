@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from portal import auth, csrf, db, email_send
+from portal import auth, csrf, db
 from portal.config import settings
 from portal.db import User
 from portal.routing import routing
@@ -32,6 +32,15 @@ def _verify_csrf_form(user: User, csrf_token: str) -> None:
 
 def _signin_link(token: str) -> str:
     return f"{settings.portal_base_url.rstrip('/')}/sign-in?token={token}"
+
+
+def _log_signin_link(email: str, link: str) -> None:
+    """Make the sign-in link available to the operator.
+
+    The portal does not send sign-in email via an external provider — the admin
+    copies the link from the logs (or from the link shown in the admin UI).
+    """
+    logger.info("Sign-in link for %s: %s", email, link)
 
 
 async def _render_admin(request: Request, user: User, **extra):
@@ -64,7 +73,7 @@ async def admin_create_user(
     _verify_csrf_form(user, csrf_token)
     new_user = await db.create_user(email)
     signin_link = _signin_link(new_user.sign_in_token)
-    await email_send.send_signin_email(new_user.email, signin_link)
+    _log_signin_link(new_user.email, signin_link)
     return await _render_admin(
         request, user,
         new_container_token=new_user.container_token,
@@ -83,7 +92,7 @@ async def admin_send_signin_email(
     target = await db.get_user_by_id(user_id)
     if target is None:
         raise HTTPException(404)
-    await email_send.send_signin_email(target.email, _signin_link(target.sign_in_token))
+    _log_signin_link(target.email, _signin_link(target.sign_in_token))
     return RedirectResponse("/admin", status_code=303)
 
 
@@ -133,7 +142,7 @@ async def admin_regenerate_sign_in(
     new_token = await db.regenerate_sign_in_token(user_id)
     target = await db.get_user_by_id(user_id)
     if target:
-        await email_send.send_signin_email(target.email, _signin_link(new_token))
+        _log_signin_link(target.email, _signin_link(new_token))
     return RedirectResponse("/admin", status_code=303)
 
 
@@ -172,11 +181,11 @@ async def _cli_create_user(email: str) -> None:
     await db.run_migrations()
     try:
         user = await db.create_user(email)
-        await email_send.send_signin_email(user.email, _signin_link(user.sign_in_token))
+        _log_signin_link(user.email, _signin_link(user.sign_in_token))
         print(f"Created user {user.id} <{user.email}>")
         print(f"Container token (set in container env as CURUNIR_PORTAL_TOKEN):")
         print(f"  {user.container_token}")
-        print(f"Sign-in link emailed; copy of link:")
+        print(f"Sign-in link (send this to the user):")
         print(f"  {_signin_link(user.sign_in_token)}")
     finally:
         await db.close_pool()
