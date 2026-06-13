@@ -1,0 +1,479 @@
+/* chat.css — shared chat-pane styles + console theme tokens.
+ *
+ * Canonical home: src/local_ui/static/. Designed to be lifted into the portal
+ * in Phase 2 (see docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md).
+ *
+ * All chat-pane rules are namespaced under `.cu-chat` (or the global overlay
+ * roots `.cu-offline-overlay` / `.cu-skills-overlay` / `#cu-print-doc`) and use
+ * `cu-`-prefixed classes — never bare ids — so (a) they cannot collide with the
+ * host's read-panel CSS and (b) a second instance (portal scratchpad) can mount
+ * without id clashes.
+ *
+ * Theme tokens live here so the host's read-panels theme together with the chat
+ * when the theme toggles. Light is the default; [data-theme="dark"] overrides. */
+
+:root {
+  /* shared / chat */
+  --bg: #ffffff;
+  --fg: #1a1a1f;
+  --user: #16a34a;
+  --tool: #6b7280;
+  --accent: #4f46e5;
+  --bubble: #f4f4f8;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --header-text: #6b7280;
+  --hint: #9ca3af;
+  --code-bg: #f3f4f6;
+  --btn-disabled-bg: #e5e7eb;
+  --btn-disabled-fg: #9ca3af;
+  --hover-bg: #f3f4f6;
+  --system-text: #9ca3af;
+  --offline: #9ca3af;
+  --stop: #dc2626;
+  --stop-hover: #b91c1c;
+  /* host read-panels */
+  --panel: #f4f4f8;
+  --muted: #6b7280;
+  --ok: #16a34a;
+  --warn: #b8860b;
+  --err: #dc2626;
+}
+[data-theme="dark"] {
+  --bg: #0a0a12;
+  --fg: #e0e0e0;
+  --user: #4ade80;
+  --tool: #555;
+  --accent: #6366f1;
+  --bubble: #12121c;
+  --border: #1a1a22;
+  --border-strong: #2a2a3e;
+  --header-text: #888;
+  --hint: #555;
+  --code-bg: #1a1a2e;
+  --btn-disabled-bg: #2a2a3e;
+  --btn-disabled-fg: #666;
+  --hover-bg: #1a1a2e;
+  --system-text: #666;
+  --offline: #555;
+  --stop: #f87171;
+  --stop-hover: #fca5a5;
+  --panel: #12121c;
+  --muted: #888;
+  --ok: #4ade80;
+  --warn: #d29922;
+  --err: #f87171;
+}
+
+/* === Pane layout === */
+.cu-chat {
+  height: 100%;
+  display: flex; flex-direction: column;
+  min-height: 0;
+  position: relative;
+  color: var(--fg);
+}
+.cu-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; font-size: 12px; color: var(--header-text);
+}
+.cu-toolbar-right { display: flex; align-items: center; gap: 10px; }
+.cu-header-btn {
+  background: transparent; border: 1px solid var(--border-strong); border-radius: 6px;
+  color: var(--accent); padding: 4px 10px; font-size: 12px; cursor: pointer;
+  font-family: inherit; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.cu-header-btn:hover { background: var(--hover-bg); border-color: var(--accent); }
+.cu-theme { width: 30px; padding: 0; justify-content: center; color: var(--header-text); }
+.cu-theme:hover { color: var(--accent); }
+
+.cu-status { display: inline-flex; align-items: center; }
+.cu-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
+.cu-dot.online { background: var(--user); }
+.cu-dot.offline { background: var(--offline); }
+.cu-dot.reconnecting { background: #e2b55a; animation: cu-pulse 1s infinite; }
+@keyframes cu-pulse { 50% { opacity: 0.4; } }
+
+.cu-messages {
+  flex: 1; overflow-y: auto; min-height: 0;
+  padding: 14px; max-width: 760px; width: 100%; margin: 0 auto;
+}
+
+/* === Messages === */
+.cu-chat .msg { margin-bottom: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.cu-chat .msg .role { display: none; }
+.cu-chat .msg.user .body {
+  background: var(--bubble); border-radius: 14px;
+  padding: 10px 14px; margin-left: 80px; white-space: pre-wrap;
+}
+.cu-chat .msg.user .body code.slash-cmd {
+  background: var(--code-bg); padding: 1px 6px; border-radius: 4px;
+  font-size: 12.5px; font-weight: 600;
+}
+.cu-chat .msg.assistant .body { padding: 2px 0; }
+.cu-chat .msg.assistant .body > p { margin: 0 0 8px; }
+.cu-chat .msg.assistant .body > p:last-child { margin-bottom: 0; }
+.cu-chat .msg.assistant .body h1,
+.cu-chat .msg.assistant .body h2,
+.cu-chat .msg.assistant .body h3 { font-weight: 600; margin: 18px 0 8px; }
+.cu-chat .msg.assistant .body h1 { font-size: 17px; }
+.cu-chat .msg.assistant .body h2 { font-size: 15px; }
+.cu-chat .msg.assistant .body h3 { font-size: 14px; }
+.cu-chat .msg.assistant .body > h1:first-child,
+.cu-chat .msg.assistant .body > h2:first-child,
+.cu-chat .msg.assistant .body > h3:first-child { margin-top: 4px; }
+.cu-chat .msg.assistant .body ul,
+.cu-chat .msg.assistant .body ol { padding-left: 20px; margin: 6px 0 10px; }
+.cu-chat .msg.assistant .body li { margin-bottom: 6px; }
+.cu-chat .msg.assistant .body table {
+  border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 13px;
+}
+.cu-chat .msg.assistant .body th,
+.cu-chat .msg.assistant .body td {
+  padding: 8px 0; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.cu-chat .msg.assistant .body th {
+  font-weight: 600; font-size: 11px; color: var(--header-text);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-strong);
+}
+.cu-chat .msg.assistant .body td:first-child { font-weight: 600; padding-right: 16px; }
+.cu-chat .msg.assistant .body td:first-child code {
+  white-space: nowrap; overflow-wrap: normal; word-break: keep-all;
+}
+.cu-chat .msg.assistant .body code {
+  background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12.5px;
+}
+.cu-chat .msg.assistant .body pre {
+  background: var(--code-bg); border-radius: 6px; padding: 10px; margin: 6px 0;
+  overflow-x: auto; font-size: 12px; line-height: 1.4;
+}
+.cu-chat .msg.assistant .body pre code { background: none; padding: 0; }
+.cu-chat .msg.assistant .body a { color: var(--accent); }
+.cu-chat .msg.assistant .body blockquote {
+  border-left: 2px solid var(--border-strong); padding-left: 12px;
+  color: var(--header-text); margin: 6px 0 10px;
+}
+.cu-chat .system-msg { color: var(--system-text); }
+
+/* === Activity indicator (tool ticker) === */
+.cu-chat .msg details.tools { margin: 8px 0 2px; }
+.cu-chat .msg details.tools > summary { list-style: none; cursor: pointer; user-select: none; outline: none; }
+.cu-chat .msg details.tools > summary::-webkit-details-marker { display: none; }
+.cu-chat .msg details.tools.live .activity-row {
+  display: inline-flex; align-items: center; gap: 10px; padding: 2px 0;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 12px;
+}
+.cu-chat .msg details.tools.live .pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px 4px 9px; background: var(--code-bg);
+  border: 1px solid var(--border); border-radius: 999px; transition: border-color .12s;
+}
+.cu-chat .msg details.tools.live > summary:hover .pill { border-color: var(--border-strong); }
+.cu-chat .msg details.tools.live .pill-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+  flex-shrink: 0; animation: cu-pill-pulse 1.6s ease-in-out infinite;
+}
+.cu-chat .msg details.tools.live .pill-label,
+.cu-chat .msg details.tools.live .tool-current {
+  background: linear-gradient(90deg, var(--header-text) 35%, var(--fg) 50%, var(--header-text) 65%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: cu-pill-shimmer 2.2s linear infinite;
+}
+.cu-chat .msg details.tools.live .tool-current {
+  max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  animation-delay: .2s;
+}
+.cu-chat .msg details.tools.live .tool-current:empty { display: none; }
+.cu-chat .msg details.tools.live .activity-row .ticker-caret { margin-left: 2px; }
+.cu-chat .msg details.tools.live:not(.has-tools) .ticker-caret { display: none; }
+.cu-chat .msg details.tools.live:not(.has-tools) > summary { cursor: default; }
+.cu-chat .msg details.tools .ticker {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 0;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11.5px; color: var(--header-text);
+}
+.cu-chat .msg details.tools .ticker-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); opacity: 0.6; flex-shrink: 0;
+}
+.cu-chat .msg details.tools .ticker-count {
+  color: var(--header-text); font-size: 10.5px; padding: 1px 6px;
+  background: var(--code-bg); border-radius: 4px; flex-shrink: 0;
+}
+.cu-chat .msg details.tools .ticker-caret {
+  font-size: 8px; color: var(--header-text); transition: transform 0.15s ease;
+}
+.cu-chat .msg details.tools[open] .ticker-caret { transform: rotate(90deg); }
+.cu-chat .msg details.tools .tool-list {
+  margin: 6px 0 4px 8px; padding-left: 12px; border-left: 1px solid var(--border);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11.5px; color: var(--tool); line-height: 1.7;
+}
+.cu-chat .msg details.tools .tool-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes cu-pill-pulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.1); opacity: 1; }
+}
+@keyframes cu-pill-shimmer { to { background-position: -250% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .cu-chat .msg details.tools.live .pill-dot { animation: none; opacity: 0.8; }
+  .cu-chat .msg details.tools.live .pill-label,
+  .cu-chat .msg details.tools.live .tool-current {
+    animation: none; color: var(--header-text); -webkit-text-fill-color: var(--header-text);
+  }
+}
+
+/* === Per-response actions === */
+.cu-chat .msg.assistant .response-actions {
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; margin-top: 8px;
+}
+.cu-chat .msg.assistant .response-actions .resp-action {
+  background: transparent; border: 1px solid var(--border-strong); color: var(--header-text);
+  font-family: inherit; font-size: 11.5px; padding: 3px 9px; border-radius: 6px;
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.cu-chat .msg.assistant .response-actions .resp-action:hover {
+  background: var(--hover-bg); color: var(--accent); border-color: var(--accent);
+}
+.cu-chat .msg.assistant .response-actions .resp-action:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.cu-chat .msg.assistant .response-actions .resp-action:disabled { cursor: default; opacity: 0.7; }
+.cu-chat .msg.assistant.stopping .body::after {
+  content: " stopping…"; color: var(--hint); font-style: italic; font-size: 12px;
+}
+
+/* === Empty-state starters === */
+.cu-chat .empty-state {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.cu-chat .es-greeting { font-size: 18px; font-weight: 600; color: var(--fg); margin-bottom: 22px; }
+.cu-chat .es-list { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 400px; }
+.cu-chat .es-starter {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 9px 12px; border-radius: 8px; cursor: pointer; transition: background .12s;
+}
+.cu-chat .es-starter:hover { background: var(--hover-bg); }
+.cu-chat .es-arrow { color: var(--hint); flex: none; font-size: 13px; }
+.cu-chat .es-text { font-size: 13.5px; color: var(--fg); line-height: 1.4; }
+.cu-chat .es-starter:hover .es-text,
+.cu-chat .es-starter:hover .es-arrow { color: var(--accent); }
+
+/* === Attachments === */
+.cu-chat .attachment {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: 4px;
+  padding: 3px 8px; font-size: 11px; color: var(--accent);
+}
+.cu-chat .attachment-card {
+  display: inline-flex; align-items: center; gap: 11px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 10px 13px;
+  min-width: min(290px, 100%); max-width: 380px;
+  transition: border-color .12s, background .12s;
+}
+.cu-chat .attachment-card.downloadable { cursor: pointer; }
+.cu-chat .attachment-card.downloadable:hover {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.cu-chat .attachment-card .badge {
+  width: 34px; height: 34px; border-radius: 7px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+}
+.cu-chat .attachment-card .meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.cu-chat .attachment-card .fname {
+  font-size: 13px; font-weight: 600; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cu-chat .attachment-card .fsub { font-size: 11px; color: var(--hint); margin-top: 1px; }
+.cu-chat .attachment-card .dl { color: var(--hint); flex: none; }
+.cu-chat .attachment-card.downloadable:hover .dl { color: var(--accent); }
+.cu-chat .attachment-image {
+  display: block; max-width: min(320px, 100%); max-height: 320px;
+  border-radius: 10px; border: 1px solid var(--border-strong);
+  cursor: pointer; transition: border-color .12s;
+}
+.cu-chat .attachment-image:hover { border-color: var(--accent); }
+.cu-chat .attachments { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.cu-chat .msg.user .body .attachments { margin-bottom: 6px; }
+.cu-chat .msg.assistant .attachments { margin-top: 6px; }
+
+/* === Footer / composer === */
+.cu-footer {
+  padding: 10px 14px 14px; border-top: 1px solid var(--border);
+  max-width: 760px; width: 100%; margin: 0 auto; flex-shrink: 0;
+}
+.cu-staged:empty { display: none; }
+.cu-staged { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.cu-staged .attachment { cursor: pointer; }
+.cu-staged .attachment:hover { color: #f87171; }
+.cu-composer {
+  position: relative; background: var(--bubble);
+  border: 1px solid var(--border-strong); border-radius: 14px;
+  padding: 10px 10px 8px 14px; display: flex; flex-direction: column; gap: 6px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.cu-composer:focus-within { border-color: var(--accent); }
+.cu-collapse {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  width: 46px; height: 20px; border-radius: 10px;
+  background: var(--bubble); border: 1px solid var(--border-strong);
+  color: var(--header-text); cursor: pointer; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; font-family: inherit; transition: color .12s, border-color .12s;
+}
+.cu-collapse:hover { color: var(--accent); border-color: var(--accent); }
+.cu-composer.collapsed .cu-input { min-height: 0; height: 26px !important; overflow: hidden; }
+.cu-chat.dragging .cu-composer {
+  border-color: var(--accent); border-style: dashed;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bubble));
+}
+.cu-drop-hint {
+  position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+  border-radius: 14px; color: var(--accent); font-size: 13px; font-weight: 600;
+  pointer-events: none; background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.cu-chat.dragging .cu-drop-hint { display: flex; }
+.cu-input {
+  background: transparent; color: var(--fg); border: 0; outline: 0; resize: none; width: 100%;
+  font-family: inherit; font-size: 14px; line-height: 1.5; min-height: 60px; max-height: 30dvh;
+}
+.cu-composer-row { display: flex; align-items: center; gap: 8px; }
+.cu-attach {
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--accent); font-family: inherit; font-size: 13px; font-weight: 600;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 5px;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.cu-attach:hover { border-color: var(--accent); background: var(--hover-bg); }
+.cu-attach .glyph { font-size: 16px; line-height: 1; }
+.cu-hint { color: var(--hint); font-size: 11px; flex: 1; text-align: right; margin-right: 4px; }
+.cu-send {
+  background: var(--accent); color: white; border: 0;
+  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+  font-size: 16px; padding: 6px; box-sizing: content-box;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cu-send:disabled { background: var(--btn-disabled-bg); color: var(--btn-disabled-fg); cursor: not-allowed; }
+.cu-send[data-mode="stop"] { background: var(--stop); }
+.cu-send[data-mode="stop"]:hover { background: var(--stop-hover); }
+@media (max-width: 480px) {
+  .cu-hint { display: none; }
+  .cu-chat .msg.user .body { margin-left: 36px; }
+}
+
+/* === Offline modal (pane-scoped, so the read-panel tabs stay usable when the
+   agent is offline) === */
+.cu-offline-overlay {
+  position: absolute; inset: 0; z-index: 40;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+}
+.cu-offline-overlay[hidden] { display: none; }
+.cu-offline-card {
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.3); padding: 28px 32px; max-width: 320px;
+  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.cu-offline-spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid var(--border-strong); border-top-color: var(--accent);
+  animation: cu-offline-spin 0.8s linear infinite;
+}
+@keyframes cu-offline-spin { to { transform: rotate(360deg); } }
+.cu-offline-title { font-weight: 700; font-size: 15px; }
+.cu-offline-sub { color: var(--hint); font-size: 13px; line-height: 1.5; }
+
+/* === Skills picker (global, fixed) === */
+.cu-skills-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: color-mix(in srgb, #000 38%, transparent); display: flex;
+}
+.cu-skills-overlay[hidden] { display: none; }
+.cu-skills-panel {
+  background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+  border: 1px solid var(--border); margin: auto; width: 420px; max-width: 92vw; max-height: 70vh;
+  border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.3); overflow: hidden;
+}
+.cu-skills-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px;
+}
+.cu-skills-title { font-weight: 700; font-size: 15px; }
+.cu-skills-close {
+  background: transparent; border: 0; color: var(--header-text);
+  font-size: 15px; cursor: pointer; width: 28px; height: 28px; border-radius: 6px;
+}
+.cu-skills-close:hover { background: var(--hover-bg); color: var(--accent); }
+.cu-skills-search {
+  margin: 0 14px 8px; padding: 8px 10px;
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--bg); color: var(--fg); font-family: inherit; font-size: 13px;
+}
+.cu-skills-search:focus { outline: 0; border-color: var(--accent); }
+.cu-skills-list { overflow-y: auto; padding: 0 8px; }
+.cu-skills-overlay .skill-row {
+  display: flex; gap: 10px; align-items: flex-start; padding: 9px 8px; border-radius: 8px; cursor: pointer;
+}
+.cu-skills-overlay .skill-row:hover { background: var(--hover-bg); }
+.cu-skills-overlay .skill-row .skill-icon { font-size: 20px; line-height: 1.1; flex: none; }
+.cu-skills-overlay .skill-row .skill-name { font-weight: 600; font-size: 13px; }
+.cu-skills-overlay .skill-row .skill-summary { color: var(--hint); font-size: 12px; line-height: 1.35; }
+.cu-skills-empty { color: var(--hint); font-size: 13px; padding: 14px; text-align: center; }
+.cu-skills-config-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px; color: var(--hint);
+  border-top: 1px solid var(--border); margin: 6px 12px 0; padding: 8px 0 4px;
+}
+.cu-skills-config { padding: 0 8px 10px; }
+.cu-skills-overlay .skill-row.config { padding: 7px 8px; }
+.cu-skills-overlay .skill-row.config .skill-icon { font-size: 15px; opacity: .8; }
+.cu-skills-overlay .skill-row.config .skill-name { font-weight: 500; font-size: 12.5px; color: var(--header-text); }
+@media (max-width: 640px) {
+  .cu-skills-overlay { align-items: flex-end; }
+  .cu-skills-panel {
+    margin: 0; width: 100%; max-width: 100%; max-height: 78vh;
+    border-radius: 16px 16px 0 0; border-bottom: 0;
+  }
+}
+
+/* === Print target (global) === */
+#cu-print-doc { display: none; }
+@media print {
+  body > *:not(#cu-print-doc) { display: none !important; }
+  @page { margin: 1.6cm; }
+  #cu-print-doc {
+    display: block !important; color: #000; background: #fff; font-size: 12pt; line-height: 1.5;
+  }
+  #cu-print-doc h1 { font-size: 18pt; }
+  #cu-print-doc h2 { font-size: 15pt; }
+  #cu-print-doc h3 { font-size: 13pt; }
+  #cu-print-doc h1, #cu-print-doc h2, #cu-print-doc h3 { margin: 16px 0 8px; }
+  #cu-print-doc p { margin: 0 0 8px; }
+  #cu-print-doc ul, #cu-print-doc ol { padding-left: 22px; margin: 6px 0 10px; }
+  #cu-print-doc li { margin-bottom: 4px; }
+  #cu-print-doc pre {
+    background: #f3f4f6; border-radius: 4px; padding: 10px; margin: 8px 0;
+    font-size: 10pt; white-space: pre-wrap; word-break: break-word;
+  }
+  #cu-print-doc code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 10pt; }
+  #cu-print-doc pre code, #cu-print-doc pre code * { background: none !important; color: #1a1a1f !important; }
+  #cu-print-doc table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  #cu-print-doc th, #cu-print-doc td {
+    border-bottom: 1px solid #ccc; padding: 6px 8px 6px 0; text-align: left; vertical-align: top;
+  }
+  #cu-print-doc a { color: #000; text-decoration: underline; }
+  #cu-print-doc img { max-width: 100%; }
+  #cu-print-doc blockquote { border-left: 3px solid #ccc; padding-left: 12px; color: #333; margin: 8px 0; }
+}
