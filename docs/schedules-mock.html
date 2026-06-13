@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Schedules panel — mock</title>
+<!-- Same CDN deps the real console already loads -->
+<script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+<!-- NEW: human-readable cron, consistent with how marked/hljs are loaded -->
+<script src="https://cdn.jsdelivr.net/npm/cronstrue@2/dist/cronstrue.min.js"></script>
+<style>
+  /* Theme tokens approximating chat.css (light) so the mock looks like the real console */
+  :root {
+    --bg:#ffffff; --fg:#1f2328; --border:#d0d7de; --panel:#f6f8fa;
+    --muted:#656d76; --accent:#0969da; --ok:#1a7f37; --err:#cf222e; --warn:#9a6700;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background:var(--bg); color:var(--fg);
+  }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--panel); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  main { padding:16px; max-width:1100px; }
+  h2 { font-size:16px; margin:0 0 12px; }
+  .muted { color:var(--muted); }
+  .badge { font-size:11px; padding:1px 7px; border-radius:10px; }
+  .badge.on { background:rgba(26,127,55,.15); color:var(--ok); }
+  .badge.off { background:rgba(101,109,118,.15); color:var(--muted); }
+  button.btn { background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:4px 10px; font:inherit; cursor:pointer; }
+  button.btn:hover { border-color:var(--accent); color:var(--accent); }
+  button.btn.danger:hover { border-color:var(--err); color:var(--err); }
+  .row-actions { display:flex; gap:6px; white-space:nowrap; }
+  code { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:0 4px; font-size:12px; }
+
+  /* Option switcher */
+  .opt-switch { display:flex; gap:6px; margin-bottom:20px; }
+  .opt-switch button { background:transparent; border:1px solid var(--border); color:var(--muted); padding:6px 14px; border-radius:6px; cursor:pointer; }
+  .opt-switch button.active { color:var(--fg); background:var(--panel); border-color:var(--accent); }
+  .opt { display:none; }
+  .opt.active { display:block; }
+
+  /* ============ OPTION A: accordion cards ============ */
+  .sched-list { display:flex; flex-direction:column; gap:8px; }
+  .sched-card { border:1px solid var(--border); border-radius:8px; background:var(--panel); overflow:hidden; }
+  .sched-head {
+    display:grid; grid-template-columns:18px 200px 1fr auto auto; align-items:center; gap:12px;
+    padding:10px 14px; cursor:pointer; user-select:none;
+  }
+  .sched-head:hover { background:rgba(9,105,218,.05); }
+  .sched-arrow { color:var(--muted); transition:transform .15s; }
+  .sched-card.open .sched-arrow { transform:rotate(90deg); }
+  .sched-id { font-weight:600; }
+  .sched-id .skill-chip { font-weight:400; font-size:11px; color:var(--accent); margin-left:8px; border:1px solid var(--border); border-radius:10px; padding:0 7px; }
+  .sched-when { color:var(--fg); }
+  .sched-when .raw { color:var(--muted); font-size:12px; margin-left:8px; }
+  .sched-next { color:var(--muted); font-size:12px; text-align:right; white-space:nowrap; }
+  .sched-body { display:none; padding:0 14px 14px 48px; border-top:1px solid var(--border); }
+  .sched-card.open .sched-body { display:block; }
+  .sched-meta { display:flex; gap:18px; margin:10px 0; font-size:12px; color:var(--muted); }
+  .sched-meta b { color:var(--fg); font-weight:600; }
+  .prompt-render { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:2px 14px; margin:8px 0 12px; max-height:240px; overflow:auto; }
+  .prompt-render h1, .prompt-render h2, .prompt-render h3 { font-size:14px; margin:12px 0 6px; }
+  .prompt-render :first-child { margin-top:10px; }
+  .prompt-render pre { background:var(--panel); padding:10px; border-radius:6px; overflow:auto; }
+
+  /* ============ OPTION B: expandable table cell ============ */
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .cell-prompt { max-width:380px; }
+  .cell-prompt .clip { display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .cell-prompt .clip .txt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cell-prompt .full { display:none; margin-top:8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:2px 12px; }
+  .cell-prompt.open .full { display:block; }
+  .cell-prompt.open .clip .txt { white-space:normal; }
+  .toggle-arrow { color:var(--muted); }
+  .cell-prompt.open .toggle-arrow { transform:rotate(90deg); display:inline-block; }
+</style>
+</head>
+<body>
+<header><h1>Curunir — Schedules (mock)</h1></header>
+<main>
+  <h2>Scheduled Tasks</h2>
+  <div class="opt-switch">
+    <button data-opt="a" class="active">Option A — Accordion cards (recommended)</button>
+    <button data-opt="b">Option B — Expandable table cell</button>
+  </div>
+
+  <!-- ============ OPTION A ============ -->
+  <div class="opt active" id="opt-a">
+    <div class="sched-list" id="list-a"></div>
+  </div>
+
+  <!-- ============ OPTION B ============ -->
+  <div class="opt" id="opt-b">
+    <table>
+      <tr><th>id</th><th>when</th><th>skill</th><th>prompt</th><th>state</th><th>next fire</th><th>last</th><th></th></tr>
+      <tbody id="list-b"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+// ---- sample data mirroring the real /api/schedules shape ----
+const TASKS = [
+  { id:"daily-brief", cron:"0 7 * * 1-5", skill:"research", enabled:true,
+    next_fire:"2026-06-15T07:00:00", last_status:"ok",
+    prompt:"## Morning brief\n\nPull together a **market open** summary:\n\n- Overnight moves in `SPY`, `QQQ`, and the watchlist\n- Top 3 macro headlines\n- Anything flagged in memory under *projects*\n\n### Sections\n\n1. **Headline** — one sentence on what matters most today\n2. **Markets** — index futures, notable single-name moves, FX/rates if relevant\n3. **Macro** — scheduled data releases and central-bank speakers\n4. **Watchlist** — anything from my tracked positions that gapped overnight\n5. **Follow-ups** — open items from yesterday's brief\n\n### Tone\n\nLead with the punchline. No filler, no hedging. If a section has nothing worth saying, write `nothing notable` and move on.\n\n```\nExample header line:\n📈 Risk-on open — futures +0.6%, yields steady, all eyes on 8:30 CPI\n```\n\nEnd with a one-line read on positioning into the open." },
+  { id:"market-scan", cron:"*/15 9-16 * * 1-5", skill:null, enabled:true,
+    next_fire:"2026-06-13T14:15:00", last_status:"ok",
+    prompt:"Scan the watchlist for moves >3% since the last scan and note any volume spikes." },
+  { id:"weekly-review", cron:"0 18 * * 5", skill:"balance-sheet", enabled:false,
+    next_fire:null, last_status:"error",
+    prompt:"### Weekly net-worth review\n\n1. Refresh market-priced positions\n2. Render the rollup-by-class table\n3. Compare to last week and call out the biggest delta\n4. Note any liabilities due in the next 14 days" },
+];
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const md  = (t) => (window.marked ? marked.parse(t || "") : esc(t));
+function human(cron){ try { return cronstrue.toString(cron, { use24HourTimeFormat:false }); } catch(e){ return null; } }
+function fmtNext(s){ return s ? new Date(s).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) : "—"; }
+
+// ---- Option A: accordion cards ----
+function renderA(){
+  document.getElementById("list-a").innerHTML = TASKS.map((t,i) => {
+    const h = human(t.cron);
+    return `<div class="sched-card ${i===0?"open":""}">
+      <div class="sched-head" onclick="this.parentNode.classList.toggle('open')">
+        <span class="sched-arrow">▶</span>
+        <span class="sched-id">${esc(t.id)}${t.skill?`<span class="skill-chip">${esc(t.skill)}</span>`:""}</span>
+        <span class="sched-when">${h?esc(h):`<code>${esc(t.cron)}</code>`}${h?`<span class="raw">${esc(t.cron)}</span>`:""}</span>
+        <span class="badge ${t.enabled?"on":"off"}">${t.enabled?"enabled":"disabled"}</span>
+        <span class="sched-next">next: ${fmtNext(t.next_fire)}</span>
+      </div>
+      <div class="sched-body">
+        <div class="sched-meta">
+          <span>last status: <b>${esc(t.last_status||"—")}</b></span>
+          <span>skill: <b>${esc(t.skill||"—")}</b></span>
+        </div>
+        <div class="prompt-render">${md(t.prompt)}</div>
+        <div class="row-actions">
+          <button class="btn">Edit</button>
+          <button class="btn">${t.enabled?"Disable":"Enable"}</button>
+          <button class="btn danger">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// ---- Option B: expandable prompt cell ----
+function renderB(){
+  document.getElementById("list-b").innerHTML = TASKS.map((t) => {
+    const h = human(t.cron);
+    const oneLine = (t.prompt||"").replace(/[#*`>]/g,"").replace(/\s+/g," ").trim();
+    return `<tr>
+      <td><b>${esc(t.id)}</b></td>
+      <td>${h?esc(h):`<code>${esc(t.cron)}</code>`}<div class="muted" style="font-size:12px">${esc(t.cron)}</div></td>
+      <td>${esc(t.skill||"—")}</td>
+      <td class="cell-prompt">
+        <div class="clip" onclick="this.parentNode.classList.toggle('open')">
+          <span class="toggle-arrow">▶</span><span class="txt">${esc(oneLine)}</span>
+        </div>
+        <div class="full">${md(t.prompt)}</div>
+      </td>
+      <td><span class="badge ${t.enabled?"on":"off"}">${t.enabled?"enabled":"disabled"}</span></td>
+      <td class="muted" style="font-size:12px">${fmtNext(t.next_fire)}</td>
+      <td>${esc(t.last_status||"—")}</td>
+      <td class="row-actions"><button class="btn">Edit</button><button class="btn danger">Delete</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// ---- option switcher ----
+document.querySelectorAll(".opt-switch button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".opt-switch button").forEach((x) => x.classList.remove("active"));
+  document.querySelectorAll(".opt").forEach((x) => x.classList.remove("active"));
+  b.classList.add("active");
+  document.getElementById("opt-"+b.dataset.opt).classList.add("active");
+}));
+
+renderA(); renderB();
+</script>
+</body>
+</html>

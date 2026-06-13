@@ -11,6 +11,9 @@
 <link id="cu-hljs-light" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github.min.css" />
 <link id="cu-hljs-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css" disabled />
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/highlight.min.js"></script>
+<!-- Human-readable cron for the Schedules panel. Vendored locally (served from
+     /static) so the loopback/Docker console works without CDN reachability. -->
+<script src="/static/cronstrue.min.js"></script>
 <!-- Shared chat-pane styles + console theme tokens (light default / dark). -->
 <link rel="stylesheet" href="/static/chat.css" />
 <style>
@@ -140,8 +143,34 @@
   .row-actions { display: flex; gap: 6px; white-space: nowrap; }
   .sched-preview { color: var(--muted); font-size: 12px; }
   .sched-preview.bad { color: var(--err); }
-  tr.editing td { background: rgba(139,148,158,.08); }
   .edit-form input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit; }
+
+  /* Schedules — accordion cards (collapsed header is scannable; body holds the
+     Markdown-rendered prompt and actions). */
+  .sched-list { display: flex; flex-direction: column; gap: 8px; }
+  .sched-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  .sched-head {
+    display: grid; grid-template-columns: 16px minmax(140px, 1fr) 2fr auto auto;
+    align-items: center; gap: 12px; padding: 9px 14px; cursor: pointer; user-select: none;
+  }
+  .sched-head:hover { background: rgba(139,148,158,.08); }
+  .sched-arrow { color: var(--muted); transition: transform .15s; }
+  .sched-card.open .sched-arrow { transform: rotate(90deg); }
+  .sched-id { font-weight: 600; }
+  .sched-id .skill-chip { font-weight: 400; font-size: 11px; color: var(--accent); margin-left: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; }
+  .sched-when { color: var(--fg); min-width: 0; }
+  .sched-when .sched-raw { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .sched-next { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+  .sched-body { display: none; padding: 12px 14px 14px 42px; border-top: 1px solid var(--border); }
+  .sched-card.open .sched-body { display: block; }
+  .sched-meta { display: flex; gap: 18px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+  .sched-meta b { color: var(--fg); font-weight: 600; }
+  .prompt-render { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 14px; margin-bottom: 12px; max-height: 240px; overflow: auto; }
+  .prompt-render :first-child { margin-top: 10px; }
+  .prompt-render pre { background: var(--panel); padding: 10px; border-radius: 6px; overflow: auto; }
+  .sched-body .edit-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .sched-body .edit-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  .sched-body .edit-form textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; resize: vertical; }
 </style>
 </head>
 <body>
@@ -368,6 +397,18 @@ async function openMemoryFile(relpath) {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Render a schedule prompt as Markdown using the same global `marked` the chat
+// and Memory panels already load; fall back to escaped text if it's unavailable.
+const md = (s) => (window.marked ? marked.parse(String(s ?? "")) : esc(s));
+
+// cron → human-readable English via the vendored cronstrue; null on any failure
+// (missing lib or unparseable expr) so callers can fall back to the raw cron.
+function humanCron(cron) {
+  if (!cron || !window.cronstrue) return null;
+  try { return cronstrue.toString(cron, { use24HourTimeFormat: false }); }
+  catch (e) { return null; }
+}
+
 // Minimal client-side 5-field cron evaluator — preview convenience ONLY.
 // The server (croniter) stays the source of truth for validation.
 function cronField(spec, min, max) {
@@ -427,44 +468,66 @@ async function loadSchedules() {
   try {
     const tasks = await apiGet("/api/schedules");
     if (!tasks.length) { el.innerHTML = '<span class="muted">No scheduled tasks.</span>'; return; }
-    const rows = tasks.map((t) => t.id === _schedEdit ? editRow(t) : viewRow(t)).join("");
-    el.innerHTML = `<table><tr><th>id</th><th>cron</th><th>skill</th><th>prompt</th><th>state</th><th>next fire</th><th>last status</th><th></th></tr>${rows}</table>`;
+    el.innerHTML = `<div class="sched-list">${tasks.map((t) => schedCard(t)).join("")}</div>`;
+    // Header toggles expand/collapse. Action buttons live in the body (a
+    // sibling of the header), so their clicks never reach this handler.
+    el.querySelectorAll(".sched-head").forEach((h) =>
+      h.addEventListener("click", () => h.parentNode.classList.toggle("open")));
     el.querySelectorAll("[data-act]").forEach((b) =>
       b.addEventListener("click", () => onSchedAction(b.dataset.act, b.dataset.id)));
+    if (_schedEdit) wireEditPreview();
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
-function viewRow(t) {
-  return `<tr>
-    <td>${esc(t.id)}</td>
-    <td><code>${esc(t.cron)}</code></td>
-    <td>${esc(t.skill)}</td>
-    <td>${esc(t.prompt)}</td>
-    <td><span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span></td>
-    <td>${t.next_fire ? new Date(t.next_fire).toLocaleString() : "—"}</td>
-    <td>${esc(t.last_status)}</td>
-    <td class="row-actions">
+// One collapsible card per schedule. The card being edited renders open with
+// the inline edit form in its body; all others render the read-only view.
+function schedCard(t) {
+  const editing = t.id === _schedEdit;
+  const human = humanCron(t.cron);
+  const when = human
+    ? `${esc(human)}<span class="sched-raw">${esc(t.cron)}</span>`
+    : `<code>${esc(t.cron)}</code>`;
+  const next = t.next_fire ? new Date(t.next_fire).toLocaleString() : "—";
+  const header = `<div class="sched-head">
+      <span class="sched-arrow">▶</span>
+      <span class="sched-id">${esc(t.id)}${t.skill ? `<span class="skill-chip">${esc(t.skill)}</span>` : ""}</span>
+      <span class="sched-when">${when}</span>
+      <span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span>
+      <span class="sched-next">next: ${esc(next)}</span>
+    </div>`;
+  return `<div class="sched-card${editing ? " open editing" : ""}">${header}${editing ? schedEditBody(t) : schedViewBody(t)}</div>`;
+}
+function schedViewBody(t) {
+  return `<div class="sched-body">
+    <div class="sched-meta">
+      <span>last status: <b>${esc(t.last_status || "—")}</b></span>
+      <span>skill: <b>${esc(t.skill || "—")}</b></span>
+    </div>
+    <div class="prompt-render">${md(t.prompt)}</div>
+    <div class="row-actions">
       <button class="btn" data-act="edit" data-id="${esc(t.id)}">Edit</button>
       <button class="btn" data-act="toggle" data-id="${esc(t.id)}">${t.enabled ? "Disable" : "Enable"}</button>
       <button class="btn danger" data-act="delete" data-id="${esc(t.id)}">Delete</button>
-    </td></tr>`;
+    </div>
+  </div>`;
 }
-function editRow(t) {
-  return `<tr class="editing"><td>${esc(t.id)}</td>
-    <td class="edit-form" colspan="6">
-      <input id="esched-cron" value="${esc(t.cron)}" placeholder="cron" />
-      <input id="esched-skill" value="${esc(t.skill)}" placeholder="skill (optional)" />
-      <input id="esched-prompt" value="${esc(t.prompt)}" placeholder="prompt" />
+function schedEditBody(t) {
+  return `<div class="sched-body">
+    <div class="edit-form">
+      <label>cron <input id="esched-cron" value="${esc(t.cron)}" placeholder="cron" /></label>
+      <label>skill <input id="esched-skill" value="${esc(t.skill || "")}" placeholder="skill (optional)" /></label>
+      <label>prompt <textarea id="esched-prompt" rows="6" placeholder="prompt">${esc(t.prompt || "")}</textarea></label>
       <span class="sched-preview" id="esched-preview"></span>
-    </td>
-    <td class="row-actions">
+    </div>
+    <div class="row-actions">
       <button class="btn" data-act="save" data-id="${esc(t.id)}">Save</button>
       <button class="btn" data-act="cancel" data-id="${esc(t.id)}">Cancel</button>
-    </td></tr>`;
+    </div>
+  </div>`;
 }
 async function onSchedAction(act, id) {
   const errAt = (msg) => alert(msg);
   try {
-    if (act === "edit") { _schedEdit = id; await loadSchedules(); wireEditPreview(); return; }
+    if (act === "edit") { _schedEdit = id; await loadSchedules(); return; }  // loadSchedules wires the preview
     if (act === "cancel") { _schedEdit = null; await loadSchedules(); return; }
     if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`); await loadSchedules(); return; }
     if (act === "delete") {
