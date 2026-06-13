@@ -112,7 +112,7 @@ Spawns a sub-agent (`Agent` instance) with a clean context window and a restrict
 
 ### Schedule (`schedule_tool.py`)
 
-CRUD operations on `context/schedules.json`. Supports `list`, `add`, `update`, `remove` actions. Cron expressions are validated via `croniter`. File writes are atomic (temp file + rename).
+CRUD operations on the SQLite schedule store `context/schedules.db`, delegating to `src/schedule_store/engine.py`. Supports `list`, `add`, `update`, `remove`, `toggle` actions. Validation (cron via `croniter`, unique `id`, and the persona skill allowlist) lives in the engine; each write is a scoped `UPDATE`/`INSERT`/`DELETE`, so it no longer races the scheduler's run-metadata writes the way the old JSON full-file rewrite did.
 
 ### Attach (`attach.py`)
 

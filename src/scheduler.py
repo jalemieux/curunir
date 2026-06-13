@@ -1,64 +1,34 @@
 # src/scheduler.py
-"""Async scheduler that fires scheduled tasks via agent.handle()."""
+"""Async scheduler that fires scheduled tasks via agent.handle().
+
+Reads due tasks from the SQLite schedule store (`context/schedules.db`) each
+tick and stamps run metadata back through scoped engine writes — so a user edit
+and the scheduler's bookkeeping never clobber each other."""
 
 import asyncio
-import json
 import logging
-import os
-import tempfile
 import time
 
 from croniter import croniter
 
+from src.schedule_store import db as sdb
+from src.schedule_store import engine
 from src.skills import load_skill
 
 logger = logging.getLogger(__name__)
 
 
-def _schedule_path(config):
-    return config.context_dir / "schedules.json"
+def _db(config) -> str:
+    return str(config.schedules_db)
 
 
 def _load_tasks(config) -> list[dict]:
-    path = _schedule_path(config)
-    if not path.exists():
+    try:
+        sdb.init_db(_db(config))
+        return engine.list_schedules(_db(config))
+    except Exception as e:  # noqa: BLE001 — a corrupt store must not kill the loop
+        logger.warning("Failed to read schedule store: %s", e)
         return []
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to read schedules.json: %s", e)
-        return []
-
-
-def _update_task_fields(config, task_id: str, fields: dict) -> None:
-    """Atomically merge ``fields`` into the task with id ``task_id``."""
-    path = _schedule_path(config)
-    try:
-        tasks = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError, FileNotFoundError):
-        return
-    for t in tasks:
-        if t["id"] == task_id:
-            t.update(fields)
-            break
-    else:
-        return  # task not found
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(tasks, f, indent=2)
-        os.rename(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def _update_last_run(config, task_id: str, timestamp: int) -> None:
-    """Back-compat wrapper around :func:`_update_task_fields`."""
-    _update_task_fields(config, task_id, {"last_run": timestamp})
 
 
 def _is_due(task: dict, now: float) -> bool:
@@ -83,23 +53,17 @@ async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -
             session_id=session_id,
             system_task_prompt=prompt,
         )
-        _update_task_fields(config, task_id, {
-            "last_run": int(time.time()),
-            "last_status": "success",
-            "last_error": None,
-        })
+        engine.mark_run(_db(config), task_id, int(time.time()), "success")
         logger.info("Scheduled task completed: %s", task_id)
     except Exception as e:
-        _update_task_fields(config, task_id, {
-            "last_status": "error",
-            "last_error": str(e)[:500],
-        })
+        engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
         logger.error("Scheduled task failed: %s — %s", task_id, e)
 
 
 async def _check_and_fire(agent) -> list[str]:
     """Check all tasks and fire any that are due. Returns list of fired task IDs."""
-    tasks = _load_tasks(agent.config)
+    config = agent.config
+    tasks = _load_tasks(config)
     fired = []
     now = time.time()
 
@@ -114,7 +78,9 @@ async def _check_and_fire(agent) -> list[str]:
 
         # Load skill content if specified
         if task.get("skill"):
-            skill_content = load_skill(task["skill"], agent.config.skill_dirs)
+            allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
+            skill_content = load_skill(task["skill"], config.skill_dirs,
+                                       allowlist=allowlist)
             if not skill_content.startswith("Skill not found"):
                 prompt = skill_content + "\n\n" + prompt
 
@@ -123,10 +89,10 @@ async def _check_and_fire(agent) -> list[str]:
 
         # Mark the attempt before dispatch so a slow or crashed task does not
         # re-fire on the next tick. last_run only advances on success.
-        _update_task_fields(agent.config, task_id, {"last_attempt_at": timestamp})
+        engine.mark_attempt(_db(config), task_id, timestamp)
 
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
-        asyncio.create_task(_run_task(agent, agent.config, task_id, session_id, prompt))
+        asyncio.create_task(_run_task(agent, config, task_id, session_id, prompt))
         fired.append(task_id)
 
     return fired

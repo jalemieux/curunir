@@ -51,7 +51,7 @@ docker buildx imagetools inspect ghcr.io/jalemieux/curunir:latest
    ├── .env                    # API keys, CURUNIR_TAG, etc.
    ├── secrets/                # OAuth tokens, service-account JSON
    ├── workspace/              # persisted workspace (curunir.log lives here)
-   └── context/                # identity.md, memory/, schedules.json
+   └── context/                # identity.md, memory/, schedules.db
    ```
 
    `docker-compose.yml` is the only file that needs to be kept in sync

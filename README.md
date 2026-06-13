@@ -49,7 +49,7 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
   † planned
 ```
 
-Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel. A scheduler reads cron tasks from `context/schedules.json` and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
+Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel. A scheduler reads cron tasks from the SQLite store `context/schedules.db` (a legacy `context/schedules.json` is auto-migrated on first boot) and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
 
 Ctrl-C while the agent is working triggers a cooperative cancel: the in-flight LLM call and current tool run to completion, any remaining tools in the batch are stubbed with `(interrupted)`, and the turn returns cleanly. Channels deliver the cancel out-of-band (the agent queue is blocked inside `handle()`).
 
@@ -69,7 +69,8 @@ curunir/
 │   ├── config.py           # AgentConfig dataclass
 │   ├── llm.py              # LLM interface (LiteLLM)
 │   ├── memory_extractor.py # Post-session memory extraction
-│   ├── scheduler.py        # Cron task runner (context/schedules.json)
+│   ├── scheduler.py        # Cron task runner (reads context/schedules.db)
+│   ├── schedule_store/      # SQLite schedule store (db.py + engine.py)
 │   ├── usage_store.py      # SQLite per-call token/cost ledger
 │   └── skills.py           # Skill manifest and loader
 ├── skills/                 # Drop-in skills (each a dir with SKILL.md)
@@ -80,7 +81,7 @@ curunir/
 │   ├── identity.md         # Assistant persona and instructions
 │   ├── memory/             # Persistent markdown memory store
 │   ├── input/              # Drop-zone for user-supplied input files
-│   └── schedules.json      # Cron tasks evaluated by scheduler
+│   └── schedules.db        # SQLite cron-task store evaluated by scheduler
 ├── workspace/              # Gitignored runtime volume — outputs the agent produces
 │   ├── generated/          # Generated deliverables (research reports, memos, PDFs)
 │   └── scratch/            # Transient/intermediate files (safe to delete)

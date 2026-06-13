@@ -262,7 +262,7 @@ _SCHEMAS = [
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["list", "add", "update", "remove"],
+                            "enum": ["list", "add", "update", "remove", "toggle"],
                             "description": "The operation to perform.",
                         },
                         "id": {
