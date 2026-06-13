@@ -28,18 +28,44 @@ bash: `python skills/balance-sheet/portfolio.py <cmd>`. Both front the same
 engine.
 
 - **Reads:** `networth`, `rollup`, `list`, `show`, `re_equity`, `pnl`,
-  `query` (read-only SELECT), `render`.
-- **Writes:** `add`, `add_liability`, `set`, `rm`, `import_rows`, `refresh`.
+  `query` (read-only SELECT), `render`, `trades`, `realized`.
+- **Writes:** `add`, `add_liability`, `set`, `rm`, `import_rows`, `refresh`,
+  `buy`, `sell`.
 
 Tool actions use the underscore names above. CLI subcommands match but
 hyphenate multi-word names — `re-equity`, `add-liability`, `import-rows`
 (the CLI `import-rows` takes `--rows-file <json>`).
+
+## Trades (the ledger)
+
+`buy` / `sell` are the **active, specific-lot trade ledger** over qty-bearing
+classes (equity, physical). They are the *entry point* for a position change:
+the engine moves the position for you — you do **not** also `set`/`rm` the lot.
+
+- **`buy`** (`ticker`, `qty`, `price`, `trade_date`; optional `class` (default
+  equity), `fees`, `account`, `label`, `note`) mints a **new lot** with
+  `cost_basis = qty·price + fees` and `acquired = trade_date`, then logs the
+  trade. Each buy is its own lot — never merge into an existing row.
+- **`sell`** (`asset_id` = the lot, `qty`, `price`, `trade_date`; optional
+  `fees`, `note`) draws the **named lot** down, computes realized P/L
+  (`(qty·price − fees) − qty·per-share-basis`), flags long/short-term, deletes
+  the lot at zero qty, and logs the trade. The sale is specific-lot: when the
+  owner sells, **ask which lot** (run `list --class equity` to show them) —
+  one sell draws from one lot. Errors if the lot lacks the shares or a cost
+  basis.
+- **`trades`** (optional `ticker`/`account`/`side`/`since`) is the history,
+  newest-first. **`realized`** (optional `ticker`/`account`/`year`) sums
+  realized P/L, split short- vs long-term.
 
 ## Disciplines (non-negotiable)
 
 - **Never hand-compute a total.** Run `networth` / `rollup` and report what it
   returns. A net worth you summed yourself is a bug.
 - **Never hand-edit the DB.** Use `add` / `set` / `rm`.
+- **Record trades through `buy` / `sell`, not `set`.** When the owner buys or
+  sells a qty-bearing holding, log it as a trade — the engine moves the
+  position *and* the realized P/L. A sell hand-applied with `set` silently
+  drops the realized gain and the audit trail.
 - **Capture cost basis + acquisition date on every asset.** `add` warns when
   they're missing — ask the owner for them rather than leaving them blank.
 - **Pick the right `class`** so the asset lands in the right bucket (physical
