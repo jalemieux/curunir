@@ -14,6 +14,7 @@ class AgentConfig:
     identity_file: Path = Path("./context/identity.md")
     context_dir: Path = Path("./context")
     usage_db: Path = Path("./context/usage.db")
+    schedules_db: Path = Path("./context/schedules.db")
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )

@@ -29,6 +29,8 @@ from onboarding.bootstrap import bootstrap_context
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
+from src.schedule_store import db as schedule_db
+from src.schedule_store import engine as schedule_engine
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
@@ -663,6 +665,19 @@ async def main():
         )
 
     usage_store = UsageStore(config.usage_db)
+
+    # Initialize the SQLite schedule store and migrate any legacy
+    # context/schedules.json once (renames it to .migrated; idempotent).
+    schedule_db.init_db(str(config.schedules_db))
+    legacy_json = Path(config.context_dir) / "schedules.json"
+    try:
+        migrated = schedule_engine.migrate_from_json(str(config.schedules_db), legacy_json)
+        if migrated:
+            logger.info("Migrated %d schedule(s) from %s to %s",
+                        migrated, legacy_json, config.schedules_db)
+    except Exception as e:  # noqa: BLE001 — never block boot on migration
+        logger.error("Schedule migration failed: %s", e)
+
     agent = Agent(config, usage_store=usage_store)
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
