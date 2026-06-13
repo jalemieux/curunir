@@ -14,10 +14,6 @@ services:
         generateValue: true
       - key: PORTAL_BASE_URL
         sync: false   # set per-environment in dashboard
-      - key: EMAIL_API_KEY
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
       - key: ADMIN_EMAILS
         sync: false
 

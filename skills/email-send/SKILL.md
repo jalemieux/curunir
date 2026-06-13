@@ -5,147 +5,104 @@ description: "Send a NEW outbound email to a recipient who is not already in the
 
 # Sending Email
 
-Send emails via the deadsimple.email API using `src.channels.deadsimple` through bash. The sending inbox and API key come from environment variables (`DEADSIMPLE_INBOX_ID`, `DEADSIMPLE_API_KEY`), so snippets read them at runtime.
+Send a new outbound email with the `email_send.py` CLI in this skill directory.
+It wraps the deadsimple.email API; the sending inbox, API key, and recipient
+allowlist all come from the environment (`DEADSIMPLE_INBOX_ID`,
+`DEADSIMPLE_API_KEY`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_ALLOWED_SENDERS`), so you
+never pass or hardcode credentials.
 
-## Recipient allowlist
-
-When `EMAIL_RESTRICT_OUTBOUND` is `true` (the default), `send_email` will **raise `DeadsimpleError`** if any `to`/`cc`/`bcc` address isn't in `EMAIL_ALLOWED_SENDERS`. In practice this means you can only email the user. Don't try to route around it — if a send is blocked, that's intentional; report it and stop. To genuinely lift the restriction the operator sets `EMAIL_RESTRICT_OUTBOUND=false` in the environment.
+Run it from the repo root via the `bash` tool. On success it prints
+`{"sent": true, "id": "..."}`; on failure it prints `{"error": ..., "hint": ...}`
+and exits non-zero.
 
 ## When NOT to use this skill
 
-If the current conversation arrived over the email channel (the user message begins with `[channel: email, ...]`), the email channel will automatically send your final assistant message as a reply in that thread. Do **not** also call `send_email` from this skill — you will send two emails. Just write your reply as your normal final response; the channel delivers it.
+If the current conversation arrived over the email channel (the user message
+begins with `[channel: email, ...]`), the email channel **automatically** sends
+your final assistant message as the reply in that thread. Do **not** also run
+this CLI — you would send two emails. Just write your reply as your normal final
+response.
 
 Use this skill only for:
 - Sending a new email to a different recipient (not the inbound sender)
-- Sending outbound email from a non-email session (CLI, scheduled task)
+- Sending outbound email from a non-email session (CLI, local UI, scheduled task)
 
-## Basic Send
+## Recipient allowlist
+
+When `EMAIL_RESTRICT_OUTBOUND` is `true` (the default), a send to any address
+not in `EMAIL_ALLOWED_SENDERS` fails with an error (exit 1). In practice you can
+only email the user. Don't try to route around it — if a send is blocked, that's
+intentional; report it and stop. Lifting the restriction is an operator action
+(`EMAIL_RESTRICT_OUTBOUND=false`).
+
+## Basic send
 
 ```bash
-python3 -c "
-import asyncio
-from src.channels.deadsimple import build_client_from_env
-
-async def main():
-    client = build_client_from_env()
-    try:
-        await client.send_email(
-            to='recipient@example.com',
-            subject='Subject line',
-            text_body='Plain text body here',
-        )
-        print('Sent.')
-    finally:
-        await client.aclose()
-
-asyncio.run(main())
-"
+python skills/email-send/email_send.py send \
+    --to recipient@example.com \
+    --subject "Subject line" \
+    --body "Plain text body here"
 ```
 
-## HTML Body
+## Long body from a file (preferred for reports / long-form)
 
-Provide both plain text and HTML — the recipient's client chooses which to display:
+Write the body to a temp file first — this avoids shell-quoting problems with
+long or multi-line content.
 
 ```bash
-python3 -c "
-import asyncio
-from src.channels.deadsimple import build_client_from_env
-
-async def main():
-    client = build_client_from_env()
-    try:
-        await client.send_email(
-            to='recipient@example.com',
-            subject='Subject line',
-            text_body='Plain text fallback',
-            html_body='<h1>Hello</h1><p>Rich content here</p>',
-        )
-        print('Sent.')
-    finally:
-        await client.aclose()
-
-asyncio.run(main())
-"
+# (write the content to /tmp/email-body.txt first, e.g. with the write tool)
+python skills/email-send/email_send.py send \
+    --to recipient@example.com \
+    --subject "Subject line" \
+    --body-file /tmp/email-body.txt
 ```
 
-## Long Body from File
+## HTML body
 
-For long content, write to a temp file first, then read it in:
+Provide a plain-text body plus an HTML file; the recipient's client chooses which
+to display. `--body`/`--body-file` is the text part, `--html-file` the HTML part.
 
 ```bash
-python3 -c "
-import asyncio
-from src.channels.deadsimple import build_client_from_env
-
-async def main():
-    client = build_client_from_env()
-    try:
-        with open('/tmp/email-body.txt') as f:
-            body = f.read()
-        await client.send_email(
-            to='recipient@example.com',
-            subject='Subject line',
-            text_body=body,
-        )
-        print('Sent.')
-    finally:
-        await client.aclose()
-
-asyncio.run(main())
-"
+python skills/email-send/email_send.py send \
+    --to recipient@example.com \
+    --subject "Subject line" \
+    --body-file /tmp/email-body.txt \
+    --html-file /tmp/email-body.html
 ```
 
-## Multiple Recipients, CC, BCC
+## Multiple recipients, CC, BCC
+
+`--to`, `--cc`, and `--bcc` are each repeatable and also accept comma-separated
+values.
 
 ```bash
-python3 -c "
-import asyncio
-from src.channels.deadsimple import build_client_from_env
-
-async def main():
-    client = build_client_from_env()
-    try:
-        await client.send_email(
-            to=['one@example.com', 'two@example.com'],
-            cc=['cc@example.com'],
-            bcc=['bcc@example.com'],
-            subject='Subject line',
-            text_body='Content',
-        )
-        print('Sent.')
-    finally:
-        await client.aclose()
-
-asyncio.run(main())
-"
+python skills/email-send/email_send.py send \
+    --to one@example.com --to two@example.com \
+    --cc cc@example.com \
+    --bcc bcc@example.com \
+    --subject "Subject line" \
+    --body "Content"
 ```
 
 ## Attachments
 
+`--attach` is repeatable.
+
 ```bash
-python3 -c "
-import asyncio
-from src.channels.deadsimple import build_client_from_env
-
-async def main():
-    client = build_client_from_env()
-    try:
-        await client.send_email(
-            to='recipient@example.com',
-            subject='Report attached',
-            text_body='See attached.',
-            attachment_paths=['/path/to/report.pdf', '/path/to/data.csv'],
-        )
-        print('Sent.')
-    finally:
-        await client.aclose()
-
-asyncio.run(main())
-"
+python skills/email-send/email_send.py send \
+    --to recipient@example.com \
+    --subject "Report attached" \
+    --body "See attached." \
+    --attach /path/to/report.pdf --attach /path/to/data.csv
 ```
 
 ## Tips
 
-- Always let the script read env vars at runtime — never hardcode credentials or addresses.
-- For reports or long-form content, write the body to a temp file and read it in to avoid shell quoting issues.
-- Replies inside an email-channel thread are handled automatically; use this skill only for new outbound mail.
+- Run from the repo root (`/app` in the container) so the script can import the
+  email client.
+- For reports or long-form content, write the body to a temp file and pass
+  `--body-file` to avoid shell quoting issues.
+- Replies inside an email-channel thread are handled automatically; use this
+  skill only for new outbound mail.
+- The CLI never hardcodes credentials — it reads them from the environment at
+  runtime.
