@@ -42,6 +42,28 @@ CREATE VIEW IF NOT EXISTS v_rollup_by_class AS
 CREATE VIEW IF NOT EXISTS v_collectibles_pnl AS
   SELECT label, cost_basis, value, value - cost_basis AS unrealized, acquired
   FROM assets WHERE class = 'collectible';
+
+-- Trade ledger: append-only event log for qty-bearing positions. A buy mints a
+-- new asset lot; a sell draws down a named lot and records realized P/L. The
+-- asset_id is a soft reference (no FK) so a sell that closes a lot can delete
+-- the asset row while the trade survives as history.
+CREATE TABLE IF NOT EXISTS trades (
+  id              TEXT PRIMARY KEY,
+  trade_date      TEXT NOT NULL,
+  side            TEXT NOT NULL,
+  ticker          TEXT NOT NULL,
+  qty             REAL NOT NULL,
+  price           REAL NOT NULL,
+  fees            REAL,
+  asset_id        TEXT,
+  account         TEXT,
+  cost_basis_sold REAL,
+  proceeds        REAL,
+  realized_pnl    REAL,
+  long_term       INTEGER,
+  note            TEXT,
+  created_at      TEXT
+);
 """
 
 

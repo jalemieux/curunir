@@ -330,6 +330,181 @@ def import_rows(path: str, rows: list[dict], account: str | None = None,
             "self_check": self_check, "warnings": warnings}
 
 
+# --- trade ledger -----------------------------------------------------------
+
+TRADABLE = {"equity", "physical"}  # qty-bearing classes the ledger accepts
+_TRADE_COLUMNS = ("id", "trade_date", "side", "ticker", "qty", "price", "fees",
+                  "asset_id", "account", "cost_basis_sold", "proceeds",
+                  "realized_pnl", "long_term", "note", "created_at")
+
+
+def _insert_trade(con: sqlite3.Connection, rec: dict) -> str:
+    """Insert one trade row with a deduped slug id. Caller commits."""
+    base = _slug(rec.get("id") or
+                 f"t-{rec['trade_date']}-{rec['ticker']}-{rec['side']}")
+    new_id, i = base, 2
+    existing = {r["id"] for r in con.execute("SELECT id FROM trades")}
+    while new_id in existing:
+        new_id, i = f"{base}-{i}", i + 1
+    rec = {**rec, "id": new_id,
+           "created_at": rec.get("created_at") or date.today().isoformat()}
+    con.execute(
+        f"INSERT INTO trades ({','.join(_TRADE_COLUMNS)}) "
+        f"VALUES ({','.join('?' for _ in _TRADE_COLUMNS)})",
+        tuple(rec.get(c) for c in _TRADE_COLUMNS))
+    return new_id
+
+
+def record_buy(path: str, fields: dict) -> dict:
+    """Record a buy: mint a NEW asset lot and append a buy trade. `fields`:
+    ticker, qty, price, trade_date (required); class (default equity), fees,
+    account, label, note (optional). Cost basis = qty*price + fees."""
+    for k in ("ticker", "qty", "price", "trade_date"):
+        if fields.get(k) in (None, ""):
+            raise ValueError(f"missing required trade field: {k}")
+    cls = fields.get("class", "equity")
+    if cls not in TRADABLE:
+        raise ValueError(f"class {cls!r} is not tradable; "
+                         f"the ledger handles qty-bearing classes only: "
+                         f"{sorted(TRADABLE)}")
+    qty = float(fields["qty"]); price = float(fields["price"])
+    fees = float(fields.get("fees") or 0.0)
+    if qty <= 0 or price < 0:
+        raise ValueError("qty must be > 0 and price >= 0")
+    trade_date = fields["trade_date"]
+    ticker = fields["ticker"]
+    basis = round(qty * price + fees, 2)
+    lot = add_asset(path, {
+        "class": cls,
+        "label": fields.get("label") or f"{ticker} {trade_date}",
+        "ticker": ticker, "qty": qty, "avg_cost": price,
+        "cost_basis": basis, "value": round(qty * price, 2),
+        "value_asof": trade_date, "acquired": trade_date,
+        "account": fields.get("account"),
+    })
+    con = pdb.connect(path)
+    try:
+        trade_id = _insert_trade(con, {
+            "trade_date": trade_date, "side": "buy", "ticker": ticker,
+            "qty": qty, "price": price, "fees": fees, "asset_id": lot["id"],
+            "account": fields.get("account"), "note": fields.get("note"),
+        })
+        con.commit()
+    finally:
+        con.close()
+    return {"trade_id": trade_id, "asset_id": lot["id"],
+            "lot": show(path, lot["id"]), "warnings": lot["warnings"]}
+
+
+def record_sell(path: str, fields: dict) -> dict:
+    """Record a sell against a named lot (specific-lot): compute realized P/L,
+    draw the lot down (delete at zero qty), and append a sell trade. `fields`:
+    asset_id, qty, price, trade_date (required); fees, note (optional)."""
+    for k in ("asset_id", "qty", "price", "trade_date"):
+        if fields.get(k) in (None, ""):
+            raise ValueError(f"missing required trade field: {k}")
+    lot = show(path, fields["asset_id"])  # raises KeyError if absent
+    if lot["class"] not in TRADABLE:
+        raise ValueError(f"lot {lot['id']!r} is class {lot['class']!r}, not "
+                         f"tradable; the ledger handles {sorted(TRADABLE)} only")
+    if lot.get("qty") in (None, ""):
+        raise ValueError(f"lot {lot['id']!r} has no qty — cannot sell shares")
+    if lot.get("cost_basis") in (None, ""):
+        raise ValueError(f"lot {lot['id']!r} has no cost_basis — set one with "
+                         f"`set` before recording a sell (realized P/L needs it)")
+
+    sold = float(fields["qty"]); price = float(fields["price"])
+    fees = float(fields.get("fees") or 0.0)
+    lot_qty = float(lot["qty"])
+    if sold <= 0:
+        raise ValueError("qty must be > 0")
+    if sold > lot_qty:
+        raise ValueError(f"cannot sell {sold} shares from lot {lot['id']!r} "
+                         f"holding {lot_qty} — name a different lot or split the sell")
+
+    trade_date = fields["trade_date"]
+    per_share_basis = float(lot["cost_basis"]) / lot_qty
+    cost_basis_sold = round(sold * per_share_basis, 2)
+    proceeds = round(sold * price - fees, 2)
+    realized = round(proceeds - cost_basis_sold, 2)
+    long_term = None
+    if lot.get("acquired"):
+        long_term = _years_between(lot["acquired"], trade_date) >= 1.0
+
+    remaining = round(lot_qty - sold, 8)
+    lot_closed = remaining == 0
+    if lot_closed:
+        remove_asset(path, lot["id"])
+    else:
+        update_asset(path, lot["id"], {
+            "qty": remaining,
+            "cost_basis": round(float(lot["cost_basis"]) - cost_basis_sold, 2),
+            "value": round(remaining * price, 2),
+            "value_asof": trade_date,
+        })
+
+    con = pdb.connect(path)
+    try:
+        trade_id = _insert_trade(con, {
+            "trade_date": trade_date, "side": "sell", "ticker": lot["ticker"],
+            "qty": sold, "price": price, "fees": fees, "asset_id": lot["id"],
+            "account": lot.get("account"), "cost_basis_sold": cost_basis_sold,
+            "proceeds": proceeds, "realized_pnl": realized,
+            "long_term": (1 if long_term else 0) if long_term is not None else None,
+            "note": fields.get("note"),
+        })
+        con.commit()
+    finally:
+        con.close()
+    return {"trade_id": trade_id, "realized_pnl": realized,
+            "cost_basis_sold": cost_basis_sold, "proceeds": proceeds,
+            "long_term": long_term, "remaining_qty": remaining,
+            "lot_closed": lot_closed}
+
+
+def trade_history(path: str, ticker: str | None = None, account: str | None = None,
+                  side: str | None = None, since: str | None = None) -> list[dict]:
+    """Filtered trade ledger, newest-first."""
+    sql = "SELECT * FROM trades"
+    clauses, params = [], []
+    if ticker:
+        clauses.append("ticker = ?"); params.append(ticker)
+    if account:
+        clauses.append("account = ?"); params.append(account)
+    if side:
+        clauses.append("side = ?"); params.append(side)
+    if since:
+        clauses.append("trade_date >= ?"); params.append(since)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY trade_date DESC, created_at DESC, id DESC"
+    con = pdb.connect(path)
+    try:
+        return [dict(r) for r in con.execute(sql, params)]
+    finally:
+        con.close()
+
+
+def realized_pnl(path: str, ticker: str | None = None, account: str | None = None,
+                 year: int | None = None) -> dict:
+    """Realized P/L over sell trades, split short/long-term. Filterable by
+    ticker, account, and calendar year (of trade_date)."""
+    short = long = 0.0
+    trades = []
+    for t in trade_history(path, ticker=ticker, account=account, side="sell"):
+        if year is not None and not str(t["trade_date"]).startswith(str(year)):
+            continue
+        r = t.get("realized_pnl") or 0.0
+        if t.get("long_term"):
+            long += r
+        else:
+            short += r
+        trades.append(t)
+    return {"short_term": round(short, 2), "long_term": round(long, 2),
+            "total": round(short + long, 2), "count": len(trades),
+            "trades": trades}
+
+
 def _yfin_quote(ticker: str) -> float:
     """Default quoter: shell out to the yfinance CLI. Returns the last price."""
     import os
