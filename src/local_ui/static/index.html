@@ -44,8 +44,56 @@
   .tab { display: none; height: 100%; overflow: auto; padding: 16px; }
   .tab.active { display: block; }
   .tab#tab-chat { padding: 0; display: none; }
-  .tab#tab-chat.active { display: block; }
-  #chat-root { height: 100%; }
+  .tab#tab-chat.active { display: flex; }
+  #chat-root { height: 100%; flex: 1; min-width: 0; }
+
+  /* Conversation sidebar — scoped to the Chat tab; other tabs stay full-width.
+     Tokens (--bg/--panel/--border/--muted/--accent/--fg) come from chat.css. */
+  .conv-sidebar {
+    width: 260px; flex-shrink: 0; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border);
+  }
+  .conv-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: var(--muted); flex-shrink: 0;
+  }
+  .conv-new {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer; text-transform: none; letter-spacing: 0;
+  }
+  .conv-new:hover { filter: brightness(1.08); }
+  .conv-list { flex: 1; overflow-y: auto; }
+  .conv-row {
+    position: relative; padding: 9px 12px; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .conv-row:hover { background: var(--bg); }
+  .conv-row.active { background: var(--bg); box-shadow: inset 2px 0 0 var(--accent); }
+  .conv-title {
+    font-size: 13px; font-weight: 600; color: var(--fg);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 18px;
+  }
+  .conv-meta { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .conv-channel {
+    font-size: 10px; padding: 0 5px; border-radius: 8px;
+    background: rgba(139,148,158,.18); color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .conv-del {
+    position: absolute; right: 6px; top: 7px;
+    width: 18px; height: 18px; padding: 0; line-height: 1;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--muted); font-size: 13px; opacity: 0;
+  }
+  .conv-row:hover .conv-del { opacity: 0.55; }
+  .conv-del:hover { opacity: 1; color: var(--accent); }
+  .conv-empty { padding: 14px; font-size: 12px; color: var(--muted); }
 
   /* Read panels */
   h2 { font-size: 16px; margin: 0 0 12px; }
@@ -108,7 +156,16 @@
   </nav>
 </header>
 <main>
-  <div class="tab active" id="tab-chat"><div id="chat-root"></div></div>
+  <div class="tab active" id="tab-chat">
+    <aside class="conv-sidebar">
+      <div class="conv-head">
+        <span>Conversations</span>
+        <button class="conv-new" id="conv-new" title="Start a new conversation">+ New</button>
+      </div>
+      <div class="conv-list" id="conversation-list"></div>
+    </aside>
+    <div id="chat-root"></div>
+  </div>
   <div class="tab" id="tab-usage"><h2>Token Usage &amp; Cost</h2>
     <div class="controls">
       <label>Window
@@ -155,7 +212,20 @@ import { createChat } from "/static/chat.js";
 // The operator opens http://host:port/?token=XXX. We read it once and reuse
 // it for every /api and /ws call. (On loopback this is just the pairing gate.)
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
-const SESSION_ID = "local";
+
+// === Conversation state (multi-conversation) ===
+// The active session id is read live by chat.js via getSessionId(). On first
+// load after the multi-conversation upgrade there's no stored id, so we mint a
+// fresh one — opening a new conversation rather than the legacy "local" slot,
+// which stays resumable from the sidebar.
+const SESSION_KEY = "curunir-local-session-id";
+let activeSessionId = localStorage.getItem(SESSION_KEY);
+if (!activeSessionId) {
+  activeSessionId = crypto.randomUUID();
+  localStorage.setItem(SESSION_KEY, activeSessionId);
+}
+let conversations = [];  // latest conversations_snapshot, drives the sidebar
+const conversationListEl = document.getElementById("conversation-list");
 
 function apiUrl(path, params = {}) {
   const u = new URL(path, location.origin);
@@ -465,10 +535,104 @@ const conn = createConnection({
 chat = createChat({
   container: document.getElementById("chat-root"),
   connection: conn,
-  getSessionId: () => SESSION_ID,
+  getSessionId: () => activeSessionId,
   features: { attachments: true, skills: true, theme: true, emptyState: true },
-  hooks: {},
+  hooks: {
+    // Socket just opened — pull the conversation list for the sidebar.
+    onSocketOpen: () => requestConversations(),
+    // chat.js routes frames for other sessions here; we only care about the
+    // conversation list snapshot.
+    onUnhandledFrame: (msg) => {
+      if (msg && msg.type === "conversations_snapshot") {
+        conversations = msg.conversations || [];
+        renderConversations();
+      }
+    },
+    // A turn just finished — re-pull so a brand-new conversation joins the
+    // list (and titles/timestamps refresh) after its first reply.
+    onTurnFinal: () => requestConversations(),
+  },
 });
+
+// === Conversation sidebar ===
+function requestConversations() {
+  conn.send({ command: "conversations_request", session_id: activeSessionId });
+}
+
+function relativeTime(iso) {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  const d = Math.floor(h / 24);
+  if (d < 7) return d + "d ago";
+  return new Date(iso).toLocaleDateString();
+}
+
+function renderConversations() {
+  conversationListEl.innerHTML = "";
+  if (!conversations.length) {
+    const empty = document.createElement("div");
+    empty.className = "conv-empty";
+    empty.textContent = "No conversations yet.";
+    conversationListEl.appendChild(empty);
+    return;
+  }
+  for (const c of conversations) {
+    const row = document.createElement("div");
+    row.className = "conv-row" + (c.session_id === activeSessionId ? " active" : "");
+    row.innerHTML =
+      '<div class="conv-title"></div>' +
+      '<div class="conv-meta"><span class="conv-channel"></span><span class="conv-time"></span></div>' +
+      '<button class="conv-del" title="Delete conversation" aria-label="Delete conversation">✕</button>';
+    row.querySelector(".conv-title").textContent = c.title || "New conversation";
+    row.querySelector(".conv-channel").textContent = c.channel || "—";
+    row.querySelector(".conv-time").textContent = relativeTime(c.updated_at);
+    row.addEventListener("click", () => switchConversation(c.session_id));
+    row.querySelector(".conv-del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteConversation(c.session_id);
+    });
+    conversationListEl.appendChild(row);
+  }
+}
+
+function switchConversation(id) {
+  if (id === activeSessionId) return;
+  activeSessionId = id;
+  localStorage.setItem(SESSION_KEY, activeSessionId);
+  // rebind() clears the pane and re-bootstraps (history + skills) for the
+  // session getSessionId() now returns.
+  chat.rebind();
+  renderConversations();
+}
+
+function startNew() {
+  // Mint a fresh id — no `clear`, so the prior conversation is kept and stays
+  // in the sidebar. It joins the list once its first turn completes.
+  activeSessionId = crypto.randomUUID();
+  localStorage.setItem(SESSION_KEY, activeSessionId);
+  chat.rebind();
+  renderConversations();
+}
+
+function deleteConversation(id) {
+  if (!confirm("Delete this conversation?")) return;
+  // `clear` is the server-side delete: it extracts the conversation into
+  // memory, then removes the transcript (parity with the portal).
+  conn.send({ content: "", command: "clear", session_id: id });
+  conversations = conversations.filter((c) => c.session_id !== id);
+  renderConversations();
+  // Deleting the conversation you're in drops you into a fresh one.
+  if (id === activeSessionId) startNew();
+}
+
+document.getElementById("conv-new").addEventListener("click", startNew);
 </script>
 </body>
 </html>

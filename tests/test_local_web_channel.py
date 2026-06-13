@@ -412,6 +412,102 @@ async def test_inbound_skills_request_responds_with_snapshot(config):
     assert sent[0]["skills"] == [{"name": "demo"}]
 
 
+# --- conversation sidebar (multi-conversation) -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_inbound_conversations_request_responds_with_snapshot(config):
+    convs = [
+        {"session_id": "cli", "channel": "ws", "title": "First"},
+        {"session_id": "portal", "channel": "portal", "title": "Second"},
+    ]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        conversations_provider=lambda: convs,
+    )
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame(
+        {"command": "conversations_request"}, respond=respond
+    )
+    assert sent[0]["type"] == "conversations_snapshot"
+    assert sent[0]["conversations"] == convs
+
+
+@pytest.mark.asyncio
+async def test_inbound_frame_uses_explicit_session_id(channel):
+    await channel._handle_inbound_frame(
+        {"content": "hi", "session_id": "abc-123"}
+    )
+    msg = channel.in_queue.get_nowait()
+    assert msg.session_id == "abc-123"
+    assert msg.content == "hi"
+
+
+@pytest.mark.asyncio
+async def test_inbound_frame_defaults_to_local_session_id(channel):
+    await channel._handle_inbound_frame({"content": "hi"})
+    msg = channel.in_queue.get_nowait()
+    assert msg.session_id == "local"
+
+
+@pytest.mark.asyncio
+async def test_inbound_clear_with_session_id_enqueues_clear(channel):
+    await channel._handle_inbound_frame(
+        {"command": "clear", "session_id": "abc-123", "content": ""}
+    )
+    msg = channel.in_queue.get_nowait()
+    assert msg.command == "clear"
+    assert msg.session_id == "abc-123"
+
+
+@pytest.mark.asyncio
+async def test_inbound_interrupt_cancels_explicit_session(channel):
+    await channel._handle_inbound_frame(
+        {"command": "interrupt", "session_id": "abc-123"}
+    )
+    channel.cancel_session.assert_called_once_with("abc-123")
+    assert channel.in_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_history_snapshot_echoes_requested_session_id(config):
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        history_provider=lambda sid: [{"role": "user", "content": sid}],
+    )
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame(
+        {"command": "history_request", "session_id": "abc-123"}, respond=respond
+    )
+    assert sent[0]["session_id"] == "abc-123"
+    assert sent[0]["messages"] == [{"role": "user", "content": "abc-123"}]
+
+
+@pytest.mark.asyncio
+async def test_skills_snapshot_echoes_requested_session_id(config):
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        skills_provider=lambda: [{"name": "demo"}],
+    )
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame(
+        {"command": "skills_request", "session_id": "abc-123"}, respond=respond
+    )
+    assert sent[0]["session_id"] == "abc-123"
+
+
 # --- send() ----------------------------------------------------------------
 
 
