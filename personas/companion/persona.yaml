@@ -1,0 +1,17 @@
+name: companion
+description: A direct, accountability-focused life coach, therapist-style listener, and confidant — conversation-first with memory-driven continuity, grounding technique suggestions in real research.
+
+# ABSOLUTE skill allowlist. Only these register for this deployment.
+skills:
+  - identity
+  - onboarding
+  - dreaming
+  # Grounding technique suggestions in real research
+  - deep-research
+  - web-search
+
+# Key NAMES only — documentation + soft startup warning. The operator
+# supplies the values via the container environment / .env. See
+# .env.companion.example and README.md.
+keys:
+  - BRAVE_API_KEY   # web-search backend (deep-research, web-search)

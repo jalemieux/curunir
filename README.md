@@ -293,9 +293,12 @@ prompt. Select one with `CURUNIR_PERSONA=<name>`. Unset falls back to
 `personas/default/`, which ships the full skill catalog and the baseline
 behavior prompt — so unset is itself a persona, not a special case.
 
-The shipped specialty example is `finance` — a local, private personal-finance
-assistant that curates skills down to analysis/memo/data tools and adds
-domain + guardrails prompts. See `personas/finance/README.md`.
+Shipped specialty examples include `finance` — a local, private
+personal-finance assistant that curates skills down to analysis/memo/data tools
+(see `personas/finance/README.md`) — and `companion`, a direct,
+accountability-focused life coach / confidant with memory-driven continuity
+(see `personas/companion/README.md`). Each adds its own domain + guardrails
+prompts on top of `context/identity.md`.
 
 ```bash
 cp personas/finance/.env.finance.example .env
