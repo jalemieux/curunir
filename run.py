@@ -698,6 +698,7 @@ async def main():
         ws_allowed_origins = None  # channel default (localhost set)
     ws = WebSocketChannel(
         in_queue, host=ws_host, port=ws_port, model=config.model,
+        persona=persona.name,
         cancel_session=agent.request_cancel,
         allowed_origins=ws_allowed_origins,
         pairing_token=ws_pairing_token,

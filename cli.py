@@ -374,8 +374,14 @@ async def run(host: str, port: int, console: Console | None = None,
                     sid = data.get("session_id")
                     if isinstance(sid, str) and sid:
                         session_id = sid
+                    info_parts = []
                     if data.get("model"):
-                        console.print(f"[dim]model: {data['model']}[/dim]\n")
+                        info_parts.append(f"[dim]model: {data['model']}[/dim]")
+                    if data.get("persona"):
+                        # Amber tag mirrors the web UI's persona label.
+                        info_parts.append(f"[#c4923a]persona: {data['persona']}[/#c4923a]")
+                    if info_parts:
+                        console.print("  ·  ".join(info_parts) + "\n")
                     ready.set()
                     continue
 
