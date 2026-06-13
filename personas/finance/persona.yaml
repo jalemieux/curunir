@@ -22,6 +22,9 @@ skills:
   - reddit-research
   - youtube-transcript
   - podcast-ingest
+  # Outbound delivery — the digest skill's deliver step loads this to email
+  # the result; scheduled digests can't reach the user without it.
+  - email-send
   # Web-search backends the research skills depend on
   - web-search
   - xai-search
