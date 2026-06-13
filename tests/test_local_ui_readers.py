@@ -12,6 +12,8 @@ from src.config import AgentConfig
 from src.local_ui import readers
 from src.portfolio import db as pdb
 from src.portfolio import engine
+from src.schedule_store import db as sdb
+from src.schedule_store import engine as sengine
 from src.usage_store import UsageRecord, UsageStore
 
 
@@ -24,6 +26,7 @@ def config(tmp_path):
         identity_file=ctx / "identity.md",
         context_dir=ctx,
         usage_db=ctx / "usage.db",
+        schedules_db=ctx / "schedules.db",
         portfolio_db=str(ctx / "memory" / "portfolio.db"),
     )
 
@@ -117,11 +120,11 @@ def test_portfolio_overview_missing_db(config):
 
 
 def test_schedules_lists_tasks_with_next_fire(config):
-    import json
-    (config.context_dir / "schedules.json").write_text(json.dumps([
-        {"id": "daily", "cron": "0 7 * * *", "prompt": "go", "enabled": True},
-        {"id": "off", "cron": "0 8 * * *", "prompt": "no", "enabled": False},
-    ]))
+    sdb.init_db(str(config.schedules_db))
+    sengine.create(str(config.schedules_db),
+                   {"id": "daily", "cron": "0 7 * * *", "prompt": "go", "enabled": True})
+    sengine.create(str(config.schedules_db),
+                   {"id": "off", "cron": "0 8 * * *", "prompt": "no", "enabled": False})
     out = readers.schedules(config)
     assert len(out) == 2
     daily = next(t for t in out if t["id"] == "daily")

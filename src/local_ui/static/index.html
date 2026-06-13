@@ -76,6 +76,24 @@
   .mem-tree .file:hover { text-decoration: underline; }
   .mem-tree .dir { color: var(--fg); font-weight: 600; }
   .mem-view { flex: 1; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+
+  /* Schedules editor */
+  button.btn {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer;
+  }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  button.btn.danger:hover { border-color: var(--err); color: var(--err); }
+  .sched-new { margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+  .sched-new > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+  .sched-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; }
+  .sched-form input { flex: 1; min-width: 120px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .sched-form input.prompt { flex-basis: 100%; }
+  .row-actions { display: flex; gap: 6px; white-space: nowrap; }
+  .sched-preview { color: var(--muted); font-size: 12px; }
+  .sched-preview.bad { color: var(--err); }
+  tr.editing td { background: rgba(139,148,158,.08); }
+  .edit-form input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit; }
 </style>
 </head>
 <body>
@@ -112,7 +130,21 @@
       <div class="mem-view" id="memory-view"><span class="muted">Select a file.</span></div>
     </div>
   </div>
-  <div class="tab" id="tab-schedules"><h2>Scheduled Tasks</h2><div id="schedules-body"></div></div>
+  <div class="tab" id="tab-schedules"><h2>Scheduled Tasks</h2>
+    <details class="sched-new">
+      <summary>+ New schedule</summary>
+      <div class="sched-form">
+        <input id="nsched-id" placeholder="id" />
+        <input id="nsched-cron" placeholder="cron (e.g. 0 9 * * *)" />
+        <input id="nsched-skill" placeholder="skill (optional)" />
+        <input id="nsched-prompt" class="prompt" placeholder="prompt" />
+        <button class="btn" id="nsched-create">Create</button>
+        <span class="sched-preview" id="nsched-preview"></span>
+        <span class="err" id="nsched-err"></span>
+      </div>
+    </details>
+    <div id="schedules-body"></div>
+  </div>
 </main>
 
 <script type="module">
@@ -133,6 +165,15 @@ function apiUrl(path, params = {}) {
 }
 async function apiGet(path, params) {
   const r = await fetch(apiUrl(path, params));
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+async function apiSend(method, path, body) {
+  const r = await fetch(apiUrl(path), {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
@@ -239,20 +280,158 @@ async function openMemoryFile(relpath) {
 }
 
 // === Schedules panel ===
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// Minimal client-side 5-field cron evaluator — preview convenience ONLY.
+// The server (croniter) stays the source of truth for validation.
+function cronField(spec, min, max) {
+  const out = new Set();
+  for (const part of spec.split(",")) {
+    let [range, stepStr] = part.split("/");
+    const step = stepStr ? parseInt(stepStr, 10) : 1;
+    if (!step || step < 1) throw new Error("bad step");
+    let lo, hi;
+    if (range === "*") { lo = min; hi = max; }
+    else if (range.includes("-")) {
+      [lo, hi] = range.split("-").map((n) => parseInt(n, 10));
+    } else { lo = hi = parseInt(range, 10); }
+    if (Number.isNaN(lo) || Number.isNaN(hi) || lo < min || hi > max || lo > hi)
+      throw new Error("out of range");
+    for (let v = lo; v <= hi; v += step) out.add(v);
+  }
+  return out;
+}
+function cronNext(expr, from, count) {
+  const f = expr.trim().split(/\s+/);
+  if (f.length !== 5) throw new Error("cron needs 5 fields");
+  const mins = cronField(f[0], 0, 59), hours = cronField(f[1], 0, 23);
+  const doms = cronField(f[2], 1, 31), months = cronField(f[3], 1, 12);
+  const dows = cronField(f[4], 0, 6);
+  const domR = f[2] !== "*", dowR = f[4] !== "*";
+  const out = [];
+  const d = new Date(from.getTime());
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() + 1);
+  for (let i = 0; i < 366 * 24 * 60 && out.length < count; i++) {
+    const dom = d.getDate(), dow = d.getDay();
+    const dayOk = domR && dowR ? (doms.has(dom) || dows.has(dow))
+      : (doms.has(dom) && dows.has(dow));
+    if (mins.has(d.getMinutes()) && hours.has(d.getHours()) &&
+        months.has(d.getMonth() + 1) && dayOk) {
+      out.push(new Date(d.getTime()));
+    }
+    d.setMinutes(d.getMinutes() + 1);
+  }
+  return out;
+}
+function previewText(expr) {
+  if (!expr || !expr.trim()) return { text: "", bad: false };
+  try {
+    const runs = cronNext(expr, new Date(), 3);
+    if (!runs.length) return { text: "no upcoming runs", bad: true };
+    return { text: "next: " + runs.map((d) => d.toLocaleString()).join(", "), bad: false };
+  } catch (e) { return { text: "invalid cron", bad: true }; }
+}
+
+let _schedEdit = null;  // id currently being edited inline
+
 async function loadSchedules() {
   const el = document.getElementById("schedules-body");
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
     const tasks = await apiGet("/api/schedules");
     if (!tasks.length) { el.innerHTML = '<span class="muted">No scheduled tasks.</span>'; return; }
-    const rows = tasks.map((t) =>
-      `<tr><td>${t.id}</td><td><code>${t.cron || ""}</code></td><td>${t.skill || ""}</td>
-       <td><span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span></td>
-       <td>${t.next_fire ? new Date(t.next_fire).toLocaleString() : "—"}</td>
-       <td>${t.last_status || ""}</td></tr>`).join("");
-    el.innerHTML = `<table><tr><th>id</th><th>cron</th><th>skill</th><th>state</th><th>next fire</th><th>last status</th></tr>${rows}</table>`;
+    const rows = tasks.map((t) => t.id === _schedEdit ? editRow(t) : viewRow(t)).join("");
+    el.innerHTML = `<table><tr><th>id</th><th>cron</th><th>skill</th><th>prompt</th><th>state</th><th>next fire</th><th>last status</th><th></th></tr>${rows}</table>`;
+    el.querySelectorAll("[data-act]").forEach((b) =>
+      b.addEventListener("click", () => onSchedAction(b.dataset.act, b.dataset.id)));
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
+function viewRow(t) {
+  return `<tr>
+    <td>${esc(t.id)}</td>
+    <td><code>${esc(t.cron)}</code></td>
+    <td>${esc(t.skill)}</td>
+    <td>${esc(t.prompt)}</td>
+    <td><span class="badge ${t.enabled ? "on" : "off"}">${t.enabled ? "enabled" : "disabled"}</span></td>
+    <td>${t.next_fire ? new Date(t.next_fire).toLocaleString() : "—"}</td>
+    <td>${esc(t.last_status)}</td>
+    <td class="row-actions">
+      <button class="btn" data-act="edit" data-id="${esc(t.id)}">Edit</button>
+      <button class="btn" data-act="toggle" data-id="${esc(t.id)}">${t.enabled ? "Disable" : "Enable"}</button>
+      <button class="btn danger" data-act="delete" data-id="${esc(t.id)}">Delete</button>
+    </td></tr>`;
+}
+function editRow(t) {
+  return `<tr class="editing"><td>${esc(t.id)}</td>
+    <td class="edit-form" colspan="6">
+      <input id="esched-cron" value="${esc(t.cron)}" placeholder="cron" />
+      <input id="esched-skill" value="${esc(t.skill)}" placeholder="skill (optional)" />
+      <input id="esched-prompt" value="${esc(t.prompt)}" placeholder="prompt" />
+      <span class="sched-preview" id="esched-preview"></span>
+    </td>
+    <td class="row-actions">
+      <button class="btn" data-act="save" data-id="${esc(t.id)}">Save</button>
+      <button class="btn" data-act="cancel" data-id="${esc(t.id)}">Cancel</button>
+    </td></tr>`;
+}
+async function onSchedAction(act, id) {
+  const errAt = (msg) => alert(msg);
+  try {
+    if (act === "edit") { _schedEdit = id; await loadSchedules(); wireEditPreview(); return; }
+    if (act === "cancel") { _schedEdit = null; await loadSchedules(); return; }
+    if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`); await loadSchedules(); return; }
+    if (act === "delete") {
+      if (!confirm(`Delete schedule '${id}'?`)) return;
+      await apiSend("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
+      await loadSchedules(); return;
+    }
+    if (act === "save") {
+      const body = {
+        cron: document.getElementById("esched-cron").value.trim(),
+        skill: document.getElementById("esched-skill").value.trim() || null,
+        prompt: document.getElementById("esched-prompt").value,
+      };
+      await apiSend("PUT", `/api/schedules/${encodeURIComponent(id)}`, body);
+      _schedEdit = null; await loadSchedules(); return;
+    }
+  } catch (e) { errAt(e.message); }
+}
+function wireEditPreview() {
+  const cron = document.getElementById("esched-cron");
+  const prev = document.getElementById("esched-preview");
+  if (!cron || !prev) return;
+  const upd = () => { const p = previewText(cron.value); prev.textContent = p.text; prev.classList.toggle("bad", p.bad); };
+  cron.addEventListener("input", upd); upd();
+}
+
+// New-schedule form wiring.
+const nschedCron = document.getElementById("nsched-cron");
+const nschedPreview = document.getElementById("nsched-preview");
+nschedCron.addEventListener("input", () => {
+  const p = previewText(nschedCron.value);
+  nschedPreview.textContent = p.text;
+  nschedPreview.classList.toggle("bad", p.bad);
+});
+document.getElementById("nsched-create").addEventListener("click", async () => {
+  const errEl = document.getElementById("nsched-err");
+  errEl.textContent = "";
+  const body = {
+    id: document.getElementById("nsched-id").value.trim(),
+    cron: nschedCron.value.trim(),
+    skill: document.getElementById("nsched-skill").value.trim() || null,
+    prompt: document.getElementById("nsched-prompt").value,
+  };
+  try {
+    await apiSend("POST", "/api/schedules", body);
+    document.getElementById("nsched-id").value = "";
+    nschedCron.value = ""; nschedPreview.textContent = "";
+    document.getElementById("nsched-skill").value = "";
+    document.getElementById("nsched-prompt").value = "";
+    await loadSchedules();
+  } catch (e) { errEl.textContent = e.message; }
+});
 
 // === Chat (shared module over the same wire protocol as the portal) ===
 function wsUrl() {
