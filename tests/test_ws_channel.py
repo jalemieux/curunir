@@ -41,6 +41,39 @@ async def _read_hello(ws: websockets.ClientConnection) -> str:
 
 
 @pytest.mark.asyncio
+async def test_hello_frame_carries_model_and_persona():
+    """The welcome frame surfaces the active model and persona to clients."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(
+        q, host=TEST_HOST, port=TEST_PORT, model="anthropic/x", persona="finance",
+    )
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT}") as ws:
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+            assert data["type"] == "hello"
+            assert data["model"] == "anthropic/x"
+            assert data["persona"] == "finance"
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
+async def test_hello_frame_omits_persona_when_unset():
+    """No persona configured → no persona key (clients hide the tag)."""
+    q = asyncio.Queue()
+    ch = WebSocketChannel(q, host=TEST_HOST, port=TEST_PORT)
+    task = await _start_channel(ch)
+    try:
+        async with websockets.connect(f"ws://{TEST_HOST}:{TEST_PORT}") as ws:
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+            assert data["type"] == "hello"
+            assert "persona" not in data
+    finally:
+        await _stop_channel(task)
+
+
+@pytest.mark.asyncio
 async def test_accepts_connection_and_forwards_to_queue():
     """Client message is forwarded to in_queue as IncomingMessage."""
     q = asyncio.Queue()
