@@ -561,21 +561,20 @@ via `/podcast-ingest`.
 
 ## Scheduler entry
 
-The weekly pull is wired up via `context/schedules.json`:
+The weekly pull is wired up via the `schedule` tool (entries persist in
+`context/schedules.db`):
 
-```json
-{
-  "id": "podcast-ingest-weekly",
-  "cron": "0 8 * * 1",
-  "skill": "podcast-ingest",
-  "prompt": "Run the podcast-ingest skill in pull mode. Process all shows in podcasts.yaml against the last 8 days of episodes, filter, transcribe, summarize, store, and update indexes. Return a one-paragraph report.",
-  "enabled": true
-}
+```
+schedule(action="add", id="podcast-ingest-weekly", cron="0 8 * * 1",
+         skill="podcast-ingest",
+         prompt="Run the podcast-ingest skill in pull mode. Process all shows in podcasts.yaml against the last 8 days of episodes, filter, transcribe, summarize, store, and update indexes. Return a one-paragraph report.")
 ```
 
-Monday 8am local. The `enabled: false` template in
-`context.default/schedules.json` is a starting point — the user flips
-it to `true` after configuring at least one show with Mode B.
+Monday 8am local. A disabled template is seeded in
+`context.default/schedules.json` (migrated into `context/schedules.db` on
+first boot) — the user enables it via
+`schedule(action="toggle", id="podcast-ingest-weekly")` after configuring at
+least one show with Mode B.
 
 ## Common mistakes
 

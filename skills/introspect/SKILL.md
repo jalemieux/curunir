@@ -1,6 +1,6 @@
 ---
 name: introspect
-description: "Use when periodically reviewing curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows and filing GitHub issues for novel findings. Trigger on a schedule (e.g. hourly via `context/schedules.json`), or when the user asks to scan logs / check on the agent's recent behavior. Dedups against open issues so repeated patterns become comments, not new tickets."
+description: "Use when periodically reviewing curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows and filing GitHub issues for novel findings. Trigger on a schedule (e.g. hourly via the `schedule` tool), or when the user asks to scan logs / check on the agent's recent behavior. Dedups against open issues so repeated patterns become comments, not new tickets."
 tools: bash
 ---
 
@@ -263,21 +263,17 @@ Never crash the scheduler tick. Always exit with a ledger entry.
 
 ## Scheduling
 
-This skill is built to run on a cron via `context/schedules.json`. Example
-entry (disabled by default — flip `enabled` to `true` after confirming
-`GH_TOKEN` and `INTROSPECT_REPO` are set, and that `$LOG_FILE` is readable —
-docker compose points it at `/app/workspace/curunir.log`):
+This skill is built to run on a cron. Register it with the `schedule` tool
+(entries persist in `context/schedules.db`). Add it, then keep it disabled
+via `toggle` until you've confirmed `GH_TOKEN` and `INTROSPECT_REPO` are set
+and `$LOG_FILE` is readable — docker compose points it at
+`/app/workspace/curunir.log`; `toggle` again to enable:
 
-```json
-[
-  {
-    "id": "introspect-hourly",
-    "cron": "0 * * * *",
-    "skill": "introspect",
-    "prompt": "Scan the last hour of curunir's logs and file github issues for any new problems.",
-    "enabled": false
-  }
-]
+```
+schedule(action="add", id="introspect-hourly", cron="0 * * * *",
+         skill="introspect",
+         prompt="Scan the last hour of curunir's logs and file github issues for any new problems.")
+schedule(action="toggle", id="introspect-hourly")   # disable until ready
 ```
 
 When the scheduler fires this task, the skill body is loaded and prepended to

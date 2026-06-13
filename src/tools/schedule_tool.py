@@ -1,55 +1,23 @@
 # src/tools/schedule_tool.py
-"""CRUD operations for scheduled tasks stored in context/schedules.json."""
-
-import json
-import os
-import tempfile
-from pathlib import Path
-
-from croniter import croniter
+"""CRUD operations for scheduled tasks, backed by the SQLite schedule store
+(`context/schedules.db`). Thin string-rendering surface over
+`src.schedule_store.engine`; all validation (cron, duplicate id, skill
+allowlist) lives in the engine."""
 
 from src.config import AgentConfig
+from src.schedule_store import db as sdb
+from src.schedule_store import engine
 
 
-def _schedule_path(config: AgentConfig) -> Path:
-    return config.context_dir / "schedules.json"
-
-
-def _load(config: AgentConfig) -> list[dict]:
-    path = _schedule_path(config)
-    if not path.exists():
-        return []
-    return json.loads(path.read_text())
-
-
-def _save(config: AgentConfig, tasks: list[dict]) -> None:
-    path = _schedule_path(config)
-    # Atomic write: temp file + rename to prevent partial reads
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(tasks, f, indent=2)
-        os.rename(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def _validate_cron(expr: str) -> bool:
-    try:
-        croniter(expr)
-        return True
-    except (ValueError, KeyError):
-        return False
+def _db(config: AgentConfig) -> str:
+    sdb.init_db(str(config.schedules_db))
+    return str(config.schedules_db)
 
 
 def exec_schedule(args: dict, config: AgentConfig) -> str:
     action = args.get("action")
     if not action:
-        return "Error: missing 'action' field. Use: list, add, update, remove."
+        return "Error: missing 'action' field. Use: list, add, update, remove, toggle."
 
     match action:
         case "list":
@@ -60,17 +28,19 @@ def exec_schedule(args: dict, config: AgentConfig) -> str:
             return _update(args, config)
         case "remove":
             return _remove(args, config)
+        case "toggle":
+            return _toggle(args, config)
         case _:
-            return f"Error: unknown action '{action}'. Use: list, add, update, remove."
+            return f"Error: unknown action '{action}'. Use: list, add, update, remove, toggle."
 
 
 def _list(config: AgentConfig) -> str:
-    tasks = _load(config)
+    tasks = engine.list_schedules(_db(config))
     if not tasks:
         return "No scheduled tasks."
     lines = []
     for t in tasks:
-        status = "enabled" if t.get("enabled", True) else "disabled"
+        status = "enabled" if t["enabled"] else "disabled"
         skill = f" (skill: {t['skill']})" if t.get("skill") else ""
         lines.append(f"- **{t['id']}** `{t['cron']}` [{status}]{skill}\n  {t['prompt']}")
     return "\n".join(lines)
@@ -84,22 +54,14 @@ def _add(args: dict, config: AgentConfig) -> str:
     if not task_id or not cron or not prompt:
         return "Error: missing required fields — 'add' needs 'id', 'cron', and 'prompt'."
 
-    if not _validate_cron(cron):
-        return f"Error: invalid cron expression '{cron}'."
-
-    tasks = _load(config)
-    if any(t["id"] == task_id for t in tasks):
-        return f"Error: task '{task_id}' already exists. Use 'update' to modify it."
-
-    tasks.append({
-        "id": task_id,
-        "cron": cron,
-        "prompt": prompt,
-        "skill": args.get("skill"),
-        "enabled": True,
-        "last_run": 0,
-    })
-    _save(config, tasks)
+    try:
+        engine.create(
+            _db(config),
+            {"id": task_id, "cron": cron, "prompt": prompt, "skill": args.get("skill")},
+            skill_allowlist=config.skill_allowlist,
+        )
+    except ValueError as e:
+        return f"Error: {e}."
     return f"Task '{task_id}' added — scheduled at `{cron}`."
 
 
@@ -108,23 +70,13 @@ def _update(args: dict, config: AgentConfig) -> str:
     if not task_id:
         return "Error: 'update' requires 'id' field."
 
-    tasks = _load(config)
-    task = next((t for t in tasks if t["id"] == task_id), None)
-    if not task:
-        return f"Error: task '{task_id}' not found."
-
-    if "cron" in args:
-        if not _validate_cron(args["cron"]):
-            return f"Error: invalid cron expression '{args['cron']}'."
-        task["cron"] = args["cron"]
-    if "prompt" in args:
-        task["prompt"] = args["prompt"]
-    if "skill" in args:
-        task["skill"] = args["skill"]
-    if "enabled" in args:
-        task["enabled"] = bool(args["enabled"])
-
-    _save(config, tasks)
+    fields = {k: args[k] for k in ("cron", "prompt", "skill", "enabled") if k in args}
+    if "enabled" in fields:
+        fields["enabled"] = bool(fields["enabled"])
+    try:
+        engine.update(_db(config), task_id, fields, skill_allowlist=config.skill_allowlist)
+    except ValueError as e:
+        return f"Error: {e}."
     return f"Task '{task_id}' updated."
 
 
@@ -132,12 +84,20 @@ def _remove(args: dict, config: AgentConfig) -> str:
     task_id = args.get("id")
     if not task_id:
         return "Error: 'remove' requires 'id' field."
-
-    tasks = _load(config)
-    original_len = len(tasks)
-    tasks = [t for t in tasks if t["id"] != task_id]
-    if len(tasks) == original_len:
-        return f"Error: task '{task_id}' not found."
-
-    _save(config, tasks)
+    try:
+        engine.delete(_db(config), task_id)
+    except ValueError as e:
+        return f"Error: {e}."
     return f"Task '{task_id}' removed."
+
+
+def _toggle(args: dict, config: AgentConfig) -> str:
+    task_id = args.get("id")
+    if not task_id:
+        return "Error: 'toggle' requires 'id' field."
+    try:
+        row = engine.toggle(_db(config), task_id)
+    except ValueError as e:
+        return f"Error: {e}."
+    state = "enabled" if row["enabled"] else "disabled"
+    return f"Task '{task_id}' {state}."
