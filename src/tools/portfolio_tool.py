@@ -22,6 +22,11 @@ _READ = {
     "pnl": lambda db, a: engine.pnl(db, cls=a.get("class", "collectible")),
     "query": lambda db, a: engine.query(db, a["sql"]),
     "render": lambda db, a: {"markdown": engine.render_markdown(db)},
+    "trades": lambda db, a: engine.trade_history(
+        db, ticker=a.get("ticker"), account=a.get("account"),
+        side=a.get("side"), since=a.get("since")),
+    "realized": lambda db, a: engine.realized_pnl(
+        db, ticker=a.get("ticker"), account=a.get("account"), year=a.get("year")),
 }
 _WRITE = {
     "add": lambda db, a: engine.add_asset(db, a),
@@ -31,6 +36,8 @@ _WRITE = {
     "import_rows": lambda db, a: engine.import_rows(
         db, a["rows"], account=a.get("account"), stated_total=a.get("stated_total")),
     "refresh": lambda db, a: engine.refresh(db),
+    "buy": lambda db, a: engine.record_buy(db, a),
+    "sell": lambda db, a: engine.record_sell(db, a),
 }
 
 

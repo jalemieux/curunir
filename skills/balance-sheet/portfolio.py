@@ -58,6 +58,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rows-file", required=True, help="path to a JSON array of asset rows")
     sp.add_argument("--account")
     sp.add_argument("--stated-total", type=float)
+
+    sp = sub.add_parser("buy")
+    for f in ("ticker", "trade-date", "class", "account", "label", "note"):
+        sp.add_argument(f"--{f}")
+    for f in ("qty", "price", "fees"):
+        sp.add_argument(f"--{f}", type=float)
+    sp = sub.add_parser("sell")
+    sp.add_argument("asset_id")
+    sp.add_argument("--trade-date")
+    sp.add_argument("--note")
+    for f in ("qty", "price", "fees"):
+        sp.add_argument(f"--{f}", type=float)
+    sp = sub.add_parser("trades")
+    for f in ("ticker", "account", "side", "since"):
+        sp.add_argument(f"--{f}")
+    sp = sub.add_parser("realized")
+    for f in ("ticker", "account"):
+        sp.add_argument(f"--{f}")
+    sp.add_argument("--year", type=int)
     return p
 
 
@@ -94,6 +113,23 @@ def main(argv=None) -> int:
                 rows = json.load(f)
             out = engine.import_rows(db, rows, account=args.account,
                                      stated_total=args.stated_total)
+        elif args.cmd == "buy":
+            fields = {"ticker": args.ticker, "trade_date": args.trade_date,
+                      "class": getattr(args, "class"), "account": args.account,
+                      "label": args.label, "note": args.note, "qty": args.qty,
+                      "price": args.price, "fees": args.fees}
+            out = engine.record_buy(db, {k: v for k, v in fields.items() if v is not None})
+        elif args.cmd == "sell":
+            fields = {"asset_id": args.asset_id, "trade_date": args.trade_date,
+                      "note": args.note, "qty": args.qty, "price": args.price,
+                      "fees": args.fees}
+            out = engine.record_sell(db, {k: v for k, v in fields.items() if v is not None})
+        elif args.cmd == "trades":
+            out = engine.trade_history(db, ticker=args.ticker, account=args.account,
+                                       side=args.side, since=args.since)
+        elif args.cmd == "realized":
+            out = engine.realized_pnl(db, ticker=args.ticker, account=args.account,
+                                      year=args.year)
         else:
             raise ValueError(f"unknown command {args.cmd!r}")
     except Exception as e:  # noqa: BLE001 — surface as JSON, not a traceback
