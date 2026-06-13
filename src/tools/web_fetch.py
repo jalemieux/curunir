@@ -12,6 +12,11 @@ from src.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
+# trafilatura logs one WARNING per unresolved anchor ("missing link attribute")
+# while extracting list-heavy pages (e.g. IRS tax-code sections), drowning the
+# agent's own log signal. Quiet its chatter; genuine ERRORs still surface.
+logging.getLogger("trafilatura").setLevel(logging.ERROR)
+
 _MAX_CONTENT_CHARS = 20_000  # ~5k tokens
 _TIMEOUT = 30
 _PDF_MAGIC = b"%PDF-"

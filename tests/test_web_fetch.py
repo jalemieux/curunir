@@ -1,4 +1,5 @@
 import io
+import logging
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -213,3 +214,12 @@ class TestUrlValidation:
             result = exec_web_fetch({"url": url}, agent_config)
         assert "Error fetching" in result
         assert url in result
+
+
+class TestTrafilaturaLogging:
+    def test_trafilatura_warnings_suppressed(self):
+        """trafilatura's WARNING-level chatter (e.g. 'missing link attribute'
+        on IRS tax-code pages) must not reach the agent log; ERRORs still do."""
+        tlog = logging.getLogger("trafilatura")
+        assert not tlog.isEnabledFor(logging.WARNING)
+        assert tlog.isEnabledFor(logging.ERROR)
