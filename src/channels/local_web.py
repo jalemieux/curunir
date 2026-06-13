@@ -9,6 +9,10 @@ directly:
 - ``GET /api/usage``      → token/cost rollup (``UsageStore.summary``)
 - ``GET /api/portfolio``  → balance sheet (``portfolio.engine``)
 - ``GET /api/schedules``  → cron tasks (``scheduler._load_tasks``)
+- ``POST /api/schedules`` → create a cron task (``schedule_store.engine.create``)
+- ``PUT /api/schedules/{id}`` → edit cron/prompt/skill/enabled (``engine.update``)
+- ``POST /api/schedules/{id}/toggle`` → flip enabled (``engine.toggle``)
+- ``DELETE /api/schedules/{id}`` → remove a task (``engine.delete``)
 - ``GET /api/memory``     → ``context/memory/`` tree
 - ``GET /api/memory/file``→ one memory file (path-traversal guarded)
 - ``WS  /ws/browser``     → chat bridged straight into the agent queues
@@ -42,6 +46,8 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.ws import _DEFAULT_LOCALHOST_ORIGINS, _origin_allowed
 from src.config import AgentConfig
 from src.local_ui import readers
+from src.schedule_store import db as sdb
+from src.schedule_store import engine as sengine
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +111,16 @@ class LocalWebChannel:
             "token"
         )
 
+    def _schedules_db(self) -> str:
+        """Initialize (if needed) and return the schedule store path.
+
+        Mirrors ``schedule_tool._db`` so writes go through the same engine the
+        ``schedule`` tool and scheduler use — no separate query/validation path.
+        """
+        path = str(self.config.schedules_db)
+        sdb.init_db(path)
+        return path
+
     # --- app construction --------------------------------------------------
 
     def _build_app(self) -> FastAPI:
@@ -143,6 +159,70 @@ class LocalWebChannel:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             return JSONResponse(readers.schedules(self.config))
+
+        @app.post("/api/schedules")
+        async def api_schedule_create(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            body = await request.json()
+            fields = {
+                k: body.get(k) for k in ("id", "cron", "prompt", "skill")
+            }
+            fields["enabled"] = bool(body.get("enabled", True))
+            try:
+                row = sengine.create(
+                    self._schedules_db(), fields,
+                    skill_allowlist=self.config.skill_allowlist,
+                )
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return JSONResponse(row)
+
+        @app.put("/api/schedules/{task_id}")
+        async def api_schedule_update(
+            task_id: str, request: Request
+        ) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            body = await request.json()
+            fields = {
+                k: body[k] for k in ("cron", "prompt", "skill", "enabled")
+                if k in body
+            }
+            if "enabled" in fields:
+                fields["enabled"] = bool(fields["enabled"])
+            try:
+                row = sengine.update(
+                    self._schedules_db(), task_id, fields,
+                    skill_allowlist=self.config.skill_allowlist,
+                )
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return JSONResponse(row)
+
+        @app.post("/api/schedules/{task_id}/toggle")
+        async def api_schedule_toggle(
+            task_id: str, request: Request
+        ) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            try:
+                row = sengine.toggle(self._schedules_db(), task_id)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return JSONResponse(row)
+
+        @app.delete("/api/schedules/{task_id}")
+        async def api_schedule_delete(
+            task_id: str, request: Request
+        ) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            try:
+                sengine.delete(self._schedules_db(), task_id)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return JSONResponse({"ok": True, "id": task_id})
 
         @app.get("/api/memory")
         async def api_memory(request: Request) -> JSONResponse:
