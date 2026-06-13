@@ -220,3 +220,158 @@ def test_import_rows_duplicate_label_aborts_before_insert(tmp_path):
     with pytest.raises(ValueError):
         engine.import_rows(path, rows)
     assert engine.list_assets(path) == []  # truly all-or-nothing
+
+
+# --- trade ledger -----------------------------------------------------------
+
+def test_trades_table_exists(tmp_path):
+    path = _fresh(tmp_path)
+    con = sqlite3.connect(path)
+    names = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert "trades" in names
+
+
+def test_record_buy_creates_new_lot_and_trade(tmp_path):
+    path = _fresh(tmp_path)
+    res = engine.record_buy(path, {"ticker": "SPCX", "qty": 100, "price": 150,
+                                   "trade_date": "2026-01-10", "account": "ira"})
+    lot = engine.show(path, res["asset_id"])
+    assert lot["qty"] == 100
+    assert lot["cost_basis"] == 15000          # 100 * 150
+    assert lot["value"] == 15000
+    assert lot["acquired"] == "2026-01-10"
+    assert lot["account"] == "ira"
+    trades = engine.trade_history(path)
+    assert len(trades) == 1 and trades[0]["side"] == "buy"
+    assert trades[0]["realized_pnl"] is None
+
+
+def test_record_buy_includes_fees_in_basis(tmp_path):
+    path = _fresh(tmp_path)
+    res = engine.record_buy(path, {"ticker": "VOO", "qty": 10, "price": 500,
+                                   "trade_date": "2026-02-01", "fees": 7})
+    assert engine.show(path, res["asset_id"])["cost_basis"] == 5007
+
+
+def test_record_buy_rejects_non_qty_class(tmp_path):
+    path = _fresh(tmp_path)
+    with pytest.raises(ValueError):
+        engine.record_buy(path, {"ticker": "X", "qty": 1, "price": 1,
+                                 "trade_date": "2026-01-01", "class": "collectible"})
+
+
+def test_record_buy_each_buy_is_a_new_lot(tmp_path):
+    path = _fresh(tmp_path)
+    a = engine.record_buy(path, {"ticker": "VOO", "qty": 10, "price": 500,
+                                 "trade_date": "2026-01-01"})["asset_id"]
+    b = engine.record_buy(path, {"ticker": "VOO", "qty": 5, "price": 520,
+                                 "trade_date": "2026-03-01"})["asset_id"]
+    assert a != b
+    assert len(engine.list_assets(path, cls="equity")) == 2
+
+
+def test_record_sell_decrements_lot_and_computes_realized(tmp_path):
+    path = _fresh(tmp_path)
+    lot = engine.record_buy(path, {"ticker": "SPCX", "qty": 100, "price": 150,
+                                   "trade_date": "2024-01-10"})["asset_id"]
+    res = engine.record_sell(path, {"asset_id": lot, "qty": 40, "price": 170,
+                                    "trade_date": "2026-06-13"})
+    # proceeds 40*170=6800; basis sold 40*150=6000; realized 800
+    assert res["realized_pnl"] == 800
+    assert res["remaining_qty"] == 60
+    assert res["lot_closed"] is False
+    assert res["long_term"] is True            # held >1yr
+    remaining = engine.show(path, lot)
+    assert remaining["qty"] == 60
+    assert remaining["cost_basis"] == 9000     # 15000 - 6000
+
+
+def test_record_sell_closes_lot_at_zero(tmp_path):
+    path = _fresh(tmp_path)
+    lot = engine.record_buy(path, {"ticker": "GLD", "qty": 5, "price": 200,
+                                   "trade_date": "2026-01-01"})["asset_id"]
+    res = engine.record_sell(path, {"asset_id": lot, "qty": 5, "price": 220,
+                                    "trade_date": "2026-02-01"})
+    assert res["lot_closed"] is True
+    assert res["remaining_qty"] == 0
+    with pytest.raises(KeyError):
+        engine.show(path, lot)
+    # trade history survives the closed lot
+    assert len(engine.trade_history(path, side="sell")) == 1
+
+
+def test_record_sell_short_term_flag(tmp_path):
+    path = _fresh(tmp_path)
+    lot = engine.record_buy(path, {"ticker": "AAPL", "qty": 10, "price": 100,
+                                   "trade_date": "2026-01-01"})["asset_id"]
+    res = engine.record_sell(path, {"asset_id": lot, "qty": 10, "price": 120,
+                                    "trade_date": "2026-06-01"})
+    assert res["long_term"] is False
+
+
+def test_record_sell_rejects_oversell(tmp_path):
+    path = _fresh(tmp_path)
+    lot = engine.record_buy(path, {"ticker": "VOO", "qty": 5, "price": 500,
+                                   "trade_date": "2026-01-01"})["asset_id"]
+    with pytest.raises(ValueError):
+        engine.record_sell(path, {"asset_id": lot, "qty": 6, "price": 510,
+                                  "trade_date": "2026-02-01"})
+
+
+def test_record_sell_unknown_lot_raises(tmp_path):
+    path = _fresh(tmp_path)
+    with pytest.raises(KeyError):
+        engine.record_sell(path, {"asset_id": "nope", "qty": 1, "price": 1,
+                                  "trade_date": "2026-01-01"})
+
+
+def test_record_sell_requires_cost_basis(tmp_path):
+    path = _fresh(tmp_path)
+    aid = engine.add_asset(path, {"class": "equity", "label": "MYST", "ticker": "MYST",
+                                  "qty": 10, "value": 1000})["id"]
+    with pytest.raises(ValueError):
+        engine.record_sell(path, {"asset_id": aid, "qty": 1, "price": 100,
+                                  "trade_date": "2026-01-01"})
+
+
+def test_trade_history_filters(tmp_path):
+    path = _fresh(tmp_path)
+    a = engine.record_buy(path, {"ticker": "VOO", "qty": 10, "price": 500,
+                                 "trade_date": "2026-01-01", "account": "ira"})["asset_id"]
+    engine.record_buy(path, {"ticker": "GLD", "qty": 5, "price": 200,
+                             "trade_date": "2026-01-02", "account": "taxable"})
+    engine.record_sell(path, {"asset_id": a, "qty": 2, "price": 520,
+                              "trade_date": "2026-02-01"})
+    assert len(engine.trade_history(path, ticker="VOO")) == 2
+    assert len(engine.trade_history(path, side="sell")) == 1
+    assert len(engine.trade_history(path, account="taxable")) == 1
+
+
+def test_realized_pnl_splits_short_and_long_term(tmp_path):
+    path = _fresh(tmp_path)
+    lt = engine.record_buy(path, {"ticker": "AAA", "qty": 10, "price": 100,
+                                  "trade_date": "2024-01-01"})["asset_id"]
+    st = engine.record_buy(path, {"ticker": "BBB", "qty": 10, "price": 100,
+                                  "trade_date": "2026-01-01"})["asset_id"]
+    engine.record_sell(path, {"asset_id": lt, "qty": 10, "price": 150,
+                              "trade_date": "2026-06-01"})   # +500 long
+    engine.record_sell(path, {"asset_id": st, "qty": 10, "price": 90,
+                              "trade_date": "2026-06-01"})   # -100 short
+    r = engine.realized_pnl(path)
+    assert r["long_term"] == 500
+    assert r["short_term"] == -100
+    assert r["total"] == 400
+
+
+def test_realized_pnl_filters_by_year(tmp_path):
+    path = _fresh(tmp_path)
+    a = engine.record_buy(path, {"ticker": "AAA", "qty": 10, "price": 100,
+                                 "trade_date": "2024-01-01"})["asset_id"]
+    engine.record_sell(path, {"asset_id": a, "qty": 5, "price": 150,
+                              "trade_date": "2025-06-01"})   # +250 in 2025
+    engine.record_sell(path, {"asset_id": a, "qty": 5, "price": 200,
+                              "trade_date": "2026-06-01"})   # +500 in 2026
+    assert engine.realized_pnl(path, year=2025)["total"] == 250
+    assert engine.realized_pnl(path, year=2026)["total"] == 500
