@@ -65,10 +65,17 @@ def usage_summary(
     return {"window": window, "by": by, "rows": rows, "available": True}
 
 
-def portfolio_overview(config: AgentConfig) -> dict:
+def portfolio_overview(config: AgentConfig, year: int | None = None) -> dict:
     """Balance-sheet snapshot from ``config.portfolio_db``.
 
-    Returns ``{"available", "networth", "rollup", "assets", "collectibles_pnl"}``.
+    Returns ``{"available", "networth", "rollup", "assets", "collectibles_pnl",
+    "unrealized", "trades", "realized", "as_of"}``. ``trades`` and ``realized``
+    are scoped to ``year`` (default: current calendar year = fiscal year) so the
+    trade ledger and the realized-P&L cards always cover the same window.
+    ``as_of`` is the ``{oldest, newest}`` span of holdings' ``value_asof`` dates
+    — the staleness caveat shown under the hero, since stored values aren't
+    necessarily live.
+
     A missing store yields ``available=False`` with empty/None payloads — the
     engine's views don't exist on a fresh file, so we never touch it.
     """
@@ -80,13 +87,26 @@ def portfolio_overview(config: AgentConfig) -> dict:
             "rollup": None,
             "assets": [],
             "collectibles_pnl": None,
+            "unrealized": None,
+            "trades": [],
+            "realized": None,
+            "as_of": None,
         }
+    yr = year if year is not None else datetime.now().year
+    assets = engine.list_assets(path)
+    asof_dates = sorted(a["value_asof"] for a in assets if a.get("value_asof"))
+    as_of = {"oldest": asof_dates[0], "newest": asof_dates[-1]} if asof_dates else None
     return {
         "available": True,
         "networth": engine.networth(path),
         "rollup": engine.rollup(path),
-        "assets": engine.list_assets(path),
+        "assets": assets,
         "collectibles_pnl": engine.pnl(path, cls="collectible"),
+        "unrealized": engine.unrealized(path),
+        "trades": engine.trade_history(path, since=f"{yr}-01-01"),
+        "realized": engine.realized_pnl(path, year=yr),
+        "as_of": as_of,
+        "year": yr,
     }
 
 
