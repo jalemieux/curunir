@@ -193,7 +193,7 @@ See **[portal/README.md](portal/README.md)** for portal deployment and the local
 
 #### Local Web UI (operator console served from the container)
 
-A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.json`), and the `context/memory/` tree. It reuses the portal chat frontend and wire protocol but bridges `/ws/browser` straight into the local agent queues.
+A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.json`), and the `context/memory/` tree. Its chat tab is built on a **shared, reusable chat module** (`src/local_ui/static/{connection,chat}.js` + `chat.css`) that speaks the same wire protocol as the portal and bridges `/ws/browser` straight into the local agent queues. The module gives the local console full chat parity with the portal — light/dark theme toggle, the live tool ticker, attachments (drag/drop/paste), and the skills picker. It is the canonical source the portal frontend will adopt in a later phase (see `docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md`).
 
 Off by default. Enable it with:
 
