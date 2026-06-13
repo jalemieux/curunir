@@ -4,15 +4,19 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Curunir — Local Console</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css" />
+<!-- Pinned to v4: the setOptions({highlight}) API used by chat.js was removed
+     in marked v5+. Matches the portal. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+<!-- Two highlight.js themes; chat.js toggles `disabled` to match light/dark. -->
+<link id="cu-hljs-light" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github.min.css" />
+<link id="cu-hljs-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github-dark.min.css" disabled />
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/highlight.min.js"></script>
+<!-- Shared chat-pane styles + console theme tokens (light default / dark). -->
+<link rel="stylesheet" href="./chat.css" />
 <style>
-  :root {
-    --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #e6edf3;
-    --muted: #8b949e; --accent: #2f81f7; --user: #1f6feb; --ok: #3fb950;
-    --warn: #d29922; --err: #f85149;
-  }
+  /* Read-panel chrome only. Theme tokens (--bg, --fg, --border, --panel,
+     --muted, --accent, --ok, --err …) come from chat.css so the panels
+     re-theme together with the chat when the theme toggles. */
   * { box-sizing: border-box; }
   body {
     margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -24,9 +28,6 @@
     border-bottom: 1px solid var(--border); background: var(--panel);
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .status { font-size: 12px; color: var(--muted); }
-  header .status.online { color: var(--ok); }
-  header .status.offline { color: var(--err); }
   nav { display: flex; gap: 4px; margin-left: auto; }
   nav button {
     background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -37,27 +38,9 @@
   main { flex: 1; overflow: hidden; position: relative; }
   .tab { display: none; height: 100%; overflow: auto; padding: 16px; }
   .tab.active { display: block; }
-  .tab#tab-chat { padding: 0; display: none; flex-direction: column; }
-  .tab#tab-chat.active { display: flex; }
-
-  /* Chat */
-  #messages { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; white-space: normal; word-wrap: break-word; }
-  .msg.user { align-self: flex-end; background: var(--user); color: #fff; }
-  .msg.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
-  .msg .body p:first-child { margin-top: 0; } .msg .body p:last-child { margin-bottom: 0; }
-  .msg pre { background: #010409; padding: 10px; border-radius: 6px; overflow: auto; }
-  .tools { font-size: 12px; color: var(--muted); margin-top: 6px; font-family: ui-monospace, monospace; }
-  .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); }
-  .composer textarea {
-    flex: 1; resize: none; background: var(--bg); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit; max-height: 160px;
-  }
-  .composer button {
-    background: var(--accent); color: #fff; border: none; border-radius: 8px;
-    padding: 0 18px; cursor: pointer; font-weight: 600;
-  }
-  .composer button:disabled { opacity: .5; cursor: default; }
+  .tab#tab-chat { padding: 0; display: none; }
+  .tab#tab-chat.active { display: block; }
+  #chat-root { height: 100%; }
 
   /* Read panels */
   h2 { font-size: 16px; margin: 0 0 12px; }
@@ -93,7 +76,6 @@
 <body>
 <header>
   <h1>Curunir</h1>
-  <span class="status" id="status">connecting…</span>
   <nav>
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
@@ -103,13 +85,7 @@
   </nav>
 </header>
 <main>
-  <div class="tab active" id="tab-chat">
-    <div id="messages"></div>
-    <div class="composer">
-      <textarea id="input" rows="1" placeholder="Message Curunir…"></textarea>
-      <button id="send">Send</button>
-    </div>
-  </div>
+  <div class="tab active" id="tab-chat"><div id="chat-root"></div></div>
   <div class="tab" id="tab-usage"><h2>Token Usage &amp; Cost</h2>
     <div class="controls">
       <label>Window
@@ -133,7 +109,11 @@
   </div>
   <div class="tab" id="tab-schedules"><h2>Scheduled Tasks</h2><div id="schedules-body"></div></div>
 </main>
-<script>
+
+<script type="module">
+import { createConnection } from "./connection.js";
+import { createChat } from "./chat.js";
+
 // === Auth token ===
 // The operator opens http://host:port/?token=XXX. We read it once and reuse
 // it for every /api and /ws call. (On loopback this is just the pairing gate.)
@@ -269,98 +249,26 @@ async function loadSchedules() {
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
 
-// === Chat (same wire protocol as the portal) ===
-const messagesEl = document.getElementById("messages");
-const inputEl = document.getElementById("input");
-const sendBtn = document.getElementById("send");
-const statusEl = document.getElementById("status");
-let ws = null, backoff = 1000, assistantEl = null, assistantRaw = "";
-
-function setStatus(s) {
-  statusEl.textContent = s;
-  statusEl.className = "status " + (s === "online" ? "online" : s === "offline" ? "offline" : "");
-}
-function appendMessage(role) {
-  const el = document.createElement("div");
-  el.className = "msg " + role;
-  el.innerHTML = '<div class="body"></div>';
-  messagesEl.appendChild(el);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return el;
-}
-function renderHistory(messages) {
-  messagesEl.innerHTML = ""; assistantEl = null;
-  for (const m of messages) {
-    if (m.role === "user") {
-      appendMessage("user").querySelector(".body").textContent = m.content || "";
-    } else if (m.role === "assistant") {
-      const el = appendMessage("assistant");
-      if (m.content) el.querySelector(".body").innerHTML = marked.parse(m.content);
-      if (m.tool_calls && m.tool_calls.length) addTools(el, m.tool_calls);
-    } else if (m.role === "system") {
-      appendMessage("assistant").querySelector(".body").innerHTML = `<em class="muted">${m.content}</em>`;
-    }
-  }
-}
-function addTools(el, calls) {
-  let t = el.querySelector(".tools");
-  if (!t) { t = document.createElement("div"); t.className = "tools"; el.appendChild(t); }
-  t.textContent = "⚙ " + calls.join(" · ");
-}
-function renderChunk(msg) {
-  if (!assistantEl) { assistantEl = appendMessage("assistant"); assistantRaw = ""; }
-  if (msg.tool_calls && msg.tool_calls.length) addTools(assistantEl, msg.tool_calls);
-  if (msg.delta && msg.content) {
-    assistantRaw += msg.content;
-    assistantEl.querySelector(".body").innerHTML = marked.parse(assistantRaw);
-  } else if (msg.content) {
-    assistantRaw = msg.content;
-    assistantEl.querySelector(".body").innerHTML = marked.parse(assistantRaw);
-  }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  if (msg.final) { assistantEl = null; sendBtn.disabled = false; }
-}
-function onServerMessage(msg) {
-  if (msg.type === "agent_status") { setStatus(msg.status); return; }
-  if (msg.type === "history_snapshot") { renderHistory(msg.messages || []); return; }
-  if (msg.type === "skills_snapshot") { return; }
-  if (msg.session_id && msg.session_id !== SESSION_ID) return;
-  renderChunk(msg);
-}
+// === Chat (shared module over the same wire protocol as the portal) ===
 function wsUrl() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const t = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : "";
   return `${proto}//${location.host}/ws/browser${t}`;
 }
-function connect() {
-  ws = new WebSocket(wsUrl());
-  setStatus("connecting…");
-  ws.onopen = () => {
-    backoff = 1000;
-    ws.send(JSON.stringify({ content: "", command: "history_request", session_id: SESSION_ID }));
-  };
-  ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
-  ws.onclose = () => { setStatus("offline"); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000); };
-  ws.onerror = () => { try { ws.close(); } catch {} };
-}
-function sendMessage() {
-  const text = inputEl.value.trim();
-  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-  appendMessage("user").querySelector(".body").textContent = text;
-  const frame = text.startsWith("/")
-    ? { command: "slash", text, session_id: SESSION_ID }
-    : { content: text, session_id: SESSION_ID };
-  ws.send(JSON.stringify(frame));
-  inputEl.value = ""; inputEl.style.height = "auto"; sendBtn.disabled = true;
-}
-sendBtn.addEventListener("click", sendMessage);
-inputEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+let chat;
+const conn = createConnection({
+  url: wsUrl,
+  onFrame: (msg) => chat && chat.handleFrame(msg),
+  onStatus: (state) => chat && chat.setStatus(state),
+  onOpen: () => chat && chat.bootstrap(),
 });
-inputEl.addEventListener("input", () => {
-  inputEl.style.height = "auto"; inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+chat = createChat({
+  container: document.getElementById("chat-root"),
+  connection: conn,
+  getSessionId: () => SESSION_ID,
+  features: { attachments: true, skills: true, theme: true, emptyState: true },
+  hooks: {},
 });
-connect();
 </script>
 </body>
 </html>
