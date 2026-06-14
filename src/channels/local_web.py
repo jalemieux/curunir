@@ -8,6 +8,7 @@ directly:
 - ``GET /``               → the static SPA (reuses the portal frontend + wire protocol)
 - ``GET /api/usage``      → token/cost rollup (``UsageStore.summary``)
 - ``GET /api/portfolio``  → balance sheet (``portfolio.engine``)
+- ``POST /api/portfolio/refresh`` → deterministic re-price (``portfolio.engine.refresh``)
 - ``GET /api/schedules``  → cron tasks (``scheduler._load_tasks``)
 - ``POST /api/schedules`` → create a cron task (``schedule_store.engine.create``)
 - ``PUT /api/schedules/{id}`` → edit cron/prompt/skill/enabled (``engine.update``)
@@ -52,6 +53,7 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.ws import _DEFAULT_LOCALHOST_ORIGINS, _origin_allowed
 from src.config import AgentConfig
 from src.local_ui import readers
+from src.portfolio import engine as pengine
 from src.schedule_store import db as sdb
 from src.schedule_store import engine as sengine
 
@@ -161,6 +163,21 @@ class LocalWebChannel:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             return JSONResponse(readers.portfolio_overview(self.config))
+
+        @app.post("/api/portfolio/refresh")
+        async def api_portfolio_refresh(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            path = str(self.config.portfolio_db)
+            if not os.path.exists(path):
+                return JSONResponse(
+                    {"error": "no portfolio store"}, status_code=400
+                )
+            # refresh() shells out to yfinance per ticker; keep the event loop
+            # responsive. Deterministic — no agent / no LLM (mirrors the
+            # schedule write routes delegating straight to their engine).
+            result = await asyncio.to_thread(pengine.refresh, path)
+            return JSONResponse(result)
 
         @app.get("/api/schedules")
         async def api_schedules(request: Request) -> JSONResponse:

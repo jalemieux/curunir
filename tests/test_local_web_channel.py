@@ -261,6 +261,85 @@ def test_schedule_mutations_require_token(client):
     assert _schedule_ids(client) == ["t"]
 
 
+# --- portfolio refresh (price re-pricing write surface) --------------------
+
+
+def test_portfolio_refresh_reprices(client, config, monkeypatch):
+    """POST /api/portfolio/refresh re-prices market holdings deterministically.
+
+    Seeds an equity holding with a ticker+qty, stubs the quoter, and asserts
+    the route returns the engine's {repriced, errors, asof} and that a
+    follow-up GET reflects the new value/value_asof.
+    """
+    from datetime import date
+
+    engine.add_asset(
+        config.portfolio_db,
+        {"class": "equity", "label": "Acme", "ticker": "ACME", "qty": 10,
+         "value": 100},
+    )
+    monkeypatch.setattr(engine, "_yfin_quote", lambda ticker: 25.0)
+
+    r = client.post("/api/portfolio/refresh", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["repriced"] == 1
+    assert body["errors"] == []
+    assert body["asof"] == date.today().isoformat()
+
+    # The follow-up read reflects the freshly-priced value (10 * 25.0 = 250).
+    after = client.get("/api/portfolio", headers={"X-Curunir-Token": TOKEN}).json()
+    acme = next(a for a in after["assets"] if a["label"] == "Acme")
+    assert acme["value"] == 250.0
+    assert acme["value_asof"] == date.today().isoformat()
+
+
+def test_portfolio_refresh_reports_quote_errors(client, config, monkeypatch):
+    """A per-ticker quote failure is reported in errors, not silently dropped."""
+    engine.add_asset(
+        config.portfolio_db,
+        {"class": "equity", "label": "Bad", "ticker": "BAD", "qty": 5,
+         "value": 50},
+    )
+
+    def boom(ticker):
+        raise ValueError("no quote for you")
+
+    monkeypatch.setattr(engine, "_yfin_quote", boom)
+
+    r = client.post("/api/portfolio/refresh", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["repriced"] == 0
+    assert any("BAD" in e for e in body["errors"])
+
+
+def test_portfolio_refresh_requires_token(client):
+    assert client.post("/api/portfolio/refresh").status_code == 401
+    assert client.post(
+        "/api/portfolio/refresh", headers={"X-Curunir-Token": "wrong"}
+    ).status_code == 401
+
+
+def test_portfolio_refresh_no_store_400(tmp_path):
+    ctx = tmp_path / "ctx"
+    (ctx / "memory").mkdir(parents=True)
+    cfg = AgentConfig(
+        identity_file=ctx / "identity.md",
+        context_dir=ctx,
+        usage_db=ctx / "usage.db",
+        schedules_db=ctx / "schedules.db",
+        portfolio_db=str(ctx / "memory" / "portfolio.db"),  # not created
+    )
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=cfg, pairing_token=TOKEN
+    )
+    with TestClient(ch.app) as c:
+        r = c.post("/api/portfolio/refresh", headers={"X-Curunir-Token": TOKEN})
+        assert r.status_code == 400
+        assert "error" in r.json()
+
+
 def test_api_memory_tree(client):
     r = client.get("/api/memory", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200

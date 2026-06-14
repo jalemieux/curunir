@@ -451,7 +451,9 @@ async function loadPortfolio() {
       ? `<div class="pf-asof">Values as of ${esc(d.as_of.oldest)}${d.as_of.oldest !== d.as_of.newest ? " – " + esc(d.as_of.newest) : ""}</div>`
       : "";
     const hero = `<div class="pf-hero"><div class="pf-nw">${PF_MONEY(nw.net_worth)}</div>
-      <div class="pf-nw-label">net worth</div></div>${asof}`;
+      <div class="pf-nw-label">net worth</div>
+      <button class="btn" id="pf-refresh">Refresh prices</button></div>${asof}
+      <div class="pf-asof" id="pf-refresh-status"></div>`;
     const cards = `<div class="cards">
       <div class="card"><div class="label">Assets</div><div class="value">${PF_MONEY(nw.assets)}</div></div>
       <div class="card"><div class="label">Liabilities</div><div class="value">${PF_MONEY(nw.liabilities)}</div></div>
@@ -506,7 +508,33 @@ async function loadPortfolio() {
 
     el.querySelectorAll(".pf-grp-head").forEach((h) =>
       h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+
+    // Refresh prices — deterministic re-price, then repaint.
+    const refreshBtn = document.getElementById("pf-refresh");
+    if (refreshBtn) refreshBtn.addEventListener("click", () => refreshPrices(refreshBtn));
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+async function refreshPrices(btn) {
+  btn.disabled = true;
+  btn.textContent = "Refreshing…";
+  const fail = document.getElementById("pf-refresh-status");
+  if (fail) fail.innerHTML = "";
+  try {
+    const res = await apiSend("POST", "/api/portfolio/refresh");
+    await loadPortfolio();  // repaint hero/holdings/unrealized/as-of, replacing the status div
+    let html = `Repriced ${res.repriced} holding${res.repriced === 1 ? "" : "s"} as of ${esc(res.asof)}.`;
+    if (res.errors && res.errors.length) {
+      html += ` <span class="err">${res.errors.length} error${res.errors.length === 1 ? "" : "s"}:</span>` +
+        `<ul class="muted">${res.errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`;
+    }
+    const status = document.getElementById("pf-refresh-status");  // fresh node after repaint
+    if (status) status.innerHTML = html;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Refresh prices";
+    if (fail) fail.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  }
 }
 
 // === Memory panel ===
