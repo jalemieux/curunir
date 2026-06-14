@@ -163,6 +163,17 @@
   .pf-badge.st { background: rgba(210,153,34,.18); color: var(--warn); }
   .pf-badge.buy { background: rgba(99,102,241,.18); color: var(--accent); }
   .pf-badge.sell { background: rgba(210,153,34,.18); color: var(--warn); }
+  /* Lot collapse (Equities holdings) */
+  .pf-lot-sum { cursor: pointer; }
+  .pf-lot-sum:hover { background: var(--bg); }
+  .pf-lot-sum .cnt { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .pf-lot-caret { display: inline-block; color: var(--muted); transition: transform .15s;
+    margin-right: 6px; font-size: 11px; }
+  .pf-lot-sum.open .pf-lot-caret { transform: rotate(90deg); }
+  .pf-lot-row { display: none; }
+  .pf-lot-row.show { display: table-row; }
+  .pf-lot-row td { color: var(--muted); }
+  .pf-lot-cell { padding-left: 30px !important; }
 
   /* Schedules editor */
   button.btn {
@@ -401,13 +412,62 @@ function pfUnreal(a) {
   return (a.cost_basis == null || a.cost_basis === "") ? null : (a.value || 0) - a.cost_basis;
 }
 
+// Collapse per-lot equity rows into one summary per (account, ticker).
+// Blank-ticker rows are never merged (each gets its own single-lot group).
+// Aggregates mirror the flat-view math: qty/value are plain sums; weighted-avg
+// cost = Σcost_basis / Σqty; unrealized = Σ(value − cost_basis) over lots that
+// carry a cost_basis (consistent with pfUnreal), else null.
+function pfGroupLots(rows) {
+  const groups = new Map();
+  const order = [];
+  for (const a of rows) {
+    const t = (a.ticker == null || a.ticker === "") ? null : a.ticker;
+    const key = t == null ? order.length + ":" + (a.label || "") : (a.account || "") + " " + t;
+    let g = groups.get(key);
+    if (!g || t == null) {
+      g = { account: a.account || "", ticker: t, lots: [] };
+      groups.set(key, g);
+      order.push(g);
+    }
+    g.lots.push(a);
+  }
+  return order.map((g) => {
+    const qty = g.lots.reduce((s, a) => s + (a.qty || 0), 0);
+    const value = g.lots.reduce((s, a) => s + (a.value || 0), 0);
+    const basisLots = g.lots.filter((a) => a.cost_basis != null && a.cost_basis !== "");
+    const costBasis = basisLots.reduce((s, a) => s + a.cost_basis, 0);
+    const avgCost = qty ? costBasis / qty : null;
+    const unrealized = basisLots.length
+      ? basisLots.reduce((s, a) => s + (a.value || 0) - a.cost_basis, 0)
+      : null;
+    return { account: g.account, ticker: g.ticker, qty, value, avgCost, unrealized, lots: g.lots };
+  });
+}
+
 function pfGroupTable(kind, rows) {
   let head, body;
   if (kind === "equity") {
     head = `<th>Ticker</th><th class="num">Qty</th><th class="num">Avg cost</th><th class="num">Value</th><th class="num">Unrealized</th><th>Account</th>`;
-    body = rows.map((a) => `<tr><td>${esc(a.ticker || a.label)}</td><td class="num">${PF_QTY(a.qty)}</td>` +
+    const lotRow = (a) => `<td class="num">${PF_QTY(a.qty)}</td>` +
       `<td class="num">${PF_PX(a.avg_cost)}</td><td class="num">${PF_MONEY(a.value)}</td>` +
-      `<td class="num">${PF_GAIN(pfUnreal(a))}</td><td>${esc(a.account || "")}</td></tr>`).join("");
+      `<td class="num">${PF_GAIN(pfUnreal(a))}</td>`;
+    body = pfGroupLots(rows).map((g, gi) => {
+      if (g.lots.length === 1) {
+        const a = g.lots[0];
+        return `<tr><td>${esc(a.ticker || a.label)}</td>${lotRow(a)}<td>${esc(a.account || "")}</td></tr>`;
+      }
+      const summary = `<tr class="pf-lot-sum" data-lot-grp="${gi}">` +
+        `<td><span class="pf-lot-caret">▸</span>${esc(g.ticker)}` +
+        `<span class="cnt">${g.lots.length} lots</span></td>` +
+        `<td class="num">${PF_QTY(g.qty)}</td><td class="num">${PF_PX(g.avgCost)}</td>` +
+        `<td class="num">${PF_MONEY(g.value)}</td><td class="num">${PF_GAIN(g.unrealized)}</td>` +
+        `<td>${esc(g.account || "")}</td></tr>`;
+      const lots = g.lots.map((a) =>
+        `<tr class="pf-lot-row" data-lot-grp="${gi}">` +
+        `<td class="pf-lot-cell">${esc(a.acquired || a.label || "")}</td>${lotRow(a)}` +
+        `<td>${esc(a.account || "")}</td></tr>`).join("");
+      return summary + lots;
+    }).join("");
   } else if (kind === "cash") {
     head = `<th>Account</th><th class="num">Value</th>`;
     body = rows.map((a) => `<tr><td>${esc(a.label)}${a.account ? ' <span class="muted">· ' + esc(a.account) + "</span>" : ""}</td><td class="num">${PF_MONEY(a.value)}</td></tr>`).join("");
@@ -506,6 +566,13 @@ async function loadPortfolio() {
 
     el.querySelectorAll(".pf-grp-head").forEach((h) =>
       h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+    el.querySelectorAll(".pf-lot-sum").forEach((s) =>
+      s.addEventListener("click", () => {
+        s.classList.toggle("open");
+        const grp = s.getAttribute("data-lot-grp");
+        s.closest("table").querySelectorAll(`tr.pf-lot-row[data-lot-grp="${grp}"]`)
+          .forEach((r) => r.classList.toggle("show"));
+      }));
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
 }
 
