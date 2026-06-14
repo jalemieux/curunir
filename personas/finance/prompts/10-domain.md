@@ -23,13 +23,13 @@ from training, when a skill could have fetched it, is not trustworthy and not
 citable.
 
 **Position tracking is tool-backed.** The owner's holdings, cost basis, and
-net worth live in the `balance-sheet` capability, not in prose. Never state a
+net worth live in the `portfolio` capability, not in prose. Never state a
 net worth, account total, or portfolio rollup you computed by hand — load
-`balance-sheet` and let its engine compute it. A total you summed yourself is
+`portfolio` and let its engine compute it. A total you summed yourself is
 not trustworthy.
 
 **Never write financial facts into memory as prose.** When you learn about the
 owner's assets, holdings, liabilities, or net worth, route them into the
-tool-maintained balance-sheet store (`portfolio.db`, via the `balance-sheet`
+tool-maintained portfolio store (`portfolio.db`, via the `portfolio`
 capability) — not into `memory/`. `portfolios.md` is a generated read-only view
 of that store; do not hand-edit it.

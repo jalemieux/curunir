@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Seed context/memory/portfolio.db for the balance-sheet capability.
+"""Seed context/memory/portfolio.db for the portfolio capability.
 
 This is a SCAFFOLD. The rows below are SYNTHETIC EXAMPLES — replace them with
 the owner's real figures at migration time, and do NOT commit real holdings to
 git. The real migration is an owner-present step: drop in the actual rows (or
-import brokerage CSVs via the balance-sheet `import_rows` path), resolve the
+import brokerage CSVs via the portfolio `import_rows` path), resolve the
 ambiguity checklist printed at the end, then verify with `portfolio.py networth`.
 
 Refuses to run if the DB already has assets, to avoid duplicate seeding."""
@@ -39,7 +39,7 @@ AMBIGUITIES = [
     "ETF with the brokerage CSV; record physical separately as class=physical.",
     "COLLECTIBLES: set cost_basis + acquired for every piece so holding period "
     "and the 28% collectibles rate can be computed.",
-    "BROKERAGE EQUITIES: import each account from its CSV via the balance-sheet "
+    "BROKERAGE EQUITIES: import each account from its CSV via the portfolio "
     "`import_rows` path, passing the account's stated total as stated_total.",
 ]
 

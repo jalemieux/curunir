@@ -1,6 +1,6 @@
 """Opt-in `portfolio` tool — structured-args surface over src.portfolio.engine.
 
-Unlocked by the `balance-sheet` skill (frontmatter `tools: portfolio`). One
+Unlocked by the `portfolio` skill (frontmatter `tools: portfolio`). One
 tool with an `action` + `args`, so only a single entry joins the unlocked set.
 Returns a JSON string (the dispatcher contract)."""
 from __future__ import annotations

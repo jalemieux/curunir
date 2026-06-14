@@ -6,7 +6,7 @@ import sys
 def _run(tmp_path, *args):
     db = str(tmp_path / "portfolio.db")
     proc = subprocess.run(
-        [sys.executable, "skills/balance-sheet/portfolio.py", "--db", db, *args],
+        [sys.executable, "skills/portfolio/portfolio.py", "--db", db, *args],
         capture_output=True, text=True)
     return proc.returncode, proc.stdout
 

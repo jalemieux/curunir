@@ -140,7 +140,7 @@ A persona is a deployment bundle selected at boot via `CURUNIR_PERSONA=<name>`.
 There is no "no persona" code path — unset falls back to `personas/default/`,
 which ships the full skill catalog and the baseline behavior prompt. Three
 bundles ship today: **`default`** (full catalog, no allowlist), **`finance`**
-(balance-sheet / position-tracking + research; allowlists ~27 skills, declares
+(portfolio / position-tracking + research; allowlists ~27 skills, declares
 `FRED_API_KEY` / `BRAVE_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY`), and
 **`marketing`** (GTM pipeline + competitive intel; allowlists ~25 skills).
 
@@ -171,9 +171,9 @@ the canonical wording is repeated per bundle by design.
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
 
-### Portfolio / Balance-Sheet Engine (`src/portfolio/`)
+### Portfolio Engine (`src/portfolio/`)
 
-Deterministic SQLite-backed personal balance sheet, powering the finance persona's "position tracking is tool-backed, never prose" rule. `db.py` defines a wide `assets` table + `liabilities` table and three canned views — `v_networth`, `v_rollup_by_class`, `v_collectibles_pnl` — so reads never re-sum. `engine.py` holds all logic: validated writes (`add_asset`/`update_asset`/`remove_asset`/`add_liability`/`import_rows`), reads (`networth`/`rollup`/`list`/`show`/`re_equity`/`pnl`/`query`), deterministic `refresh()` re-pricing market classes via yfinance, and markdown rendering. Real-estate equity nets linked mortgages so the rollup sums to net worth without double-counting. The store lives at `context/memory/portfolio.db`. Three surfaces reach the engine: the opt-in `portfolio` tool (`src/tools/portfolio_tool.py`, `{action, args}` → JSON; unlocked by the `balance-sheet` skill), a CLI (`skills/balance-sheet/portfolio.py`), and the `balance-sheet` skill itself.
+Deterministic SQLite-backed personal balance sheet, powering the finance persona's "position tracking is tool-backed, never prose" rule. `db.py` defines a wide `assets` table + `liabilities` table and three canned views — `v_networth`, `v_rollup_by_class`, `v_collectibles_pnl` — so reads never re-sum. `engine.py` holds all logic: validated writes (`add_asset`/`update_asset`/`remove_asset`/`add_liability`/`import_rows`), reads (`networth`/`rollup`/`list`/`show`/`re_equity`/`pnl`/`query`), deterministic `refresh()` re-pricing market classes via yfinance, and markdown rendering. Real-estate equity nets linked mortgages so the rollup sums to net worth without double-counting. The store lives at `context/memory/portfolio.db`. Three surfaces reach the engine: the opt-in `portfolio` tool (`src/tools/portfolio_tool.py`, `{action, args}` → JSON; unlocked by the `portfolio` skill), a CLI (`skills/portfolio/portfolio.py`), and the `portfolio` skill itself.
 
 ### Memory (`src/memory_extractor.py`, `src/memory_indexer.py`)
 

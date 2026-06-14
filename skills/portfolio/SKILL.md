@@ -1,11 +1,11 @@
 ---
-name: balance-sheet
+name: portfolio
 description: "Use to track the owner's personal balance sheet — holdings across every asset class (equities, real estate, collectibles, physical/commodities, cash, private/PE), liabilities, cost basis, and net worth. Trigger phrases: 'what's my net worth', 'track my <asset>', 'add this to my portfolio', 'what's my equity in <property>', 'my watch collection value', 'import my brokerage CSV', 'how much <ticker> do I own', 'refresh my values', 'reconcile my accounts'. This is the owner's own book — distinct from financial-analysis (public companies) and investment-memo (theses)."
 tools: portfolio
 portal_summary: "Track your assets, liabilities, and net worth"
 ---
 
-# Balance Sheet
+# Portfolio
 
 Track the owner's assets and liabilities in a structured store and answer
 questions about them. **The engine does every calculation and every write** —
@@ -24,7 +24,7 @@ its property).
 
 Reach the engine through the `portfolio` tool when it is available to you
 (call it with an `action` and an `args` object). Otherwise run the CLI via
-bash: `python skills/balance-sheet/portfolio.py <cmd>`. Both front the same
+bash: `python skills/portfolio/portfolio.py <cmd>`. Both front the same
 engine.
 
 - **Reads:** `networth`, `rollup`, `list`, `show`, `re_equity`, `pnl`,
