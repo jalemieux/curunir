@@ -17,6 +17,7 @@ never internals like "did it call skill X" (except where a routing/privacy
 | `finance_tasks.py` | Tasks as data: `{id, name, tags, prompt`/`prompts, max_loops, grader, spec, budget}`. R/F/C = market data; **P/T/W = position-tracking** (the owner's balance sheet) |
 | `run_finance_evals.py` | Thin shim: builds the finance `SuiteConfig` and calls `eval.harness.runner.main` |
 | `_pe_gap.py` | Anchor helper for C1 (live forward-P/E gap) |
+| `_projection.py` | Anchor helper for the projection tasks (R8/C5): recomputes the retirement projection through the SAME `src.financial_plan.engine` the agent reaches via the `financial_plan` tool / `plan.py`, with the tool's default seed/n_sims so the Monte-Carlo `success_pct` is reproducible. Supports `--from-portfolio` (reads `CURUNIR_PORTFOLIO_DB`) |
 | `_networth.py` | Anchor helper for the T family: queries the seeded SQLite store's shared `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views for `total` / `rollup` / `re-equity` / `collectibles` |
 | `fixtures/portfolio.sql` | Frozen, synthetic-but-faithful portfolio seed (tables + the shared views). Seed `context/memory/portfolio.db` from it before any tracking task (see [Bootstrap the portfolio store](#bootstrap-the-portfolio-store-one-time-before-p2tw)); the agent and the anchor both read that store |
 | `fixtures/memory/baseline/` | The free-form memory representation of those same holdings, seeded into `context/memory/` for a tracking run |
