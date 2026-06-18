@@ -111,7 +111,7 @@ def portfolio_overview(config: AgentConfig, year: int | None = None) -> dict:
 
 
 def schedules(config: AgentConfig) -> list[dict]:
-    """Scheduled tasks from ``context/schedules.json``.
+    """Scheduled tasks from ``context/schedules.db``.
 
     Reuses ``scheduler._load_tasks`` (the same loader the scheduler runs) and
     annotates each task with ``next_fire`` (ISO-8601, UTC) computed read-only

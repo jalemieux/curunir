@@ -1,7 +1,6 @@
 """SQLite schema, connection helpers, and init for the schedule store.
 
-One `schedules` table whose columns mirror the legacy `schedules.json` fields —
-editable fields (cron/skill/prompt/enabled) plus run metadata
+One `schedules` table — editable fields (cron/skill/prompt/enabled) plus run metadata
 (last_run/last_attempt_at/last_status/last_error). WAL mode, consistent with
 `usage.db`. Writes go only through engine.py."""
 from __future__ import annotations
