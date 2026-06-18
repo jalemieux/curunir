@@ -167,7 +167,12 @@ _SCHEMAS = [
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The shell command to execute.",
+                            "description": (
+                                "The shell command to execute. For large or multiline scripts "
+                                "(heredocs, embedded newlines), prefer writing the script to a file "
+                                "with the `write` tool and then executing it, rather than embedding a "
+                                "big heredoc inline — inline newlines/quotes often break JSON encoding."
+                            ),
                         },
                         "timeout": {
                             "type": "integer",
