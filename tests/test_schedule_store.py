@@ -1,6 +1,5 @@
 # tests/test_schedule_store.py
 """Tests for the SQLite-backed schedule store (src/schedule_store)."""
-import json
 import sqlite3
 
 import pytest
@@ -186,58 +185,3 @@ class TestRunMetadata:
         row = engine.list_schedules(path)[0]
         assert row["cron"] == "0 9 * * *"
         assert row["prompt"] == "keep me"
-
-
-class TestMigration:
-    def test_migrate_imports_rows_and_renames(self, tmp_path):
-        json_path = tmp_path / "schedules.json"
-        json_path.write_text(json.dumps([
-            {"id": "t1", "cron": "0 9 * * *", "prompt": "p1", "skill": None,
-             "enabled": True, "last_run": 42},
-            {"id": "t2", "cron": "0 17 * * *", "prompt": "p2", "skill": "deep-research",
-             "enabled": False, "last_run": 0, "last_status": "success"},
-        ]))
-        path = _fresh(tmp_path)
-        n = engine.migrate_from_json(path, json_path)
-        assert n == 2
-        rows = {r["id"]: r for r in engine.list_schedules(path)}
-        assert rows["t1"]["cron"] == "0 9 * * *"
-        assert rows["t1"]["last_run"] == 42
-        assert rows["t2"]["skill"] == "deep-research"
-        assert rows["t2"]["enabled"] is False
-        assert rows["t2"]["last_status"] == "success"
-        # Source renamed to .migrated, original gone
-        assert not json_path.exists()
-        assert (tmp_path / "schedules.json.migrated").exists()
-
-    def test_migrate_idempotent_when_table_populated(self, tmp_path):
-        json_path = tmp_path / "schedules.json"
-        json_path.write_text(json.dumps([
-            {"id": "t1", "cron": "* * * * *", "prompt": "p", "skill": None,
-             "enabled": True, "last_run": 0},
-        ]))
-        path = _fresh(tmp_path)
-        engine.create(path, {"id": "existing", "cron": "* * * * *", "prompt": "x"})
-        n = engine.migrate_from_json(path, json_path)
-        assert n == 0
-        # Existing table untouched, JSON not renamed (no migration happened)
-        ids = {r["id"] for r in engine.list_schedules(path)}
-        assert ids == {"existing"}
-        assert json_path.exists()
-
-    def test_migrate_absent_json_is_noop(self, tmp_path):
-        path = _fresh(tmp_path)
-        n = engine.migrate_from_json(path, tmp_path / "nope.json")
-        assert n == 0
-        assert engine.list_schedules(path) == []
-
-    def test_migrate_empty_json_array(self, tmp_path):
-        json_path = tmp_path / "schedules.json"
-        json_path.write_text("[]")
-        path = _fresh(tmp_path)
-        n = engine.migrate_from_json(path, json_path)
-        assert n == 0
-        assert engine.list_schedules(path) == []
-        # Empty source still renamed so it isn't re-scanned every boot
-        assert not json_path.exists()
-        assert (tmp_path / "schedules.json.migrated").exists()

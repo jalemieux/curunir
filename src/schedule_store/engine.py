@@ -10,7 +10,6 @@ SQLite handles the concurrency the JSON full-file rewrite could not.
 Validation errors raise ValueError; the caller (tool/scheduler) surfaces them."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from croniter import croniter
@@ -183,49 +182,3 @@ def mark_run(path: str, task_id: str, ts: int, status: str,
         con.commit()
     finally:
         con.close()
-
-
-def migrate_from_json(path: str, json_path) -> int:
-    """One-time import of legacy `schedules.json` into the table.
-
-    Idempotent and gated: imports only when the table is empty and the JSON
-    file exists. On a successful scan the source is renamed to
-    `<name>.migrated` (even when empty) so it is not re-scanned. Returns the
-    number of rows imported."""
-    json_path = Path(json_path)
-    if not json_path.exists():
-        return 0
-    if load(path):  # table already populated — never re-import
-        return 0
-
-    try:
-        rows = json.loads(json_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return 0
-    if not isinstance(rows, list):
-        return 0
-
-    con = sdb.connect(path)
-    try:
-        imported = 0
-        for r in rows:
-            if not isinstance(r, dict) or "id" not in r or "cron" not in r:
-                continue
-            con.execute(
-                "INSERT OR IGNORE INTO schedules "
-                "(id, cron, skill, prompt, enabled, last_run, last_attempt_at, "
-                " last_status, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    r["id"], r["cron"], r.get("skill"), r.get("prompt"),
-                    1 if r.get("enabled", True) else 0,
-                    int(r.get("last_run", 0) or 0),
-                    int(r.get("last_attempt_at", 0) or 0),
-                    r.get("last_status"), r.get("last_error"),
-                ))
-            imported += 1
-        con.commit()
-    finally:
-        con.close()
-
-    json_path.rename(json_path.with_name(json_path.name + ".migrated"))
-    return imported
