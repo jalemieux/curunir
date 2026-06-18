@@ -185,7 +185,7 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 
 ### Context Directory (`context/`)
 
-Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and the runtime SQLite stores `schedules.db` (cron tasks; see Scheduling — a legacy `schedules.json` is auto-migrated to it and renamed `schedules.json.migrated`), `portfolio.db`, and `usage.db`. The system prompt reads `identity.md` (then layers `personas/<active>/prompts/*.md` on top — see Personas). **`behavior.md` is no longer read at boot** — framework behavior moved into the persona bundle's `prompts/`; a stray `context/behavior.md` has no effect. The `/identity` skill only edits `identity.md`. Use `sync-context.sh` to rsync from a remote machine before starting.
+Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and the runtime SQLite stores `schedules.db` (cron tasks; see Scheduling), `portfolio.db`, and `usage.db`. The system prompt reads `identity.md` (then layers `personas/<active>/prompts/*.md` on top — see Personas). **`behavior.md` is no longer read at boot** — framework behavior moved into the persona bundle's `prompts/`; a stray `context/behavior.md` has no effect. The `/identity` skill only edits `identity.md`. Use `sync-context.sh` to rsync from a remote machine before starting.
 
 ### Onboarding (`onboarding/`)
 
@@ -205,7 +205,7 @@ Cron tasks live in the SQLite store `context/schedules.db` (one `schedules` tabl
 
 The scheduler evaluates the table every ~60s via croniter (re-querying each tick, so edits take effect without restart). When due, it stamps `last_attempt_at` via `mark_attempt` *before* dispatch (so a slow/crashed task doesn't re-fire), optionally prepends the named skill's `SKILL.md`, and runs `handle()` in system-task mode under a per-run `sched:<id>:<ts>` session id; `mark_run` advances `last_run`/`last_status` only on success.
 
-**JSON → SQLite migration.** On boot, `run.py` initializes the store and calls `engine.migrate_from_json(context/schedules.json)` once: if the table is empty and the legacy JSON exists, its rows are imported and the file is renamed to `schedules.json.migrated` (audit/rollback trail, never deleted). Idempotent — once the table is populated it is a no-op.
+**Source of truth.** On boot, `run.py` only initializes the store (`schedule_db.init_db`); the SQLite table is the sole schedule source. The legacy `context/schedules.json` is no longer read or migrated — a stray one is inert. (The historical one-time JSON→SQLite import was removed; deployments already on SQLite are unaffected.)
 
 ### Usage Tracking (`src/usage_store.py`, `src/usage.py`)
 
