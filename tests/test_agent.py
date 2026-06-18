@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _is_context_overflow, _trim_history
+from src.agent.agent import (
+    Agent,
+    _cap_tool_result,
+    _estimate_chars,
+    _is_context_overflow,
+    _parse_tool_args,
+    _tool_detail_lines,
+    _trim_history,
+)
 from src.llm import LLMResponse
 
 
@@ -505,6 +513,43 @@ class TestAgentHandle:
         assert agent.sessions["s1"][0]["content"] == content_blocks
         user_msg = [m for m in captured["messages"] if m["role"] == "user"][-1]
         assert user_msg["content"] == content_blocks
+
+
+class TestParseToolArgs:
+    def test_strict_valid_json_parses(self):
+        args, err = _parse_tool_args('{"command": "ls -la"}')
+        assert err is None
+        assert args == {"command": "ls -la"}
+
+    def test_literal_newline_in_string_rescued_via_strict_false(self):
+        # The heredoc family: a string value carrying a literal, unescaped
+        # newline is invalid strict JSON but rescued with strict=False.
+        raw = '{"command": "cat > f << \'EOF\'\nhello\nEOF\n"}'
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(raw)  # confirm strict parsing genuinely rejects it
+        args, err = _parse_tool_args(raw)
+        assert err is None
+        assert args["command"] == "cat > f << 'EOF'\nhello\nEOF\n"
+
+    def test_genuinely_malformed_json_returns_actionable_error(self):
+        args, err = _parse_tool_args('{"command": "echo unterminated')
+        assert args is None
+        assert err is not None
+        assert "write" in err
+        assert "bash" in err
+
+    def test_non_string_input_returns_error(self):
+        args, err = _parse_tool_args(None)
+        assert args is None
+        assert err is not None
+
+
+class TestToolDetailLinesHeredoc:
+    def test_renders_real_detail_line_for_heredoc(self):
+        raw = '{"command": "cat > f << \'EOF\'\nhello\nEOF\n"}'
+        lines = _tool_detail_lines("bash", raw)
+        assert not any("unparseable" in line for line in lines)
+        assert any("Bash" in line for line in lines)
 
 
 class TestTrimHistoryMultimodal:

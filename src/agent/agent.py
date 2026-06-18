@@ -46,11 +46,38 @@ def _display_name(tool_name: str) -> str:
     return "".join(part.capitalize() for part in tool_name.split("_"))
 
 
+_TOOL_ARG_RECOVERY_HINT = (
+    "Retry with well-formed JSON arguments. For large or multiline scripts "
+    "(heredocs, embedded newlines, or unescaped quotes), stage the script with "
+    "the `write` tool and then execute it with `bash`, rather than embedding it "
+    "inline; or escape all newlines and quotes so the arguments are valid JSON."
+)
+
+
+def _parse_tool_args(args_str: str) -> tuple[dict | None, str | None]:
+    """Parse a tool call's JSON ``arguments`` string tolerantly.
+
+    Tries strict JSON first; on failure, retries with ``strict=False`` which
+    permits literal control characters (unescaped newlines/tabs) inside string
+    values — the common "multiline heredoc" failure mode where the model emits
+    a `bash` command with embedded newlines. Returns ``(args, None)`` on
+    success, or ``(None, error_message)`` with actionable recovery guidance
+    when parsing still fails (e.g. unescaped quotes or truncated JSON).
+    """
+    try:
+        return json.loads(args_str), None
+    except (json.JSONDecodeError, TypeError):
+        pass
+    try:
+        return json.loads(args_str, strict=False), None
+    except (json.JSONDecodeError, TypeError) as exc:
+        return None, f"Error: tool arguments were not valid JSON ({exc}). {_TOOL_ARG_RECOVERY_HINT}"
+
+
 def _tool_detail_lines(name: str, args_str: str) -> list[str]:
     """Build tree-formatted detail lines for a tool call."""
-    try:
-        args = json.loads(args_str)
-    except (json.JSONDecodeError, TypeError):
+    args, err = _parse_tool_args(args_str)
+    if err is not None:
         return [f"├─ {_display_name(name)} (unparseable args)"]
 
     key_names = _TOOL_KEY_ARGS.get(name, list(args.keys())[:1])
@@ -609,14 +636,13 @@ class Agent:
                         if on_tool_call:
                             await on_tool_call(name, args_str)
 
-                        try:
-                            args = json.loads(args_str)
-                        except (json.JSONDecodeError, TypeError) as exc:
-                            logger.warning("[%s] tool %s: unparseable arguments: %s", sid, name, exc)
+                        args, parse_err = _parse_tool_args(args_str)
+                        if parse_err is not None:
+                            logger.warning("[%s] tool %s: unparseable arguments: %s", sid, name, parse_err)
                             return {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
-                                "content": f"Error: tool arguments were not valid JSON ({exc}). Retry with well-formed JSON arguments.",
+                                "content": parse_err,
                                 "_tool_name": name,
                             }
 
