@@ -146,6 +146,43 @@ def test_persona_allowlisting_a_delivery_skill_also_allows_email_send(persona_na
         )
 
 
+def _finance_prompts_text() -> str:
+    """Concatenated text of every finance persona prompt layer, as shipped.
+
+    These conventions live in the persona bundle's prompts/*.md (the framework
+    behavior layer), so assert against the real files rather than a fixture.
+    """
+    prompts_dir = Path("personas") / "finance" / "prompts"
+    return "\n".join(
+        p.read_text() for p in sorted(prompts_dir.glob("*.md"))
+    )
+
+
+def test_finance_prompts_define_unsourced_convention():
+    # #402: any external factual claim not grounded in a tool/skill/web_fetch
+    # result must be tagged [UNSOURCED], reinforcing the no-general-knowledge
+    # guardrail. The literal tag is what the agent emits, so guard the literal.
+    text = _finance_prompts_text()
+    assert "[UNSOURCED]" in text
+
+
+def test_finance_prompts_define_show_your_work_convention():
+    # #402: projections and derived figures must surface their inputs and the
+    # arithmetic, not assert a bare number.
+    text = _finance_prompts_text().lower()
+    assert "show your work" in text
+
+
+def test_finance_prompts_standardize_emitted_tables():
+    # #402: the finance skills emit standardized markdown tables (holdings /
+    # allocation / P&L) with all summation left to the engine ("reads never
+    # re-sum"). Guard that the table convention block ships.
+    text = _finance_prompts_text().lower()
+    assert "standard table" in text
+    for kind in ("holdings", "allocation", "p&l"):
+        assert kind in text, kind
+
+
 def test_companion_bundle_parses_from_repo():
     p = load_persona("companion")
     assert p.name == "companion"
