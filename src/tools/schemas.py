@@ -368,6 +368,46 @@ _OPT_IN_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "financial_plan",
+            "description": (
+                "Project whether the owner's money will last — a deterministic "
+                "retirement/goal engine (no store, stateless). The engine does "
+                "all math; never compute a projection yourself. Actions: "
+                "project (year-by-year cash-flow table, accumulation→"
+                "distribution, with depletion detection), montecarlo (seeded "
+                "probability-of-success vs the 85% bar, with ending-balance "
+                "percentiles), stress (re-runs the four canned shocks: retire "
+                "2yr early, −20% year-1 return, +20% spending, late-life LTC), "
+                "report (markdown of all three). Returns are REAL "
+                "(inflation-adjusted), not nominal. Pass plan inputs in "
+                "`args.inputs` and optional `args.seed` / `args.n_sims`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["project", "montecarlo", "stress", "report"],
+                        "description": "The projection to run.",
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": (
+                            "{inputs:{current_age, retirement_age, end_age, "
+                            "current_balance, annual_contribution, "
+                            "annual_spending, real_return?, volatility?}, "
+                            "seed?, n_sims?}. Seed the starting balance from the "
+                            "balance-sheet networth — never invent it."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "to_audio",
             "description": (
                 "Rewrite text for natural speech and synthesize it into an "
