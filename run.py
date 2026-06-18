@@ -29,6 +29,7 @@ from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
 from onboarding.bootstrap import bootstrap_context
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
+from src.log_context import LoopIdFilter
 from src.memory_extractor import extract_learnings
 from src.schedule_store import db as schedule_db
 from src.scheduler import run_scheduler
@@ -556,7 +557,7 @@ def _ensure_ws_token(path: Path) -> str:
     return token
 
 
-_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(loop_id)s]: %(message)s"
 # Full date so the introspect skill can filter the rotating log file by a
 # time window (the flat file spans multiple days; time-only stamps can't be
 # windowed). `docker logs` adds its own dated prefix, so this only affects
@@ -584,6 +585,15 @@ def _configure_logging(log_file: str | None) -> None:
         level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT
     )
 
+    # Stamp every record with the current agent-loop id (``-`` outside a loop)
+    # so the ``%(loop_id)s`` field resolves and interleaved sessions/tasks can
+    # be grepped apart. Attached at the handler level (not the logger) so it
+    # also covers records propagated from other modules (e.g. src.llm retries).
+    # Must be in place before the first record is emitted with the new format.
+    loop_filter = LoopIdFilter()
+    for h in logging.getLogger().handlers:
+        h.addFilter(loop_filter)
+
     if not log_file:
         return
 
@@ -602,6 +612,7 @@ def _configure_logging(log_file: str | None) -> None:
         return
 
     handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+    handler.addFilter(loop_filter)
     logging.getLogger().addHandler(handler)
 
 

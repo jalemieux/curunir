@@ -43,6 +43,8 @@ Context overflow is caught from LiteLLM exceptions; history is adaptively trimme
 
 **Usage accounting.** After each successful `call_llm`, a `UsageRecord` (prompt/completion/cached/reasoning/image/audio tokens, `cost_usd`, `elapsed_sec`) is written to SQLite `context/usage.db` via `asyncio.to_thread` (see Usage Tracking below).
 
+**Loop-id logging.** Each `handle()` call sets a `loop_id` (`<session8>.<4hex>`, e.g. `sched:da.a3f1`) on a `contextvars.ContextVar` (`src/log_context.py`), reset in the `finally`. A `LoopIdFilter` attached to the root log handlers stamps every record with it, surfaced by the `[%(loop_id)s]` field in `_LOG_FORMAT` (`run.py`). Because it rides a ContextVar, the id propagates across `await` and into the `asyncio.gather` tool-batch tasks, and — crucially — onto records from *other* modules the loop calls into (e.g. `src.llm` 429 retries), so one interleaved multi-session loop can be grepped out by its id. Lines logged outside any loop render `[-]`.
+
 **Cancellation.** `Agent.request_cancel(session_id)` sets a per-session `asyncio.Event` that the loop checks at the top of each iteration and before the tool batch starts. Channels call this out-of-band when the user requests a stop (the in_queue is blocked while `handle()` runs). Because the batch is dispatched with a single `asyncio.gather()`, a cancel that arrives **before** the batch starts stubs every call in it with an `(interrupted)` tool response (so each `tool_call_id` has a matching response); once the batch is in flight, all calls run to completion — there is no mid-batch skip. On the next iteration the outer cancel check fires, an `(interrupted)` assistant turn is appended, and `handle()` returns `"(interrupted)"`.
 
 ### Message Flow
