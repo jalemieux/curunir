@@ -3,6 +3,7 @@ import asyncio
 from src.config import AgentConfig
 from src.tools.attach import exec_attach
 from src.tools.bash_tool import exec_bash
+from src.tools.financial_plan_tool import exec_financial_plan
 from src.tools.fs_tools import exec_edit, exec_glob, exec_grep, exec_read, exec_write
 from src.tools.portfolio_tool import exec_portfolio
 from src.tools.skill_tool import exec_load_skill
@@ -22,6 +23,7 @@ _SYNC_EXECUTORS = {
     "attach": exec_attach,
     "schedule": exec_schedule,
     "portfolio": exec_portfolio,
+    "financial_plan": exec_financial_plan,
 }
 
 
