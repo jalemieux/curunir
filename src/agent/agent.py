@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from src.agent.system_prompt import build_memory_block, build_static_prompt
 logger = logging.getLogger(__name__)
 from src.config import AgentConfig
 from src.llm import call_llm, classify_provider_error
+from src.log_context import loop_id_var
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
 from src.tools.schemas import get_tool_schemas
@@ -406,6 +408,10 @@ class Agent:
         messages = [{"role": "system", "content": system_prompt}] + history
 
         sid = session_id[:8]
+        # Tag every log record this loop emits (across all modules) with a
+        # unique id so interleaved sessions/tasks can be grepped apart. Reset
+        # in the finally so lines logged after the loop aren't misattributed.
+        loop_ctx_token = loop_id_var.set(f"{sid}.{uuid.uuid4().hex[:4]}")
         msg_chars = _estimate_chars(history)
         logger.info("[%s] agent loop start — %d messages, ~%dk chars", sid, len(history), msg_chars // 1000)
 
@@ -711,3 +717,4 @@ class Agent:
         finally:
             self._running_sessions.discard(session_id)
             cancel_event.clear()
+            loop_id_var.reset(loop_ctx_token)
