@@ -1,6 +1,6 @@
 ---
 name: tax-strategy
-description: "Use for US federal tax questions on investments — tax implications of a sale, tax-loss harvesting, the wash-sale rule, capital gains vs. ordinary income, holding period (short- vs. long-term), cost basis, crypto/digital-asset taxation, capital-loss limits and carryover, IRA/retirement contribution limits, brackets/rates, and estimated tax. Trigger phrases: 'tax implications', 'tax-loss harvesting', 'wash sale', 'capital gains', 'holding period', 'is this short- or long-term', 'cost basis', 'crypto taxes', 'how is this taxed'."
+description: "Use for US federal tax questions on investments — tax implications of a sale, tax-loss harvesting (incl. at household scope), the wash-sale rule (incl. across accounts), replacement securities, building a tax budget, capital gains vs. ordinary income, holding period (short- vs. long-term), cost basis, crypto/digital-asset taxation, capital-loss limits and carryover, IRA/retirement contribution limits, brackets/rates, and estimated tax. Trigger phrases: 'tax implications', 'tax-loss harvesting', 'tax-loss harvesting at household scope', 'wash sale', 'wash sale across accounts', 'replacement security', 'tax budget', 'capital gains', 'holding period', 'is this short- or long-term', 'cost basis', 'crypto taxes', 'how is this taxed'."
 portal_summary: "Ground US federal tax questions in current-year IRS guidance"
 portal_starter: true
 ---
@@ -103,6 +103,110 @@ wash-sale rule kill my loss?"*
    year.
 4. Caveat line.
 
+## Tax-loss harvesting mechanics
+
+Tax-loss harvesting (TLH) sells a position at a loss to bank the capital loss
+while keeping the portfolio roughly invested. Three mechanics decide whether a
+harvest actually works. Each is a **load-bearing claim** — ground it per the
+rule above (state the year, fetch and quote Pub 550 / IRC §1091), and present
+the result as a *planning consideration*, never a directive to sell.
+
+### Wash-sale window (household scope)
+
+The wash-sale rule (IRC §1091, explained in Pub 550) **disallows** a loss when
+"substantially identical" stock or securities are bought within a **61-day
+window**: the **30 days before** through the **30 days after** the loss sale
+(the sale day itself is the center, not an endpoint). A disallowed loss isn't
+gone — it's added to the basis of the replacement shares — but it is deferred,
+which usually defeats the point of the harvest.
+
+The trap this skill exists to flag: the window is **not scoped to the account
+where the loss was booked.** Before calling a loss "clean," check the whole
+**household-controlled** set of accounts for a triggering buy in the ±30-day
+window:
+
+- **The taxpayer's own accounts**, taxable *and* tax-advantaged. A repurchase
+  inside an **IRA or Roth IRA** triggers the wash sale (IRS Rev. Rul. 2008-5)
+  — and there the disallowed loss is *permanently* lost, because IRA basis
+  doesn't carry it forward. This is the worst-case version.
+- **A spouse's accounts.** The rule reaches a buy by the taxpayer's spouse, so
+  a household filing jointly must look across both partners' accounts.
+- **DRIP and auto-reinvestment.** A dividend-reinvestment plan or a fund's
+  automatic distribution reinvestment is a **purchase** — a small DRIP buy of
+  the same security inside the window taints (at least partially) the loss. Ask
+  whether DRIP is on for the security being harvested.
+
+Whether the wash-sale rule reaches **digital assets** is legislation-sensitive
+and unsettled — IRC §1091 is written around "stock or securities," and crypto
+is currently treated as property. **Do not assert the answer from memory**:
+re-fetch the *Digital Assets* hub and Pub 550 and quote the current position,
+exactly as in the crypto worked example above.
+
+### Replacement security
+
+To keep market exposure while banking the loss, the standard move is to rotate
+the proceeds into a **replacement security** that tracks similar exposure but is
+**not "substantially identical"** to the one sold. The judgment that matters —
+and the one to surface — is the *substantially-identical* line: two S&P 500
+index funds from different issuers are widely viewed as risky-to-identical;
+swapping one broad-market fund for a different-index fund (e.g. a total-market
+fund for an S&P 500 fund) is the more defensible distance. The IRS has not
+published a bright-line test, so this is a risk judgment, not a settled rule.
+
+Your job is to **explain the substitution principle and the
+substantially-identical risk** so the user (with their advisor) can choose — not
+to pick tickers. **Do not recommend a specific replacement security as tax
+advice**; naming exact funds is investment selection that defers to the user or
+their advisor. Frame it as: "the principle is X; whether fund A and fund B are
+substantially identical is the risk to weigh," and keep the not-advice caveat.
+
+### Tax-budget table
+
+A **tax budget** plans how much loss to harvest (or gain to realize) against the
+year's running gains. Use this canonical shape so the numbers are legible and
+year-stamped:
+
+| Line | Amount | Notes |
+|---|---|---|
+| Short-term capital gains (YTD) | $X | taxed as ordinary income |
+| Long-term capital gains (YTD) | $Y | preferential LTCG rate |
+| Realized losses (YTD) | $(Z) | already booked this year |
+| Capital-loss carryforward (from prior years) | $(C) | from last year's return |
+| **Net position before harvest** | $(X+Y−Z−C) | gains net of losses/carryover |
+| **Target harvest this year** | $H | the loss you plan to realize |
+
+Grounding (quote Pub 550): capital losses first offset capital gains of the
+same character, then the **opposite** character; any **net** capital loss then
+offsets up to **$3,000 of ordinary income per year** ($1,500 if married filing
+separately), and whatever remains **carries forward** indefinitely to future
+years. So harvesting beyond (net gains + $3,000) doesn't save tax *this* year —
+it just builds carryforward.
+
+**Worked example** (tax year 2026; figures illustrative, confirm the $3,000
+limit live in Pub 550):
+
+| Line | Amount | Notes |
+|---|---|---|
+| Short-term capital gains (YTD) | $4,000 | ordinary-income rate |
+| Long-term capital gains (YTD) | $10,000 | LTCG rate |
+| Realized losses (YTD) | $(2,000) | already booked |
+| Capital-loss carryforward | $(1,000) | from 2025 return |
+| **Net position before harvest** | $11,000 | $14,000 gains − $3,000 losses/carryover |
+| **Target harvest** | up to ~$14,000 | $11,000 to zero out net gains, + $3,000 to offset ordinary income |
+
+Above ~$14,000 of additional harvested loss in this example, the excess only
+adds to next year's carryforward rather than reducing 2026 tax.
+
+## Tool boundary
+
+The balance-sheet / `portfolio` engine has **no wash-sale detection and no TLH
+math** — that is out of scope for the deterministic engine by design. What it
+*does* give you, read-only, is the raw material: per-lot **cost basis** and
+**acquired date** (`portfolio show` / `trade_history`) and **realized P/L**
+(`realized_pnl`). Derive the wash-sale check and the tax budget *yourself* from
+those reads, ground them per the rule above, and present them as **planning
+considerations**. Never have the engine — or yourself — auto-execute a sell.
+
 ## Common mistakes
 
 - **Answering a rate/limit/applicability question from memory.** That is the
@@ -113,5 +217,16 @@ wash-sale rule kill my loss?"*
   highest-risk claim category; legislation moves. Re-fetch every time.
 - **Reusing a prior-year newsroom or Rev. Proc. URL for brackets.** Those are
   year-stamped and 404 or mislead. Look up the current year live.
+- **Scoping the wash-sale window to a single account.** The ±30-day window
+  spans the whole household — the taxpayer's other accounts (incl. IRAs), a
+  spouse's accounts, and DRIP auto-reinvestments. Checking only the selling
+  account misses the taint.
+- **Treating a replacement security as "safe" without the substantially-
+  identical check.** "Rotate into a similar fund" is incomplete — name the
+  substantially-identical risk and defer the actual ticker choice to the user/
+  advisor; don't recommend a specific security as tax advice.
+- **Emitting a tax-budget number without naming the tax year or grounding the
+  $3,000 limit.** A "harvest up to $X" figure is wrong without the year and a
+  quoted Pub 550 basis for the $3,000 ordinary-income offset and carryforward.
 - **Wandering into state or foreign tax.** Out of scope — flag and stop.
 - **Dropping the not-professional-advice caveat.** It closes every answer.
