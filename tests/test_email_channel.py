@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.channels.email import EmailChannel
-from src.channels.deadsimple import DeadsimpleError
+from src.channels.fastmail import FastmailError
 from src.config import EmailChannelConfig
 
 
@@ -15,9 +15,11 @@ from src.config import EmailChannelConfig
 def email_config(tmp_path):
     return EmailChannelConfig(
         enabled=True,
-        api_key="dse_test",
-        inbox_id="inbox-uuid-1",
-        api_base="https://api.deadsimple.email",
+        imap_host="imap.fastmail.com",
+        smtp_host="smtp.fastmail.com",
+        user="jac@curunir.ai",
+        password="app-password",
+        inbox="jac@curunir.ai",
         poll_interval_sec=1,
         allowed_senders=["alice@example.com"],
         restrict_outbound=True,
@@ -36,9 +38,9 @@ def in_queue():
 
 
 def _make_channel(in_queue, config, client: AsyncMock | None = None):
-    """Construct the channel with the deadsimple client patched out."""
+    """Construct the channel with the Fastmail client patched out."""
     mock_client = client or AsyncMock()
-    with patch("src.channels.email.DeadsimpleClient", return_value=mock_client):
+    with patch("src.channels.email.FastmailClient", return_value=mock_client):
         ch = EmailChannel(in_queue, config)
     return ch, mock_client
 
@@ -58,7 +60,7 @@ def test_constructor(email_config, in_queue):
 @pytest.mark.asyncio
 async def test_start_validates_inbox_then_initializes_watermark(email_config, in_queue):
     client = AsyncMock()
-    client.validate_inbox.return_value = {"data": {"inbox_id": "inbox-uuid-1", "email": "bot@deadsimple.email"}}
+    client.validate_inbox.return_value = {"data": {"inbox_id": "inbox-uuid-1", "email": "jac@curunir.ai"}}
     client.list_messages.return_value = {"messages": [], "next_cursor": None}
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
@@ -85,7 +87,7 @@ async def test_start_validates_inbox_then_initializes_watermark(email_config, in
 @pytest.mark.asyncio
 async def test_start_returns_early_on_inbox_validation_failure(email_config, in_queue, caplog):
     client = AsyncMock()
-    client.validate_inbox.side_effect = DeadsimpleError("404: inbox not found")
+    client.validate_inbox.side_effect = FastmailError("404: inbox not found")
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
     await ch.start()  # returns without raising
@@ -147,8 +149,8 @@ async def test_poll_once_outbound_does_not_advance_watermark(email_config, in_qu
     """Outbound messages must not advance the watermark.
 
     Reproducer for the silent-drop bug: a scheduled outbound at T+1 used to
-    push the watermark past an inbound at T whose delivery into the deadsimple
-    list endpoint lagged by a few seconds. After the watermark jumped, the
+    push the watermark past an inbound at T whose delivery into the IMAP
+    listing lagged by a few seconds. After the watermark jumped, the
     late-arriving inbound was permanently ≤ watermark and got dropped.
     """
     client = AsyncMock()
@@ -323,7 +325,7 @@ async def test_poll_once_walks_pages_until_watermark(email_config, in_queue):
 
 @pytest.mark.asyncio
 async def test_poll_once_handles_api_returning_messages_out_of_order(email_config, in_queue):
-    """Live deadsimple API does NOT guarantee strict newest-first ordering.
+    """Live IMAP listings do NOT guarantee strict newest-first ordering.
 
     Reproducer for the case where the watermark message (a previous outbound
     reply) is returned at index 0 even though a newer inbound message exists
@@ -557,7 +559,7 @@ async def test_poll_once_skips_failed_attachment_but_keeps_message(email_config,
         {"attachment_id": "a1", "filename": "broken.pdf",
          "content_type": "application/pdf", "size": 1024},
     ])
-    client.download_attachment.side_effect = DeadsimpleError("expired URL")
+    client.download_attachment.side_effect = FastmailError("expired URL")
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
     ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
@@ -702,9 +704,9 @@ def test_render_html_no_raw_markdown_survives():
 
 
 @pytest.mark.asyncio
-async def test_send_logs_and_returns_on_deadsimple_error(email_config, in_queue, caplog):
+async def test_send_logs_and_returns_on_fastmail_error(email_config, in_queue, caplog):
     client = AsyncMock()
-    client.send_reply.side_effect = DeadsimpleError("rate limited")
+    client.send_reply.side_effect = FastmailError("rate limited")
     ch, _ = _make_channel(in_queue, email_config, client=client)
     msg = _outgoing(
         "hi",
@@ -772,7 +774,7 @@ async def test_send_failure_records_retry_not_dropped(email_config, in_queue):
     ch, _ = _make_channel(in_queue, email_config, client=client)
     await _poll_one_inbound(ch, client, mid="m1")
 
-    client.send_reply.side_effect = DeadsimpleError("dns outage")
+    client.send_reply.side_effect = FastmailError("dns outage")
     msg = _outgoing("the answer", reply_address={
         "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
     await ch.send(msg)
@@ -791,7 +793,7 @@ async def test_failed_send_then_drain_resends_and_clears(email_config, in_queue)
     ch, _ = _make_channel(in_queue, email_config, client=client)
     await _poll_one_inbound(ch, client, mid="m1")
 
-    client.send_reply.side_effect = DeadsimpleError("outage")
+    client.send_reply.side_effect = FastmailError("outage")
     msg = _outgoing("the answer", reply_address={
         "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"})
     await ch.send(msg)
@@ -815,7 +817,7 @@ async def test_failed_send_not_reenqueued_by_later_poll(email_config, in_queue):
     client = AsyncMock()
     ch, _ = _make_channel(in_queue, email_config, client=client)
     await _poll_one_inbound(ch, client, mid="m1")
-    client.send_reply.side_effect = DeadsimpleError("outage")
+    client.send_reply.side_effect = FastmailError("outage")
     await ch.send(_outgoing("answer", reply_address={
         "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"}))
     assert "m1" in ch.state.pending
@@ -856,7 +858,7 @@ async def test_dead_letter_after_max_retries(email_config, in_queue, caplog):
     ch._escalate_hook = MagicMock()
     await _poll_one_inbound(ch, client, mid="m1")
 
-    client.send_reply.side_effect = DeadsimpleError("persistent outage")
+    client.send_reply.side_effect = FastmailError("persistent outage")
     await ch.send(_outgoing("answer", reply_address={
         "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"}))
     assert ch.state.pending["m1"].status == "retry"
@@ -871,7 +873,7 @@ async def test_dead_letter_after_max_retries(email_config, in_queue, caplog):
 @pytest.mark.asyncio
 async def test_escalation_fires_once_at_threshold(email_config, in_queue):
     client = AsyncMock()
-    client.send_reply.side_effect = DeadsimpleError("down")
+    client.send_reply.side_effect = FastmailError("down")
     ch, _ = _make_channel(in_queue, email_config, client=client)
     ch.config.failure_alert_threshold = 3
     ch._escalate_hook = MagicMock()
@@ -890,7 +892,7 @@ async def test_send_success_resets_failure_counter(email_config, in_queue):
     ch.config.failure_alert_threshold = 3
     ch._escalate_hook = MagicMock()
 
-    client.send_reply.side_effect = DeadsimpleError("down")
+    client.send_reply.side_effect = FastmailError("down")
     for i in range(2):
         await ch.send(_outgoing("a", reply_address={
             "to": "alice@example.com", "subject": "re", "in_reply_to": f"x{i}"}))
@@ -898,7 +900,7 @@ async def test_send_success_resets_failure_counter(email_config, in_queue):
     client.send_reply.side_effect = None
     await ch.send(_outgoing("ok", reply_address={
         "to": "alice@example.com", "subject": "re", "in_reply_to": "x-ok"}))
-    client.send_reply.side_effect = DeadsimpleError("down")
+    client.send_reply.side_effect = FastmailError("down")
     for i in range(2):
         await ch.send(_outgoing("a", reply_address={
             "to": "alice@example.com", "subject": "re", "in_reply_to": f"y{i}"}))
@@ -1017,7 +1019,7 @@ async def test_poll_get_message_failure_does_not_advance_cursor(email_config, in
     client = AsyncMock()
     client.list_messages.return_value = {
         "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")], "next_cursor": None}
-    client.get_message.side_effect = DeadsimpleError("transient 503")
+    client.get_message.side_effect = FastmailError("transient 503")
 
     ch, _ = _make_channel(in_queue, email_config, client=client)
     ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
@@ -1045,7 +1047,7 @@ async def test_poll_transient_failure_pins_cursor_but_processes_newer(email_conf
 
     def _get(mid):
         if mid == "m_old":
-            raise DeadsimpleError("503")
+            raise FastmailError("503")
         return _detail(mid)
     client.get_message.side_effect = _get
 

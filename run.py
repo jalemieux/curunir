@@ -698,9 +698,11 @@ async def main():
     # Email channel (conditional)
     email_config = EmailChannelConfig(
         enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
-        api_key=os.environ.get("DEADSIMPLE_API_KEY", ""),
-        inbox_id=os.environ.get("DEADSIMPLE_INBOX_ID", ""),
-        api_base=os.environ.get("DEADSIMPLE_API_BASE", "https://api.deadsimple.email"),
+        imap_host=os.environ.get("FASTMAIL_IMAP_HOST", "imap.fastmail.com"),
+        smtp_host=os.environ.get("FASTMAIL_SMTP_HOST", "smtp.fastmail.com"),
+        user=os.environ.get("FASTMAIL_USER", ""),
+        password=os.environ.get("FASTMAIL_PASSWORD", ""),
+        inbox=os.environ.get("FASTMAIL_INBOX", "") or os.environ.get("FASTMAIL_USER", ""),
         poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
         restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
@@ -712,13 +714,13 @@ async def main():
         failure_alert_threshold=int(os.environ.get("EMAIL_FAILURE_ALERT_THRESHOLD", "5")),
     )
     if email_config.enabled:
-        if not email_config.api_key or not email_config.inbox_id:
-            logger.error("EMAIL_ENABLED=true but DEADSIMPLE_API_KEY or DEADSIMPLE_INBOX_ID is unset; skipping email channel")
+        if not email_config.user or not email_config.password:
+            logger.error("EMAIL_ENABLED=true but FASTMAIL_USER or FASTMAIL_PASSWORD is unset; skipping email channel")
         else:
             email_channel = EmailChannel(in_queue, email_config)
             channels["email"] = email_channel
             logger.info("Email channel enabled for inbox %s (poll every %ds)",
-                        email_config.inbox_id, email_config.poll_interval_sec)
+                        email_config.inbox, email_config.poll_interval_sec)
 
     # Portal channel (conditional)
     portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
