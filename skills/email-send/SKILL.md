@@ -6,9 +6,9 @@ description: "Send a NEW outbound email to a recipient who is not already in the
 # Sending Email
 
 Send a new outbound email with the `email_send.py` CLI in this skill directory.
-It wraps the deadsimple.email API; the sending inbox, API key, and recipient
-allowlist all come from the environment (`DEADSIMPLE_INBOX_ID`,
-`DEADSIMPLE_API_KEY`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_ALLOWED_SENDERS`), so you
+It sends via Fastmail SMTP; the sending inbox, credentials, and recipient
+allowlist all come from the environment (`FASTMAIL_INBOX`, `FASTMAIL_USER`,
+`FASTMAIL_PASSWORD`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_ALLOWED_SENDERS`), so you
 never pass or hardcode credentials.
 
 Run it from the repo root via the `bash` tool. On success it prints

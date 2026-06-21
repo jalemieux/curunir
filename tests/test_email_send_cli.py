@@ -1,6 +1,6 @@
 """Tests for the email-send skill CLI (skills/email-send/email_send.py).
 
-The CLI is a thin adapter over src.channels.deadsimple.DeadsimpleClient. We load
+The CLI is a thin adapter over src.channels.fastmail.FastmailClient. We load
 it by path (it lives under skills/, not an importable package) and drive cmd_send
 with a fake client factory so nothing hits the network.
 """
@@ -26,7 +26,7 @@ cli = _load_cli()
 
 
 class FakeClient:
-    """Stand-in for DeadsimpleClient — records the send and the close."""
+    """Stand-in for FastmailClient — records the send and the close."""
 
     def __init__(self):
         self.sent = None
@@ -94,9 +94,9 @@ def test_send_reports_message_id(capsys):
     assert rc == 0 and out == {"sent": True, "id": "msg_123"}
 
 
-def test_send_deadsimple_error_returns_1(capsys):
+def test_send_fastmail_error_returns_1(capsys):
     def boom():
-        raise cli.DeadsimpleError("recipient not allowed")
+        raise cli.FastmailError("recipient not allowed")
 
     args = _parse("send", "--to", "x@x.com", "--subject", "S", "--body", "t")
     rc = cli.cmd_send(args, client_factory=boom)

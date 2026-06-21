@@ -1,5 +1,9 @@
-"""Email channel — polls deadsimple.email for new messages, queues IncomingMessage,
-sends replies into the same thread."""
+"""Email channel — polls a Fastmail INBOX (IMAP) for new messages, queues
+IncomingMessage, sends replies into the same thread (SMTP).
+
+The transport lives in `FastmailClient`; this channel and its discovery
+cursor / pending-reply ledger are transport-agnostic above the client
+boundary (they key on the RFC822 Message-ID and Date)."""
 
 import asyncio
 import logging
@@ -15,7 +19,7 @@ from src.channels._attachments import (
 )
 from src.channels._email_state import EmailState
 from src.channels.base import IncomingMessage, OutgoingMessage
-from src.channels.deadsimple import DeadsimpleClient, DeadsimpleError
+from src.channels.fastmail import FastmailClient, FastmailError
 from src.config import EmailChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -63,10 +67,12 @@ class EmailChannel:
     def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
         self.in_queue = in_queue
         self.config = config
-        self.client = DeadsimpleClient(
-            api_key=config.api_key,
-            api_base=config.api_base,
-            inbox_id=config.inbox_id,
+        self.client = FastmailClient(
+            imap_host=config.imap_host,
+            smtp_host=config.smtp_host,
+            user=config.user,
+            password=config.password,
+            inbox=config.inbox,
             allowed_recipients=config.allowed_senders,
             restrict_outbound=config.restrict_outbound,
         )
@@ -90,7 +96,7 @@ class EmailChannel:
         """Validate inbox, classify boot state, re-drive the ledger, then poll."""
         try:
             inbox = await self.client.validate_inbox()
-        except DeadsimpleError as e:
+        except FastmailError as e:
             logger.error("Email channel failed to start (invalid inbox): %s", e)
             return
 
@@ -134,7 +140,7 @@ class EmailChannel:
                 continue
             try:
                 detail = await self.client.get_message(mid)
-            except DeadsimpleError:
+            except FastmailError:
                 logger.exception("Re-drive: failed to re-fetch queued message %s", mid)
                 continue
             sender = pr.reply_address.get("to", "") or detail.get("from_email", "")
@@ -158,9 +164,9 @@ class EmailChannel:
     async def _poll_once(self) -> None:
         """Walk pages until a page is entirely ≤ the discovery cursor, process new inbound.
 
-        The deadsimple list endpoint does not guarantee strict newest-first
-        ordering — the discovery-cursor message itself can appear at index 0
-        with newer messages further down. So sort each page locally by
+        The message listing does not guarantee strict newest-first ordering —
+        the discovery-cursor message itself can appear at index 0 with newer
+        messages further down. So sort each page locally by
         (created_at, message_id) descending and only terminate pagination
         when the entire sorted page is ≤ the cursor (a within-page miss is
         not enough).
@@ -169,7 +175,7 @@ class EmailChannel:
         advance the discovery cursor. Otherwise a scheduled outbound at T+1
         would push the cursor past an inbound at T whose listing was delayed,
         silently dropping it on every subsequent poll. (`page_cursor` below is
-        the deadsimple pagination token, distinct from the discovery cursor.)
+        the transport pagination token, distinct from the discovery cursor.)
         """
         page_cursor: str | None = None
         seen_inbound: list[tuple[datetime, str, dict[str, Any]]] = []
@@ -248,7 +254,7 @@ class EmailChannel:
 
         try:
             detail = await self.client.get_message(summary["message_id"])
-        except DeadsimpleError:
+        except FastmailError:
             logger.exception("Failed to fetch detail for %s", summary.get("message_id"))
             return False
 
@@ -341,7 +347,7 @@ class EmailChannel:
                 continue
             try:
                 await self.client.download_attachment(detail["message_id"], att_id, dest)
-            except DeadsimpleError:
+            except FastmailError:
                 logger.exception("Failed to download attachment %s", fname)
                 continue
             if not dest.is_file():
@@ -370,7 +376,8 @@ class EmailChannel:
         return _re.sub(r"<[^>]+>", "", html).strip()
 
     async def send(self, msg: OutgoingMessage) -> None:
-        """Send a reply via deadsimple. Routes to /reply for text-only, /messages when attaching.
+        """Send a reply via Fastmail SMTP. Routes to send_reply for text-only,
+        send_with_attachments when attaching.
 
         On failure for a ledger-tracked inbound, the computed reply is persisted
         to the pending-reply ledger (status=retry) so the drain loop can re-send
@@ -397,7 +404,7 @@ class EmailChannel:
         }
         try:
             await self._dispatch_reply(in_reply_to, payload)
-        except DeadsimpleError as e:
+        except FastmailError as e:
             self._note_failure()
             if in_reply_to in self.state.pending:
                 self._schedule_retry(in_reply_to, payload, e)
@@ -414,7 +421,7 @@ class EmailChannel:
             self.state.save()
 
     async def _dispatch_reply(self, in_reply_to: str, payload: dict[str, Any]) -> None:
-        """Send a reply payload via the appropriate deadsimple endpoint."""
+        """Send a reply payload via the appropriate Fastmail SMTP method."""
         if payload.get("attachment_paths"):
             await self.client.send_with_attachments(
                 in_reply_to=in_reply_to,
@@ -460,7 +467,7 @@ class EmailChannel:
             payload = pr.reply_payload or {}
             try:
                 await self._dispatch_reply(mid, payload)
-            except DeadsimpleError as e:
+            except FastmailError as e:
                 self._note_failure()
                 if pr.attempts + 1 >= self.config.send_max_retries:
                     self.state.mark_dead(mid)
