@@ -46,9 +46,9 @@ delegate. A trivial lookup (one ticker's `profile`/`multiples`, resolving a
 ticker symbol) is a couple of small `bash` calls — run it inline; a
 sub-agent there saves no context and costs a whole agent loop.
 
-Each sub-agent runs under a hard ~300s timeout. The real judgment call is
+Each sub-agent runs under a hard ~1200s (20 min) timeout. The real judgment call is
 sizing: a single delegate spanning research **and** a 10-ticker financial
-pull **and** sentiment will exceed 300s and lose everything it gathered.
+pull **and** sentiment will exceed 1200s and lose everything it gathered.
 Keep each delegate to one coherent chunk of work; if one times out, narrow
 the scope rather than retrying it unchanged.
 
@@ -361,7 +361,7 @@ fact-check"). Sentiment-only opinion pieces are not a valid skip reason for
 this skill — investment memos always have verifiable load-bearing claims
 (prices, multiples, dates, peer numbers).
 
-**If `delegate` times out** (`Sub-agent timed out after 300s`), do not
+**If `delegate` times out** (`Sub-agent hit the hard 1200s time limit and was terminated.`), do not
 retry. Set Status to `Draft — fact-check timed out; scoped follow-up
 recommended`, deliver as-is, and tell the user in the text reply that a
 scoped fact-check (e.g., "verify the valuation numbers only") would
@@ -515,7 +515,7 @@ plan, re-emit, stop.
 - **Fact-checking yourself.** Always `delegate`. Your reasoning is anchored
   on the same framing you used to write.
 - **One mega-delegate for the whole memo.** Research + financials +
-  sentiment in a single `delegate` exceeds the 300s budget and loses all of
+  sentiment in a single `delegate` exceeds the 1200s budget and loses all of
   it on timeout. Delegate bulky phases separately — see "Delegation model".
 - **Delegating trivial lookups.** A sub-agent to fetch one ticker's
   multiples or resolve a symbol saves no context and costs a full agent

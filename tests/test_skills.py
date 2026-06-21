@@ -1,5 +1,9 @@
 # tests/test_skills.py
 import logging
+import re
+from pathlib import Path
+
+import pytest
 
 from src.skills import (
     build_skill_manifest,
@@ -412,3 +416,35 @@ def test_portal_list_honors_allowlist(tmp_path):
         _write_portal_skill(skills_dir, n, "d", summary=f"summary-{n}")
     names = [s["name"] for s in portal_skill_list([skills_dir], allowlist={"alpha"})]
     assert names == ["alpha"]
+
+
+# Anti-drift guard: the memo skills document the `delegate` sub-agent timeout
+# in prose (markdown can't interpolate `delegate._TIMEOUT`), so this test fails
+# if the two ever diverge — e.g. the stale "300s" the docs once carried while
+# the real limit was 1200s (#412).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_MEMO_SKILLS = ("catalyst-memo", "investment-memo")
+
+
+def _delegate_timeout() -> int:
+    src = (_REPO_ROOT / "src" / "tools" / "delegate.py").read_text()
+    m = re.search(r"^_TIMEOUT\s*=\s*(\d+)", src, re.MULTILINE)
+    assert m, "could not find _TIMEOUT in src/tools/delegate.py"
+    return int(m.group(1))
+
+
+@pytest.mark.parametrize("skill", _MEMO_SKILLS)
+def test_memo_skill_documents_current_delegate_timeout(skill):
+    timeout = _delegate_timeout()
+    body = (_REPO_ROOT / "skills" / skill / "SKILL.md").read_text()
+    # The docs must reference the live timeout...
+    assert f"{timeout}s" in body, (
+        f"skills/{skill}/SKILL.md does not reference the live delegate "
+        f"timeout of {timeout}s (from delegate._TIMEOUT)"
+    )
+    # ...and must not carry the stale 300s figure (when it isn't the real one).
+    if timeout != 300:
+        assert "300s" not in body, (
+            f"skills/{skill}/SKILL.md still references the stale 300s delegate "
+            f"timeout; the real limit is {timeout}s"
+        )
