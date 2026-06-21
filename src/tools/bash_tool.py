@@ -16,11 +16,17 @@ def exec_bash(args: dict, config: AgentConfig) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=config.repo_root,
         )
         output = result.stdout
         if result.stderr:
             output += result.stderr
         if not output:
+            # A bare "" for a failed command is indistinguishable from a
+            # successful no-output run — that hole let a silently-failing
+            # verification command "pass" a gate (#413). Surface the exit code.
+            if result.returncode != 0:
+                return f"(no output; command exited with status {result.returncode})"
             return ""
         if len(output) > MAX_OUTPUT_CHARS:
             return output[:MAX_OUTPUT_CHARS] + f"\n\n... truncated ({len(output)} chars total, showing first {MAX_OUTPUT_CHARS})"

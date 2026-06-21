@@ -80,6 +80,8 @@ Aim for **at most 10 claims** per the Budgets section. Prioritize: load-bearing 
 
 #### Step 2 — Verify each claim
 
+**Running verification CLIs.** When a claim needs a tool-backed number (e.g. `python skills/yfinance/yfin.py quote X`), invoke it from the repo root with the repo-relative path — bash commands already run there. Never `cd` elsewhere first and never append `2>/dev/null`: a verification that silently fails must surface as an error, not be mistaken for a pass.
+
 For each claim, in order:
 
 1. **Identify the right source class** using the Source Hierarchy below. A claim about a company's revenue → SEC filings or earnings release. A scientific claim → peer-reviewed paper or the institution's primary report. A historical fact → primary or established secondary sources.

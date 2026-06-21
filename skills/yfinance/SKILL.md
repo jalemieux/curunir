@@ -21,6 +21,9 @@ errors print `{"error": "...", "hint": "..."}` and exit 1, usage errors exit 2.
 1. Pick the **smallest** subcommand that answers the question. Don't fetch full
    financials when the user asked for a single multiple.
 2. Run via the bash tool: `python skills/yfinance/yfin.py <subcommand> <ticker> [opts]`.
+   Bash commands already run from the repo root, so use that repo-relative path
+   as-is — do **not** `cd` elsewhere first, and do **not** append `2>/dev/null`
+   (a failed pull must surface its error, not silently look like empty data).
 3. Read the JSON, surface the answer with the **as-of** date alongside any number.
 
 ## Subcommands
