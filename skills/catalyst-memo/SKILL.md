@@ -53,7 +53,7 @@ this skill:
 ## Delegation model
 
 Same as `investment-memo`: `delegate` is synchronous — it buys context
-isolation, not parallelism. Each sub-agent runs under a hard ~300s timeout.
+isolation, not parallelism. Each sub-agent runs under a hard ~1200s (20 min) timeout.
 Delegate bulky phases (deep-research, financial, sentiment, fact-check)
 separately; never bundle them into one mega-delegate. Trivial lookups
 (resolving a ticker, one polymarket search, one grep over the podcast
@@ -601,7 +601,7 @@ among investors because of its potential to create a new TAM."*
   rumor mill is exactly where load-bearing numbers get garbled. Always
   delegate to `fact-checker`.
 - **One mega-delegate for the whole memo.** Research + financials +
-  sentiment + fact-check in one `delegate` exceeds the 300s budget and
+  sentiment + fact-check in one `delegate` exceeds the 1200s budget and
   loses everything on timeout. Delegate bulky phases separately.
 - **Rendering the PDF via HTML/Chromium/CSS.** Use plain pandoc (LaTeX).
 - **Bare URLs instead of numbered markers.** Every claim cites sources
