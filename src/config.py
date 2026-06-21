@@ -19,6 +19,12 @@ class AgentConfig:
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
     persona: str = "default"
+    # Absolute repo-root anchor, derived once from this file's location
+    # (src/config.py → parents[1] == repo root). The bash tool pins its
+    # subprocess cwd here so commands run from the repo root regardless of
+    # where the host process was launched — every config path is relative
+    # to it (./context, ./skills, ...).
+    repo_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[1])
     skill_allowlist: list[str] | None = None
     attachment_dir: str = "/tmp/attachments"
     tts_model: str = "tts-1"

@@ -161,7 +161,15 @@ _SCHEMAS = [
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Execute a shell command and return stdout + stderr.",
+                "description": (
+                    "Execute a shell command and return stdout + stderr. "
+                    "Commands already run from the repo root, so invoke skill "
+                    "CLIs with repo-relative paths (e.g. "
+                    "`python skills/<skill>/<cli>.py ...`) without `cd`-ing "
+                    "elsewhere. Do not suppress stderr (`2>/dev/null`) on "
+                    "verification commands — a failed command must surface, "
+                    "not pass silently."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
