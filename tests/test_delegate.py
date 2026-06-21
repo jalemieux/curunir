@@ -31,6 +31,19 @@ class TestDelegate:
         tool_names = [s["function"]["name"] for s in schemas]
         assert "delegate" not in tool_names
 
+    async def test_sub_agent_constructed_as_sub_agent(self, agent_config):
+        """exec_delegate must mark its Agent as a sub-agent so the delivery-tool
+        unlock gate (#411) applies."""
+        from src.tools import delegate as delegate_mod
+        from src.tools.delegate import exec_delegate
+
+        mock_response = LLMResponse(text="Done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response), \
+             patch.object(delegate_mod, "Agent", wraps=delegate_mod.Agent) as mock_agent:
+            await exec_delegate({"task": "do something"}, agent_config)
+
+        assert mock_agent.call_args.kwargs.get("is_sub_agent") is True
+
     async def test_image_paths_inlined_as_base64(self, agent_config, tmp_path):
         from src.tools.delegate import exec_delegate
 

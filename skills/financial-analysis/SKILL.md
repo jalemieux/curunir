@@ -11,6 +11,13 @@ tools: attach
 Produce a structured financial analysis of a public company. The output is a
 markdown report posted inline plus a PDF attachment for sharing.
 
+> **When running as a sub-agent (under `delegate`):** the PDF/`attach` delivery
+> step is owned by the orchestrator, not you. Return the markdown report /
+> digest only — the orchestrator runs the fact-check gate before delivering.
+> The harness enforces this by refusing to grant a sub-agent the `attach` tool
+> via this skill's `tools:` unlock, so the delivery step will not be available
+> to you in that context regardless.
+
 This skill is the **orchestrator** — it tells you how to combine data from
 the data skills (`yfinance`, `fred`, `sec-edgar`) and apply four core
 analytical frameworks. The frameworks themselves live in `references/` so
