@@ -155,7 +155,10 @@ cannot reach skills outside its allowlist.
 
 `personas/<name>/prompts/*.md` is read directly from the bundle (sorted by
 filename, e.g. `10-domain.md` then `20-guardrails.md`) and appended to the
-system prompt after `context/identity.md`. **This is where framework behavior
+system prompt after `context/identity.md`. The finance bundle additionally
+carries `30-output-tables.md`, an always-in-context output convention pinning
+the canonical performance / drift / tax-budget / wash-sale table shapes (and
+the `[UNSOURCED]` inline tag) so cross-session output stays consistent. **This is where framework behavior
 now lives** — the legacy `context/behavior.md` is no longer read (see Context
 Directory). These files are framework/specialty content and are **not**
 bootstrapped into `context/` — only user-edited content lives there. API-key

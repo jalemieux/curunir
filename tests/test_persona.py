@@ -146,6 +146,24 @@ def test_persona_allowlisting_a_delivery_skill_also_allows_email_send(persona_na
         )
 
 
+def test_finance_bundle_carries_output_conventions():
+    # The finance prompt bundle pins three cheap conventions (#402): the
+    # [UNSOURCED] inline tag, the show-work/confirm-at-each-stage rule, and the
+    # canonical output tables. These live in the always-in-context prompts so
+    # cross-session output stays consistent — assert they're present so a
+    # prompt-file rename or deletion can't silently drop them.
+    prompts = Path("personas/finance/prompts")
+    guardrails = (prompts / "20-guardrails.md").read_text()
+    domain = (prompts / "10-domain.md").read_text()
+    tables = (prompts / "30-output-tables.md").read_text()
+
+    assert "[UNSOURCED]" in guardrails
+    assert "confirmation at each stage" in domain or "confirmation" in domain
+    assert "30-output-tables.md" in domain  # pointer to the canonical shapes
+    for shape in ("performance", "Drift", "Tax budget", "Wash-sale"):
+        assert shape in tables, shape
+
+
 def test_companion_bundle_parses_from_repo():
     p = load_persona("companion")
     assert p.name == "companion"
