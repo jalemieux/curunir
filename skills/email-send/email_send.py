@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""email-send CLI — thin adapter over src.channels.deadsimple.
+"""email-send CLI — thin adapter over src.channels.fastmail.
 
-Sends a NEW outbound (cold) email via the deadsimple.email API. Credentials and
-the recipient allowlist come from the environment (DEADSIMPLE_API_KEY,
-DEADSIMPLE_INBOX_ID, EMAIL_RESTRICT_OUTBOUND, EMAIL_ALLOWED_SENDERS); the client
+Sends a NEW outbound (cold) email via Fastmail SMTP. Credentials and the
+recipient allowlist come from the environment (FASTMAIL_USER, FASTMAIL_PASSWORD,
+FASTMAIL_INBOX, EMAIL_RESTRICT_OUTBOUND, EMAIL_ALLOWED_SENDERS); the client
 enforces the allowlist. Do NOT use this to reply inside an email-channel thread —
 the channel sends your final assistant message as the reply automatically.
 
@@ -27,7 +27,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from src.channels.deadsimple import DeadsimpleError, build_client_from_env  # noqa: E402
+from src.channels.fastmail import FastmailError, build_client_from_env  # noqa: E402
 
 
 def _split_addrs(values: list[str] | None) -> list[str]:
@@ -40,7 +40,7 @@ def _split_addrs(values: list[str] | None) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="email_send.py", description="Send a new outbound email via deadsimple.email."
+        prog="email_send.py", description="Send a new outbound email via Fastmail SMTP."
     )
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("send", help="Send a new outbound email.")
@@ -108,8 +108,8 @@ def cmd_send(args, *, client_factory=build_client_from_env) -> int:
 
     try:
         result = asyncio.run(_run())
-    except DeadsimpleError as e:
-        return _fail(str(e), "check DEADSIMPLE_* env vars and the EMAIL_ALLOWED_SENDERS allowlist")
+    except FastmailError as e:
+        return _fail(str(e), "check FASTMAIL_* env vars and the EMAIL_ALLOWED_SENDERS allowlist")
     except Exception as e:  # noqa: BLE001 — surface any failure as a model-visible JSON error
         return _fail(f"send failed: {e}")
 
