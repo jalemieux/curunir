@@ -159,20 +159,21 @@ an out-of-band `{"command": "interrupt"}` frame (bound to Ctrl-C in the
 CLI), because the agent worker is blocked during a turn and can't drain
 the queue in time.
 
-#### Email Channel (deadsimple.email)
+#### Email Channel (Fastmail — IMAP/SMTP)
 
-The email channel uses [deadsimple.email](https://deadsimple.email) — an HTTP API for sending and receiving mail. Create an inbox and an API key in the deadsimple dashboard, then set:
+The email channel uses [Fastmail](https://fastmail.com) over IMAP (inbound) and SMTP (outbound) on a custom domain (e.g. `curunir.ai`). Create the mailbox and an **app-specific password** in Fastmail settings, then set:
 
 ```bash
 EMAIL_ENABLED=true
-DEADSIMPLE_API_KEY=dse_your_api_key
-DEADSIMPLE_INBOX_ID=<inbox-uuid>
+FASTMAIL_USER=jac@curunir.ai
+FASTMAIL_PASSWORD=your_fastmail_app_password
+FASTMAIL_INBOX=jac@curunir.ai          # the From address; defaults to FASTMAIL_USER
 EMAIL_ALLOWED_SENDERS=alice@example.com,bob@example.com
 ```
 
-The channel polls every `EMAIL_POLL_INTERVAL` seconds (default 60). Replies use deadsimple's `/reply` endpoint when text-only, or `/messages` with explicit threading headers when attachments are included. Inbound mail with `is_spam=true` or `spam_score >= EMAIL_SPAM_SCORE_THRESHOLD` (default 5.0) is dropped. The discovery cursor is persisted to `./context/email_state.json` so restarts resume without reprocessing history.
+The channel polls the INBOX every `EMAIL_POLL_INTERVAL` seconds (default 60) via IMAP, and sends replies via SMTP — text-only when there are no attachments, or a `multipart/mixed` message with explicit `In-Reply-To`/`References` threading headers when attachments are included. Spam is filtered server-side into Fastmail's Junk folder (which the channel never polls), so INBOX is pre-filtered. The discovery cursor (keyed on the RFC822 `Message-ID` and `Date`) is persisted to `./context/email_state.json` so restarts resume without reprocessing history. Replies carry a stable generated `Message-ID` reused across retries so a duplicate delivery (after a lost SMTP ack) is dedupable by the receiving server.
 
-Delivery is decoupled from discovery so an outbound failure can't silently drop a message. Every inbound is recorded in a durable **pending-reply ledger** in the same state file the moment it is queued, and only cleared once its reply is confirmed sent. If a reply send fails (DNS/network/5xx outage), the computed reply is stored and re-sent with exponential backoff (`EMAIL_SEND_RETRY_BACKOFF`, default 30s) up to `EMAIL_SEND_MAX_RETRIES` (default 5) attempts before being dead-lettered and escalated at ERROR; `EMAIL_FAILURE_ALERT_THRESHOLD` (default 5) consecutive failures also escalates. On restart the ledger is re-driven (unanswered inbound re-enqueued, failed sends re-sent). A genuine first run skips pre-existing mail, but a *corrupt* state file is never fast-forwarded — the channel alerts and waits for an operator to repair or remove it.
+Delivery is decoupled from discovery so an outbound failure can't silently drop a message. Every inbound is recorded in a durable **pending-reply ledger** in the same state file the moment it is queued, and only cleared once its reply is confirmed sent. If a reply send fails (DNS/network/SMTP error), the computed reply is stored and re-sent with exponential backoff (`EMAIL_SEND_RETRY_BACKOFF`, default 30s) up to `EMAIL_SEND_MAX_RETRIES` (default 5) attempts before being dead-lettered and escalated at ERROR; `EMAIL_FAILURE_ALERT_THRESHOLD` (default 5) consecutive failures also escalates. On restart the ledger is re-driven (unanswered inbound re-enqueued, failed sends re-sent). A genuine first run skips pre-existing mail, but a *corrupt* state file is never fast-forwarded — the channel alerts and waits for an operator to repair or remove it.
 
 See `.env.example` for the full list of email-related variables.
 

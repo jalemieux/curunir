@@ -32,9 +32,11 @@ def test_vision_config():
 def test_email_config_defaults():
     config = EmailChannelConfig()
     assert config.enabled is False
-    assert config.api_key == ""
-    assert config.inbox_id == ""
-    assert config.api_base == "https://api.deadsimple.email"
+    assert config.user == ""
+    assert config.password == ""
+    assert config.inbox == ""
+    assert config.imap_host == "imap.fastmail.com"
+    assert config.smtp_host == "smtp.fastmail.com"
     assert config.poll_interval_sec == 60
     assert config.allowed_senders == []
     assert config.restrict_outbound is True
@@ -46,8 +48,9 @@ def test_email_config_defaults():
 def test_email_config_custom():
     config = EmailChannelConfig(
         enabled=True,
-        api_key="ds-key-abc123",
-        inbox_id="inbox-xyz",
+        user="jac@curunir.ai",
+        password="app-pass",
+        inbox="jac@curunir.ai",
         poll_interval_sec=30,
         allowed_senders=["alice@example.com"],
         restrict_outbound=False,
@@ -55,8 +58,9 @@ def test_email_config_custom():
         spam_score_threshold=3.0,
     )
     assert config.enabled is True
-    assert config.api_key == "ds-key-abc123"
-    assert config.inbox_id == "inbox-xyz"
+    assert config.user == "jac@curunir.ai"
+    assert config.password == "app-pass"
+    assert config.inbox == "jac@curunir.ai"
     assert config.poll_interval_sec == 30
     assert config.allowed_senders == ["alice@example.com"]
     assert config.restrict_outbound is False
