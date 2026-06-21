@@ -36,7 +36,7 @@ async def exec_delegate(args: dict, config: AgentConfig, on_tool_call=None) -> s
     else:
         content = task
 
-    sub_agent = Agent(config, tools=_SUB_AGENT_TOOLS)
+    sub_agent = Agent(config, tools=_SUB_AGENT_TOOLS, is_sub_agent=True)
     session_id = str(uuid4())
 
     logger.info("Spawning sub-agent %s: %.80s", session_id[:8], task)

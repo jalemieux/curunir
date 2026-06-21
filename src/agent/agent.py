@@ -161,6 +161,14 @@ def _is_context_overflow(exc: Exception) -> bool:
     )
 
 
+# Delivery tools a sub-agent must never gain via a skill's opt-in `tools:`
+# unlock. A `delegate`-spawned sub-agent is supposed to return a digest, never
+# deliver directly to the user — letting it re-acquire `attach`/`to_audio` would
+# bypass the orchestrator's fact-check gate (#411). The denylist only governs
+# the `load_skill` unlock path; the main agent's base tools are unaffected.
+_SUBAGENT_BLOCKED_UNLOCKS = {"attach", "to_audio"}
+
+
 def _parse_skill_tools(skill_content: str) -> list[str]:
     """Extract required tool names from a skill's frontmatter."""
     fm = parse_frontmatter(skill_content)
@@ -176,8 +184,13 @@ class Agent:
         config: AgentConfig,
         tools: list[str] | None = None,
         usage_store: "UsageStore | None" = None,
+        is_sub_agent: bool = False,
     ):
         self.config = config
+        # Sub-agents (spawned via `delegate`) return digests, never deliver. The
+        # load_skill opt-in unlock refuses to grant delivery tools to them so
+        # the orchestrator's fact-check gate can't be bypassed (#411).
+        self.is_sub_agent = is_sub_agent
         # Active sessions only — past conversations live on disk in
         # context/conversations/ and are lazy-loaded on access. The archive
         # path for memory extraction is tracked per-conversation on disk
@@ -663,6 +676,14 @@ class Agent:
                         # Done post-gather so concurrent skill loads apply in order.
                         if tool_msg.pop("_tool_name", None) == "load_skill":
                             required = _parse_skill_tools(tool_msg["content"])
+                            if required and self.is_sub_agent:
+                                blocked = [t for t in required if t in _SUBAGENT_BLOCKED_UNLOCKS]
+                                if blocked:
+                                    required = [t for t in required if t not in _SUBAGENT_BLOCKED_UNLOCKS]
+                                    logger.info(
+                                        "[%s] sub-agent denied delivery tool unlock: %s",
+                                        sid, blocked,
+                                    )
                             if required:
                                 self._session_tools.setdefault(session_id, set()).update(required)
                                 tool_schemas = self._get_tool_schemas(session_id)

@@ -98,8 +98,9 @@ Channels implement a protocol: `async start()` to listen, `async send(msg)` to r
 - Schemas registered in `schemas.py` via `_register()`
 - Dispatch in `dispatcher.py` routes by name to executor functions
 - Sync executors wrapped in `asyncio.to_thread()`; async executors (e.g. `delegate`) awaited directly
-- `delegate` spawns a sub-agent restricted to `_SUB_AGENT_TOOLS` (no `delegate`, so sub-agents cannot recurse)
+- `delegate` spawns a sub-agent restricted to `_SUB_AGENT_TOOLS` (no `delegate`, so sub-agents cannot recurse). The sub-agent `Agent` is built with `is_sub_agent=True`.
 - Opt-in unlock is session-scoped: when `load_skill` runs, the skill's `tools:` are added to that session's tool set and schemas refresh for the next iteration
+- **Sub-agents cannot unlock delivery tools.** When `is_sub_agent=True`, the `load_skill` opt-in-unlock path drops any tool in `_SUBAGENT_BLOCKED_UNLOCKS` (`{"attach", "to_audio"}`) from the skill's `tools:` before adding them to the session. A `delegate`-spawned sub-agent therefore cannot re-acquire a delivery capability (e.g. a phase delegate loading `financial-analysis`, which declares `tools: attach`) and self-deliver an un-fact-checked artifact — sub-agents return digests; the orchestrator owns delivery and the fact-check gate (#411). The denylist only governs the unlock path; `attach` stays a base tool for the main agent.
 
 See [`src/tools/README.md`](src/tools/README.md) for detailed documentation on the tool registry, dispatch pipeline, executor implementations, and how to add new tools.
 

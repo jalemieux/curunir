@@ -78,6 +78,67 @@ class TestConversationPersistence:
         assert history[-1]["content"] == "new reply"
 
 
+def _write_skill(skills_dir, name, tools):
+    """Create a minimal SKILL.md declaring opt-in ``tools:`` in frontmatter."""
+    d = skills_dir / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: test skill {name}\ntools: {tools}\n---\n\n# {name}\n\nbody\n"
+    )
+    return d
+
+
+def _load_skill_then_done(skill_name):
+    """LLM script: first a load_skill tool call, then a final text response."""
+    load_call = LLMResponse(
+        text=None,
+        tool_calls=[{
+            "id": "call_load",
+            "type": "function",
+            "function": {"name": "load_skill", "arguments": json.dumps({"name": skill_name})},
+        }],
+    )
+    done = LLMResponse(text="done", tool_calls=None)
+    return [load_call, done]
+
+
+class TestSubAgentDeliveryGate:
+    """A sub-agent must never re-acquire delivery tools (e.g. ``attach``) via a
+    skill's opt-in ``tools:`` unlock — that would bypass the orchestrator's
+    fact-check gate (#411)."""
+
+    async def test_sub_agent_cannot_unlock_attach(self, agent_config, tmp_skills):
+        from src.tools.delegate import _SUB_AGENT_TOOLS
+
+        _write_skill(tmp_skills, "deliver-skill", "attach")
+        # Mirror the real sub-agent's restricted base tool set (no `attach`).
+        agent = Agent(agent_config, tools=_SUB_AGENT_TOOLS, is_sub_agent=True)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=_load_skill_then_done("deliver-skill")):
+            await agent.handle("go", "sub-sess")
+        assert "attach" not in agent._session_tools.get("sub-sess", set())
+        schema_names = {s["function"]["name"] for s in agent._get_tool_schemas("sub-sess")}
+        assert "attach" not in schema_names
+
+    async def test_sub_agent_still_unlocks_non_delivery_tool(self, agent_config, tmp_skills):
+        """Non-delivery opt-in tools (e.g. ``portfolio``) are unaffected by the gate."""
+        _write_skill(tmp_skills, "data-skill", "portfolio")
+        agent = Agent(agent_config, is_sub_agent=True)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=_load_skill_then_done("data-skill")):
+            await agent.handle("go", "sub-sess")
+        assert "portfolio" in agent._session_tools.get("sub-sess", set())
+
+    async def test_main_agent_still_unlocks_attach(self, agent_config, tmp_skills):
+        """The gate is scoped to sub-agents — the main agent still unlocks delivery tools."""
+        _write_skill(tmp_skills, "deliver-skill", "attach")
+        agent = Agent(agent_config, is_sub_agent=False)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock,
+                   side_effect=_load_skill_then_done("deliver-skill")):
+            await agent.handle("go", "main-sess")
+        assert "attach" in agent._session_tools.get("main-sess", set())
+
+
 class TestAgentHandle:
     async def test_returns_text_response(self, agent):
         mock_response = LLMResponse(text="Hello!", tool_calls=None)
