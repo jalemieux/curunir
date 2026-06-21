@@ -45,9 +45,13 @@ class LocalWebConfig:
 @dataclass
 class EmailChannelConfig:
     enabled: bool = False
-    api_key: str = ""
-    inbox_id: str = ""
-    api_base: str = "https://api.deadsimple.email"
+    # Fastmail IMAP/SMTP transport. `inbox` is the From address (e.g.
+    # jac@curunir.ai); `user`/`password` are the Fastmail login + app password.
+    imap_host: str = "imap.fastmail.com"
+    smtp_host: str = "smtp.fastmail.com"
+    user: str = ""
+    password: str = ""
+    inbox: str = ""
     poll_interval_sec: int = 60
     allowed_senders: list[str] = field(default_factory=list)
     restrict_outbound: bool = True
