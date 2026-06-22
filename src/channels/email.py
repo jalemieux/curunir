@@ -435,6 +435,7 @@ class EmailChannel:
             await self.client.send_reply(
                 in_reply_to=in_reply_to,
                 to=payload["to"],
+                subject=payload.get("subject", ""),
                 text_body=payload["text_body"],
                 html_body=payload.get("html_body"),
             )

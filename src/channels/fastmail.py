@@ -463,12 +463,13 @@ class FastmailClient:
         in_reply_to: str,
         to: str,
         text_body: str,
+        subject: str = "",
         html_body: str | None = None,
     ) -> dict[str, Any]:
         self._check_recipients_allowed(to)
         message_id = _stable_reply_msgid(in_reply_to, self._domain)
         msg = self._build_message(
-            to=[to], subject="", text_body=text_body, html_body=html_body,
+            to=[to], subject=subject, text_body=text_body, html_body=html_body,
             message_id=message_id, in_reply_to=in_reply_to,
         )
         await asyncio.to_thread(self._smtp_send, msg)
