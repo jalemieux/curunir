@@ -376,10 +376,12 @@ def test_send_reply_builds_threaded_mime(client):
         import asyncio
         asyncio.run(client.send_reply(
             in_reply_to="<m1@curunir.ai>", to="alice@example.com", text_body="Hi back",
+            subject="Re: hello",
         ))
     msg = holder["smtp"].sent[0]
     assert msg["In-Reply-To"] == "<m1@curunir.ai>"
     assert "<m1@curunir.ai>" in msg["References"]
+    assert msg["Subject"] == "Re: hello"
     assert msg["To"] == "alice@example.com"
     assert msg["From"] == "jac@curunir.ai"
     assert msg["Message-ID"]  # a generated Message-ID is set
