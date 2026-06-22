@@ -606,6 +606,7 @@ async def test_send_uses_reply_endpoint_when_no_attachments(email_config, in_que
     kwargs = client.send_reply.await_args.kwargs
     assert kwargs["in_reply_to"] == "m1"
     assert kwargs["to"] == "alice@example.com"
+    assert kwargs["subject"] == "Re: hi"
     assert kwargs["text_body"] == "# Hi back"
     assert "<h1>Hi back</h1>" in kwargs["html_body"]
     client.send_with_attachments.assert_not_called()
