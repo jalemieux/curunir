@@ -10,6 +10,16 @@ from src.agent import conversation_store as cs
 from src.agent.agent import Agent
 from src.channels.base import IncomingMessage
 from src.llm import LLMResponse
+from src.runtime import AgentRuntime
+
+
+def _registry_for(agent) -> dict:
+    """Wrap a single agent in a one-persona registry for the dispatcher."""
+    persona = agent.config.persona or "default"
+    rt = AgentRuntime(persona=persona, config=agent.config, agent=agent)
+    reg = {persona: rt}
+    reg.setdefault("default", rt)
+    return reg
 
 
 def _summary_response(slug: str, content: str = "Summary.") -> LLMResponse:
@@ -41,7 +51,8 @@ def memory_dir(agent_config):
 
 async def _drive_worker_once(in_q: asyncio.Queue, out_q: asyncio.Queue, agent):
     import run as run_module
-    task = asyncio.create_task(run_module.agent_worker(agent, in_q, out_q))
+    task = asyncio.create_task(
+        run_module.agent_worker(_registry_for(agent), in_q, out_q))
     await asyncio.wait_for(out_q.get(), timeout=2.0)
     for _ in range(20):
         await asyncio.sleep(0)
@@ -391,7 +402,8 @@ async def test_slash_malformed_frame_is_dropped(agent_config, memory_dir, caplog
             reply_address={}, command="slash",
         ))
 
-    task = asyncio.create_task(run_module.agent_worker(agent, in_q, out_q))
+    task = asyncio.create_task(
+        run_module.agent_worker(_registry_for(agent), in_q, out_q))
     with caplog.at_level(logging.WARNING, logger="run"):
         for _ in range(50):
             if in_q.empty():

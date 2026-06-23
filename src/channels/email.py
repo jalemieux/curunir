@@ -18,7 +18,7 @@ from src.channels._attachments import (
     _validate_attachment_metadata,
 )
 from src.channels._email_state import EmailState
-from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.base import DEFAULT_PERSONA, IncomingMessage, OutgoingMessage
 from src.channels.fastmail import FastmailClient, FastmailError
 from src.config import EmailChannelConfig
 
@@ -64,9 +64,19 @@ def _render_html(markdown_text: str) -> str:
 
 
 class EmailChannel:
-    def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
+    def __init__(
+        self,
+        in_queue: asyncio.Queue,
+        config: EmailChannelConfig,
+        persona: str = DEFAULT_PERSONA,
+    ):
         self.in_queue = in_queue
         self.config = config
+        # The tenant this inbox belongs to. Each persona is provisioned as a
+        # distinct Fastmail inbox polled by its own EmailChannel instance, so
+        # mail is attributed to a persona by the inbox it arrived on — no alias
+        # parsing. Stamped onto every inbound IncomingMessage.
+        self.persona = persona
         self.client = FastmailClient(
             imap_host=config.imap_host,
             smtp_host=config.smtp_host,
@@ -301,6 +311,7 @@ class EmailChannel:
             session_id=thread_id,
             reply_address=reply_address,
             attachments=attachments,
+            persona=self.persona,
         )
         await self.in_queue.put(incoming)
         logger.info("Queued email from %s (thread %s): %s",

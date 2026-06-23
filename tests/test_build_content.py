@@ -168,7 +168,11 @@ async def _run_worker_once(in_q, out_q, fake_agent):
     Returns the first OutgoingMessage the worker emits.
     """
     import run as run_module
-    task = asyncio.create_task(run_module.agent_worker(fake_agent, in_q, out_q))
+    from src.runtime import AgentRuntime
+    persona = getattr(fake_agent.config, "persona", "default") or "default"
+    registry = {persona: AgentRuntime(persona, fake_agent.config, fake_agent)}
+    registry.setdefault("default", registry[persona])
+    task = asyncio.create_task(run_module.agent_worker(registry, in_q, out_q))
     out_msg = await asyncio.wait_for(out_q.get(), timeout=2.0)
     task.cancel()
     try:

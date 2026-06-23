@@ -37,11 +37,11 @@ def in_queue():
     return asyncio.Queue()
 
 
-def _make_channel(in_queue, config, client: AsyncMock | None = None):
+def _make_channel(in_queue, config, client: AsyncMock | None = None, persona="default"):
     """Construct the channel with the Fastmail client patched out."""
     mock_client = client or AsyncMock()
     with patch("src.channels.email.FastmailClient", return_value=mock_client):
-        ch = EmailChannel(in_queue, config)
+        ch = EmailChannel(in_queue, config, persona=persona)
     return ch, mock_client
 
 
@@ -286,6 +286,25 @@ async def test_poll_once_queues_inbound_and_advances_watermark(email_config, in_
     assert first.reply_address["subject"] == "Re: hi"
     # Watermark advanced to the newest message.
     assert ch.state.watermark_message_id == "m2"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_stamps_persona_from_inbox(email_config, in_queue):
+    """Each inbox is bound to a persona; inbound mail carries it (#420)."""
+    client = AsyncMock()
+    client.list_messages.return_value = {
+        "messages": [_msg("m1", ts="2026-05-14T15:31:00Z")],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda mid: _detail(mid, text_body="hi")
+
+    ch, _ = _make_channel(in_queue, email_config, client=client, persona="finance")
+    ch.state.set_watermark(datetime(2026, 5, 14, 15, 0, 0, tzinfo=timezone.utc), "")
+
+    await ch._poll_once()
+
+    msg = in_queue.get_nowait()
+    assert msg.persona == "finance"
 
 
 @pytest.mark.asyncio

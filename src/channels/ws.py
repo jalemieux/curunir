@@ -15,7 +15,7 @@ from src.channels._attachments import (
     _enrich_attachments,
     _stage_attachments,
 )
-from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.base import DEFAULT_PERSONA, IncomingMessage, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ class WebSocketChannel:
         port: int = 8765,
         model: str = "",
         persona: str = "",
+        personas: list[str] | None = None,
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
@@ -75,6 +76,10 @@ class WebSocketChannel:
         self.port = port
         self.model = model
         self.persona = persona
+        # The personas this process hosts. Sent in the hello frame so the CLI /
+        # UI can render a persona switcher; a client selects one per frame via a
+        # "persona" field, defaulting to ``persona`` (the active default).
+        self.personas = personas or ([persona] if persona else [])
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
@@ -128,6 +133,8 @@ class WebSocketChannel:
             payload["model"] = self.model
         if self.persona:
             payload["persona"] = self.persona
+        if self.personas:
+            payload["personas"] = self.personas
         try:
             await websocket.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
@@ -234,6 +241,13 @@ class WebSocketChannel:
             new_sid = await self._rekey(websocket, session_id, resumed_sid)
             session_id = new_sid
 
+        # Per-connection active persona. Defaults to the channel's default and
+        # can be switched per frame (the UI persona picker sets "persona").
+        persona = self.persona or DEFAULT_PERSONA
+        if self.pairing_token is not None and isinstance(hello, dict):
+            if isinstance(hello.get("persona"), str) and hello["persona"]:
+                persona = hello["persona"]
+
         await self._send_hello(websocket, session_id)
 
         try:
@@ -251,6 +265,10 @@ class WebSocketChannel:
                     if new_sid != session_id:
                         session_id = new_sid
                         await self._send_hello(websocket, session_id)
+                # A persona field on any frame switches the connection's active
+                # tenant for subsequent (and this) message(s).
+                if isinstance(data.get("persona"), str) and data["persona"]:
+                    persona = data["persona"]
                 if data.get("command") == "interrupt":
                     delivered = bool(
                         self.cancel_session and self.cancel_session(session_id)
@@ -270,6 +288,7 @@ class WebSocketChannel:
                         session_id=session_id,
                         reply_address={},
                         command="slash",
+                        persona=persona,
                     ))
                     continue
 
@@ -285,7 +304,7 @@ class WebSocketChannel:
                     ))
                     continue
 
-                await self._process_inbound(data, session_id)
+                await self._process_inbound(data, session_id, persona)
         except websockets.exceptions.ConnectionClosedError:
             pass
         finally:
@@ -300,10 +319,13 @@ class WebSocketChannel:
                 session_id=session_id,
                 reply_address={},
                 command="extract",
+                persona=persona,
             )
             await self.in_queue.put(extract_msg)
 
-    async def _process_inbound(self, data: dict, session_id: str) -> None:
+    async def _process_inbound(
+        self, data: dict, session_id: str, persona: str = DEFAULT_PERSONA
+    ) -> None:
         decoded, err = _decode_attachments(data.get("attachments"))
         if err is not None:
             logger.info("Rejected inbound message: %s", err)
@@ -328,6 +350,7 @@ class WebSocketChannel:
             reply_address={},
             command=data.get("command") or None,
             attachments=manifest,
+            persona=persona,
         )
         await self.in_queue.put(msg)
 

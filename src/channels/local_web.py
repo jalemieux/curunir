@@ -48,7 +48,7 @@ from src.channels._attachments import (
     _enrich_attachments,
     _stage_attachments,
 )
-from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.base import DEFAULT_PERSONA, IncomingMessage, OutgoingMessage
 from src.channels.ws import _DEFAULT_LOCALHOST_ORIGINS, _origin_allowed
 from src.config import AgentConfig
 from src.local_ui import readers
@@ -72,20 +72,28 @@ class LocalWebChannel:
         port: int = 8766,
         model: str = "",
         persona: str = "",
+        personas: list[str] | None = None,
+        registry: dict | None = None,
         uploads_dir: str | None = None,
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
         pairing_token: str | None = None,
-        history_provider: Callable[[str], list[dict]] | None = None,
-        skills_provider: Callable[[], list[dict]] | None = None,
-        conversations_provider: Callable[[], list[dict]] | None = None,
+        history_provider: Callable[..., list[dict]] | None = None,
+        skills_provider: Callable[..., list[dict]] | None = None,
+        conversations_provider: Callable[..., list[dict]] | None = None,
     ):
         self.in_queue = in_queue
         self.config = config
+        # Multi-tenant: the registry lets read panels resolve a persona's own
+        # config (its usage/portfolio/schedule stores). ``personas`` is the list
+        # surfaced to the SPA's persona switcher. Both degrade gracefully to the
+        # single default persona when omitted.
+        self.registry = registry or {}
         self.host = host
         self.port = port
         self.model = model
         self.persona = persona
+        self.personas = personas or ([persona] if persona else [])
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -95,9 +103,9 @@ class LocalWebChannel:
             else _DEFAULT_LOCALHOST_ORIGINS
         )
         self.pairing_token = pairing_token
-        self.history_provider = history_provider or (lambda _sid: [])
-        self.skills_provider = skills_provider or (lambda: [])
-        self.conversations_provider = conversations_provider or (lambda: [])
+        self.history_provider = history_provider or (lambda _sid, persona=None: [])
+        self.skills_provider = skills_provider or (lambda persona=None: [])
+        self.conversations_provider = conversations_provider or (lambda persona=None: [])
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
         self.app = self._build_app()
@@ -119,13 +127,24 @@ class LocalWebChannel:
             "token"
         )
 
-    def _schedules_db(self) -> str:
+    def _config_for(self, persona: str | None):
+        """Resolve the AgentConfig backing a persona's read panels.
+
+        Read panels (usage / portfolio / schedules) are per-tenant: each
+        persona's stores live under its own context/<persona>/ root. Falls back
+        to the default config when the persona is unknown/omitted.
+        """
+        if persona and persona in self.registry:
+            return self.registry[persona].config
+        return self.config
+
+    def _schedules_db(self, persona: str | None = None) -> str:
         """Initialize (if needed) and return the schedule store path.
 
         Mirrors ``schedule_tool._db`` so writes go through the same engine the
         ``schedule`` tool and scheduler use — no separate query/validation path.
         """
-        path = str(self.config.schedules_db)
+        path = str(self._config_for(persona).schedules_db)
         sdb.init_db(path)
         return path
 
@@ -143,44 +162,65 @@ class LocalWebChannel:
         async def index() -> FileResponse:
             return FileResponse(str(_STATIC_DIR / "index.html"))
 
+        @app.get("/api/personas")
+        async def api_personas(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return JSONResponse({
+                "personas": self.personas,
+                "default": self.persona,
+            })
+
         @app.get("/api/usage")
         async def api_usage(
             request: Request,
             window: str = "7d",
             by: str = "model",
+            persona: str = "",
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             try:
-                return JSONResponse(readers.usage_summary(self.config, window, by))
+                return JSONResponse(
+                    readers.usage_summary(self._config_for(persona), window, by)
+                )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
 
         @app.get("/api/portfolio")
-        async def api_portfolio(request: Request) -> JSONResponse:
+        async def api_portfolio(
+            request: Request, persona: str = ""
+        ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return JSONResponse(readers.portfolio_overview(self.config))
+            return JSONResponse(
+                readers.portfolio_overview(self._config_for(persona))
+            )
 
         @app.get("/api/schedules")
-        async def api_schedules(request: Request) -> JSONResponse:
+        async def api_schedules(
+            request: Request, persona: str = ""
+        ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return JSONResponse(readers.schedules(self.config))
+            return JSONResponse(readers.schedules(self._config_for(persona)))
 
         @app.post("/api/schedules")
-        async def api_schedule_create(request: Request) -> JSONResponse:
+        async def api_schedule_create(
+            request: Request, persona: str = ""
+        ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             body = await request.json()
+            cfg = self._config_for(persona)
             fields = {
                 k: body.get(k) for k in ("id", "cron", "prompt", "skill")
             }
             fields["enabled"] = bool(body.get("enabled", True))
             try:
                 row = sengine.create(
-                    self._schedules_db(), fields,
-                    skill_allowlist=self.config.skill_allowlist,
+                    self._schedules_db(persona), fields,
+                    skill_allowlist=cfg.skill_allowlist,
                 )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
@@ -188,11 +228,12 @@ class LocalWebChannel:
 
         @app.put("/api/schedules/{task_id}")
         async def api_schedule_update(
-            task_id: str, request: Request
+            task_id: str, request: Request, persona: str = ""
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             body = await request.json()
+            cfg = self._config_for(persona)
             fields = {
                 k: body[k] for k in ("cron", "prompt", "skill", "enabled")
                 if k in body
@@ -201,8 +242,8 @@ class LocalWebChannel:
                 fields["enabled"] = bool(fields["enabled"])
             try:
                 row = sengine.update(
-                    self._schedules_db(), task_id, fields,
-                    skill_allowlist=self.config.skill_allowlist,
+                    self._schedules_db(persona), task_id, fields,
+                    skill_allowlist=cfg.skill_allowlist,
                 )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
@@ -210,42 +251,46 @@ class LocalWebChannel:
 
         @app.post("/api/schedules/{task_id}/toggle")
         async def api_schedule_toggle(
-            task_id: str, request: Request
+            task_id: str, request: Request, persona: str = ""
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             try:
-                row = sengine.toggle(self._schedules_db(), task_id)
+                row = sengine.toggle(self._schedules_db(persona), task_id)
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse(row)
 
         @app.delete("/api/schedules/{task_id}")
         async def api_schedule_delete(
-            task_id: str, request: Request
+            task_id: str, request: Request, persona: str = ""
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             try:
-                sengine.delete(self._schedules_db(), task_id)
+                sengine.delete(self._schedules_db(persona), task_id)
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse({"ok": True, "id": task_id})
 
         @app.get("/api/memory")
-        async def api_memory(request: Request) -> JSONResponse:
+        async def api_memory(
+            request: Request, persona: str = ""
+        ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return JSONResponse(readers.memory_tree(self.config))
+            return JSONResponse(readers.memory_tree(self._config_for(persona)))
 
         @app.get("/api/memory/file")
         async def api_memory_file(
-            request: Request, path: str = Query(...)
+            request: Request, path: str = Query(...), persona: str = ""
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             try:
-                return JSONResponse(readers.memory_file(self.config, path))
+                return JSONResponse(
+                    readers.memory_file(self._config_for(persona), path)
+                )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             except FileNotFoundError as e:
@@ -274,9 +319,11 @@ class LocalWebChannel:
         self._socket = ws
         logger.info("Local web console connected")
         await ws.send_text(json.dumps({"type": "agent_status", "status": "online"}))
-        # Surface the active model/persona so the console header can label them.
+        # Surface the active model/persona + the hosted persona list so the
+        # console header can label them and render a persona switcher.
         await ws.send_text(json.dumps(
-            {"type": "meta", "model": self.model, "persona": self.persona}
+            {"type": "meta", "model": self.model, "persona": self.persona,
+             "personas": self.personas}
         ))
 
         async def respond(frame: dict) -> None:
@@ -324,6 +371,9 @@ class LocalWebChannel:
         """
         command = payload.get("command")
         sid = payload.get("session_id") or LOCAL_SESSION_ID
+        # Per-frame active persona (the SPA's switcher sets it). Snapshots and
+        # enqueued messages are scoped to it so one socket drives every tenant.
+        persona = payload.get("persona") or self.persona or DEFAULT_PERSONA
 
         if command == "interrupt":
             delivered = bool(self.cancel_session and self.cancel_session(sid))
@@ -335,7 +385,7 @@ class LocalWebChannel:
 
         if command == "history_request":
             if respond is not None:
-                messages = self.history_provider(sid)
+                messages = self.history_provider(sid, persona)
                 for m in messages:
                     if m.get("attachments"):
                         _enrich_attachments(m["attachments"], os.getcwd())
@@ -351,7 +401,7 @@ class LocalWebChannel:
                 await respond({
                     "type": "skills_snapshot",
                     "session_id": sid,
-                    "skills": self.skills_provider(),
+                    "skills": self.skills_provider(persona),
                 })
             return
 
@@ -360,7 +410,7 @@ class LocalWebChannel:
                 await respond({
                     "type": "conversations_snapshot",
                     "session_id": sid,
-                    "conversations": self.conversations_provider(),
+                    "conversations": self.conversations_provider(persona),
                 })
             return
 
@@ -371,6 +421,7 @@ class LocalWebChannel:
                 session_id=sid,
                 reply_address={},
                 command="slash",
+                persona=persona,
             ))
             return
 
@@ -397,6 +448,7 @@ class LocalWebChannel:
             reply_address={},
             command=command or None,
             attachments=manifest,
+            persona=persona,
         ))
 
     # --- channel protocol --------------------------------------------------

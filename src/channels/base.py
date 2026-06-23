@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Protocol
 
+# The tenant dimension carried end-to-end through the queues. A blank persona
+# means "the default persona"; the agent_worker dispatcher resolves it against
+# the registry (and falls back to the single configured runtime), so legacy
+# channels that never set it keep working.
+DEFAULT_PERSONA = "default"
+
 
 # attachments: list of {"filename": str, "path": str, "mime_type": str, "size": int}
 #   — produced by ws.py (CLI uploads) and email.py (email attachments), same shape.
@@ -12,6 +18,7 @@ class IncomingMessage:
     reply_address: dict
     command: str | None = None
     attachments: list[dict] | None = None
+    persona: str = DEFAULT_PERSONA
 
 
 @dataclass
@@ -26,6 +33,7 @@ class OutgoingMessage:
     attachments: list[dict] | None = None
     workflow: dict | None = None
     stats: dict | None = None
+    persona: str = DEFAULT_PERSONA
 
 
 class Channel(Protocol):

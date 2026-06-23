@@ -256,7 +256,9 @@ async def test_agent_worker_passes_workflow_to_outgoing():
 
     # Import and run one iteration of agent_worker
     from run import agent_worker
-    task = asyncio.create_task(agent_worker(agent, in_q, out_q))
+    from src.runtime import AgentRuntime
+    registry = {"default": AgentRuntime("default", agent.config, agent)}
+    task = asyncio.create_task(agent_worker(registry, in_q, out_q))
     result = await asyncio.wait_for(out_q.get(), timeout=2.0)
     task.cancel()
 
