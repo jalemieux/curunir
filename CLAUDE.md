@@ -169,6 +169,58 @@ prompts (`default/prompts/behavior.md`, `finance`/`marketing`
 `prompts/20-guardrails.md`) — there is no shared cross-persona prompt layer, so
 the canonical wording is repeated per bundle by design.
 
+### Multi-Tenant Hosting (`src/runtime.py`)
+
+One process can host **N personas concurrently** (#420). `parse_personas` reads
+`CURUNIR_PERSONAS` (comma list; wins) else falls back to the single
+`CURUNIR_PERSONA`/`default`. `build_registry` mints one **`AgentRuntime`**
+(`persona`, `AgentConfig`, `Agent`) per persona, each rooted at
+`context/<persona>/` — so **all** per-persona state forks off that one dir
+(`memory/`, `conversations/`, `schedules.db`, `portfolio.db`, `usage.db`,
+`identity.md`, the `workspace/` FS sandbox). `AgentConfig.__post_init__` derives
+every state path from `context_dir`, which is what makes the fork a one-line
+change. Per persona, `build_registry` bootstraps the context dir, provisions
+`workspace/`, and inits the schedule store.
+
+A **single shared `in_queue`/`out_queue`** is kept; `run.py`'s `agent_worker` is
+now a **dispatcher** that resolves `registry[msg.persona]` (falling back to the
+default runtime for blank/unknown personas, so legacy channels keep working) and
+runs that persona's agent. The per-persona background loops
+(`periodic_extraction`, `periodic_dreaming`, `run_scheduler`) are spawned **once
+per runtime** in the `TaskGroup`, so each reads only its own
+`context/<persona>/` state. `route_outbound` disambiguates a fanned-out channel
+by `"<channel>:<persona>"` first, then the bare name.
+
+**Persona addressing.** `IncomingMessage`/`OutgoingMessage` carry a `persona`
+field (default = the default persona). Channels stamp it: WS / Local Web /
+Portal read it per-frame (the UI persona switcher sets it) and run
+persona-aware providers (`history`/`skills`/`conversations` snapshots resolve
+the right runtime); the Local Web read panels + schedule routes take a
+`?persona=` and resolve that persona's config; **email** binds one Fastmail
+inbox per persona (`FASTMAIL_*__<PERSONA>`, global vars only single-tenant) and
+stamps the inbox's persona on inbound mail. The Local Web console + portal SPA
+gain a persona selector (hidden when only one persona is hosted) that rebinds
+all outgoing frames + refetches snapshots.
+
+**Filesystem isolation — the #420 hard requirement.** Data isolation between
+personas is a security boundary, not a nicety: `default` must never read or
+clobber `finance`/`life-coach` data. The **authoritative** boundary is a
+container/namespace per persona (mount root `context/<persona>/workspace`); the
+kernel — not Python — enforces it. **Status:** that kernel boundary is a
+follow-up gated on a privileged Linux runtime (it cannot be created or tested on
+the macOS dev box, where Linux namespaces don't exist, nor in an unprivileged
+container without `CAP_SYS_ADMIN`). What ships **today** and is fully enforced +
+tested is the **hardened realpath path-jail** in `fs_tools.py`: when
+`config.fs_jail` is set (every multi-tenant runtime sets it), `read`/`write`/
+`edit`/`glob`/`grep` resolve relative paths against `config.workdir` and reject
+`..`, absolute escapes, and **symlink escapes** via realpath containment, so a
+persona's FS tools fail closed outside its own `workspace/`. **`bash` is NOT
+path-jailed** (a shell can `cd`/use absolute paths anyway) — true `bash` FS
+isolation is the container boundary's job; its cwd stays at `repo_root` so skill
+CLIs keep working (two anchors: `repo_root` for skills/CLIs, `workdir` for user
+data). The `delegate` sub-agent inherits the parent `config`, hence the same
+jail.
+
 ### Portal Service (`portal/`)
 
 Standalone FastAPI app deployed to Render, separate Python project from the curunir container. See [`portal/README.md`](portal/README.md). Contains its own pyproject.toml, Dockerfile, render.yaml, and tests/. The curunir container talks to it via PortalChannel.
@@ -186,6 +238,8 @@ Post-session, `extract_learnings()` calls the LLM with conversation history to e
 ### Context Directory (`context/`)
 
 Local directory containing `identity.md` (agent persona, required), `memory/` (persistent facts), and the runtime SQLite stores `schedules.db` (cron tasks; see Scheduling), `portfolio.db`, and `usage.db`. The system prompt reads `identity.md` (then layers `personas/<active>/prompts/*.md` on top — see Personas). **`behavior.md` is no longer read at boot** — framework behavior moved into the persona bundle's `prompts/`; a stray `context/behavior.md` has no effect. The `/identity` skill only edits `identity.md`. Use `sync-context.sh` to rsync from a remote machine before starting.
+
+**Per-persona rooting.** With multi-tenant hosting (see Multi-Tenant Hosting), each persona's state lives under its own `context/<persona>/` root (e.g. `context/default/`, `context/finance/`) — every path above (`identity.md`, `memory/`, the SQLite stores, plus `.ws-token`, `email_state.json`, and the `workspace/` FS-tool sandbox) is derived from `AgentConfig.context_dir` in `__post_init__`. Byte-for-byte backward compatibility with the old flat `./context` layout is **not** a goal; the memory on-disk *format* is unchanged, only the root moves under the persona.
 
 ### Onboarding (`onboarding/`)
 
@@ -223,9 +277,10 @@ Key test files map 1:1 to modules: `test_agent.py`, `test_channels.py`, `test_to
 
 See `.env.example` for full list. Critical ones:
 - `MODEL` — LiteLLM format (e.g., `anthropic/claude-sonnet-4-20250514`)
+- `CURUNIR_PERSONA` — single persona to host (default `default`); `CURUNIR_PERSONAS` — comma list to host MANY personas in one process (wins over `CURUNIR_PERSONA`; see Multi-Tenant Hosting). Each gets `context/<persona>/` + an FS-jailed `workspace/`.
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`
 - `VISION_MODEL` — fallback vision model when `MODEL` is text-only. At boot, `litellm.supports_vision(MODEL)` is checked; if false, image attachments are described by `VISION_MODEL` and the description is sent to `MODEL` as text. If unset, images become a `[file (image, NKB) — no vision model configured]` text marker.
-- `EMAIL_ENABLED`, `FASTMAIL_USER`, `FASTMAIL_PASSWORD`, `FASTMAIL_INBOX` (the From address; defaults to `FASTMAIL_USER`), `FASTMAIL_IMAP_HOST` (default `imap.fastmail.com`), `FASTMAIL_SMTP_HOST` (default `smtp.fastmail.com`), `EMAIL_ALLOWED_SENDERS`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_POLL_INTERVAL`, `EMAIL_STATE_FILE`, `EMAIL_SEND_MAX_RETRIES` (default 5), `EMAIL_SEND_RETRY_BACKOFF` (default 30s), `EMAIL_FAILURE_ALERT_THRESHOLD` (default 5) — for the Fastmail IMAP/SMTP channel (no Google/Gmail or deadsimple vars anymore)
+- `EMAIL_ENABLED`, `FASTMAIL_USER`, `FASTMAIL_PASSWORD`, `FASTMAIL_INBOX` (the From address; defaults to `FASTMAIL_USER`), `FASTMAIL_IMAP_HOST` (default `imap.fastmail.com`), `FASTMAIL_SMTP_HOST` (default `smtp.fastmail.com`), `EMAIL_ALLOWED_SENDERS`, `EMAIL_RESTRICT_OUTBOUND`, `EMAIL_POLL_INTERVAL`, `EMAIL_STATE_FILE`, `EMAIL_SEND_MAX_RETRIES` (default 5), `EMAIL_SEND_RETRY_BACKOFF` (default 30s), `EMAIL_FAILURE_ALERT_THRESHOLD` (default 5) — for the Fastmail IMAP/SMTP channel (no Google/Gmail or deadsimple vars anymore). For multi-tenant hosting, suffix per persona: `FASTMAIL_USER__<PERSONA>` / `FASTMAIL_PASSWORD__<PERSONA>` / `FASTMAIL_INBOX__<PERSONA>` (one inbox per persona; the bare vars are single-tenant only and are not shared across personas)
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `MAX_TOOL_RESULT_CHARS` — per-tool-result truncation cap in chars (default 100000 ≈ 25k tokens; defense-in-depth, lower for small-context models)
 - `LOCAL_UI_ENABLED`, `LOCAL_UI_HOST` (default `127.0.0.1`), `LOCAL_UI_PORT` (default `8766`) — the loopback-bound local web console (`local_web.py`). Reuses the `context/.ws-token` pairing token + `WS_ALLOWED_ORIGINS` allowlist; no dedicated auth env vars
