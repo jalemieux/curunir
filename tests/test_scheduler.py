@@ -218,3 +218,33 @@ class TestCheckAndFire:
         assert "t1" in fired
         assert "t2" in fired
         assert mock_agent.handle.call_count == 2
+
+
+class TestPerPersonaIsolation:
+    """Each persona's scheduler reads only its own schedules.db (#420)."""
+
+    async def test_scheduler_fires_only_its_own_personas_tasks(self, tmp_path):
+        from src.config import AgentConfig
+
+        a_ctx = tmp_path / "context" / "alpha"
+        b_ctx = tmp_path / "context" / "bravo"
+        (a_ctx).mkdir(parents=True)
+        (b_ctx).mkdir(parents=True)
+        cfg_a = AgentConfig(context_dir=a_ctx)
+        cfg_b = AgentConfig(context_dir=b_ctx)
+        sdb.init_db(str(cfg_a.schedules_db))
+        sdb.init_db(str(cfg_b.schedules_db))
+        assert cfg_a.schedules_db != cfg_b.schedules_db
+
+        engine.create(str(cfg_a.schedules_db),
+                      {"id": "alpha-task", "cron": "* * * * *", "prompt": "a"})
+        engine.create(str(cfg_b.schedules_db),
+                      {"id": "bravo-task", "cron": "* * * * *", "prompt": "b"})
+
+        agent_a = AsyncMock()
+        agent_a.config = cfg_a
+        fired = await _check_and_fire(agent_a)
+        await asyncio.sleep(0)
+
+        # alpha's scheduler sees ONLY alpha's task — never bravo's.
+        assert fired == ["alpha-task"]

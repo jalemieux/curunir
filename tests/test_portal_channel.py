@@ -123,7 +123,7 @@ async def test_history_request_invokes_provider_and_sends_snapshot(portal_server
     ]
     seen_sids: list[str] = []
 
-    def provider(sid: str) -> list[dict]:
+    def provider(sid: str, persona=None) -> list[dict]:
         seen_sids.append(sid)
         return fake_history
 
@@ -204,7 +204,7 @@ async def test_history_request_with_session_id_passed_to_provider(portal_server)
     in_q: asyncio.Queue = asyncio.Queue()
     seen_sids: list[str] = []
 
-    def provider(sid: str) -> list[dict]:
+    def provider(sid: str, persona=None) -> list[dict]:
         seen_sids.append(sid)
         return []
 
@@ -327,7 +327,7 @@ async def test_history_request_command_triggers_snapshot(portal_server):
     in_q: asyncio.Queue = asyncio.Queue()
     seen_sids: list[str] = []
 
-    def provider(sid: str) -> list[dict]:
+    def provider(sid: str, persona=None) -> list[dict]:
         seen_sids.append(sid)
         return [{"role": "user", "content": "u1"}]
 
@@ -365,7 +365,7 @@ async def test_history_snapshot_enriches_attachments(portal_server, tmp_path):
     doc.write_text("the report body")
     in_q: asyncio.Queue = asyncio.Queue()
 
-    def provider(sid: str) -> list[dict]:
+    def provider(sid: str, persona=None) -> list[dict]:
         return [{
             "role": "assistant",
             "content": "see attached",
@@ -702,7 +702,7 @@ async def test_skills_request_invokes_provider_and_sends_snapshot(portal_server)
         {"name": "memo", "display_name": "Memo", "summary": "A memo"},
     ]
 
-    def provider() -> list[dict]:
+    def provider(persona=None) -> list[dict]:
         return fake_skills
 
     ch = PortalChannel(
@@ -728,7 +728,7 @@ async def test_skills_request_command_triggers_snapshot(portal_server):
     session_id triggers a skills_snapshot tagged with that session."""
     in_q: asyncio.Queue = asyncio.Queue()
 
-    def provider() -> list[dict]:
+    def provider(persona=None) -> list[dict]:
         return []
 
     ch = PortalChannel(
@@ -762,7 +762,7 @@ async def test_conversations_request_invokes_provider_and_sends_snapshot(portal_
 
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        conversations_provider=lambda: fake_convos,
+        conversations_provider=lambda persona=None: fake_convos,
     )
     task = asyncio.create_task(ch.start())
     try:
@@ -785,7 +785,7 @@ async def test_conversations_request_command_triggers_snapshot(portal_server):
 
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        conversations_provider=lambda: [],
+        conversations_provider=lambda persona=None: [],
     )
     task = asyncio.create_task(ch.start())
     try:
@@ -809,7 +809,7 @@ async def test_conversations_request_no_connection_no_send(portal_server):
     in_q: asyncio.Queue = asyncio.Queue()
     ch = PortalChannel(
         in_queue=in_q, url=portal_server["url"], token="t",
-        conversations_provider=lambda: [{"session_id": "x"}],
+        conversations_provider=lambda persona=None: [{"session_id": "x"}],
     )
     # No start() — _connection is None.
     await ch._handle_conversations_request({})

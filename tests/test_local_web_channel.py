@@ -384,7 +384,7 @@ async def test_inbound_slash_forwarded(channel):
 async def test_inbound_history_request_responds_with_snapshot(config):
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
-        history_provider=lambda sid: [{"role": "user", "content": "hi"}],
+        history_provider=lambda sid, persona=None: [{"role": "user", "content": "hi"}],
     )
     sent = []
 
@@ -400,7 +400,7 @@ async def test_inbound_history_request_responds_with_snapshot(config):
 async def test_inbound_skills_request_responds_with_snapshot(config):
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
-        skills_provider=lambda: [{"name": "demo"}],
+        skills_provider=lambda persona=None: [{"name": "demo"}],
     )
     sent = []
 
@@ -423,7 +423,7 @@ async def test_inbound_conversations_request_responds_with_snapshot(config):
     ]
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
-        conversations_provider=lambda: convs,
+        conversations_provider=lambda persona=None: convs,
     )
     sent = []
 
@@ -477,7 +477,7 @@ async def test_inbound_interrupt_cancels_explicit_session(channel):
 async def test_history_snapshot_echoes_requested_session_id(config):
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
-        history_provider=lambda sid: [{"role": "user", "content": sid}],
+        history_provider=lambda sid, persona=None: [{"role": "user", "content": sid}],
     )
     sent = []
 
@@ -495,7 +495,7 @@ async def test_history_snapshot_echoes_requested_session_id(config):
 async def test_skills_snapshot_echoes_requested_session_id(config):
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
-        skills_provider=lambda: [{"name": "demo"}],
+        skills_provider=lambda persona=None: [{"name": "demo"}],
     )
     sent = []
 

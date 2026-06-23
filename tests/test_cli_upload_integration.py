@@ -43,7 +43,10 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
 
     with patch("src.agent.agent.call_llm", new=fake_call_llm):
         server_task = asyncio.create_task(ch.start())
-        worker_task = asyncio.create_task(run_module.agent_worker(agent, in_q, out_q))
+        from src.runtime import AgentRuntime
+        registry = {"default": AgentRuntime("default", agent.config, agent)}
+        worker_task = asyncio.create_task(
+            run_module.agent_worker(registry, in_q, out_q))
         await asyncio.sleep(0.1)  # let server bind
 
         try:

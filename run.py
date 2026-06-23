@@ -24,17 +24,19 @@ from src.channels.local_web import LocalWebChannel
 from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
-from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
-from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
-from onboarding.bootstrap import bootstrap_context
+from src.config import AgentConfig, LocalWebConfig
+from src.runtime import (
+    build_email_configs,
+    build_registry,
+    default_runtime,
+    parse_personas,
+)
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
-from src.schedule_store import db as schedule_db
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
-from src.usage_store import UsageStore
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -303,17 +305,26 @@ async def _vision_prepass(
     return out
 
 
-async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
-    """Bridge between the message queues and the agent loop.
+async def agent_worker(registry: dict, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+    """Bridge between the message queues and the per-persona agent loops.
 
-    One IncomingMessage per iteration: handle control commands inline, or
-    prep its content + attachments, run the agent, and emit the reply on
-    out_queue. Streaming deltas and tool-call notifications go out mid-turn
-    via the on_text_delta / on_tool_call hooks.
+    One IncomingMessage per iteration. The worker is a *dispatcher*: it resolves
+    ``registry[msg.persona]`` (falling back to the default runtime for blank or
+    unknown personas, so legacy channels keep working) and then handles control
+    commands inline, or preps the content + attachments, runs that persona's
+    agent, and emits the reply on out_queue. Streaming deltas and tool-call
+    notifications go out mid-turn via the on_text_delta / on_tool_call hooks.
     """
+    from src.runtime import default_runtime
+
     while True:
         msg = await in_queue.get()
-        logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
+        runtime = registry.get(msg.persona) or default_runtime(registry)
+        agent = runtime.agent
+        logger.info(
+            "Processing message from %s (session %s, persona %s)",
+            msg.channel, msg.session_id, runtime.persona,
+        )
         if msg.attachments:
             logger.info(
                 "Inbound attachments: %s",
@@ -410,6 +421,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 channel=msg.channel,
                 session_id=msg.session_id,
                 reply_address=msg.reply_address,
+                persona=msg.persona,
                 tool_calls=[_summarize_tool_call(name, args_str)],
                 final=False,
             ))
@@ -420,6 +432,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 channel=msg.channel,
                 session_id=msg.session_id,
                 reply_address=msg.reply_address,
+                persona=msg.persona,
                 delta=True,
                 final=False,
             ))
@@ -474,6 +487,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             channel=msg.channel,
             session_id=msg.session_id,
             reply_address=msg.reply_address,
+            persona=msg.persona,
             attachments=attachments or None,
             workflow=metadata.get("workflow"),
             stats=metadata.get("stats"),
@@ -620,21 +634,34 @@ async def main():
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
 
-    # Seed context/ from context.default/ on first run (non-overwriting).
-    # Must run before building the system prompt so a fresh deployment boots
-    # with the baseline identity.md instead of failing.
-    bootstrap_context(Path("./context"))
+    # Multi-tenant registry: one AgentRuntime per persona, each rooted at
+    # context/<persona> so all per-persona state forks. CURUNIR_PERSONAS (comma
+    # list) hosts many; otherwise CURUNIR_PERSONA / default hosts one. Per-
+    # persona context bootstrap + schedule-store init happen inside
+    # build_registry, so a fresh deployment boots with baseline identity files.
+    persona_names = parse_personas(os.environ)
 
-    persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or DEFAULT_PERSONA
-    persona = load_persona(persona_name)
-    logger.info(
-        "Persona '%s' active: skills=%s",
-        persona.name,
-        f"{len(persona.skills)} allowlisted" if persona.skills else "all on disk",
-    )
-    warn_missing_keys(persona, os.environ)
+    # Vision support is a property of MODEL (shared across personas), so detect
+    # it once and pass it down as a config override.
+    model_for_vision = model or AgentConfig().model
+    main_vision = _detect_vision_support(model_for_vision)
+    if not main_vision and not vision_model:
+        raise RuntimeError(
+            f"Main model {model_for_vision} lacks vision support and no "
+            "VISION_MODEL is configured. Set VISION_MODEL in the "
+            "environment to a vision-capable model (e.g. "
+            "openai/gpt-4o-mini) or switch MODEL to one that supports "
+            "images."
+        )
+    if not main_vision:
+        logger.info(
+            "Main model %s lacks vision support; routing image attachments "
+            "through VISION_MODEL=%s.",
+            model_for_vision, vision_model,
+        )
 
-    config = AgentConfig(
+    config_overrides = {
+        "main_model_supports_vision": main_vision,
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
@@ -645,39 +672,73 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
-        persona=persona_name,
-        **({"skill_allowlist": persona.skills} if persona.skills else {}),
+    }
+
+    registry = build_registry(
+        persona_names,
+        base_context=Path("./context"),
+        config_overrides=config_overrides,
+        env=os.environ,
     )
-    config.main_model_supports_vision = _detect_vision_support(config.model)
-    if not config.main_model_supports_vision:
-        if not config.vision_model:
-            raise RuntimeError(
-                f"Main model {config.model} lacks vision support and no "
-                "VISION_MODEL is configured. Set VISION_MODEL in the "
-                "environment to a vision-capable model (e.g. "
-                "openai/gpt-4o-mini) or switch MODEL to one that supports "
-                "images."
-            )
-        logger.info(
-            "Main model %s lacks vision support; routing image attachments "
-            "through VISION_MODEL=%s.",
-            config.model, config.vision_model,
-        )
+    logger.info(
+        "Hosting %d persona(s): %s",
+        len(registry), ", ".join(registry.keys()),
+    )
 
-    usage_store = UsageStore(config.usage_db)
+    # The default runtime backs single-socket channel providers (history /
+    # skills / conversations snapshots) and is the dispatcher's fallback.
+    default_rt = default_runtime(registry)
 
-    # Initialize the SQLite schedule store (the sole schedule source of truth).
-    schedule_db.init_db(str(config.schedules_db))
+    def cancel_any(session_id: str) -> None:
+        """Route an interrupt to whichever persona owns the live session.
 
-    agent = Agent(config, usage_store=usage_store)
+        Session ids are unique per conversation; cancelling across every
+        runtime is a harmless no-op for the personas that don't hold it.
+        """
+        for rt in registry.values():
+            rt.agent.request_cancel(session_id)
+
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
+
+    # Persona-aware providers. Each accepts an optional ``persona`` so a single
+    # multiplexed channel (one WS/portal socket) can serve every tenant; when
+    # omitted (legacy callers) they resolve to the default runtime.
+    def _rt(persona: str | None):
+        return registry.get(persona) or default_rt
+
+    def history_provider(sid, persona: str | None = None):
+        return _rt(persona).agent.history_snapshot(sid)
+
+    def skills_provider(persona: str | None = None):
+        cfg = _rt(persona).config
+        return portal_skill_list(
+            cfg.skill_dirs,
+            set(cfg.skill_allowlist) if cfg.skill_allowlist else None,
+        )
+
+    def conversations_provider(persona: str | None = None):
+        return _rt(persona).agent.conversations_snapshot()
+
+    def interactive_conversations_provider(persona: str | None = None):
+        # conversations_snapshot() already drops email + scratch; the extra
+        # filter drops scheduled-task transcripts (interactive only).
+        return [
+            c for c in _rt(persona).agent.conversations_snapshot()
+            if not str(c.get("session_id", "")).startswith("sched:")
+        ]
+
+    # The set of personas this process hosts — surfaced to channels so their
+    # UIs can render a persona switcher.
+    persona_names_list = list(registry.keys())
 
     # Register channels
     channels = {}
     ws_host = os.environ.get("WS_HOST", "127.0.0.1")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws_token_path = Path(config.context_dir) / ".ws-token"
+    # One shared pairing token: a single WS port multiplexes all personas, so
+    # the token lives at the shared context root rather than per persona.
+    ws_token_path = Path("./context") / ".ws-token"
     ws_pairing_token = _ensure_ws_token(ws_token_path)
     ws_allowed_origins_env = os.environ.get("WS_ALLOWED_ORIGINS", "").strip()
     if ws_allowed_origins_env:
@@ -687,40 +748,35 @@ async def main():
     else:
         ws_allowed_origins = None  # channel default (localhost set)
     ws = WebSocketChannel(
-        in_queue, host=ws_host, port=ws_port, model=config.model,
-        persona=persona.name,
-        cancel_session=agent.request_cancel,
+        in_queue, host=ws_host, port=ws_port, model=default_rt.config.model,
+        persona=default_rt.persona,
+        personas=persona_names_list,
+        cancel_session=cancel_any,
         allowed_origins=ws_allowed_origins,
         pairing_token=ws_pairing_token,
     )
     channels["cli"] = ws
 
-    # Email channel (conditional)
-    email_config = EmailChannelConfig(
-        enabled=os.environ.get("EMAIL_ENABLED", "false").lower() == "true",
-        imap_host=os.environ.get("FASTMAIL_IMAP_HOST", "imap.fastmail.com"),
-        smtp_host=os.environ.get("FASTMAIL_SMTP_HOST", "smtp.fastmail.com"),
-        user=os.environ.get("FASTMAIL_USER", ""),
-        password=os.environ.get("FASTMAIL_PASSWORD", ""),
-        inbox=os.environ.get("FASTMAIL_INBOX", "") or os.environ.get("FASTMAIL_USER", ""),
-        poll_interval_sec=int(os.environ.get("EMAIL_POLL_INTERVAL", "60")),
-        allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
-        restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
-        attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
-        state_file=Path(os.environ.get("EMAIL_STATE_FILE", "./context/email_state.json")),
-        spam_score_threshold=float(os.environ.get("EMAIL_SPAM_SCORE_THRESHOLD", "5.0")),
-        send_max_retries=int(os.environ.get("EMAIL_SEND_MAX_RETRIES", "5")),
-        send_retry_backoff_sec=float(os.environ.get("EMAIL_SEND_RETRY_BACKOFF", "30")),
-        failure_alert_threshold=int(os.environ.get("EMAIL_FAILURE_ALERT_THRESHOLD", "5")),
-    )
-    if email_config.enabled:
-        if not email_config.user or not email_config.password:
-            logger.error("EMAIL_ENABLED=true but FASTMAIL_USER or FASTMAIL_PASSWORD is unset; skipping email channel")
-        else:
-            email_channel = EmailChannel(in_queue, email_config)
-            channels["email"] = email_channel
-            logger.info("Email channel enabled for inbox %s (poll every %ds)",
-                        email_config.inbox, email_config.poll_interval_sec)
+    # Email channels (conditional): one Fastmail inbox per persona. A persona
+    # with resolvable credentials gets its own EmailChannel instance bound to
+    # its runtime; the channel stamps its persona on every inbound message and
+    # is registered as "email:<persona>" so route_outbound can fan replies back
+    # to the right inbox. Single-persona deployments fall back to the global
+    # FASTMAIL_* vars; multi-persona ones use FASTMAIL_USER__<PERSONA> etc.
+    if os.environ.get("EMAIL_ENABLED", "false").lower() == "true":
+        email_configs = build_email_configs(os.environ, registry)
+        if not email_configs:
+            logger.error(
+                "EMAIL_ENABLED=true but no persona has resolvable FASTMAIL "
+                "credentials; skipping email channel(s)"
+            )
+        for persona_name, email_config in email_configs.items():
+            email_channel = EmailChannel(in_queue, email_config, persona=persona_name)
+            channels[f"email:{persona_name}"] = email_channel
+            logger.info(
+                "Email channel enabled for persona %s inbox %s (poll every %ds)",
+                persona_name, email_config.inbox, email_config.poll_interval_sec,
+            )
 
     # Portal channel (conditional)
     portal_url = os.environ.get("CURUNIR_PORTAL_URL", "").strip()
@@ -730,13 +786,11 @@ async def main():
             in_queue=in_queue,
             url=portal_url,
             token=portal_token,
-            history_provider=lambda sid: agent.history_snapshot(sid),
-            skills_provider=lambda: portal_skill_list(
-                agent.config.skill_dirs,
-                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
-            ),
-            conversations_provider=lambda: agent.conversations_snapshot(),
-            cancel_session=agent.request_cancel,
+            history_provider=history_provider,
+            skills_provider=skills_provider,
+            conversations_provider=conversations_provider,
+            cancel_session=cancel_any,
+            personas=persona_names_list,
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
@@ -751,25 +805,19 @@ async def main():
     if local_web_config.enabled:
         local_web_channel = LocalWebChannel(
             in_queue=in_queue,
-            config=config,
+            config=default_rt.config,
+            registry=registry,
             host=local_web_config.host,
             port=local_web_config.port,
-            model=config.model,
-            persona=persona.name,
-            cancel_session=agent.request_cancel,
+            model=default_rt.config.model,
+            persona=default_rt.persona,
+            personas=persona_names_list,
+            cancel_session=cancel_any,
             allowed_origins=ws_allowed_origins,
             pairing_token=ws_pairing_token,
-            history_provider=lambda sid: agent.history_snapshot(sid),
-            skills_provider=lambda: portal_skill_list(
-                agent.config.skill_dirs,
-                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
-            ),
-            # conversations_snapshot() already drops email + scratch; the extra
-            # filter drops scheduled-task transcripts (interactive only).
-            conversations_provider=lambda: [
-                c for c in agent.conversations_snapshot()
-                if not str(c.get("session_id", "")).startswith("sched:")
-            ],
+            history_provider=history_provider,
+            skills_provider=skills_provider,
+            conversations_provider=interactive_conversations_provider,
         )
         channels["local_web"] = local_web_channel
         logger.info(
@@ -782,15 +830,18 @@ async def main():
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
-    # Start all channels, the router, and the agent worker
+    # Start all channels, the router, and the dispatching agent worker. The
+    # per-persona background loops (memory extraction, dreaming, scheduler) run
+    # once per runtime so each reads only its own context/<persona>/ state.
     async with asyncio.TaskGroup() as tg:
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
-        tg.create_task(agent_worker(agent, in_queue, out_queue))
-        tg.create_task(periodic_extraction(agent, extraction_interval))
-        tg.create_task(periodic_dreaming(agent, dreaming_interval))
-        tg.create_task(run_scheduler(agent))
+        tg.create_task(agent_worker(registry, in_queue, out_queue))
+        for rt in registry.values():
+            tg.create_task(periodic_extraction(rt.agent, extraction_interval))
+            tg.create_task(periodic_dreaming(rt.agent, dreaming_interval))
+            tg.create_task(run_scheduler(rt.agent))
 
 
 if __name__ == "__main__":

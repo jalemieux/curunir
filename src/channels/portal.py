@@ -44,7 +44,7 @@ from src.channels._attachments import (
     _enrich_attachments,
     _stage_attachments,
 )
-from src.channels.base import IncomingMessage, OutgoingMessage
+from src.channels.base import DEFAULT_PERSONA, IncomingMessage, OutgoingMessage
 
 
 logger = logging.getLogger(__name__)
@@ -81,18 +81,23 @@ class PortalChannel:
         in_queue: asyncio.Queue,
         url: str,
         token: str,
-        history_provider: "callable[[str], list[dict]] | None" = None,
-        skills_provider: "callable[[], list[dict]] | None" = None,
-        conversations_provider: "callable[[], list[dict]] | None" = None,
+        history_provider: "callable[..., list[dict]] | None" = None,
+        skills_provider: "callable[..., list[dict]] | None" = None,
+        conversations_provider: "callable[..., list[dict]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
+        personas: list[str] | None = None,
     ):
         self.in_queue = in_queue
         self.url = url
         self.token = token
-        self.history_provider = history_provider or (lambda _sid: [])
-        self.skills_provider = skills_provider or (lambda: [])
-        self.conversations_provider = conversations_provider or (lambda: [])
+        self.history_provider = history_provider or (lambda _sid, persona=None: [])
+        self.skills_provider = skills_provider or (lambda persona=None: [])
+        self.conversations_provider = conversations_provider or (lambda persona=None: [])
+        # The personas this container hosts; surfaced to the portal so its
+        # selector can switch the active tenant. The portal stamps the chosen
+        # persona onto each inbound frame.
+        self.personas = personas or []
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
@@ -174,6 +179,8 @@ class PortalChannel:
 
     async def _handle_user_message(self, payload: dict) -> None:
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        # The portal's persona selector stamps the chosen tenant on each frame.
+        persona = payload.get("persona") or DEFAULT_PERSONA
         if payload.get("command") == "interrupt":
             delivered = bool(self.cancel_session and self.cancel_session(session_id))
             logger.info(
@@ -182,15 +189,18 @@ class PortalChannel:
             )
             return
         if payload.get("command") == "history_request":
-            await self._handle_history_request({"session_id": session_id})
+            await self._handle_history_request(
+                {"session_id": session_id, "persona": persona})
             return
 
         if payload.get("command") == "skills_request":
-            await self._handle_skills_request({"session_id": session_id})
+            await self._handle_skills_request(
+                {"session_id": session_id, "persona": persona})
             return
 
         if payload.get("command") == "conversations_request":
-            await self._handle_conversations_request({"session_id": session_id})
+            await self._handle_conversations_request(
+                {"session_id": session_id, "persona": persona})
             return
 
         if payload.get("command") == "scratch_discard":
@@ -204,6 +214,7 @@ class PortalChannel:
                 session_id=session_id,
                 reply_address={},
                 command="scratch_discard",
+                persona=persona,
             ))
             return
 
@@ -216,6 +227,7 @@ class PortalChannel:
                 session_id=session_id,
                 reply_address={},
                 command="slash",
+                persona=persona,
             ))
             return
 
@@ -248,6 +260,7 @@ class PortalChannel:
             reply_address={},
             command=payload.get("command") or None,
             attachments=manifest,
+            persona=persona,
         ))
 
     def _is_duplicate(self, payload: dict) -> bool:
@@ -274,7 +287,7 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        messages = self.history_provider(session_id)
+        messages = self.history_provider(session_id, payload.get("persona"))
         # Inline attachment content/data so a reopened conversation renders
         # its files without a second fetch — same enrichment the live reply
         # path applies in send().
@@ -294,7 +307,7 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        skills = self.skills_provider()
+        skills = self.skills_provider(payload.get("persona"))
         try:
             await self._connection.send(json.dumps({
                 "type": "skills_snapshot",
@@ -308,7 +321,7 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        conversations = self.conversations_provider()
+        conversations = self.conversations_provider(payload.get("persona"))
         try:
             await self._connection.send(json.dumps({
                 "type": "conversations_snapshot",
