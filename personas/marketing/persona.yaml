@@ -5,6 +5,7 @@ description: Go-to-market assistant for builders — product onboarding, ICP & p
 skills:
   - identity
   - onboarding
+  - introspect
   # GTM pipeline (onboard -> position -> plan)
   - gtm-onboard-ingest
   - gtm-position-segment

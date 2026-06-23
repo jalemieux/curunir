@@ -1,25 +1,40 @@
 ---
 name: introspect
-description: "Use when periodically reviewing curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows and filing GitHub issues for novel findings. Trigger on a schedule (e.g. hourly via the `schedule` tool), or when the user asks to scan logs / check on the agent's recent behavior. Dedups against open issues so repeated patterns become comments, not new tickets."
+description: "Use to review curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows. Trigger on a schedule (e.g. hourly via the `schedule` tool) — files GitHub issues for novel findings, deduping against open ones — or on demand when the user asks to scan logs / check on recent behavior ('check the logs', 'how has the agent been behaving', 'any errors lately'), in which case it just reports findings back in chat instead of filing issues."
 tools: bash
 ---
 
 # Introspect
 
-Self-hosted observability loop. Scan recent logs, classify findings, dedup
-against open GitHub issues, and file new ones for novel problems.
+Self-hosted observability loop. Scan recent logs, classify findings, then
+either report them back to the user or file GitHub issues for novel problems.
+
+The scan (Steps 1–3) is always the same. The only thing that changes is what
+you do with the findings:
+
+- **On a schedule / when asked to "file issues"** — dedup against open issues
+  (Step 4), file novel ones (Step 5), close with a ledger line (Step 6).
+- **When a user asks in chat** to scan logs or check on recent behavior — just
+  report what you found back to them (Step A) and stop. **Do not file GitHub
+  issues unless they explicitly ask** ("...and open issues for anything new") —
+  silently filing tickets in response to a question is the surprising part, so
+  never do it unprompted. GitHub auth, dedup, and the ledger are all skippable.
 
 **Requires:**
-- `gh` CLI authenticated via `GH_TOKEN` (see the `github` skill for details)
 - A readable log source — either the rotating log file at `$LOG_FILE`
   (default `/app/workspace/curunir.log`, written by `run.py` and persisted on
   the workspace volume), or `docker logs` access (host `docker` CLI, or
   `/var/run/docker.sock` mounted in alongside a `docker` client)
 
+**Scheduled mode also requires** `gh` CLI authenticated via `GH_TOKEN` (see the
+`github` skill for details) to dedup and file issues. Ad-hoc mode does not — it
+reports findings in chat and never touches GitHub.
+
 When running inside the curunir container, `$LOG_FILE` is the normal path —
 `docker logs` is not reachable without the socket mounted. If neither source
-is available, log a one-line failure to `context/memory/introspection.md`
-and exit cleanly. Do not invent findings.
+is available: in scheduled mode, log a one-line failure to
+`context/memory/introspection.md` and exit cleanly; in ad-hoc mode, tell the
+user the log source is unreachable. Do not invent findings either way.
 
 ## Inputs
 
@@ -132,7 +147,22 @@ For each chunk, look for:
 
 **Confidence threshold**: only file a finding if confidence is **high**. If
 you would hedge ("might be", "possibly"), drop it. False positives spam the
-tracker and erode trust in the loop.
+tracker and erode trust in the loop. (When reporting to a user instead of
+filing, you can surface a hedged observation as long as you flag it as
+low-confidence.)
+
+---
+
+**If a user asked you to check the logs, stop here.** Summarize the findings
+from Steps 2–3 back to them and skip Steps 4–6 (unless they asked you to file
+issues). Lead with the verdict — clean, or N findings by category — then for
+each category give a one-line description, the count, and the single most
+representative excerpt (a few lines, not 30). Note the window and log source so
+they know the scope. If something's worth a tracked issue, offer, but only file
+it if they say yes. A clean window: say so plainly ("No errors, loops, or
+tool-misuse in the last {window}").
+
+The remaining steps are the scheduled / file-issues path.
 
 ### Step 4: Dedup
 
@@ -253,6 +283,10 @@ A chatty hour can produce hundreds of MB of logs. Guard against context blowup:
 - Cap excerpts in issue bodies at 30 lines.
 
 ## Failure modes
+
+These cover the scheduled / file-issues path. When you're reporting to a user
+instead, surface the same conditions as a plain message rather than a ledger
+line — and `gh`/repo failures don't apply, since you're not filing anything.
 
 - **`gh` not authenticated** — log to ledger as `error`, do not retry. User must set `GH_TOKEN`.
 - **No log source** — `$LOG_FILE` missing/empty *and* `docker logs` unavailable: log to ledger as `error`. Suggest setting `LOG_FILE` (it's set by docker compose) or, for host-side runs, mounting `/var/run/docker.sock`.
