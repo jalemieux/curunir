@@ -11,10 +11,26 @@ class AgentConfig:
     max_iterations: int = 200
     max_history_chars: int = 250_000
     max_tool_result_chars: int = 100_000
-    identity_file: Path = Path("./context/identity.md")
+    # context_dir is the single root from which every per-persona state
+    # artifact derives (memory/, conversations/, the SQLite stores,
+    # identity.md, .ws-token, workspace/). Multi-tenant hosting forks all
+    # per-persona state simply by handing each AgentRuntime its own
+    # context_dir = context/<persona>. The fields below default to ``None``
+    # and are derived from context_dir in __post_init__; pass them
+    # explicitly only to override an individual artifact's location.
     context_dir: Path = Path("./context")
-    usage_db: Path = Path("./context/usage.db")
-    schedules_db: Path = Path("./context/schedules.db")
+    identity_file: Path | None = None
+    usage_db: Path | None = None
+    schedules_db: Path | None = None
+    portfolio_db: Path | None = None
+    # FS-tool sandbox root for this persona (read/write/edit/glob/grep are
+    # confined here when ``fs_jail`` is set). Defaults to context_dir/workspace
+    # so a persona's filesystem tools can never reach a sibling persona's
+    # context/<persona>/ tree. ``fs_jail`` opts the hardened realpath
+    # containment guard in; multi-tenant runtimes set it per persona, while
+    # the historical single-tenant default leaves it off.
+    workdir: Path | None = None
+    fs_jail: bool = False
     skill_dirs: list[Path] = field(
         default_factory=lambda: [Path("./skills"), Path("./context/skills")]
     )
@@ -31,7 +47,19 @@ class AgentConfig:
     tts_voice: str = "alloy"
     vision_model: str | None = None
     main_model_supports_vision: bool = False
-    portfolio_db: str = "context/memory/portfolio.db"
+
+    def __post_init__(self) -> None:
+        self.context_dir = Path(self.context_dir)
+        if self.identity_file is None:
+            self.identity_file = self.context_dir / "identity.md"
+        if self.usage_db is None:
+            self.usage_db = self.context_dir / "usage.db"
+        if self.schedules_db is None:
+            self.schedules_db = self.context_dir / "schedules.db"
+        if self.portfolio_db is None:
+            self.portfolio_db = self.context_dir / "memory" / "portfolio.db"
+        if self.workdir is None:
+            self.workdir = self.context_dir / "workspace"
 
 
 @dataclass
