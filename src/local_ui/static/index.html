@@ -212,6 +212,7 @@
 <body>
 <header>
   <h1>Curunir<span id="persona-tag" class="persona-tag"></span></h1>
+  <select id="persona-select" style="display:none" title="Active persona"></select>
   <nav>
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
@@ -307,9 +308,15 @@ if (!activeSessionId) {
 let conversations = [];  // latest conversations_snapshot, drives the sidebar
 const conversationListEl = document.getElementById("conversation-list");
 
+// The active persona (tenant). Empty string == the server's default persona.
+// Read panels and chat/snapshot frames are scoped to it so the operator can
+// switch tenants from one console (multi-tenant hosting, #420).
+let activePersona = "";
+
 function apiUrl(path, params = {}) {
   const u = new URL(path, location.origin);
   if (TOKEN) u.searchParams.set("token", TOKEN);
+  if (activePersona) u.searchParams.set("persona", activePersona);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   return u;
 }
@@ -334,6 +341,13 @@ const fmtMoney = (n) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigi
 // === Tabs ===
 const tabs = document.querySelectorAll("nav button");
 const loaders = { usage: loadUsage, portfolio: loadPortfolio, memory: loadMemory, schedules: loadSchedules };
+// Re-run the loader for whichever read panel is currently open (used after a
+// persona switch so the panel reflects the new tenant's stores).
+function refreshActiveTab() {
+  const active = document.querySelector("header nav button.active");
+  const name = active && active.dataset.tab;
+  if (name && loaders[name]) loaders[name]();
+}
 tabs.forEach((b) => b.addEventListener("click", () => {
   tabs.forEach((x) => x.classList.remove("active"));
   b.classList.add("active");
@@ -754,16 +768,61 @@ function setPersonaTag(persona) {
   }
 }
 
+const personaSelectEl = document.getElementById("persona-select");
+
+// Render the persona switcher from the hosted-persona list. Hidden when the
+// process hosts a single persona (nothing to switch between).
+function populatePersonas(personas, current) {
+  if (!personaSelectEl) return;
+  const list = personas || [];
+  if (current && !activePersona) activePersona = current;
+  if (list.length <= 1) {
+    personaSelectEl.style.display = "none";
+    return;
+  }
+  personaSelectEl.innerHTML = "";
+  for (const p of list) {
+    const opt = document.createElement("option");
+    opt.value = p;
+    opt.textContent = p;
+    if (p === (activePersona || current)) opt.selected = true;
+    personaSelectEl.appendChild(opt);
+  }
+  personaSelectEl.style.display = "inline-block";
+}
+
+if (personaSelectEl) {
+  personaSelectEl.addEventListener("change", () => {
+    activePersona = personaSelectEl.value;
+    setPersonaTag(activePersona);
+    // Rebind the whole console to the new tenant: re-pull chat history/skills
+    // and the sidebar, and refresh whatever read panel is open.
+    chat && chat.bootstrap();
+    requestConversations();
+    refreshActiveTab && refreshActiveTab();
+  });
+}
+
 const conn = createConnection({
   url: wsUrl,
   onFrame: (msg) => {
     // The header (persona/model) is the page's concern, not the chat pane's.
-    if (msg && msg.type === "meta") { setPersonaTag(msg.persona); return; }
+    if (msg && msg.type === "meta") {
+      setPersonaTag(activePersona || msg.persona);
+      populatePersonas(msg.personas, msg.persona);
+      return;
+    }
     chat && chat.handleFrame(msg);
   },
   onStatus: (state) => chat && chat.setStatus(state),
   onOpen: () => chat && chat.bootstrap(),
 });
+// Stamp the active persona on every outgoing frame (chat sends + control
+// frames) so the server dispatches the turn to the right tenant.
+const _rawSend = conn.send;
+conn.send = (frame) => _rawSend(
+  activePersona ? { ...frame, persona: activePersona } : frame
+);
 chat = createChat({
   container: document.getElementById("chat-root"),
   connection: conn,
