@@ -24,6 +24,39 @@ _CREDITS_MSG = "My LLM provider is out of credits."
 _QUOTA_SUBSTRINGS = ("key limit", "quota", "monthly limit", "insufficient_quota")
 _CREDITS_SUBSTRINGS = ("insufficient credits", "add more using")
 
+# Transient provider failures whose error wording — not status code — identifies
+# them. OpenRouter occasionally returns an empty/non-JSON HTTP body that LiteLLM
+# can't parse, surfacing as an APIError carrying no clean retryable status code
+# (see #421). These are empirically self-recovering, so route them through the
+# same backoff loop as 429/502/503 instead of failing the run.
+_RETRYABLE_BODY_SUBSTRINGS = ("unable to get json response", "expecting value")
+_RETRYABLE_STATUS = (429, 502, 503)
+
+
+def _is_retryable_llm_error(exc: Exception, attempt: int) -> bool:
+    """Decide whether an LLM-provider exception should be retried.
+
+    Shared by ``call_llm`` and ``describe_image`` so the two retry loops can't
+    drift. Retryable when the status code is one of ``_RETRYABLE_STATUS`` *or*
+    the lowercased message matches an empty-body/unparseable-JSON substring, and
+    there is at least one attempt left.
+    """
+    if attempt >= MAX_RETRIES - 1:
+        return False
+    status = getattr(exc, "status_code", None)
+    if status in _RETRYABLE_STATUS:
+        return True
+    body = str(exc).lower()
+    return any(s in body for s in _RETRYABLE_BODY_SUBSTRINGS)
+
+
+def _retry_reason(exc: Exception) -> str:
+    """Short why-it-retried tag for the warning log."""
+    status = getattr(exc, "status_code", None)
+    if status in _RETRYABLE_STATUS:
+        return f"status {status}"
+    return "unparseable response body"
+
 
 def classify_provider_error(exc: Exception) -> tuple[str, str] | None:
     """Classify an LLM-provider exception into a user-facing category.
@@ -253,11 +286,10 @@ async def call_llm(
             response = await litellm.acompletion(**kwargs)
             break
         except Exception as exc:
-            status = getattr(exc, "status_code", None)
-            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+            if _is_retryable_llm_error(exc, attempt):
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("LLM returned %s, retrying in %ss (attempt %d/%d)",
-                            status, delay, attempt + 1, MAX_RETRIES)
+                log.warning("LLM call failed (%s), retrying in %ss (attempt %d/%d)",
+                            _retry_reason(exc), delay, attempt + 1, MAX_RETRIES)
                 await asyncio.sleep(delay)
             else:
                 raise
@@ -369,11 +401,10 @@ async def describe_image(
             response = await litellm.acompletion(**kwargs)
             break
         except Exception as exc:
-            status = getattr(exc, "status_code", None)
-            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+            if _is_retryable_llm_error(exc, attempt):
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("Vision model returned %s, retrying in %ss (attempt %d/%d)",
-                            status, delay, attempt + 1, MAX_RETRIES)
+                log.warning("Vision model call failed (%s), retrying in %ss (attempt %d/%d)",
+                            _retry_reason(exc), delay, attempt + 1, MAX_RETRIES)
                 await asyncio.sleep(delay)
             else:
                 raise

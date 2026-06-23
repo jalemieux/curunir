@@ -87,6 +87,103 @@ class TestClassifyProviderError:
         assert "http" not in msg.lower()
 
 
+def _empty_body_error():
+    """The OpenRouter empty/non-JSON body error from the #421 incident."""
+    return litellm.APIError(
+        status_code=500,
+        message=(
+            "OpenrouterException - Unable to get json response - "
+            "Expecting value: line 1 column 1 (char 0)"
+        ),
+        llm_provider="openrouter",
+        model="test",
+    )
+
+
+class TestRetry:
+    @pytest.mark.asyncio
+    async def test_empty_body_error_retried_then_succeeds(self):
+        mock_message = MagicMock(content="recovered", tool_calls=None)
+        mock_response = MagicMock(choices=[MagicMock(message=mock_message)])
+        mock_response.usage = None
+
+        with patch("src.llm.litellm") as mock_litellm, \
+                patch("src.llm.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[_empty_body_error(), mock_response]
+            )
+            result = await call_llm("test-model", [], [])
+
+        assert result.text == "recovered"
+        assert mock_litellm.acompletion.await_count == 2
+        mock_sleep.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_body_error_raises_after_max_retries(self):
+        with patch("src.llm.litellm") as mock_litellm, \
+                patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+            mock_litellm.acompletion = AsyncMock(side_effect=_empty_body_error())
+            with pytest.raises(litellm.APIError):
+                await call_llm("test-model", [], [])
+
+        assert mock_litellm.acompletion.await_count == llm_module.MAX_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_error_raises_immediately(self):
+        exc = litellm.APIError(
+            status_code=403,
+            message="Forbidden",
+            llm_provider="openrouter",
+            model="test",
+        )
+        with patch("src.llm.litellm") as mock_litellm, \
+                patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+            mock_litellm.acompletion = AsyncMock(side_effect=exc)
+            with pytest.raises(litellm.APIError):
+                await call_llm("test-model", [], [])
+
+        assert mock_litellm.acompletion.await_count == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [429, 502, 503])
+    async def test_retryable_status_codes_retried(self, status):
+        exc = litellm.APIError(
+            status_code=status,
+            message="transient",
+            llm_provider="openrouter",
+            model="test",
+        )
+        mock_message = MagicMock(content="ok", tool_calls=None)
+        mock_response = MagicMock(choices=[MagicMock(message=mock_message)])
+        mock_response.usage = None
+
+        with patch("src.llm.litellm") as mock_litellm, \
+                patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+            mock_litellm.acompletion = AsyncMock(side_effect=[exc, mock_response])
+            result = await call_llm("test-model", [], [])
+
+        assert result.text == "ok"
+        assert mock_litellm.acompletion.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_describe_image_retries_empty_body_error(self, tmp_path):
+        img = tmp_path / "photo.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nBYTES")
+
+        mock_message = MagicMock(content="a cat", tool_calls=None)
+        mock_response = MagicMock(choices=[MagicMock(message=mock_message)])
+
+        with patch("src.llm.litellm") as mock_litellm, \
+                patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[_empty_body_error(), mock_response]
+            )
+            text = await describe_image("vision", str(img), "image/png", "q")
+
+        assert text == "a cat"
+        assert mock_litellm.acompletion.await_count == 2
+
+
 @pytest.mark.asyncio
 async def test_text_response():
     mock_message = MagicMock()
