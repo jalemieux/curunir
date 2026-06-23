@@ -1,13 +1,13 @@
 # tests/test_scheduler.py
 import asyncio
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.schedule_store import db as sdb
 from src.schedule_store import engine
-from src.scheduler import _check_and_fire, _is_due
+from src.scheduler import _check_and_fire, _is_due, _run_task
 
 
 @pytest.fixture
@@ -218,3 +218,69 @@ class TestCheckAndFire:
         assert "t1" in fired
         assert "t2" in fired
         assert mock_agent.handle.call_count == 2
+
+
+class TestEscalationHook:
+    async def test_failure_invokes_escalation_hook(self, schedule_db, agent_config):
+        engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "do it"})
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+        hook = MagicMock()
+        mock_agent.on_schedule_failure = hook
+
+        await _run_task(mock_agent, agent_config, "t1", "sched:t1:1", "do it")
+
+        hook.assert_called_once()
+        assert hook.call_args.args[0] == "t1"
+        assert "kaboom" in hook.call_args.args[1]
+
+    async def test_failure_still_marks_error(self, schedule_db, agent_config):
+        engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "do it"})
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+        mock_agent.on_schedule_failure = MagicMock()
+
+        await _run_task(mock_agent, agent_config, "t1", "sched:t1:1", "do it")
+
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_status"] == "error"
+        assert "kaboom" in row["last_error"]
+
+    async def test_no_hook_is_unchanged(self, schedule_db, agent_config):
+        engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "do it"})
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+        mock_agent.on_schedule_failure = None  # no hook configured
+
+        # Must not raise even though no hook is present.
+        await _run_task(mock_agent, agent_config, "t1", "sched:t1:1", "do it")
+
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_status"] == "error"
+
+    async def test_hook_failure_does_not_break_task(self, schedule_db, agent_config):
+        engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "do it"})
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        mock_agent.handle.side_effect = RuntimeError("kaboom")
+        mock_agent.on_schedule_failure = MagicMock(side_effect=ValueError("hook boom"))
+
+        # A throwing hook must not propagate out of _run_task.
+        await _run_task(mock_agent, agent_config, "t1", "sched:t1:1", "do it")
+
+        row = engine.list_schedules(schedule_db)[0]
+        assert row["last_status"] == "error"
+
+    async def test_success_does_not_invoke_hook(self, schedule_db, agent_config):
+        engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "do it"})
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        hook = MagicMock()
+        mock_agent.on_schedule_failure = hook
+
+        await _run_task(mock_agent, agent_config, "t1", "sched:t1:1", "do it")
+
+        hook.assert_not_called()

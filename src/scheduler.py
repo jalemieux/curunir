@@ -6,6 +6,7 @@ tick and stamps run metadata back through scoped engine writes — so a user edi
 and the scheduler's bookkeeping never clobber each other."""
 
 import asyncio
+import inspect
 import logging
 import time
 
@@ -58,6 +59,26 @@ async def _run_task(agent, config, task_id: str, session_id: str, prompt: str) -
     except Exception as e:
         engine.mark_run(_db(config), task_id, 0, "error", error=str(e)[:500])
         logger.error("Scheduled task failed: %s — %s", task_id, e)
+        await _escalate(agent, task_id, str(e))
+
+
+async def _escalate(agent, task_id: str, error: str) -> None:
+    """Surface a failed scheduled run beyond the ERROR log.
+
+    Baseline is the ERROR log already emitted by the caller; an optional
+    operator-notification hook can be wired by setting ``agent.on_schedule_failure``
+    (a ``callable(task_id, error)``, sync or async), mirroring the email
+    channel's escalation seam. Absent or throwing hooks leave behavior
+    unchanged."""
+    hook = getattr(agent, "on_schedule_failure", None)
+    if hook is None:
+        return
+    try:
+        result = hook(task_id, error)
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logger.exception("Schedule escalation hook failed for %s", task_id)
 
 
 async def _check_and_fire(agent) -> list[str]:
