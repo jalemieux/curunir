@@ -1,3 +1,8 @@
+import os
+
+import pytest
+
+from src.config import AgentConfig
 from src.tools.fs_tools import exec_glob, exec_grep, exec_read, exec_edit, exec_write
 
 
@@ -127,3 +132,97 @@ class TestExecGrep:
         (tmp_path / "a.py").write_text("nothing here\n")
         result = exec_grep({"pattern": "zzzzz", "path": str(tmp_path)}, agent_config)
         assert result == "" or "no matches" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Cross-persona filesystem isolation (the headline #420 requirement).
+#
+# Each persona's FS tools are confined to its own workdir (the persona's
+# container/namespace mount root in production; a hardened realpath path-jail
+# here as the enforced, testable defense-in-depth layer). Persona A must not
+# be able to read/write/glob/grep persona B's tree via relative paths, ``..``,
+# absolute paths, or symlinks.
+# ---------------------------------------------------------------------------
+class TestCrossPersonaIsolation:
+    @pytest.fixture
+    def two_personas(self, tmp_path):
+        """Two jailed personas under a shared context root, each with a secret."""
+        ctx = tmp_path / "context"
+        a_ctx = ctx / "alpha"
+        b_ctx = ctx / "bravo"
+        a_work = a_ctx / "workspace"
+        b_work = b_ctx / "workspace"
+        for d in (a_work, b_work):
+            d.mkdir(parents=True)
+        # B's secret lives OUTSIDE its own workspace too (whole tree is private).
+        (b_work / "secret.txt").write_text("bravo-private-data")
+        (b_ctx / "memory").mkdir()
+        (b_ctx / "memory" / "facts.md").write_text("bravo-memory")
+        (a_work / "mine.txt").write_text("alpha-own-data")
+        cfg_a = AgentConfig(context_dir=a_ctx, fs_jail=True)
+        cfg_b = AgentConfig(context_dir=b_ctx, fs_jail=True)
+        return cfg_a, cfg_b, a_work, b_work, b_ctx
+
+    def test_persona_can_reach_own_files(self, two_personas):
+        cfg_a, _, a_work, _, _ = two_personas
+        # Relative to the jail root.
+        assert "alpha-own-data" in exec_read({"file_path": "mine.txt"}, cfg_a)
+        # Absolute path that stays inside the jail is fine.
+        assert "alpha-own-data" in exec_read(
+            {"file_path": str(a_work / "mine.txt")}, cfg_a
+        )
+
+    def test_read_blocked_via_absolute_path(self, two_personas):
+        cfg_a, _, _, b_work, _ = two_personas
+        result = exec_read({"file_path": str(b_work / "secret.txt")}, cfg_a)
+        assert "bravo-private-data" not in result
+        assert "error" in result.lower()
+
+    def test_read_blocked_via_dotdot(self, two_personas):
+        cfg_a, _, _, _, b_ctx = two_personas
+        # ../../bravo/workspace/secret.txt from alpha/workspace
+        rel = os.path.join("..", "..", "bravo", "workspace", "secret.txt")
+        result = exec_read({"file_path": rel}, cfg_a)
+        assert "bravo-private-data" not in result
+        assert "error" in result.lower()
+
+    def test_read_blocked_via_symlink_escape(self, two_personas):
+        cfg_a, _, a_work, _, b_ctx = two_personas
+        # Plant a symlink inside alpha's jail pointing at bravo's tree.
+        link = a_work / "escape"
+        link.symlink_to(b_ctx)
+        result = exec_read({"file_path": "escape/workspace/secret.txt"}, cfg_a)
+        assert "bravo-private-data" not in result
+        assert "error" in result.lower()
+
+    def test_write_blocked_outside_jail(self, two_personas):
+        cfg_a, _, _, b_work, _ = two_personas
+        target = b_work / "clobbered.txt"
+        result = exec_write({"file_path": str(target), "content": "x"}, cfg_a)
+        assert "error" in result.lower()
+        assert not target.exists()
+
+    def test_edit_blocked_outside_jail(self, two_personas):
+        cfg_a, _, _, b_work, _ = two_personas
+        result = exec_edit(
+            {"file_path": str(b_work / "secret.txt"),
+             "old_string": "bravo", "new_string": "hacked"},
+            cfg_a,
+        )
+        assert "error" in result.lower()
+        assert (b_work / "secret.txt").read_text() == "bravo-private-data"
+
+    def test_glob_confined_to_jail(self, two_personas):
+        cfg_a, _, _, _, b_ctx = two_personas
+        # Try to glob bravo's tree by absolute path.
+        result = exec_glob({"pattern": "**/*.txt", "path": str(b_ctx)}, cfg_a)
+        assert "secret.txt" not in result
+        assert "error" in result.lower()
+
+    def test_grep_confined_to_jail(self, two_personas):
+        cfg_a, _, _, b_work, _ = two_personas
+        result = exec_grep(
+            {"pattern": "private", "path": str(b_work)}, cfg_a
+        )
+        assert "bravo-private-data" not in result
+        assert "error" in result.lower()

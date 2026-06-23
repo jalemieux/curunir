@@ -6,6 +6,49 @@ from pathlib import Path
 from src.config import AgentConfig
 
 
+class JailError(Exception):
+    """Raised when a path escapes the persona's FS sandbox (``config.workdir``)."""
+
+
+def _jail_root(config: AgentConfig) -> Path | None:
+    """Return the realpath'd sandbox root, or None when jailing is disabled.
+
+    Isolation between personas is the #420 hard requirement. In production each
+    persona's FS-touching tools run inside a container/namespace whose mount
+    root is this directory; here (and as defense-in-depth inside that
+    container) we enforce a hardened realpath path-jail so persona A's tools
+    can never reach persona B's context/<persona>/ tree.
+    """
+    if not getattr(config, "fs_jail", False):
+        return None
+    return Path(config.workdir).resolve()
+
+
+def _resolve_in_jail(config: AgentConfig, raw: str) -> Path:
+    """Resolve *raw* (relative to the jail root) and assert containment.
+
+    Relative paths anchor at ``config.workdir`` (not the process cwd) so the
+    model addresses its own sandbox naturally. The final realpath — symlinks
+    resolved — must live under the jail root; ``..``, absolute escapes, and
+    symlink escapes all fail closed via ``Path.relative_to``. When jailing is
+    disabled the raw path is returned untouched (legacy single-tenant
+    behavior).
+    """
+    root = _jail_root(config)
+    if root is None:
+        return Path(raw)
+    p = Path(raw)
+    if not p.is_absolute():
+        p = root / p
+    resolved = p.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise JailError(
+            f"path {raw!r} escapes the persona sandbox; FS tools are confined "
+            f"to {root}"
+        )
+    return resolved
+
+
 def exec_glob(args: dict, config: AgentConfig) -> str:
     """Find files matching a glob pattern."""
     try:
@@ -17,9 +60,12 @@ def exec_glob(args: dict, config: AgentConfig) -> str:
         pattern = pattern.lstrip("/")
         if not pattern:
             return "Error: empty glob pattern"
+        root = str(_resolve_in_jail(config, root))
         matches = glob_module.glob(pattern, root_dir=root, recursive=True)
         matches = sorted(matches)[:1000]
         return "\n".join(matches)
+    except JailError as e:
+        return f"Error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
@@ -37,6 +83,11 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
     glob_filter = args.get("glob")
     output_mode = args.get("output_mode", "content")
     context_lines = args.get("context", 0)
+
+    try:
+        path = str(_resolve_in_jail(config, path))
+    except JailError as e:
+        return f"Error: {e}"
 
     rg_path = _find_rg()
     if rg_path:
@@ -156,7 +207,7 @@ _BINARY_READERS: dict[str, callable] = {
 def exec_read(args: dict, config: AgentConfig) -> str:
     """Read a file. Handles text, PDF, DOCX, XLSX, and CSV."""
     try:
-        path = Path(args["file_path"])
+        path = _resolve_in_jail(config, args["file_path"])
         if not path.exists():
             return f"Error: File not found: {path}"
 
@@ -188,7 +239,7 @@ def exec_read(args: dict, config: AgentConfig) -> str:
 def exec_edit(args: dict, config: AgentConfig) -> str:
     """Replace exact string in a file."""
     try:
-        path = Path(args["file_path"])
+        path = _resolve_in_jail(config, args["file_path"])
         if not path.exists():
             return f"Error: File not found: {path}"
 
@@ -217,7 +268,7 @@ def exec_edit(args: dict, config: AgentConfig) -> str:
 def exec_write(args: dict, config: AgentConfig) -> str:
     """Write content to a file, creating parent dirs if needed."""
     try:
-        path = Path(args["file_path"])
+        path = _resolve_in_jail(config, args["file_path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args["content"])
         return f"Wrote {len(args['content'])} bytes to {path}"
