@@ -521,6 +521,268 @@ def realized_pnl(path: str, ticker: str | None = None, account: str | None = Non
             "trades": trades}
 
 
+# --- snapshot history -------------------------------------------------------
+
+_SNAP_COLUMNS = ("id", "taken_at", "trigger", "total_assets", "total_liabilities",
+                 "net_worth", "n_assets", "n_liabilities", "note", "created_at")
+_SNAP_ASSET_COLUMNS = ("snapshot_id", "asset_id", "class", "label", "ticker", "qty",
+                       "cost_basis", "value", "value_asof", "acquired", "account", "extra")
+_SNAP_LIAB_COLUMNS = ("snapshot_id", "liability_id", "class", "label", "balance",
+                      "apr", "linked_asset")
+
+
+def _now_iso() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _snap_id(taken_at: str) -> str:
+    """A sortable, human-readable id: snap-YYYYMMDD-HHMMSS (time part omitted
+    when `taken_at` carries only a date)."""
+    digits = re.sub(r"[^0-9]", "", taken_at)
+    if len(digits) >= 14:
+        return f"snap-{digits[:8]}-{digits[8:14]}"
+    return f"snap-{digits[:8]}" if digits else "snap"
+
+
+def snapshot(path: str, trigger: str = "manual", note: str | None = None,
+             force: bool = False, taken_at: str | None = None) -> dict:
+    """Freeze the full asset + liability state plus computed totals into the
+    append-only snapshot history. Dedup-aware: if a snapshot already exists for
+    the same calendar date AND trigger, returns {"warning", "existing"} instead
+    of inserting, unless `force=True`. `taken_at` is injectable for tests."""
+    taken_at = taken_at or _now_iso()
+    cal_date = taken_at[:10]
+    con = pdb.connect(path)
+    try:
+        existing = con.execute(
+            "SELECT * FROM snapshots WHERE substr(taken_at,1,10) = ? AND trigger = ? "
+            "ORDER BY taken_at DESC LIMIT 1", (cal_date, trigger)).fetchone()
+        if existing is not None and not force:
+            return {"warning": f"a {trigger} snapshot already exists for {cal_date} "
+                               f"({existing['id']}); pass force=True to add another",
+                    "existing": dict(existing)}
+
+        assets = [dict(r) for r in con.execute("SELECT * FROM assets")]
+        liabs = [dict(r) for r in con.execute("SELECT * FROM liabilities")]
+        nw = dict(con.execute("SELECT * FROM v_networth").fetchone())
+
+        base = _snap_id(taken_at)
+        sid, i = base, 2
+        existing_ids = {r["id"] for r in con.execute("SELECT id FROM snapshots")}
+        while sid in existing_ids:
+            sid, i = f"{base}-{i}", i + 1
+
+        meta = {
+            "id": sid, "taken_at": taken_at, "trigger": trigger,
+            "total_assets": round(nw["assets"], 2),
+            "total_liabilities": round(nw["liabilities"], 2),
+            "net_worth": round(nw["net_worth"], 2),
+            "n_assets": len(assets), "n_liabilities": len(liabs),
+            "note": note, "created_at": _now_iso(),
+        }
+        con.execute(
+            f"INSERT INTO snapshots ({','.join(_SNAP_COLUMNS)}) "
+            f"VALUES ({','.join('?' for _ in _SNAP_COLUMNS)})",
+            tuple(meta[c] for c in _SNAP_COLUMNS))
+        for a in assets:
+            row = {"snapshot_id": sid, "asset_id": a["id"],
+                   **{c: a.get(c) for c in _SNAP_ASSET_COLUMNS[2:]}}
+            con.execute(
+                f"INSERT INTO snapshot_assets ({','.join(_SNAP_ASSET_COLUMNS)}) "
+                f"VALUES ({','.join('?' for _ in _SNAP_ASSET_COLUMNS)})",
+                tuple(row.get(c) for c in _SNAP_ASSET_COLUMNS))
+        for li in liabs:
+            row = {"snapshot_id": sid, "liability_id": li["id"],
+                   **{c: li.get(c) for c in _SNAP_LIAB_COLUMNS[2:]}}
+            con.execute(
+                f"INSERT INTO snapshot_liabilities ({','.join(_SNAP_LIAB_COLUMNS)}) "
+                f"VALUES ({','.join('?' for _ in _SNAP_LIAB_COLUMNS)})",
+                tuple(row.get(c) for c in _SNAP_LIAB_COLUMNS))
+        con.commit()
+    finally:
+        con.close()
+    return {k: meta[k] for k in ("id", "taken_at", "trigger", "total_assets",
+                                 "total_liabilities", "net_worth", "n_assets",
+                                 "n_liabilities", "note")}
+
+
+def list_snapshots(path: str, since: str | None = None,
+                   until: str | None = None) -> list[dict]:
+    """Snapshot metadata, newest-first. `since`/`until` filter the calendar
+    date (inclusive) of `taken_at`."""
+    sql = "SELECT * FROM snapshots"
+    clauses, params = [], []
+    if since:
+        clauses.append("substr(taken_at,1,10) >= ?"); params.append(since)
+    if until:
+        clauses.append("substr(taken_at,1,10) <= ?"); params.append(until)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY taken_at DESC, id DESC"
+    con = pdb.connect(path)
+    try:
+        return [dict(r) for r in con.execute(sql, params)]
+    finally:
+        con.close()
+
+
+def _resolve_snapshot(con: sqlite3.Connection, ref: str) -> dict:
+    """Resolve a snapshot reference (exact id, a date, or 'latest') to its
+    metadata row. Raises KeyError if none match."""
+    if ref == "latest":
+        row = con.execute(
+            "SELECT * FROM snapshots ORDER BY taken_at DESC, id DESC LIMIT 1").fetchone()
+    else:
+        row = con.execute("SELECT * FROM snapshots WHERE id = ?", (ref,)).fetchone()
+        if row is None:  # fall back to a calendar date (most recent that day)
+            row = con.execute(
+                "SELECT * FROM snapshots WHERE substr(taken_at,1,10) = ? "
+                "ORDER BY taken_at DESC, id DESC LIMIT 1", (ref,)).fetchone()
+    if row is None:
+        raise KeyError(f"no snapshot matching {ref!r}")
+    return dict(row)
+
+
+def show_snapshot(path: str, snapshot_id: str) -> dict:
+    """Full frozen asset + liability state for one snapshot. `snapshot_id`
+    accepts an exact id, a date (YYYY-MM-DD), or the alias 'latest'."""
+    con = pdb.connect(path)
+    try:
+        meta = _resolve_snapshot(con, snapshot_id)
+        sid = meta["id"]
+        assets = [dict(r) for r in con.execute(
+            "SELECT * FROM snapshot_assets WHERE snapshot_id = ?", (sid,))]
+        liabs = [dict(r) for r in con.execute(
+            "SELECT * FROM snapshot_liabilities WHERE snapshot_id = ?", (sid,))]
+    finally:
+        con.close()
+    return {"snapshot": meta, "assets": assets, "liabilities": liabs}
+
+
+def _pct(a, b) -> float | None:
+    if a in (None, 0) or a == 0.0:
+        return None
+    return round((b - a) / a * 100, 2)
+
+
+def _delta_block(a: float, b: float) -> dict:
+    a, b = round(a, 2), round(b, 2)
+    return {"a": a, "b": b, "abs": round(b - a, 2), "pct": _pct(a, b)}
+
+
+def _diff_items(a_items: list[dict], b_items: list[dict], *,
+                id_key: str, tuple_keys: tuple, value_key: str) -> tuple[list, list]:
+    """Match items across two snapshots by id_key first, falling back to
+    tuple_keys. Returns (rows, ambiguous_labels)."""
+    from collections import defaultdict
+    b_by_id = {x[id_key]: x for x in b_items if x.get(id_key)}
+    b_by_tuple = defaultdict(list)
+    for x in b_items:
+        b_by_tuple[tuple(x.get(k) for k in tuple_keys)].append(x)
+
+    matched, rows, ambiguous = set(), [], []
+    for x in a_items:
+        match = None
+        if x.get(id_key) and x[id_key] in b_by_id and id(b_by_id[x[id_key]]) not in matched:
+            match = b_by_id[x[id_key]]
+        else:
+            cands = [c for c in b_by_tuple[tuple(x.get(k) for k in tuple_keys)]
+                     if id(c) not in matched]
+            if len(cands) > 1:
+                ambiguous.append(x.get("label"))
+            if cands:
+                match = cands[0]
+        va = x.get(value_key) or 0.0
+        base = {"label": x.get("label"), "class": x.get("class"),
+                "ticker": x.get("ticker")}
+        if match is not None:
+            matched.add(id(match))
+            vb = match.get(value_key) or 0.0
+            delta = round(vb - va, 2)
+            rows.append({**base, f"{value_key}_a": x.get(value_key),
+                         f"{value_key}_b": match.get(value_key), "delta": delta,
+                         "pct": _pct(va, vb),
+                         "status": "gained" if delta > 0 else
+                                   "lost" if delta < 0 else "unchanged"})
+        else:
+            rows.append({**base, f"{value_key}_a": x.get(value_key),
+                         f"{value_key}_b": None, "delta": round(-va, 2),
+                         "pct": None, "status": "closed"})
+    for x in b_items:
+        if id(x) in matched:
+            continue
+        vb = x.get(value_key) or 0.0
+        rows.append({"label": x.get("label"), "class": x.get("class"),
+                     "ticker": x.get("ticker"), f"{value_key}_a": None,
+                     f"{value_key}_b": x.get(value_key), "delta": round(vb, 2),
+                     "pct": None, "status": "new"})
+    return rows, ambiguous
+
+
+def diff_snapshots(path: str, a: str, b: str) -> dict:
+    """Diff two snapshots (each a snapshot id, a date, or 'latest'): net-worth
+    and total deltas (abs + %), plus a per-asset and per-liability breakdown
+    (gained / lost / unchanged / new / closed). Holdings are matched by
+    asset_id first, falling back to (class, label, ticker)."""
+    sa, sb = show_snapshot(path, a), show_snapshot(path, b)
+    ma, mb = sa["snapshot"], sb["snapshot"]
+    asset_rows, asset_amb = _diff_items(
+        sa["assets"], sb["assets"], id_key="asset_id",
+        tuple_keys=("class", "label", "ticker"), value_key="value")
+    liab_rows, liab_amb = _diff_items(
+        sa["liabilities"], sb["liabilities"], id_key="liability_id",
+        tuple_keys=("class", "label"), value_key="balance")
+    return {
+        "a": ma, "b": mb,
+        "net_worth": _delta_block(ma["net_worth"], mb["net_worth"]),
+        "total_assets": _delta_block(ma["total_assets"], mb["total_assets"]),
+        "total_liabilities": _delta_block(ma["total_liabilities"], mb["total_liabilities"]),
+        "assets": asset_rows, "liabilities": liab_rows,
+        "ambiguous_matches": asset_amb + liab_amb,
+    }
+
+
+def render_snapshot_list(path: str, since: str | None = None,
+                         until: str | None = None) -> str:
+    snaps = list_snapshots(path, since=since, until=until)
+    lines = ["# Snapshot history", "",
+             "| id | taken at | trigger | net worth | assets | liabilities | note |",
+             "|---|---|---|---:|---:|---:|---|"]
+    for s in snaps:
+        lines.append(
+            f"| {s['id']} | {s['taken_at']} | {s['trigger']} | "
+            f"{s['net_worth']:,.0f} | {s['n_assets']} | {s['n_liabilities']} | "
+            f"{s.get('note') or ''} |")
+    return "\n".join(lines) + "\n"
+
+
+def render_snapshot_diff(path: str, a: str, b: str) -> str:
+    d = diff_snapshots(path, a, b)
+    nw = d["net_worth"]
+    pct = f" ({nw['pct']:+.1f}%)" if nw["pct"] is not None else ""
+    lines = [
+        f"# Snapshot diff — {d['a']['id']} → {d['b']['id']}", "",
+        f"- **Net Worth: {nw['a']:,.0f} → {nw['b']:,.0f}** "
+        f"({nw['abs']:+,.0f}{pct})",
+        f"- Total assets: {d['total_assets']['a']:,.0f} → "
+        f"{d['total_assets']['b']:,.0f} ({d['total_assets']['abs']:+,.0f})",
+        f"- Total liabilities: {d['total_liabilities']['a']:,.0f} → "
+        f"{d['total_liabilities']['b']:,.0f} ({d['total_liabilities']['abs']:+,.0f})",
+        "", "## Holdings", "",
+        "| label | class | value a | value b | delta | status |",
+        "|---|---|---:|---:|---:|---|"]
+    for r in d["assets"]:
+        lines.append(
+            f"| {r['label']} | {r['class']} | "
+            f"{(r['value_a'] or 0):,.0f} | {(r['value_b'] or 0):,.0f} | "
+            f"{r['delta']:+,.0f} | {r['status']} |")
+    if d["ambiguous_matches"]:
+        lines += ["", f"_Ambiguous fallback matches (verify): "
+                  f"{', '.join(str(x) for x in d['ambiguous_matches'])}_"]
+    return "\n".join(lines) + "\n"
+
+
 def _yfin_quote(ticker: str) -> float:
     """Default quoter: shell out to the yfinance CLI. Returns the last price."""
     import os
@@ -537,11 +799,15 @@ def _yfin_quote(ticker: str) -> float:
     return float(price)
 
 
-def refresh(path: str, quoter=None) -> dict:
+def refresh(path: str, quoter=None, snapshot_before: bool = False) -> dict:
     """Deterministically re-price market-priced assets (equity/physical/crypto)
     that carry a ticker and qty: value = qty * live price. Illiquid classes are
-    left untouched. `quoter(ticker)->price` is injectable for tests."""
+    left untouched. `quoter(ticker)->price` is injectable for tests. When
+    `snapshot_before=True`, freeze the pre-refresh state into the snapshot
+    history first (trigger='refresh'); default off keeps behavior unchanged."""
     quoter = quoter or _yfin_quote
+    if snapshot_before:
+        snapshot(path, trigger="refresh", force=True)
     today = date.today().isoformat()
     repriced, errors = 0, []
     for a in list_assets(path):

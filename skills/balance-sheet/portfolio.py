@@ -77,6 +77,16 @@ def build_parser() -> argparse.ArgumentParser:
     for f in ("ticker", "account"):
         sp.add_argument(f"--{f}")
     sp.add_argument("--year", type=int)
+
+    sp = sub.add_parser("snapshot")
+    sp.add_argument("--trigger", default="manual")
+    sp.add_argument("--note")
+    sp.add_argument("--taken-at")
+    sp.add_argument("--force", action="store_true")
+    sp = sub.add_parser("snapshots")
+    sp.add_argument("--since"); sp.add_argument("--until")
+    sp = sub.add_parser("show-snapshot"); sp.add_argument("snapshot_id")
+    sp = sub.add_parser("diff-snapshot"); sp.add_argument("a"); sp.add_argument("b")
     return p
 
 
@@ -130,6 +140,15 @@ def main(argv=None) -> int:
         elif args.cmd == "realized":
             out = engine.realized_pnl(db, ticker=args.ticker, account=args.account,
                                       year=args.year)
+        elif args.cmd == "snapshot":
+            out = engine.snapshot(db, trigger=args.trigger, note=args.note,
+                                  force=args.force, taken_at=args.taken_at)
+        elif args.cmd == "snapshots":
+            out = engine.list_snapshots(db, since=args.since, until=args.until)
+        elif args.cmd == "show-snapshot":
+            out = engine.show_snapshot(db, args.snapshot_id)
+        elif args.cmd == "diff-snapshot":
+            out = engine.diff_snapshots(db, args.a, args.b)
         else:
             raise ValueError(f"unknown command {args.cmd!r}")
     except Exception as e:  # noqa: BLE001 — surface as JSON, not a traceback
