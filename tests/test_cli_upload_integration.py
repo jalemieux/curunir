@@ -64,7 +64,13 @@ async def test_cli_upload_end_to_end(tmp_path, monkeypatch):
                 reply = await asyncio.wait_for(out_q.get(), timeout=3.0)
                 assert reply.content == "thanks for the picture"
 
-                user_msg = [m for m in llm_calls[-1] if m["role"] == "user"][-1]
+                # The trailing per-turn "Current date/time" note is also a user
+                # message (string content); the multimodal upload is the last
+                # user message with list content.
+                user_msg = [
+                    m for m in llm_calls[-1]
+                    if m["role"] == "user" and isinstance(m["content"], list)
+                ][-1]
                 assert isinstance(user_msg["content"], list)
                 assert any(b.get("type") == "image_url" for b in user_msg["content"])
 

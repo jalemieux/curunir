@@ -28,9 +28,15 @@ def build_static_prompt(config: AgentConfig) -> str:
     agent boots with a default (faceless) personality. A missing file usually
     means onboarding hasn't run or context/ wasn't mounted, hence the warning.
 
-    Agent.__init__ appends a single boot-time timestamp on top of this so the
-    full system block is byte-stable across calls — required for auto-cache
-    providers (OpenAI / DeepSeek / xAI / GLM via OpenRouter) to hit the cache.
+    This prefix carries no timestamp, so it is byte-stable across every session
+    and the whole process lifetime — required for auto-cache providers (OpenAI /
+    DeepSeek / xAI / GLM via OpenRouter) to hit the cache. Time enters as two
+    correctly-scoped signals elsewhere: a stable per-session "Conversation
+    started at" line (added in Agent._get_session_prompt, sourced from the
+    conversation's persisted created_at) and a live per-turn "Current date/time"
+    note injected *outside* this cached prefix as a trailing message in
+    Agent.handle(). The split keeps the cacheable prefix stable while still
+    giving the model a fresh clock each turn.
     """
     parts = []
     if config.identity_file.exists():
