@@ -14,6 +14,20 @@ def agent(agent_config):
     return Agent(agent_config)
 
 
+def _real_user_msgs(messages):
+    """User messages sent to the LLM, excluding the ephemeral per-turn
+    'Current date/time:' note that handle() appends as a trailing user note."""
+    out = []
+    for m in messages:
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str) and content.startswith("Current date/time:"):
+            continue
+        out.append(m)
+    return out
+
+
 class TestConversationPersistence:
     def test_construction_does_not_bulk_load_conversations(self, agent_config):
         """Past conversations on disk are NOT rehydrated into agent.sessions."""
@@ -252,11 +266,12 @@ class TestAgentHandle:
 
         assert result == "kept going"
         assert len(seen_messages) == 3
-        # Third call must include the "Continue." nudge as the last user turn.
-        assert seen_messages[2][-1] == {"role": "user", "content": "Continue."}
+        # Third call must include the "Continue." nudge as the last real user
+        # turn (the trailing live-time note sits after it, outside history).
+        assert _real_user_msgs(seen_messages[2])[-1] == {"role": "user", "content": "Continue."}
         # First two calls must NOT include the nudge yet.
-        assert seen_messages[0][-1].get("content") != "Continue."
-        assert seen_messages[1][-1].get("content") != "Continue."
+        assert _real_user_msgs(seen_messages[0])[-1].get("content") != "Continue."
+        assert _real_user_msgs(seen_messages[1])[-1].get("content") != "Continue."
 
     async def test_empty_response_after_attachment_returns_empty(self, agent):
         """If the agent already attached a file this turn, an empty terminal
@@ -503,7 +518,7 @@ class TestAgentHandle:
 
         assert result == "ack"
         assert agent.sessions["s1"][0]["content"] == content_blocks
-        user_msg = [m for m in captured["messages"] if m["role"] == "user"][-1]
+        user_msg = _real_user_msgs(captured["messages"])[-1]
         assert user_msg["content"] == content_blocks
 
 
@@ -710,7 +725,7 @@ class TestSystemTaskMode:
         assert result == "Task done."
         # Task prompt should be sent as a user message for provider compatibility
         messages = mock_llm.call_args[0][1]
-        user_msgs = [m for m in messages if m["role"] == "user"]
+        user_msgs = _real_user_msgs(messages)
         assert len(user_msgs) == 1
         assert "Do the thing." in user_msgs[0]["content"]
 
@@ -719,7 +734,7 @@ class TestSystemTaskMode:
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("", "sched:test:123", system_task_prompt="Check PRs.")
         messages = mock_llm.call_args[0][1]
-        user_msgs = [m for m in messages if m["role"] == "user"]
+        user_msgs = _real_user_msgs(messages)
         assert len(user_msgs) == 1
         assert "## Scheduled Task" in user_msgs[0]["content"]
         assert "Check PRs." in user_msgs[0]["content"]
@@ -769,7 +784,7 @@ class TestOnboardingGate:
             await agent.handle("hi", "s1")
         # Inspect the user message that was sent to the LLM.
         messages = mock_llm.call_args[0][1]
-        user_msgs = [m for m in messages if m["role"] == "user"]
+        user_msgs = _real_user_msgs(messages)
         assert len(user_msgs) == 1
         assert "isn't onboarded yet" in user_msgs[0]["content"]
         assert "`onboarding` skill" in user_msgs[0]["content"]
@@ -793,7 +808,7 @@ class TestOnboardingGate:
         mock_response = LLMResponse(text="next", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("follow-up question", "s1")
-        user_msgs = [m for m in mock_llm.call_args[0][1] if m["role"] == "user"]
+        user_msgs = _real_user_msgs(mock_llm.call_args[0][1])
         # Latest user message preserved verbatim.
         assert user_msgs[-1]["content"] == "follow-up question"
 
@@ -844,29 +859,138 @@ class TestSystemPromptCaching:
         assert len(captured) == 2
         assert captured[0] == captured[1], "system prompt mutated between calls"
 
-    async def test_system_prompt_carries_boot_timestamp(self, agent):
-        """The static system prompt embeds a conversation-start timestamp
-        baked in at construction so the prefix is stable yet still orients
-        the model."""
-        assert "Conversation started at:" in agent.static_prompt
-        assert agent._boot_time.isoformat() in agent.static_prompt
+    async def test_static_prompt_has_no_boot_timestamp(self, agent):
+        """The static prefix is truly static now — no boot timestamp baked in,
+        so it stays byte-stable across every session and process lifetime."""
+        assert "Conversation started at" not in agent.static_prompt
+        assert not hasattr(agent, "_boot_time")
 
-    async def test_system_task_uses_same_static_prompt(self, agent):
-        """Scheduled-task branch must not append a per-call timestamp either."""
-        mock_response = LLMResponse(text="ok", tool_calls=None)
-        captured: list[str] = []
+    async def test_session_prompt_carries_started_at(self, agent):
+        """The per-session prompt appends a stable 'Conversation started at'
+        line, sourced from the session's created_at (cache-safe within a
+        session)."""
+        prompt = agent._get_session_prompt("s1")
+        assert "Conversation started at:" in prompt
+        # Timezone-aware ISO (offset or 'Z' / '+'), never a naive timestamp.
+        started_line = next(
+            line for line in prompt.splitlines()
+            if line.startswith("Conversation started at:")
+        )
+        assert ("+" in started_line) or ("-" in started_line.split("T", 1)[1]) or started_line.endswith("Z")
+
+    async def test_session_prompt_started_at_stable_within_session(self, agent):
+        """Cached per session like the memory block — byte-stable across turns."""
+        first = agent._get_session_prompt("s1")
+        second = agent._get_session_prompt("s1")
+        assert first == second
+
+    async def test_resumed_session_keeps_original_created_at(self, agent):
+        """A resumed conversation shows its persisted created_at, not 'now'."""
+        from datetime import datetime, timezone
+
+        old = datetime(2025, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        cs.save(agent.config.context_dir, "resumed",
+                [{"role": "user", "content": "hi"}], now=old)
+        prompt = agent._get_session_prompt("resumed")
+        assert old.isoformat() in prompt
+
+    async def test_started_at_distinct_per_session(self, agent):
+        """Two different sessions carry their own started-at values."""
+        from datetime import datetime, timezone
+
+        a = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        b = datetime(2026, 6, 6, tzinfo=timezone.utc)
+        cs.save(agent.config.context_dir, "sa", [{"role": "user", "content": "x"}], now=a)
+        cs.save(agent.config.context_dir, "sb", [{"role": "user", "content": "y"}], now=b)
+        pa = agent._get_session_prompt("sa")
+        pb = agent._get_session_prompt("sb")
+        assert a.isoformat() in pa
+        assert b.isoformat() in pb
+        assert pa != pb
+
+    async def test_live_time_note_injected_not_persisted(self, agent):
+        """A 'Current date/time:' note rides as the final message of the LLM
+        request but is never written into stored history."""
+        captured: list[list] = []
 
         async def fake_call_llm(model, messages, tools, **kwargs):
-            captured.append(messages[0]["content"])
-            return mock_response
+            captured.append([dict(m) for m in messages])
+            return LLMResponse(text="ok", tool_calls=None)
 
         with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle("hello", "s1")
+
+        sent = captured[0]
+        assert "Current date/time:" in sent[-1]["content"]
+        # Not persisted into history.
+        assert all(
+            "Current date/time:" not in (m.get("content") or "")
+            for m in agent.sessions["s1"]
+        )
+
+    async def test_live_time_note_reflects_turn_start(self, agent):
+        """The live note's timestamp is datetime.now() captured at turn start."""
+        import src.agent.agent as agent_mod
+        from datetime import datetime, timedelta, timezone
+
+        real_datetime = agent_mod.datetime
+        fixed = real_datetime(2026, 6, 25, 14, 30, 0, tzinfo=timezone(timedelta(hours=-4)))
+
+        class FakeDatetime:
+            @staticmethod
+            def now(tz=None):
+                return fixed if tz is None else real_datetime.now(tz)
+
+        captured: list[list] = []
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured.append([dict(m) for m in messages])
+            return LLMResponse(text="ok", tool_calls=None)
+
+        with patch.object(agent_mod, "datetime", FakeDatetime), \
+                patch("src.agent.agent.call_llm", new=fake_call_llm):
             await agent.handle("hi", "s1")
-            await agent.handle("", "sched:x", system_task_prompt="run a check")
+
+        note = captured[0][-1]["content"]
+        # Production does datetime.now().astimezone() — re-expressed in local tz,
+        # same instant. Compare against that, not the raw fixed offset.
+        expected = fixed.astimezone()
+        assert expected.isoformat() in note
+        assert expected.strftime("%A") in note  # weekday name present
+        # tz-aware, never naive.
+        assert ("+" in note) or ("-" in note.split("T", 1)[1])
+
+    async def test_live_note_stable_across_tool_loop_iterations(self, agent):
+        """Within one handle() turn, the system prompt and the live-time note are
+        byte-identical across tool-loop iterations — the cacheable prefix stays
+        stable and the suffix note doesn't change mid-turn."""
+        responses = [
+            LLMResponse(
+                text=None,
+                tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": '{"file_path": "x"}'},
+                }],
+            ),
+            LLMResponse(text="done", tool_calls=None),
+        ]
+        captured: list[list] = []
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured.append([dict(m) for m in messages])
+            return responses[len(captured) - 1]
+
+        with patch("src.agent.agent.execute_tool_call", new_callable=AsyncMock, return_value="ok"), \
+                patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle("hi", "s1")
 
         assert len(captured) == 2
-        assert captured[0] == captured[1]
-        assert captured[0] == agent.static_prompt
+        # System prefix byte-identical across iterations.
+        assert captured[0][0]["content"] == captured[1][0]["content"]
+        # Live-time note identical within the turn.
+        assert captured[0][-1]["content"] == captured[1][-1]["content"]
+        assert "Current date/time:" in captured[0][-1]["content"]
 
     async def test_stats_include_cache_hit_rate(self, agent):
         from src.llm import LLMUsage
