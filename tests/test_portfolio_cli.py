@@ -55,6 +55,29 @@ def test_cli_buy_sell_trades_realized(tmp_path):
     assert rc == 0 and json.loads(out)["total"] == 800
 
 
+def test_cli_snapshot_list_show_diff(tmp_path):
+    _run(tmp_path, "add", "--class", "cash", "--label", "Cash", "--value", "1000")
+    rc, out = _run(tmp_path, "snapshot", "--taken-at", "2026-01-01T09:00:00")
+    assert rc == 0
+    sid = json.loads(out)["id"]
+    _run(tmp_path, "set", "cash", "value=1500")
+    rc, _ = _run(tmp_path, "snapshot", "--taken-at", "2026-02-01T09:00:00")
+    assert rc == 0
+    rc, out = _run(tmp_path, "snapshots")
+    assert rc == 0 and len(json.loads(out)) == 2
+    rc, out = _run(tmp_path, "show-snapshot", "latest")
+    assert rc == 0 and json.loads(out)["snapshot"]["net_worth"] == 1500
+    rc, out = _run(tmp_path, "diff-snapshot", sid, "latest")
+    assert rc == 0 and json.loads(out)["net_worth"]["abs"] == 500
+
+
+def test_cli_snapshot_dedup_warns(tmp_path):
+    _run(tmp_path, "add", "--class", "cash", "--label", "Cash", "--value", "1000")
+    _run(tmp_path, "snapshot", "--taken-at", "2026-01-01T09:00:00")
+    rc, out = _run(tmp_path, "snapshot", "--taken-at", "2026-01-01T15:00:00")
+    assert rc == 0 and "warning" in json.loads(out)
+
+
 def test_cli_sell_oversell_errors(tmp_path):
     rc, out = _run(tmp_path, "buy", "--ticker", "VOO", "--qty", "5",
                    "--price", "500", "--trade-date", "2026-01-01")

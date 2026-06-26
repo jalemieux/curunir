@@ -27,6 +27,13 @@ _READ = {
         side=a.get("side"), since=a.get("since")),
     "realized": lambda db, a: engine.realized_pnl(
         db, ticker=a.get("ticker"), account=a.get("account"), year=a.get("year")),
+    "snapshots": lambda db, a: engine.list_snapshots(
+        db, since=a.get("since"), until=a.get("until")),
+    "list_snapshots": lambda db, a: engine.list_snapshots(
+        db, since=a.get("since"), until=a.get("until")),
+    "show_snapshot": lambda db, a: engine.show_snapshot(db, a.get("id") or "latest"),
+    "diff_snapshots": lambda db, a: engine.diff_snapshots(db, a["a"], a["b"]),
+    "snapshot_diff": lambda db, a: engine.diff_snapshots(db, a["a"], a["b"]),
 }
 _WRITE = {
     "add": lambda db, a: engine.add_asset(db, a),
@@ -35,9 +42,12 @@ _WRITE = {
     "rm": lambda db, a: engine.remove_asset(db, a["id"]),
     "import_rows": lambda db, a: engine.import_rows(
         db, a["rows"], account=a.get("account"), stated_total=a.get("stated_total")),
-    "refresh": lambda db, a: engine.refresh(db),
+    "refresh": lambda db, a: engine.refresh(db, snapshot_before=bool(a.get("snapshot_before"))),
     "buy": lambda db, a: engine.record_buy(db, a),
     "sell": lambda db, a: engine.record_sell(db, a),
+    "snapshot": lambda db, a: engine.snapshot(
+        db, trigger=a.get("trigger", "manual"), note=a.get("note"),
+        force=bool(a.get("force")), taken_at=a.get("taken_at")),
 }
 
 

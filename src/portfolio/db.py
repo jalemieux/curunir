@@ -64,6 +64,56 @@ CREATE TABLE IF NOT EXISTS trades (
   note            TEXT,
   created_at      TEXT
 );
+
+-- Snapshot history: an append-only point-in-time time-series. Each capture
+-- freezes the full asset + liability state plus computed totals so any date
+-- can be recalled and diffed. The child rows are FROZEN COPIES (soft
+-- snapshot_id ref, no FK to the live assets/liabilities) so a snapshot
+-- survives a later sale, deletion, or re-pricing.
+CREATE TABLE IF NOT EXISTS snapshots (
+  id                TEXT PRIMARY KEY,
+  taken_at          TEXT NOT NULL,
+  trigger           TEXT NOT NULL,
+  total_assets      REAL NOT NULL,
+  total_liabilities REAL NOT NULL,
+  net_worth         REAL NOT NULL,
+  n_assets          INTEGER NOT NULL,
+  n_liabilities     INTEGER NOT NULL,
+  note              TEXT,
+  created_at        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_assets (
+  snapshot_id TEXT NOT NULL,
+  asset_id    TEXT,
+  class       TEXT,
+  label       TEXT,
+  ticker      TEXT,
+  qty         REAL,
+  cost_basis  REAL,
+  value       REAL,
+  value_asof  TEXT,
+  acquired    TEXT,
+  account     TEXT,
+  extra       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_snapshot_assets_sid ON snapshot_assets(snapshot_id);
+
+CREATE TABLE IF NOT EXISTS snapshot_liabilities (
+  snapshot_id  TEXT NOT NULL,
+  liability_id TEXT,
+  class        TEXT,
+  label        TEXT,
+  balance      REAL,
+  apr          REAL,
+  linked_asset TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_snapshot_liabilities_sid ON snapshot_liabilities(snapshot_id);
+
+CREATE VIEW IF NOT EXISTS v_snapshot_networth AS
+  SELECT id AS snapshot_id, taken_at, net_worth FROM snapshots;
 """
 
 
