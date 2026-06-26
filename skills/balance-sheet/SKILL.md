@@ -28,13 +28,15 @@ bash: `python skills/balance-sheet/portfolio.py <cmd>`. Both front the same
 engine.
 
 - **Reads:** `networth`, `rollup`, `list`, `show`, `re_equity`, `pnl`,
-  `query` (read-only SELECT), `render`, `trades`, `realized`.
+  `query` (read-only SELECT), `render`, `trades`, `realized`, `snapshots`,
+  `show_snapshot`, `diff_snapshots`.
 - **Writes:** `add`, `add_liability`, `set`, `rm`, `import_rows`, `refresh`,
-  `buy`, `sell`.
+  `buy`, `sell`, `snapshot`.
 
 Tool actions use the underscore names above. CLI subcommands match but
 hyphenate multi-word names — `re-equity`, `add-liability`, `import-rows`
-(the CLI `import-rows` takes `--rows-file <json>`).
+(the CLI `import-rows` takes `--rows-file <json>`), `show-snapshot`,
+`diff-snapshot`.
 
 ## Trades (the ledger)
 
@@ -56,6 +58,43 @@ the engine moves the position for you — you do **not** also `set`/`rm` the lot
 - **`trades`** (optional `ticker`/`account`/`side`/`since`) is the history,
   newest-first. **`realized`** (optional `ticker`/`account`/`year`) sums
   realized P/L, split short- vs long-term.
+
+## Snapshots (point-in-time history)
+
+The store keeps **current state only** — a `refresh` overwrites each value in
+place, so prior marks are lost. To preserve history, freeze the full book into
+the **append-only snapshot time-series**. A snapshot stores a *frozen copy* of
+every asset + liability plus computed totals, so it survives later sales,
+deletions, and re-pricing.
+
+- **`snapshot`** (optional `trigger` (default `manual`), `note`, `force`) freezes
+  the current book. **Dedup-aware:** a second snapshot with the same calendar
+  date *and* trigger returns a `warning` (with the `existing` row) instead of
+  inserting — pass `force=true` to add another the same day.
+- **`snapshots`** (optional `since`/`until` dates) lists captures newest-first
+  (id, date, trigger, net worth, holding counts).
+- **`show_snapshot`** (`id`) returns one snapshot's full frozen state. `id`
+  accepts an exact snapshot id, a date (`YYYY-MM-DD`), or `latest`.
+- **`diff_snapshots`** (`a`, `b` — each an id, a date, or `latest`) reports the
+  net-worth / asset / liability deltas (absolute + %) and a per-holding
+  breakdown (**gained / lost / unchanged / new / closed**). Holdings are matched
+  by `asset_id` first, falling back to `(class, label, ticker)` for a
+  closed-and-reopened lot; genuinely ambiguous fallbacks are flagged in
+  `ambiguous_matches` rather than guessed.
+- **`refresh` with `snapshot_before=true`** freezes the pre-refresh state
+  (trigger `refresh`) *before* re-pricing, so the change is recorded. Plain
+  `refresh` writes no snapshot (unchanged default).
+- Ad-hoc time-series come free from `query` over the snapshot tables — e.g.
+  `SELECT taken_at, net_worth FROM v_snapshot_networth ORDER BY taken_at`.
+
+**Scheduled snapshots (recipe).** To build a net-worth time-series, schedule a
+periodic capture-and-report. Add a cron schedule (via the `schedule` tool / the
+local UI) whose prompt loads this skill and: runs `refresh` with
+`snapshot_before=true` (or a plain `snapshot`), then `diff_snapshots` of the two
+most recent snapshots, and emails the diff. Weekly cadence keeps the series
+useful without storage concern (no pruning is done). Example prompt: *"Use the
+balance-sheet skill. Snapshot the portfolio, then diff the latest two snapshots
+and email me the net-worth change and any new/closed positions."*
 
 ## Disciplines (non-negotiable)
 
