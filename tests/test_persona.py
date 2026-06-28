@@ -146,6 +146,22 @@ def test_persona_allowlisting_a_delivery_skill_also_allows_email_send(persona_na
         )
 
 
+def test_marketing_bundle_parses_from_repo():
+    p = load_persona("marketing")
+    assert p.name == "marketing"
+    assert p.skills  # non-empty absolute allowlist
+    # The marketing persona tracks leads/pipeline via the deterministic CRM.
+    assert "crm" in p.skills
+
+
+def test_marketing_bundle_skills_exist_on_disk():
+    # Every allowlisted skill must resolve to a skills/<name>/SKILL.md so a
+    # typo in persona.yaml is caught instead of silently dropping a skill.
+    p = load_persona("marketing")
+    for name in p.skills:
+        assert (Path("skills") / name / "SKILL.md").exists(), name
+
+
 def test_companion_bundle_parses_from_repo():
     p = load_persona("companion")
     assert p.name == "companion"
