@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -206,6 +207,11 @@ class Agent:
         # been persisted yet (conversation_store.save runs after the turn).
         # Captured once per session so the started-at line stays stable.
         self._session_started_at_cache: dict[str, str] = {}
+        # EXPERIMENT (CURUNIR_TIME_TACTIC): a frozen "now" string captured once
+        # at process start, used by the `boot` tactic to reproduce main's
+        # behavior — a stale-but-cache-stable current-time line in the prefix.
+        _boot = datetime.now().astimezone()
+        self._boot_now_str = f"Current date/time: {_boot.isoformat()} ({_boot.strftime('%A')})"
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
@@ -430,23 +436,51 @@ class Agent:
             history.append({"role": "user", "content": f"## Scheduled Task\n{system_task_prompt}"})
         else:
             history.append({"role": "user", "content": message})
-        system_prompt = self._get_session_prompt(session_id)
+        # Current-time injection tactic. The DEFAULT (`trailing`) is the shipped
+        # behavior; the other three exist only so the eval/time_awareness harness
+        # can A/B them on prompt-cache cost — production never sets the env var.
+        # All tactics share the SAME byte-stable base prefix; the ONLY variable
+        # is WHERE the current-time line goes, which is exactly what determines
+        # auto-cache prefix reuse. Measured trade-offs (glm-5.2/cloudflare) and
+        # the rationale for picking `trailing` are in eval/time_awareness/README.md.
+        #   boot         frozen now in prefix    cache-stable, STALE   (= main pre-#431)
+        #   prefix_live  live now in prefix       rewrites prefix -> re-bills ALL history/turn
+        #   trailing     live now after history   cache-stable, fresh  (SHIPPED, #432)
+        #   user_inline  live now in the user msg cache-stable, fresh, but persists stamps
+        tactic = os.environ.get("CURUNIR_TIME_TACTIC", "trailing").strip().lower()
+        base_prompt = self._get_session_prompt(session_id)
 
-        # Live per-turn "now", computed once at turn start and injected as a
-        # trailing, non-persisted note. It sits *outside* the cacheable prefix
-        # (system + history) and is identical across this turn's tool-loop
-        # iterations, so it gives the model a fresh clock without busting the
-        # prefix cache. tz-aware (.astimezone()) so the offset is explicit.
+        # Live per-turn "now", computed once at turn start. tz-aware so the
+        # offset is explicit.
         now = datetime.now().astimezone()
-        live_time_note = {
-            "role": "user",
-            "content": f"Current date/time: {now.isoformat()} ({now.strftime('%A')})",
-        }
+        now_str = f"Current date/time: {now.isoformat()} ({now.strftime('%A')})"
+
+        if tactic == "boot":
+            system_prompt = f"{base_prompt}\n\n{self._boot_now_str}"
+        elif tactic == "prefix_live":
+            # Recomputed every turn -> the system message (the cache prefix's
+            # first block) changes each turn -> auto-cache match length 0.
+            system_prompt = f"{base_prompt}\n\n{now_str}"
+        else:
+            system_prompt = base_prompt
+
+        # Trailing, non-persisted note (the `trailing` tactic). Sits outside the
+        # cacheable prefix and is constant within a turn's tool loop.
+        trailing_notes: list[dict] = []
+        if tactic == "trailing":
+            trailing_notes = [{"role": "user", "content": now_str}]
+        elif tactic == "user_inline":
+            # Fold the time into the CURRENT user message. It persists into
+            # history, but never rewrites OLDER messages, so the prefix cache
+            # still holds — at the cost of stale stamps accumulating in history.
+            if history and history[-1]["role"] == "user" and isinstance(history[-1].get("content"), str):
+                history[-1]["content"] = f"{now_str}\n\n{history[-1]['content']}"
 
         def _assemble_messages() -> list[dict]:
-            """[system] + history + live-time note. The note is never written
-            into history — it is appended only at LLM-call assembly time."""
-            return [{"role": "system", "content": system_prompt}] + history + [live_time_note]
+            """[system] + history + optional trailing live-time note. The
+            trailing note is never written into history — appended only at
+            LLM-call assembly time."""
+            return [{"role": "system", "content": system_prompt}] + history + trailing_notes
 
         _trim_history(history, max_chars=self.config.max_history_chars)
         messages = _assemble_messages()

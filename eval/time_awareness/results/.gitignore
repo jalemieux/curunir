@@ -1,0 +1,4 @@
+# Run outputs are machine-specific and provider-dependent (token counts vary by
+# model/provider/cache TTL). The documented finding lives in ../README.md.
+*
+!.gitignore
