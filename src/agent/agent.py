@@ -183,17 +183,16 @@ class Agent:
         # path for memory extraction is tracked per-conversation on disk
         # (conversation_store metadata), not in memory.
         self.sessions: dict[str, list[dict]] = {}
-        # Bake the timestamp into the static prompt once at construction.
-        # Auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter)
-        # hash the prefix — a per-call timestamp would invalidate the cache
-        # every iteration of the tool loop.
-        self._boot_time = datetime.now()
-        self.static_prompt = (
-            build_static_prompt(config)
-            + f"\n\nConversation started at: {self._boot_time.isoformat()}"
-        )
+        # The static prefix carries no timestamp — it must be byte-stable across
+        # every session and the whole process lifetime so auto-cache providers
+        # (OpenAI, DeepSeek, xAI, GLM via OpenRouter) keep hitting the prefix
+        # cache. Time enters as two correctly-scoped signals instead: a stable
+        # per-session "Conversation started at" line (added in
+        # _get_session_prompt) and a live per-turn "Current date/time" note
+        # injected outside the cached prefix in handle().
+        self.static_prompt = build_static_prompt(config)
         logger.info(
-            "system prompt prefix size: %d chars (identity + skill manifest + boot timestamp)",
+            "system prompt prefix size: %d chars (identity + skill manifest)",
             len(self.static_prompt),
         )
         self.tools = tools  # None = all tools
@@ -203,6 +202,10 @@ class Agent:
         # auto-cache providers keep hitting the prefix cache across the tool
         # loop. External edits during a session are picked up next session.
         self._session_prompts: dict[str, str] = {}
+        # First-turn fallback timestamp for brand-new sessions that have not
+        # been persisted yet (conversation_store.save runs after the turn).
+        # Captured once per session so the started-at line stays stable.
+        self._session_started_at_cache: dict[str, str] = {}
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
@@ -220,22 +223,48 @@ class Agent:
         event.set()
         return True
 
-    def _get_session_prompt(self, session_id: str) -> str:
-        """System prompt for a session: static prefix + memory snapshot.
+    def _session_started_at(self, session_id: str) -> str:
+        """Stable ISO-8601 "started at" for a session (tz-aware).
 
-        The memory block (memory/README.md + memory/profile.md) is read once
-        per session and cached so the system prompt stays byte-stable across
-        turns within a session — required for auto-cache providers (OpenAI,
-        DeepSeek, xAI, GLM via OpenRouter) to keep hitting the prefix cache
-        during the tool loop. External file edits during a session are picked
-        up on the next session start.
+        Sourced from the persisted conversation's ``created_at`` (set once and
+        preserved across resume). Brand-new sessions have no record yet — the
+        turn-completion save runs after handle() — so fall back to a first-turn
+        timestamp captured once in memory and reused for the rest of the
+        session, keeping the line byte-stable.
+        """
+        record = conversation_store.load(self.config.context_dir, session_id)
+        if record and record.get("created_at"):
+            return record["created_at"]
+        started = self._session_started_at_cache.get(session_id)
+        if started is None:
+            started = datetime.now().astimezone().isoformat()
+            self._session_started_at_cache[session_id] = started
+        return started
+
+    def _get_session_prompt(self, session_id: str) -> str:
+        """System prompt for a session: static prefix + memory snapshot +
+        a stable "Conversation started at" line.
+
+        The memory block (memory/README.md + memory/profile.md) and the
+        started-at line are computed once per session and cached so the system
+        prompt stays byte-stable across turns within a session — required for
+        auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter) to keep
+        hitting the prefix cache during the tool loop. External file edits
+        during a session are picked up on the next session start. The live
+        per-turn "Current date/time" signal is *not* here — it rides outside
+        the cached prefix as a trailing note in handle().
         """
         cached = self._session_prompts.get(session_id)
         if cached is not None:
             return cached
 
         block = build_memory_block(self.config.context_dir)
-        prompt = self.static_prompt if not block else f"{self.static_prompt}\n\n{block}"
+        started_line = f"Conversation started at: {self._session_started_at(session_id)}"
+        parts = [self.static_prompt]
+        if block:
+            parts.append(block)
+        parts.append(started_line)
+        prompt = "\n\n".join(parts)
         self._session_prompts[session_id] = prompt
         return prompt
 
@@ -402,8 +431,25 @@ class Agent:
         else:
             history.append({"role": "user", "content": message})
         system_prompt = self._get_session_prompt(session_id)
+
+        # Live per-turn "now", computed once at turn start and injected as a
+        # trailing, non-persisted note. It sits *outside* the cacheable prefix
+        # (system + history) and is identical across this turn's tool-loop
+        # iterations, so it gives the model a fresh clock without busting the
+        # prefix cache. tz-aware (.astimezone()) so the offset is explicit.
+        now = datetime.now().astimezone()
+        live_time_note = {
+            "role": "user",
+            "content": f"Current date/time: {now.isoformat()} ({now.strftime('%A')})",
+        }
+
+        def _assemble_messages() -> list[dict]:
+            """[system] + history + live-time note. The note is never written
+            into history — it is appended only at LLM-call assembly time."""
+            return [{"role": "system", "content": system_prompt}] + history + [live_time_note]
+
         _trim_history(history, max_chars=self.config.max_history_chars)
-        messages = [{"role": "system", "content": system_prompt}] + history
+        messages = _assemble_messages()
 
         sid = session_id[:8]
         msg_chars = _estimate_chars(history)
@@ -471,7 +517,7 @@ class Agent:
                 _trim_history(history, max_chars=half)
                 if not history:
                     return None, "Sorry, the message was too long for me to process."
-                messages = [{"role": "system", "content": system_prompt}] + history
+                messages = _assemble_messages()
                 try:
                     resp = await call_llm(
                         self.config.model, messages, tool_schemas,
@@ -568,7 +614,7 @@ class Agent:
                     )
                     nudge = {"role": "user", "content": "Continue."}
                     history.append(nudge)
-                    messages = [{"role": "system", "content": system_prompt}] + history
+                    messages = _assemble_messages()
                     response, err = await _call_and_record()
                     if err is not None:
                         return err
@@ -670,7 +716,7 @@ class Agent:
                         history.append(tool_msg)
 
                     _trim_history(history, max_chars=self.config.max_history_chars)
-                    messages = [{"role": "system", "content": system_prompt}] + history
+                    messages = _assemble_messages()
                     continue
 
                 # No tool calls — final response, exit the loop.
