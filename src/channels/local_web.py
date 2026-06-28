@@ -8,6 +8,7 @@ directly:
 - ``GET /``               → the static SPA (reuses the portal frontend + wire protocol)
 - ``GET /api/usage``      → token/cost rollup (``UsageStore.summary``)
 - ``GET /api/portfolio``  → balance sheet (``portfolio.engine``)
+- ``GET /api/crm``        → leads + pipeline (``crm.engine``)
 - ``GET /api/schedules``  → cron tasks (``scheduler._load_tasks``)
 - ``POST /api/schedules`` → create a cron task (``schedule_store.engine.create``)
 - ``PUT /api/schedules/{id}`` → edit cron/prompt/skill/enabled (``engine.update``)
@@ -161,6 +162,12 @@ class LocalWebChannel:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             return JSONResponse(readers.portfolio_overview(self.config))
+
+        @app.get("/api/crm")
+        async def api_crm(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return JSONResponse(readers.crm_overview(self.config))
 
         @app.get("/api/schedules")
         async def api_schedules(request: Request) -> JSONResponse:
