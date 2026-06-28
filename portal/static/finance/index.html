@@ -690,10 +690,12 @@
       <div class="row"><span class="sq sq-mute"></span><span class="k">summer 2026</span></div>
       <div class="row"><span class="sq sq-mute"></span><span class="k">invite only</span></div>
       <div class="row"><span class="sq sq-mute"></span><span class="k">for investors</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">traders</span></div>
+      <div class="row"><span class="sq sq-mute"></span><span class="k">speculators</span></div>
     </aside>
     <div>
       <h1>Your <span class="accent">private</span><br>financial analyst.</h1>
-      <p>A completely private agent that lives on your own hardware — with a deep bench of tools and skills: live market data, official filings, deep research, valuation, sentiment, and fact-checking. <strong>Your holdings never leave the house.</strong></p>
+      <p>A private agent that runs on your own hardware. It pulls live market data, reads official filings, runs deep research, models valuations, gauges sentiment, and checks its own facts. <strong>Your holdings never leave the house.</strong></p>
       <div class="cta-row">
         <a class="btn" href="#beta">Request beta access <span class="arr">→</span></a>
       </div>
@@ -708,8 +710,8 @@
     <div class="moat-body">
       <div></div>
       <div>
-        <p>Curunir is a private agent with <strong>memory, personality, agency, and its own tools</strong> — not a one-shot answer box. It remembers your holdings, your cost basis, and your theses between conversations, reasons across them, and reaches for the right tool on its own.</p>
-        <p>It works alongside you toward your financial goals — across <strong>trading, speculation, long-term investment, retirement planning, and tax strategy</strong> — tracking positions, building and stress-testing theses, and grounding every claim in a source you can check.</p>
+        <p>Curunir has <strong>memory, a personality, and its own tools</strong>, so it works more like a colleague than a one-shot answer box. It keeps track of your holdings and your cost basis, remembers the theses you're working between conversations, and picks the right tool on its own.</p>
+        <p>It works alongside you on the whole book: <strong>trading and speculation, long-term investing, retirement, and tax.</strong> It tracks your positions, builds and stress-tests theses with you, and backs every claim with a source you can open.</p>
         <p>And it does all of it <strong>in your house.</strong> The language models live in the cloud; your portfolio and your notes stay on the device, in local memory.</p>
       </div>
     </div>
@@ -747,6 +749,10 @@
           <div class="ex-tag"><span class="sq"></span>Podcast mining</div>
           <div class="ex-q">What investment opportunities come out of this week's All-In episode?</div>
         </div>
+        <div class="ex">
+          <div class="ex-tag"><span class="sq"></span>Social sentiment · WSB &amp; X</div>
+          <div class="ex-q">What's WallStreetBets buzzing about today — top tickers by mention volume, the day's sentiment swing, and what's surging fast?</div>
+        </div>
       </div>
     </div>
   </section>
@@ -759,7 +765,7 @@
     <div class="sources">
       <div></div>
       <div>
-        <p class="intro">A thesis is only as strong as what it's built on. Every answer is grounded in primary, authoritative data — pulled live, cited inline, and <strong>fact-checked by a fresh agent before it reaches you.</strong> No vibes, no invented numbers.</p>
+        <p class="intro">A thesis is only as good as what it stands on. Every answer here is grounded in a real source: filings, market data, macro series, prediction-market odds, social chatter. Each one is pulled live and cited inline, then handed to a separate agent that <strong>fact-checks it before you see it.</strong> No vibes, no made-up numbers.</p>
         <div class="src-grid">
           <div class="src">
             <div class="src-kind"><span class="sq"></span>Primary filings</div>
@@ -769,12 +775,32 @@
           <div class="src">
             <div class="src-kind"><span class="sq"></span>Market data</div>
             <div class="src-name">yfinance</div>
-            <div class="src-desc">Live quotes, multiples, fundamentals and analyst estimates — the price and valuation spine behind every comparison.</div>
+            <div class="src-desc">Live quotes, multiples, fundamentals, options and analyst estimates — the price and valuation spine behind every comparison.</div>
           </div>
           <div class="src">
             <div class="src-kind"><span class="sq"></span>Macro</div>
             <div class="src-name">FRED — Federal Reserve</div>
-            <div class="src-desc">Interest rates, inflation, unemployment and FX — the official series that set the discount rate inside every valuation scenario.</div>
+            <div class="src-desc">Interest rates, treasury yields, inflation (CPI/PCE), GDP, unemployment and FX — the official series that set the discount rate inside every valuation scenario.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Prediction markets</div>
+            <div class="src-name">Polymarket</div>
+            <div class="src-desc">Real-money implied probabilities on forward-looking outcomes — FDA approvals, elections, policy and macro events — taken from a live betting market with money on the line.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Social sentiment</div>
+            <div class="src-name">Reddit &amp; X / Twitter</div>
+            <div class="src-desc">WallStreetBets mention volume and crowd sentiment from Reddit, plus real-time X/Twitter listening via the xAI / Grok API — the social tape behind a meme-stock move.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Web research</div>
+            <div class="src-name">Brave · xAI · Google / Gemini</div>
+            <div class="src-desc">Three independent web-search backends — Brave, Grok and Gemini's grounded Google Search — so a claim can be checked against more than one of them.</div>
+          </div>
+          <div class="src">
+            <div class="src-kind"><span class="sq"></span>Audio &amp; video</div>
+            <div class="src-name">YouTube &amp; podcasts</div>
+            <div class="src-desc">Full transcripts of YouTube videos and tracked podcasts (All-In and more) — so commentary from the shows you follow can be mined, quoted and fact-checked.</div>
           </div>
           <div class="src">
             <div class="src-kind"><span class="sq"></span>Research &amp; verification</div>
@@ -782,6 +808,7 @@
             <div class="src-desc">Decomposes the question, gathers authoritative sources with inline citations, then hands the draft to an independent fact-checker before you see it.</div>
           </div>
         </div>
+        <p class="intro" style="margin-top:28px; margin-bottom:0;">And the roster keeps growing. We add <strong>skills, tools and integrations</strong> all the time, and each new one is simply another source the agent can reach for and cite. You ask the same way you always did.</p>
       </div>
     </div>
   </section>
@@ -798,35 +825,35 @@
           <div class="n">01</div>
           <div>
             <h3>Portfolio management</h3>
-            <p>A tool-backed balance sheet, never prose. Holdings grouped by class, a net-worth rollup, a specific-lot trade ledger with realized and unrealized P&amp;L, and point-in-time snapshots you can recall and diff. Every figure comes from the engine — it never hand-sums a total or invents a number.</p>
+            <p>Your balance sheet comes from a real engine, not from prose the model writes. Holdings are grouped by class, with a net-worth rollup, a specific-lot trade ledger that tracks realized and unrealized P&amp;L, and point-in-time snapshots you can pull up and compare. Every figure is computed, so the agent can't quietly hand-sum a total or make one up.</p>
           </div>
         </div>
         <div class="use">
           <div class="n">02</div>
           <div>
             <h3>Brokerage integration <span class="roadmap">// live sync — roadmap</span></h3>
-            <p>Import your brokerage CSV and the engine folds the positions straight into your book — cost basis, lots, and all — in one step. Automatic, live account sync is on the roadmap; today the import keeps your holdings current without copying credentials anywhere.</p>
+            <p>Export a CSV from your brokerage and the engine folds those positions straight into your book, cost basis and lots included, in a single step. Live account sync is on the roadmap. For now the CSV import keeps your holdings current, and your login stays with you.</p>
           </div>
         </div>
         <div class="use">
           <div class="n">03</div>
           <div>
             <h3>Thesis management, tracking &amp; update</h3>
-            <p>Build a thesis as a fact-checked memo, stress-test the bull and bear cases, then health-check it as the facts change. Because your thesis notes persist in local memory, re-running the memo or fact-checker months later picks up where you left off — corrections and all.</p>
+            <p>Build a thesis as a fact-checked memo, stress-test the bull and bear cases, then health-check it again as the facts move. Your notes live in local memory, so re-running the memo or the fact-checker months later picks up where you left off, corrections and all.</p>
           </div>
         </div>
         <div class="use">
           <div class="n">04</div>
           <div>
             <h3>Investment ideation &amp; research</h3>
-            <p>Deep, multi-source research that decomposes the question, gathers authoritative sources — SEC EDGAR filings, yfinance market data, FRED macro series — and hands the draft to an independent fact-checker. Every claim is traceable to a source you can open yourself.</p>
+            <p>Deep, multi-source research: it breaks the question down, pulls from authoritative sources like SEC EDGAR filings, yfinance market data and FRED macro series, then hands the draft to an independent fact-checker. Every claim traces back to a source you can open yourself.</p>
           </div>
         </div>
         <div class="use">
           <div class="n">05</div>
           <div>
             <h3>Allocation strategy &amp; tax optimization</h3>
-            <p>Read your allocation from the net-worth rollup, then make lot-level decisions with tax in mind — tax-loss harvesting, the wash-sale rule, and short- vs. long-term holding periods — each grounded in current-year IRS guidance rather than training knowledge.</p>
+            <p>Read your allocation off the net-worth rollup, then work lot by lot with tax in mind: tax-loss harvesting, the wash-sale rule, short- vs. long-term holding periods. The guidance comes from this year's IRS rules, which the agent looks up fresh each time instead of recalling from memory.</p>
           </div>
         </div>
       </div>
@@ -964,9 +991,9 @@
     <div class="moat-body">
       <div></div>
       <div>
-        <p>The finance skills above are one configuration of <strong>Curunir</strong> — a deliberately minimal agentic harness. The same engine that writes an investment memo can run research, scheduling, or anything else you wire into it.</p>
+        <p>The finance skills above are one way to configure <strong>Curunir</strong>, a small agentic harness we kept deliberately bare. The same engine that writes an investment memo can run research, handle scheduling, or do whatever else you wire into it.</p>
         <p>It runs on a small device in your home or office. The language models live in the cloud — <strong>but your portfolio, your cost basis, and your thesis notes don't.</strong> They stay on the device, in local memory.</p>
-        <p>Reachable from anywhere — web, CLI, email — through a thin portal that brokers the conversation without copying the data.</p>
+        <p>You can reach it from anywhere — web, CLI, or email — through a thin portal that passes the conversation along and keeps the data where it is.</p>
       </div>
     </div>
   </section>
