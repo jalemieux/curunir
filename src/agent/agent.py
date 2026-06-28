@@ -229,6 +229,20 @@ class Agent:
         event.set()
         return True
 
+    def forget_session(self, session_id: str) -> list[dict] | None:
+        """Drop ALL in-memory state for a session and return its history.
+
+        Pops the transcript plus the per-session caches that derive from it —
+        the assembled system prompt and the started-at fallback — so a cleared
+        session can't keep serving a stale, cached "Conversation started at"
+        line on its next (now distinct) conversation. Mirrors the paired
+        sessions/_session_prompts eviction the tool loop already does on error.
+        """
+        history = self.sessions.pop(session_id, None)
+        self._session_prompts.pop(session_id, None)
+        self._session_started_at_cache.pop(session_id, None)
+        return history
+
     def _session_started_at(self, session_id: str) -> str:
         """Stable ISO-8601 "started at" for a session (tz-aware).
 

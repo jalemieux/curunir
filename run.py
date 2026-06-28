@@ -356,7 +356,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if msg.command == "scratch_discard" or (
             msg.command in ("clear", "reset") and is_scratch(msg.session_id)
         ):
-            agent.sessions.pop(msg.session_id, None)
+            agent.forget_session(msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
                 reply_address=msg.reply_address,
@@ -368,7 +368,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         # so the memory summary lands before the transcript file is gone; the
         # summary in memory/ outlives the deleted conversation.
         if msg.command in ("clear", "reset"):
-            history = agent.sessions.pop(msg.session_id, None)
+            history = agent.forget_session(msg.session_id)
             record = conversation_store.load(agent.config.context_dir, msg.session_id)
             if history is None and record is not None:
                 history = record["history"]

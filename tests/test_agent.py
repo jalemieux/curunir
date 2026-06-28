@@ -908,6 +908,25 @@ class TestSystemPromptCaching:
         assert b.isoformat() in pb
         assert pa != pb
 
+    async def test_forget_session_drops_started_at_cache(self, agent):
+        """After a clear, the next (distinct) conversation must not reuse the
+        previous one's cached started-at line."""
+        from datetime import datetime, timezone
+
+        old = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        cs.save(agent.config.context_dir, "s", [{"role": "user", "content": "x"}], now=old)
+        assert old.isoformat() in agent._get_session_prompt("s")
+
+        # Clear: delete the record and forget in-memory state, as run.py does.
+        cs.delete(agent.config.context_dir, "s")
+        agent.forget_session("s")
+
+        new = datetime(2026, 6, 6, tzinfo=timezone.utc)
+        cs.save(agent.config.context_dir, "s", [{"role": "user", "content": "y"}], now=new)
+        prompt = agent._get_session_prompt("s")
+        assert new.isoformat() in prompt
+        assert old.isoformat() not in prompt
+
     async def test_live_time_note_injected_not_persisted(self, agent):
         """A 'Current date/time:' note rides as the final message of the LLM
         request but is never written into stored history."""
