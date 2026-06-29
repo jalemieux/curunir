@@ -24,6 +24,8 @@ def test_includes_skill_manifest(tmp_context, tmp_skills, agent_config):
     result = build_static_prompt(agent_config)
     assert "research" in result
     assert "Available Skills" in result
+    # The load-by-name signpost survives assembly into the system prompt (#451).
+    assert "load_skill" in result
 
 
 def test_no_skills_section_when_empty(tmp_context, tmp_skills, agent_config):
