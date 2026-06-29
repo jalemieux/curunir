@@ -448,7 +448,6 @@ function rowCost(r) {
   return (nonCached * (+usageRates.in || 0) + (r.cached_prompt_tokens || 0) * (+usageRates.cached || 0) + out * (+usageRates.out || 0)) / 1e6;
 }
 const sumCost = (rows) => rows.reduce((a, r) => a + rowCost(r), 0);
-const fmtUsd = (n) => "$" + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // Hydrate the inputs from storage and re-render the dashboard on edit.
 ["in", "cached", "out"].forEach((k) => {
   const el = document.getElementById("rate-" + k);
