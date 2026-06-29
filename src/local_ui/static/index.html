@@ -209,6 +209,16 @@
   .pf-badge.st { background: rgba(210,153,34,.18); color: var(--warn); }
   .pf-badge.buy { background: rgba(99,102,241,.18); color: var(--accent); }
   .pf-badge.sell { background: rgba(210,153,34,.18); color: var(--warn); }
+  /* CRM stage chips */
+  .crm-stage { font-size: 10.5px; padding: 1px 8px; border-radius: 10px; white-space: nowrap;
+    background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
+  .crm-stage.new { background: rgba(99,102,241,.16); color: var(--accent); }
+  .crm-stage.contacted { background: rgba(6,182,212,.16); color: #22d3ee; }
+  .crm-stage.qualified { background: rgba(168,85,247,.16); color: #c084fc; }
+  .crm-stage.trial { background: rgba(210,153,34,.18); color: var(--warn); }
+  .crm-stage.won { background: rgba(74,222,128,.16); color: var(--ok); }
+  .crm-stage.lost { background: rgba(248,113,113,.16); color: var(--err, #f87171); }
+  .crm-src { font-size: 11px; color: var(--muted); }
 
   /* Schedules editor */
   button.btn {
@@ -262,6 +272,7 @@
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
     <button data-tab="portfolio">Balance Sheet</button>
+    <button data-tab="crm">CRM</button>
     <button data-tab="memory">Memory</button>
     <button data-tab="schedules">Schedules</button>
   </nav>
@@ -289,6 +300,7 @@
     <div id="usage-body"></div>
   </div>
   <div class="tab" id="tab-portfolio"><h2>Balance Sheet</h2><div id="portfolio-body"></div></div>
+  <div class="tab" id="tab-crm"><h2>CRM</h2><div id="crm-body"></div></div>
   <div class="tab" id="tab-memory"><h2>Memory</h2>
     <div class="mem-layout">
       <div class="mem-tree" id="memory-tree"></div>
@@ -376,7 +388,7 @@ const fmtMoney = (n) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigi
 
 // === Tabs ===
 const tabs = document.querySelectorAll("nav button");
-const loaders = { usage: loadUsage, portfolio: loadPortfolio, memory: loadMemory, schedules: loadSchedules };
+const loaders = { usage: loadUsage, portfolio: loadPortfolio, crm: loadCrm, memory: loadMemory, schedules: loadSchedules };
 tabs.forEach((b) => b.addEventListener("click", () => {
   tabs.forEach((x) => x.classList.remove("active"));
   b.classList.add("active");
@@ -635,6 +647,70 @@ async function loadPortfolio() {
       `<h3>Allocation</h3>${bar}${legend}` +
       `<h3>Holdings</h3>${groupsHtml}` +
       `<h3>Trades — ${d.year} to date</h3>${tradeCards}${tradesBody}`;
+
+    el.querySelectorAll(".pf-grp-head").forEach((h) =>
+      h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+  } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === CRM panel (read-only leads + pipeline dashboard) ===
+const CRM_STAGES = ["new", "contacted", "qualified", "trial", "won", "lost"];
+const crmStage = (s) => `<span class="crm-stage ${CRM_STAGES.includes(s) ? s : ""}">${esc(s || "")}</span>`;
+
+function crmLeadsTable(rows) {
+  const body = rows.map((l) =>
+    `<tr><td>${esc(l.name || "")}</td><td>${esc(l.company || "")}</td>` +
+    `<td>${esc(l.email || "")}</td><td>${crmStage(l.stage)}</td>` +
+    `<td><span class="crm-src">${esc(l.source || "")}</span></td>` +
+    `<td>${esc(l.owner || "")}</td></tr>`).join("");
+  return `<table><tr><th>Name</th><th>Company</th><th>Email</th><th>Stage</th>` +
+    `<th>Source</th><th>Owner</th></tr>${body}</table>`;
+}
+
+function crmActivityTable(rows) {
+  const body = rows.map((i) =>
+    `<tr><td>${esc((i.occurred_at || "").replace("T", " "))}</td>` +
+    `<td><span class="pf-badge">${esc(i.kind || "")}</span></td>` +
+    `<td>${esc(i.lead_id || "")}</td><td>${esc(i.body || "")}</td></tr>`).join("");
+  return `<table><tr><th>When</th><th>Kind</th><th>Lead</th><th>Detail</th></tr>${body}</table>`;
+}
+
+async function loadCrm() {
+  const el = document.getElementById("crm-body");
+  el.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const d = await apiGet("/api/crm");
+    if (!d.available) { el.innerHTML = '<span class="muted">No CRM store yet — add a lead to get started.</span>'; return; }
+    const pipe = d.pipeline || { total: 0, by_stage: {} };
+
+    // Pipeline-by-stage cards (total + one per stage).
+    const cards = `<div class="cards">
+      <div class="card"><div class="label">Total leads</div><div class="value">${pipe.total}</div></div>
+      ${CRM_STAGES.map((s) => `<div class="card"><div class="label">${s}</div>` +
+        `<div class="value">${pipe.by_stage[s] || 0}</div></div>`).join("")}
+    </div>`;
+
+    // Leads grouped by stage, collapsible (mirrors the Balance Sheet groups).
+    const byStage = {};
+    for (const l of d.leads) (byStage[l.stage] = byStage[l.stage] || []).push(l);
+    const order = [...CRM_STAGES, ...Object.keys(byStage).filter((s) => !CRM_STAGES.includes(s))];
+    const groupsHtml = order.map((stage, i) => {
+      const rows = byStage[stage] || [];
+      if (!rows.length) return "";
+      return `<div class="pf-grp${i === 0 ? " open" : ""}">
+        <div class="pf-grp-head"><span class="pf-caret">▸</span>
+          <span class="pf-grp-name">${crmStage(stage)}<span class="cnt">${rows.length}</span></span>
+          <span class="pf-grp-sub"></span><span class="pf-grp-tot"></span></div>
+        <div class="pf-grp-body">${crmLeadsTable(rows)}</div></div>`;
+    }).join("");
+
+    const activity = (d.activity && d.activity.length)
+      ? crmActivityTable(d.activity)
+      : '<span class="muted">No interactions logged yet.</span>';
+
+    el.innerHTML = cards +
+      `<h3>Leads by stage</h3>${groupsHtml || '<span class="muted">No leads yet.</span>'}` +
+      `<h3>Recent activity</h3>${activity}`;
 
     el.querySelectorAll(".pf-grp-head").forEach((h) =>
       h.addEventListener("click", () => h.parentElement.classList.toggle("open")));

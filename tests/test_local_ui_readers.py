@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.config import AgentConfig
+from src.crm import db as crm_db
+from src.crm import engine as crm_engine
 from src.local_ui import readers
 from src.portfolio import db as pdb
 from src.portfolio import engine
@@ -28,6 +30,7 @@ def config(tmp_path):
         usage_db=ctx / "usage.db",
         schedules_db=ctx / "schedules.db",
         portfolio_db=str(ctx / "memory" / "portfolio.db"),
+        crm_db=str(ctx / "memory" / "crm.db"),
     )
 
 
@@ -211,6 +214,40 @@ def test_portfolio_overview_year_override(config):
     out = readers.portfolio_overview(config, year=2025)
     assert out["realized"]["total"] == 250
     assert out["trades"] == engine.trade_history(path, since="2025-01-01")
+
+
+# --- crm_overview ----------------------------------------------------------
+
+
+def _seed_crm(config):
+    path = config.crm_db
+    crm_db.init_db(path)
+    a = crm_engine.add_lead(path, {"name": "Jane Doe", "email": "jane@acme.com",
+                                   "company": "Acme", "source": "beta-signup"})["id"]
+    crm_engine.add_lead(path, {"name": "Bob Roe", "email": "bob@x.com",
+                               "source": "referral"})
+    crm_engine.set_stage(path, a, "qualified")
+    return path
+
+
+def test_crm_overview_matches_engine(config):
+    path = _seed_crm(config)
+    out = readers.crm_overview(config)
+    assert out["available"] is True
+    assert out["pipeline"] == crm_engine.pipeline(path)
+    assert out["leads"] == crm_engine.list_leads(path)
+    assert out["activity"] == crm_engine.activity(path, limit=25)
+    # The set_stage logged a stage_change interaction.
+    assert any(i["kind"] == "stage_change" for i in out["activity"])
+
+
+def test_crm_overview_missing_db(config):
+    # Fresh deployment — no crm.db yet.
+    out = readers.crm_overview(config)
+    assert out["available"] is False
+    assert out["leads"] == []
+    assert out["activity"] == []
+    assert out["pipeline"] is None
 
 
 # --- schedules -------------------------------------------------------------

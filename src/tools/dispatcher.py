@@ -4,6 +4,7 @@ from src.config import AgentConfig
 from src.tools.attach import exec_attach
 from src.tools.bash_tool import exec_bash
 from src.tools.fs_tools import exec_edit, exec_glob, exec_grep, exec_read, exec_write
+from src.tools.crm_tool import exec_crm
 from src.tools.portfolio_tool import exec_portfolio
 from src.tools.skill_tool import exec_load_skill
 from src.tools.schedule_tool import exec_schedule
@@ -22,6 +23,7 @@ _SYNC_EXECUTORS = {
     "attach": exec_attach,
     "schedule": exec_schedule,
     "portfolio": exec_portfolio,
+    "crm": exec_crm,
 }
 
 
