@@ -493,12 +493,12 @@ flag in the text reply that a scoped fact-check would complete.
 
 ### Step 9 — Deliver
 
-Convert the fact-checked markdown to PDF with plain pandoc — same path as
-`investment-memo` and `deep-research-guided`:
+Convert the fact-checked markdown to PDF with the shared helper — same path as
+`investment-memo` and `deep-research-guided`. It sanitizes LaTeX-hostile emoji
+and renders via xelatex→pdflatex:
 
 ```bash
-pandoc context/workspace/generated/{slug}-{date}.md \
-  -o context/workspace/generated/{slug}-{date}.pdf
+python -m src.md2pdf context/workspace/generated/{slug}-{date}.md
 ```
 
 Do **not** use HTML / headless Chromium / weasyprint — the LaTeX route
@@ -510,7 +510,7 @@ Attach:
 attach(path="context/workspace/generated/{slug}-{date}.pdf")
 ```
 
-If pandoc fails, attach the `.md` as fallback.
+If PDF conversion fails, attach the `.md` as fallback.
 
 In the text reply, post the **Executive Summary** verbatim plus one line on
 whether the fact-check found material corrections. The full memo is the
@@ -549,7 +549,7 @@ among investors because of its potential to create a new TAM."*
    catalyst + Who wins/loses + TAM + bull/bear + forward-looking
    probabilities + podcast commentary + sentiment + per-name financials.
 9. **Fact-check** — delegate.
-10. **Deliver** — PDF via pandoc, attach, post Executive Summary in reply.
+10. **Deliver** — PDF via `python -m src.md2pdf`, attach, post Executive Summary in reply.
 
 ## Common mistakes
 

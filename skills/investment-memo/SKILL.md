@@ -369,12 +369,13 @@ complete.
 
 ### Step 7 — Deliver
 
-Convert the fact-checked markdown to PDF with plain pandoc — the same
+Convert the fact-checked markdown to PDF with the shared helper — the same
 LaTeX-via-pandoc path `deep-research` uses, which produces a cleanly
-typeset document:
+typeset document. The helper sanitizes LaTeX-hostile emoji and renders via
+xelatex→pdflatex, so the agent's own glyphs no longer crash the render:
 
 ```bash
-pandoc context/workspace/generated/{slug}-{date}.md -o context/workspace/generated/{slug}-{date}.pdf
+python -m src.md2pdf context/workspace/generated/{slug}-{date}.md
 ```
 
 Do **not** render via HTML, headless Chromium, weasyprint, or a CSS
@@ -383,7 +384,7 @@ instead of a typeset memo. If a comparison table is too wide to fit the
 page, the fix is a narrower table (Step 5), not a different renderer.
 
 Attach the PDF: `attach(path="context/workspace/generated/{slug}-{date}.pdf")`. If
-pandoc fails, attach the `.md` as fallback.
+PDF conversion fails, attach the `.md` as fallback.
 
 In the text reply, post the **Executive Summary** verbatim plus one line on
 whether the fact-check found material corrections. The full memo is the

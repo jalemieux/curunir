@@ -128,14 +128,13 @@ biggest uncertainty.>
 ### Step 5 — Deliver
 
 1. Write the markdown to `context/workspace/generated/<TICKER>-<YYYY-MM-DD>.md`.
-2. Convert to PDF with pandoc:
+2. Convert to PDF with the shared helper (sanitizes emoji, xelatex→pdflatex):
 
    ```bash
-   pandoc context/workspace/generated/<TICKER>-<DATE>.md \
-     -o context/workspace/generated/<TICKER>-<DATE>.pdf
+   python -m src.md2pdf context/workspace/generated/<TICKER>-<DATE>.md
    ```
 3. Attach the PDF: `attach(path="context/workspace/generated/<TICKER>-<DATE>.pdf")`.
-   If pandoc fails, attach the `.md` as fallback.
+   If PDF conversion fails, attach the `.md` as fallback.
 4. In your reply, post the **Bottom Line** section verbatim plus the
    scenario table inline. The full report is the attachment.
 
