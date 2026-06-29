@@ -55,6 +55,14 @@ _BACKOFF_INITIAL = 1.0
 _BACKOFF_MAX = 30.0
 _TERMINAL_CODES = {4002, 4003}
 
+# A connection must stay up at least this long before we treat it as healthy
+# and reset the backoff counter. Without this floor, a portal/proxy that
+# accepts then immediately drops the socket would reset `attempt` on every
+# connect, so the backoff never grows and the retry loop becomes a hot ~1s
+# storm. A connect-then-immediate-close therefore lets backoff climb to
+# _BACKOFF_MAX instead.
+_STABLE_CONNECTION_SEC = 30.0
+
 # How many outbound frames to hold while disconnected. A full agent reply
 # (text + attachments) is one frame, so this is generous; the oldest frames
 # are dropped first if it overflows.
@@ -109,6 +117,8 @@ class PortalChannel:
     async def start(self) -> None:
         attempt = 0
         while not self._terminate:
+            connected_at: float | None = None
+            clean_close = False
             try:
                 async with websockets.connect(
                     self.url,
@@ -116,7 +126,7 @@ class PortalChannel:
                     max_size=32 * 1024 * 1024,
                 ) as ws:
                     logger.info("PortalChannel connected to %s", self.url)
-                    attempt = 0
+                    connected_at = time.monotonic()
                     # Drain anything buffered while disconnected before we
                     # publish the connection — keeps _connection None so any
                     # concurrent send() appends behind the backlog rather than
@@ -124,6 +134,13 @@ class PortalChannel:
                     await self._flush_outbound(ws)
                     self._connection = ws
                     await self._read_loop(ws)
+                    # _read_loop returned *without* raising → the portal closed
+                    # the socket with a normal code (1000/1001); the websockets
+                    # async-iterator ends silently for those. That otherwise
+                    # leaves no log line, so a portal/proxy that hangs up right
+                    # after accept looks like a mysterious bare-reconnect loop.
+                    # Flag it so the retry below logs the clean close + uptime.
+                    clean_close = True
             except websockets.exceptions.InvalidStatus as e:
                 code = getattr(e.response, "status_code", None)
                 logger.error("Portal upgrade rejected: %s", code)
@@ -149,6 +166,25 @@ class PortalChannel:
 
             if self._terminate:
                 return
+
+            uptime = (
+                time.monotonic() - connected_at
+                if connected_at is not None else 0.0
+            )
+            if clean_close:
+                logger.warning(
+                    "Portal closed connection cleanly after %.1fs (no error "
+                    "code); will retry. Repeated short-lived closes mean the "
+                    "portal/proxy is hanging up right after accept — check the "
+                    "portal logs and replica count.", uptime,
+                )
+            # Only a connection that *stayed up* long enough is treated as
+            # healthy and resets the backoff. A connect-then-immediate-close
+            # leaves `attempt` climbing, so a flapping portal backs off toward
+            # _BACKOFF_MAX instead of becoming a ~1s hot loop.
+            if connected_at is not None and uptime >= _STABLE_CONNECTION_SEC:
+                attempt = 0
+
             delay = _backoff_with_jitter(attempt)
             attempt = min(attempt + 1, 6)
             await asyncio.sleep(delay)
