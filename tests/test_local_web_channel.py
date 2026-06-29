@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.local_web import LocalWebChannel
 from src.config import AgentConfig
+from src.crm import db as crm_db
+from src.crm import engine as crm_engine
 from src.portfolio import db as pdb
 from src.portfolio import engine
 from src.schedule_store import db as sdb
@@ -35,6 +37,7 @@ def config(tmp_path):
         usage_db=ctx / "usage.db",
         schedules_db=ctx / "schedules.db",
         portfolio_db=str(ctx / "memory" / "portfolio.db"),
+        crm_db=str(ctx / "memory" / "crm.db"),
     )
     # Seed a bit of each store so the REST endpoints have data to return.
     store = UsageStore(cfg.usage_db)
@@ -45,6 +48,9 @@ def config(tmp_path):
     store.close()
     pdb.init_db(cfg.portfolio_db)
     engine.add_asset(cfg.portfolio_db, {"class": "cash", "label": "Bank", "value": 100})
+    crm_db.init_db(cfg.crm_db)
+    crm_engine.add_lead(cfg.crm_db, {"name": "Jane", "email": "jane@x.com",
+                                     "source": "beta-signup"})
     sdb.init_db(str(cfg.schedules_db))
     sengine.create(
         str(cfg.schedules_db),
@@ -111,6 +117,19 @@ def test_api_portfolio(client):
     body = r.json()
     assert body["available"] is True
     assert body["networth"]["assets"] == 100
+
+
+def test_api_crm(client):
+    r = client.get("/api/crm", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["pipeline"]["total"] == 1
+    assert body["leads"][0]["name"] == "Jane"
+
+
+def test_api_crm_requires_token(client):
+    assert client.get("/api/crm").status_code == 401
 
 
 def test_api_schedules(client):

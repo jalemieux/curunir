@@ -16,6 +16,8 @@ skills:
   - gtm-reassess
   # Demand validation
   - gtm-smoke-test
+  # Lead + pipeline tracking (deterministic mini-CRM)
+  - crm
   # Dependent skills the GTM pipeline calls
   - web-search
   - xai-search

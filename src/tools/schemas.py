@@ -376,6 +376,47 @@ _OPT_IN_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "crm",
+            "description": (
+                "Read and update the marketing CRM (leads + pipeline). The "
+                "engine does all writes and counts — never track pipeline in "
+                "prose. Reads: list, show, pipeline (counts by stage), "
+                "activity (interaction ledger), query (read-only SQL), render. "
+                "Writes: add (a lead), set (update fields), set_stage (advance "
+                "a lead + log a stage_change), rm, log (an interaction), "
+                "import_rows (bulk lead load). Stages: new, contacted, "
+                "qualified, trial, won, lost. Pass the operation in `action` "
+                "and its parameters in `args`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "show", "pipeline", "activity",
+                                 "query", "render", "add", "set", "set_stage",
+                                 "rm", "log", "import_rows"],
+                        "description": "The operation to run.",
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": (
+                            "Operation parameters, e.g. "
+                            "{name,email,company,source,stage,owner} for add; "
+                            "{id,fields:{...}} for set; {id,stage} for "
+                            "set_stage; {lead_id,kind,body} for log; "
+                            "{rows:[...],source,owner} for import_rows; "
+                            "{sql} for query."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "to_audio",
             "description": (
                 "Rewrite text for natural speech and synthesize it into an "
