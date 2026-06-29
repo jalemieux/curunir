@@ -22,6 +22,7 @@ from croniter import croniter
 
 from src.agent import conversation_store
 from src.config import AgentConfig
+from src.crm import engine as crm_engine
 from src.portfolio import engine
 from src.scheduler import _load_tasks
 from src.usage_store import UsageStore
@@ -154,6 +155,33 @@ def portfolio_overview(config: AgentConfig, year: int | None = None) -> dict:
         "realized": engine.realized_pnl(path, year=yr),
         "as_of": as_of,
         "year": yr,
+    }
+
+
+def crm_overview(config: AgentConfig, activity_limit: int = 25) -> dict:
+    """Mini-CRM snapshot from ``config.crm_db``.
+
+    Returns ``{"available", "pipeline", "leads", "activity"}`` straight from
+    ``crm.engine`` (``pipeline`` / ``list_leads`` / ``activity``) — no new query
+    logic, so the UI can't drift from the ``crm`` tool / CLI. ``activity`` is the
+    most-recent ``activity_limit`` interactions across all leads.
+
+    A missing store yields ``available=False`` with empty payloads — the
+    engine's views don't exist on a fresh file, so we never touch it.
+    """
+    path = str(config.crm_db)
+    if not os.path.exists(path):
+        return {
+            "available": False,
+            "pipeline": None,
+            "leads": [],
+            "activity": [],
+        }
+    return {
+        "available": True,
+        "pipeline": crm_engine.pipeline(path),
+        "leads": crm_engine.list_leads(path),
+        "activity": crm_engine.activity(path, limit=activity_limit),
     }
 
 

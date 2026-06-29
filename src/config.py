@@ -32,6 +32,7 @@ class AgentConfig:
     vision_model: str | None = None
     main_model_supports_vision: bool = False
     portfolio_db: str = "context/memory/portfolio.db"
+    crm_db: str = "context/memory/crm.db"
 
 
 @dataclass
