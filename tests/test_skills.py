@@ -62,6 +62,26 @@ class TestBuildSkillManifest:
         assert "| research | When user asks to investigate |" in result
         assert "## Available Skills" in result
 
+    def test_manifest_carries_load_by_name_signpost(self, tmp_path):
+        """A one-line preamble tells the agent to load_skill by name rather
+        than filesystem-hunting for SKILL.md files (#451)."""
+        _write_skill(tmp_path, "research", "When user asks to investigate")
+        result = build_skill_manifest([tmp_path])
+        # Mentions the load mechanism...
+        assert "load_skill" in result
+        # ...and discourages filesystem hunting.
+        assert "find" in result.lower()
+        # The signpost sits between the header and the table.
+        header_idx = result.index("## Available Skills")
+        table_idx = result.index("| Skill | When to Use |")
+        signpost_idx = result.index("load_skill")
+        assert header_idx < signpost_idx < table_idx
+
+    def test_signpost_present_with_single_skill(self, tmp_path):
+        _write_skill(tmp_path, "solo", "the only skill")
+        result = build_skill_manifest([tmp_path])
+        assert "load_skill" in result
+
     def test_multiple_skills_sorted(self, tmp_path):
         _write_skill(tmp_path, "zebra", "zebra desc")
         _write_skill(tmp_path, "alpha", "alpha desc")
