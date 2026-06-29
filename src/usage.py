@@ -2,7 +2,7 @@
 """CLI for inspecting persisted LLM usage.
 
 Usage:
-    python -m src.usage [--window 1d|7d|30d|24h|...] [--by model|day] [--db PATH]
+    python -m src.usage [--window 1d|7d|30d|24h|...] [--by model|day|session] [--db PATH]
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _format_table(rows: list[dict], group_by: str) -> str:
     if not rows:
         return "(no usage in window)"
 
-    key = "day" if group_by == "day" else "model"
+    key = group_by if group_by in ("day", "session") else "model"
     headers = [
         key, "calls", "prompt", "completion", "cached", "reasoning", "cost_usd", "elapsed_s",
     ]
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m src.usage", description=__doc__)
     parser.add_argument("--window", type=_parse_window, default=_parse_window("7d"),
                         help="Lookback window (e.g. 1d, 7d, 30d, 24h). Default 7d.")
-    parser.add_argument("--by", choices=["model", "day"], default="model")
+    parser.add_argument("--by", choices=["model", "day", "session"], default="model")
     parser.add_argument("--db", type=Path, default=None,
                         help=f"SQLite path (default {AgentConfig().usage_db}).")
     args = parser.parse_args(argv)
