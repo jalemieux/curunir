@@ -25,7 +25,7 @@ from src.config import AgentConfig
 from src.crm import engine as crm_engine
 from src.portfolio import engine
 from src.scheduler import _load_tasks
-from src.usage_store import UsageStore
+from src.usage_store import UsageStore, normalize_session
 
 # Mirror src.usage._parse_window so the UI and CLI accept identical windows.
 _WINDOW_RE = re.compile(r"^(\d+)\s*([dhm])$")
@@ -64,7 +64,7 @@ def usage_summary(
         rows = store.summary(td, group_by=by)
     finally:
         store.close()
-    if by == "session":
+    if by in ("session", "day_session"):
         rows = _label_sessions(config, rows)
     return {"window": window, "by": by, "rows": rows, "available": True}
 
@@ -94,11 +94,33 @@ def _session_label(session: str, convs: dict[str, dict]) -> tuple[str, str]:
     return session[:8], "web"
 
 
-def _label_sessions(config: AgentConfig, rows: list[dict]) -> list[dict]:
-    """Annotate each ``by=session`` row with ``label`` + ``channel`` in place.
+def _firing_time(raw_session: str) -> str | None:
+    """Local ``HH:MM`` for a scheduled run, parsed from ``sched:<id>:<epoch>``.
 
-    Joins against the conversation store (read-only) so the breakdown shows
-    real titles. A missing/unreadable store just yields fallback labels.
+    Lets the By-day drill-down disambiguate a job that fired more than once in a
+    day. Returns None for non-scheduled ids or an unparseable timestamp.
+    """
+    if not raw_session.startswith("sched:"):
+        return None
+    parts = raw_session.split(":")
+    if len(parts) < 3:
+        return None
+    try:
+        ts = int(parts[-1])
+    except ValueError:
+        return None
+    return datetime.fromtimestamp(ts).astimezone().strftime("%H:%M")
+
+
+def _label_sessions(config: AgentConfig, rows: list[dict]) -> list[dict]:
+    """Annotate each session/day_session row with ``label`` + ``channel`` in place.
+
+    Joins against the conversation store (read-only) so the breakdown shows real
+    titles. ``by=session`` rows carry the collapsed key in ``session``;
+    ``by=day_session`` rows carry the raw id in ``session_id`` (and a ``day``) —
+    those are labeled by their normalized job/conversation id and get a ``detail``
+    firing-time so repeated same-day runs stay distinct. A missing/unreadable
+    store just yields fallback labels.
     """
     convs: dict[str, dict] = {}
     if getattr(config, "context_dir", None):
@@ -107,9 +129,12 @@ def _label_sessions(config: AgentConfig, rows: list[dict]) -> list[dict]:
             for c in conversation_store.list_conversations(config.context_dir)
         }
     for r in rows:
-        label, channel = _session_label(r["session"], convs)
+        raw = r.get("session_id") or r.get("session") or ""
+        label, channel = _session_label(normalize_session(raw), convs)
         r["label"] = label
         r["channel"] = channel
+        if "session_id" in r:  # day_session rows: disambiguate same-day reruns
+            r["detail"] = _firing_time(raw)
     return rows
 
 

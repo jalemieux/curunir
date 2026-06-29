@@ -4,6 +4,7 @@ These are pure functions that wrap the *existing* read APIs (UsageStore,
 portfolio.engine, scheduler._load_tasks, context/memory file walks) so the
 co-located web UI shows the same numbers the CLIs do — and can't drift.
 """
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -139,6 +140,36 @@ def test_usage_summary_non_session_rows_unchanged(config):
     out = readers.usage_summary(config, window="7d", by="model")
     assert "label" not in out["rows"][0]
     assert "channel" not in out["rows"][0]
+
+
+def test_usage_summary_day_session_labeled_with_firing_time(config):
+    """``by=day_session`` rows keep raw session ids (no collapse), are labeled by
+    normalized job/conversation id, and carry a ``detail`` firing-time so two
+    runs of the same job on one day stay distinguishable."""
+    store = UsageStore(config.usage_db)
+    now = datetime.now(timezone.utc)
+    # Two firings of one job + a normal session (no firing time).
+    store.record(UsageRecord(ts=now, session_id="sched:digest:1700000000", model="m",
+                             prompt_tokens=100, completion_tokens=10))
+    store.record(UsageRecord(ts=now, session_id="sched:digest:1700003600", model="m",
+                             prompt_tokens=200, completion_tokens=20))
+    store.record(UsageRecord(ts=now, session_id="cli", model="m",
+                             prompt_tokens=10, completion_tokens=1))
+    store.close()
+
+    out = readers.usage_summary(config, window="7d", by="day_session")
+    sched = [r for r in out["rows"] if r["session_id"].startswith("sched:")]
+    # Not collapsed: both firings survive as separate rows, same job label.
+    assert len(sched) == 2
+    assert all(r["label"] == "digest" and r["channel"] == "sched" for r in sched)
+    # Each firing has a distinct HH:MM detail derived from its epoch suffix
+    # (the two epochs are an hour apart; exact value is timezone-local).
+    details = {r["detail"] for r in sched}
+    assert len(details) == 2
+    assert all(re.fullmatch(r"\d{2}:\d{2}", d) for d in details)
+    # A non-scheduled row gets a null detail (nothing to disambiguate).
+    cli = next(r for r in out["rows"] if r["session_id"] == "cli")
+    assert cli["detail"] is None and cli["label"] == "CLI"
 
 
 # --- portfolio_overview ----------------------------------------------------

@@ -98,7 +98,7 @@ class UsageStore:
     def summary(
         self,
         window: timedelta,
-        group_by: Literal["model", "day", "session"] = "model",
+        group_by: Literal["model", "day", "session", "day_session"] = "model",
     ) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - window).isoformat()
         if group_by == "model":
@@ -112,6 +112,12 @@ class UsageStore:
             # ``sched:<id>:<ts>``) are collapsed under ``sched:<id>`` below.
             group_expr = "session_id"
             select_expr = "session_id"
+        elif group_by == "day_session":
+            # One row per (calendar-day, raw session_id). Deliberately NOT
+            # collapsed — each scheduled firing ``sched:<id>:<ts>`` stays its
+            # own row so the By-day drill-down can show individual runs.
+            group_expr = "substr(ts, 1, 10), session_id"
+            select_expr = "substr(ts, 1, 10) AS day, session_id"
         else:
             raise ValueError(f"unknown group_by: {group_by}")
 
