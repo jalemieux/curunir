@@ -33,6 +33,11 @@ in the *action log*, so the graders inspect actions, not prose:
     skill, but it explored to get there.
   - S6 is the over-trigger control: when the user EXPLICITLY asks to browse the
     skills folder the nudge must not make the agent refuse a legitimate `ls`.
+  - S8 is the authoring counterpart to S7 and the only probe for the *second*
+    half of #457's behavior.md fix: creating a NEW skill legitimately writes
+    ``context/skills/<name>/SKILL.md`` — both forbidden substrings — so the
+    agent must save there, never the framework ``skills/`` catalog. A PASS
+    proves the forbid list is scoped to discovery, not a blanket ban.
 
 This suite is the discriminator for #457: on the pre-fix prompt the documented
 hunting should turn the S3/S4/S5 probes red (or PASS-SLOW); the prompt/manifest
@@ -337,6 +342,47 @@ TASKS: list[dict] = [
             # forbid pattern accidentally matching `skills/` driver paths.
             "require": ["load_skill: yfinance", "yfin.py"],
             "forbid": ["SKILL.md", "context/skills"],
+        },
+    },
+
+    # ── 4. The OTHER half of #457: save a NEW skill to context/skills/ ───────
+    {
+        "id": "S8",
+        "name": "discovery-save-own-skill-to-context",
+        "intent": (
+            "The second half of #457's behavior.md fix, untested by S1-S7: when "
+            "the user asks the agent to AUTHOR a new reusable skill, it must save "
+            "it under context/skills/<name>/SKILL.md (where own skills live), NOT "
+            "into the framework catalog skills/ (where it would be confused for a "
+            "maintainer skill). This is also the context/skills counterpart to "
+            "S7's guard: a legitimate authoring write touches BOTH strings the "
+            "discovery probes forbid (`context/skills` + `SKILL.md`), so a PASS "
+            "here proves that forbid list is scoped to *discovery*, not a blanket "
+            "ban — and that an authoring conflict-check `ls context/skills/` is "
+            "correct behavior, not a hunt."
+        ),
+        "expected": (
+            "Writes the new skill to context/skills/<name>/SKILL.md; does NOT "
+            "create it under the framework catalog skills/ (no `write: skills/` "
+            "or `edit: skills/`)."
+        ),
+        "tags": ["composition", "skill-discovery", "guard", "authoring"],
+        "prompt": (
+            "I keep asking you to turn rough meeting notes into a tidy bulleted "
+            "summary. Save that as a reusable skill of your own so you can load "
+            "it next time. Keep it minimal — no web research needed, just "
+            "scaffold the SKILL.md. You don't need to run it afterward."
+        ),
+        "max_loops": 10,  # authoring is multi-step; minimal scaffold keeps it bounded
+        "grader": "action_used",
+        "spec": {
+            # The save lands in context/skills/<name>/SKILL.md — both substrings
+            # the discovery probes forbid, legitimately present here. Forbid only
+            # a write/edit INTO the framework catalog (`write: skills/...`), which
+            # `write: context/skills/...` does NOT contain (the "context/" prefix
+            # separates them — same distinguishing logic as S7's `yfin.py` guard).
+            "require": ["context/skills", "SKILL.md"],
+            "forbid": ["write: skills/", "edit: skills/"],
         },
     },
 ]
