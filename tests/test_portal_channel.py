@@ -591,6 +591,61 @@ async def test_outbound_buffered_while_disconnected_is_replayed_on_reconnect():
 
 
 @pytest.mark.asyncio
+async def test_immediate_clean_close_grows_backoff(monkeypatch, caplog):
+    """A portal that accepts then immediately closes cleanly (1000/1001) must
+    not reset the backoff on every connect — otherwise the retry loop becomes a
+    ~1s hot storm. The connection stays up far less than _STABLE_CONNECTION_SEC,
+    so `attempt` (the value handed to the backoff fn) must climb across
+    reconnects, and each clean close is logged instead of being silent.
+    """
+    attempts: list[int] = []
+
+    def fake_backoff(attempt: int) -> float:
+        attempts.append(attempt)
+        return 0.0  # spin fast; we only care about the attempt sequence
+
+    monkeypatch.setattr(portal_mod, "_backoff_with_jitter", fake_backoff)
+
+    connections: list = []
+
+    async def handler(ws):
+        connections.append(ws)
+        # Accept, then immediately hang up with a normal close code. The
+        # client's async-for ends without raising → clean_close path.
+        await ws.close(code=1000, reason="bye")
+
+    server = await websockets.serve(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    url = f"ws://127.0.0.1:{port}/ws/agent"
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url=url, token="t")
+    caplog.set_level("WARNING", logger="src.channels.portal")
+    task = asyncio.create_task(ch.start())
+    try:
+        # Let several connect→clean-close→retry cycles run.
+        for _ in range(500):
+            if len(attempts) >= 4:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        ch._terminate = True
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        server.close()
+        await server.wait_closed()
+
+    # Backoff was NOT pinned at 0 — the counter climbed each immediate close.
+    assert attempts[:4] == [0, 1, 2, 3]
+    assert any(
+        "closed connection cleanly" in r.message for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 async def test_streaming_deltas_are_not_buffered_when_disconnected(portal_server):
     """Deltas are ephemeral UI updates — the final message carries the full
     content — so a delta sent while disconnected is dropped, not queued.
