@@ -218,36 +218,12 @@ The digest is delivered inline — **never as a PDF, never as an attachment**.
 The markdown produced in step 4 is the deliverable.
 
 - **Chat session** — send the markdown as the final assistant message. Done.
-- **Email** — load the `email-send` skill and send with **both** `text_body`
-  (the raw markdown) **and** `html_body` (the markdown rendered to HTML). The
-  `html_body` is mandatory — do not send a text-only email, and do not attach
-  a PDF or any other file. Render with Python's `markdown` library:
-
-  ```python
-  import markdown
-  html_body = markdown.markdown(digest_md, extensions=["extra", "sane_lists"])
-  ```
-
-  Wrap it in a minimal HTML document so links and headings render cleanly in
-  every mail client. The styling below gives the newspaper-brief look the
-  canonical example in step 4 is aiming for — a narrow column, generous
-  paragraph spacing, and obviously-clickable citations:
-
-  ```python
-  html_body = f"""<!DOCTYPE html>
-  <html><head><style>
-    body {{ font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 700px; margin: 0 auto; padding: 24px 16px; font-size: 16px; line-height: 1.6; color: #1a1a1a; }}
-    h1 {{ font-size: 22px; margin: 0 0 1em 0; font-weight: 600; }}
-    p {{ margin: 0 0 1.1em 0; }}
-    a {{ color: #1a5fb4; text-decoration: underline; }}
-  </style></head><body>
-  {html_body}
-  </body></html>"""
-  ```
-
-  If `markdown` isn't installed, fall back to `pip install --quiet markdown`
-  in the same shell before the render. Do not ship a digest as HTML-escaped
-  markdown — that defeats the purpose.
+- **Email** — load the `email-send` skill and send the digest markdown as the
+  `--body`/`--body-file`. The CLI renders that markdown into styled HTML
+  automatically and sends both parts, so the digest displays as a clean
+  newspaper-brief in every mail client — you do **not** render HTML or pass
+  `--html-file` yourself (it's only for custom styling). Do not send a text-only
+  email by stripping markdown, and do not attach a PDF or any other file.
 
 If a run is ever asked to save the digest to disk, write it to
 `context/workspace/generated/` — but disk output is in addition to inline delivery,
@@ -263,7 +239,7 @@ Before sending the digest, confirm in your reasoning:
 - [ ] Step 3 dedup ran against the per-topic Ledger path.
 - [ ] Step 5 appended shipped URLs to the ledger.
 - [ ] Each shipped item starts with a bolded lead sentence and ends with a `([Publisher](url), YYYY-MM-DD)` citation — no subheadings, bullets, or numbering between items.
-- [ ] If delivering by email, both `text_body` and `html_body` are set, no attachments, no PDF.
+- [ ] If delivering by email, the digest markdown is sent as the body (the CLI auto-renders HTML), no attachments, no PDF.
 
 If any box is empty, do not send the digest. Fix the gap or ship a shorter
 digest instead.

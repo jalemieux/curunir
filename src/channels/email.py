@@ -18,6 +18,7 @@ from src.channels._attachments import (
     _validate_attachment_metadata,
 )
 from src.channels._email_state import EmailState
+from src.channels._render import render_html
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.fastmail import FastmailClient, FastmailError
 from src.config import EmailChannelConfig
@@ -25,42 +26,6 @@ from src.config import EmailChannelConfig
 logger = logging.getLogger(__name__)
 
 _REPLY_PREFIXES = ("re:", "fw:", "fwd:")
-
-_HTML_WRAPPER = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-  body {{ font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 700px; margin: 0 auto; padding: 24px 16px; font-size: 16px; line-height: 1.6; color: #1a1a1a; }}
-  h1 {{ font-size: 24px; margin: 0 0 0.8em 0; font-weight: 600; }}
-  h2 {{ font-size: 20px; margin: 1.2em 0 0.6em 0; font-weight: 600; }}
-  h3 {{ font-size: 17px; margin: 1.1em 0 0.5em 0; font-weight: 600; }}
-  p {{ margin: 0 0 1.1em 0; }}
-  strong {{ font-weight: 600; }}
-  em {{ font-style: italic; }}
-  a {{ color: #1a5fb4; text-decoration: underline; }}
-  ul, ol {{ margin: 0 0 1.1em 0; padding-left: 1.6em; }}
-  li {{ margin: 0.2em 0; }}
-  code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; background: #f3f3f3; padding: 0.1em 0.3em; border-radius: 3px; }}
-  pre {{ background: #f3f3f3; padding: 12px; border-radius: 4px; overflow-x: auto; line-height: 1.4; }}
-  pre code {{ background: none; padding: 0; }}
-  blockquote {{ margin: 0 0 1.1em 0; padding: 0 1em; border-left: 3px solid #ddd; color: #555; }}
-</style></head><body>
-{body}
-</body></html>"""
-
-
-def _render_html(markdown_text: str) -> str:
-    """Render markdown to a styled standalone HTML document for email delivery.
-
-    Returns the raw markdown wrapped in a <pre> if the markdown library is
-    unavailable for any reason — caller treats an empty/None return as the
-    text-only fallback, but here we degrade gracefully to keep the body usable.
-    """
-    try:
-        import markdown as _md
-    except ImportError:
-        logger.warning("markdown library unavailable; falling back to text-only email")
-        return ""
-    rendered = _md.markdown(markdown_text, extensions=["extra", "sane_lists"])
-    return _HTML_WRAPPER.format(body=rendered)
 
 
 class EmailChannel:
@@ -399,7 +364,7 @@ class EmailChannel:
             "to": to,
             "subject": subject or "",
             "text_body": msg.content,
-            "html_body": _render_html(msg.content) or None,
+            "html_body": render_html(msg.content) or None,
             "attachment_paths": paths,
         }
         try:

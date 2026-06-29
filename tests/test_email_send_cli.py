@@ -83,7 +83,34 @@ def test_send_html_file(tmp_path):
         "send", "--to", "a@x.com", "--subject", "S", "--body", "t", "--html-file", str(f)
     )
     rc = cli.cmd_send(args, client_factory=lambda: fake)
+    # An explicit --html-file still wins (no auto-render override).
     assert rc == 0 and fake.sent["html_body"] == "<h1>hi</h1>"
+
+
+def test_send_auto_renders_html_when_no_html_file():
+    """Default proactive send auto-renders the markdown body to styled HTML."""
+    fake = FakeClient()
+    args = _parse(
+        "send", "--to", "a@x.com", "--subject", "S",
+        "--body", "# Title\n\nSome **bold** text.",
+    )
+    rc = cli.cmd_send(args, client_factory=lambda: fake)
+    assert rc == 0
+    html = fake.sent["html_body"]
+    assert html is not None
+    # Rendered markdown (not raw) and wrapped in the shared HTML shell.
+    assert "<strong>bold</strong>" in html
+    assert html.startswith("<!DOCTYPE html>")
+    assert "**bold**" not in html
+
+
+def test_send_empty_render_falls_back_to_text_only(monkeypatch):
+    """If render yields "" (e.g. markdown lib missing), html_body degrades to None."""
+    monkeypatch.setattr(cli, "render_html", lambda _text: "")
+    fake = FakeClient()
+    args = _parse("send", "--to", "a@x.com", "--subject", "S", "--body", "**hi**")
+    rc = cli.cmd_send(args, client_factory=lambda: fake)
+    assert rc == 0 and fake.sent["html_body"] is None
 
 
 def test_send_reports_message_id(capsys):

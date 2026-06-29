@@ -27,6 +27,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from src.channels._render import render_html  # noqa: E402
 from src.channels.fastmail import FastmailError, build_client_from_env  # noqa: E402
 
 
@@ -87,7 +88,14 @@ def cmd_send(args, *, client_factory=build_client_from_env) -> int:
 
     try:
         text_body = _read_file(args.body_file) if args.body_file else args.body
-        html_body = _read_file(args.html_file) if args.html_file else None
+        # An explicit --html-file wins; otherwise auto-render the markdown body to
+        # styled HTML at the transport boundary so proactive sends ship pretty HTML
+        # with zero skill work. `or None` mirrors the reply path: an empty render
+        # (e.g. markdown lib missing) degrades to a text-only send.
+        if args.html_file:
+            html_body = _read_file(args.html_file)
+        else:
+            html_body = render_html(text_body) or None
     except OSError as e:
         return _fail(f"could not read body file: {e}")
 

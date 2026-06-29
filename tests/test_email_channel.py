@@ -666,7 +666,7 @@ async def test_send_preserves_raw_markdown_in_text_body(email_config, in_queue):
 
 def test_render_html_no_raw_markdown_survives():
     """Rich markdown sample renders to real HTML — no raw syntax leaks through."""
-    from src.channels.email import _render_html
+    from src.channels._render import render_html
 
     sample = (
         "# Top heading\n\n"
@@ -677,7 +677,7 @@ def test_render_html_no_raw_markdown_survives():
         "Inline `code` here.\n\n"
         "```\nfenced block\n```\n"
     )
-    html = _render_html(sample)
+    html = render_html(sample)
 
     # Expected HTML tags
     assert "<h1>" in html and "Top heading" in html
