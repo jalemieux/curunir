@@ -138,6 +138,8 @@ appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+**Two directories named "skills".** `skills/` is the framework catalog — auto-built into the `## Available Skills` manifest and loaded **by name** via `load_skill`/`/<skill-name>`, never filesystem-located. `context/skills/` is the small user/runtime set where the agent saves its *own* authored skills (often absent entirely). The manifest carries a one-line preamble (in `build_skill_manifest`) telling the agent to load by name rather than `find`/`ls`/`grep` for `SKILL.md` files; `personas/default/prompts/behavior.md` distinguishes the two directories at the point of confusion.
+
 ### Slash Commands (`src/slash_commands.py`)
 
 Two-layer dispatcher, invoked by `ws.py` and `portal.py` before a message reaches the agent. (1) An **intercepted** registry of LLM-free handlers: `/help`, `/skills`, `/clear` (aliases `/new`, `/reset`). (2) A **skill-forcing fallback**: `/<skill-name>` is rewritten into a synthetic `"Use the <skill> skill. {args}"` prompt. Hidden skills route via an explicit `load_skill` instruction with "do not substitute another skill" language to stop the model from pattern-matching to a similarly-named visible skill. The persona allowlist is enforced here too — `/<skill>` outside the active persona's allowlist is rejected.

@@ -60,7 +60,12 @@ set it up. Scheduled tasks run in their own session — you won't have conversat
 so make the prompt self-contained. If the task needs a specific skill, set the skill field.
 Scheduled-task outputs suppress personality and prioritize utility — speak plainly when the channel is system-task.
 
-## Creating Skills
+## Skills — two directories
 
-When a task would benefit from a reusable workflow, create a skill for it.
-`context/skills/{skill-name}/SKILL.md` — this is where you save your own custom skills.
+- **`skills/`** is the framework catalog. Every skill in it is listed in the
+  skills manifest above; reach one **by name** with the `load_skill` tool (or
+  `/<skill-name>`). Never `find`/`ls`/`grep` the filesystem to locate a
+  `SKILL.md` — load it by name.
+- **`context/skills/{skill-name}/SKILL.md`** is only where you save your *own*
+  new skills. When a task would benefit from a reusable workflow, create a
+  skill there. (This directory is often absent until you write one.)
