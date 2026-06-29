@@ -20,6 +20,8 @@
   /* Read-panel chrome only. Theme tokens (--bg, --fg, --border, --panel,
      --muted, --accent, --ok, --err …) come from chat.css so the panels
      re-theme together with the chat when the theme toggles. */
+  /* Token-class palette for the Usage dashboard (input / output / cached). */
+  :root { --c-in: #6366f1; --c-out: #22c55e; --c-cache: #06b6d4; }
   * { box-sizing: border-box; }
   body {
     margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -128,6 +130,50 @@
   .mem-tree .dir { color: var(--fg); font-weight: 600; }
   .mem-view { flex: 1; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 
+  /* Usage dashboard */
+  .u-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  .u-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 16px; min-width: 150px; border-top: 3px solid var(--swatch, var(--border)); }
+  .u-card .label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .u-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; letter-spacing: -.5px;
+    font-variant-numeric: tabular-nums; }
+  .u-card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .u-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+  .u-sec { margin-bottom: 26px; }
+  .u-sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .u-sec-head h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); margin: 0; font-weight: 600; }
+  .u-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .u-legend .it { display: flex; align-items: center; gap: 6px; }
+  .u-chart { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 14px 10px; }
+  .u-bars { display: flex; align-items: flex-end; gap: 14px; height: 200px; }
+  .u-bcol { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+  .u-stack { width: 100%; max-width: 54px; display: flex; flex-direction: column-reverse;
+    border-radius: 4px 4px 0 0; overflow: hidden; }
+  .u-seg { width: 100%; }
+  .u-blabel { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .u-brk { display: flex; flex-direction: column; gap: 2px; }
+  .u-brow { display: grid; grid-template-columns: 210px 1fr 92px; align-items: center; gap: 12px;
+    padding: 7px 4px; border-bottom: 1px solid var(--border); }
+  .u-brow:last-child { border-bottom: none; }
+  .u-bname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .u-bname .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .u-chan { font-size: 10px; padding: 0 6px; border-radius: 8px; background: rgba(139,148,158,.18);
+    color: var(--muted); text-transform: uppercase; letter-spacing: .3px; flex-shrink: 0; }
+  .u-chan.sched { background: rgba(210,153,34,.18); color: var(--warn); }
+  .u-chan.cli { background: rgba(99,102,241,.18); color: var(--accent); }
+  .u-bbar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; background: var(--bg);
+    border: 1px solid var(--border); }
+  .u-bbar .u-seg { height: 100%; }
+  .u-btot { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .u-btot b { color: var(--fg); }
+  .u-toggle { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 7px; padding: 2px; }
+  .u-toggle button { background: transparent; border: none; color: var(--muted); font: inherit;
+    font-size: 12px; padding: 4px 11px; border-radius: 5px; cursor: pointer; }
+  .u-toggle button.on { background: var(--panel); color: var(--fg); border: 1px solid var(--border); }
+
   /* Balance Sheet dashboard */
   .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .pf-hero { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
@@ -231,16 +277,13 @@
     </aside>
     <div id="chat-root"></div>
   </div>
-  <div class="tab" id="tab-usage"><h2>Token Usage &amp; Cost</h2>
+  <div class="tab" id="tab-usage"><h2>Token Usage</h2>
     <div class="controls">
       <label>Window
         <select id="usage-window">
-          <option value="1d">1d</option><option value="7d" selected>7d</option>
-          <option value="30d">30d</option><option value="24h">24h</option>
+          <option value="24h">24h</option><option value="1d">1d</option>
+          <option value="7d" selected>7d</option><option value="30d">30d</option>
         </select>
-      </label>
-      <label>Group by
-        <select id="usage-by"><option value="model">model</option><option value="day">day</option></select>
       </label>
     </div>
     <div id="usage-body"></div>
@@ -343,27 +386,116 @@ tabs.forEach((b) => b.addEventListener("click", () => {
   if (loaders[name]) loaders[name]();
 }));
 
-// === Usage panel ===
+// === Usage dashboard ===
+// Tokens, not dollars: in/out/cache summary cards, a daily stacked-bar trend,
+// and a by conversation-or-job / model / day breakdown. All inline SVG-free
+// HTML bars so the console works offline (no chart CDN).
 document.getElementById("usage-window").addEventListener("change", loadUsage);
-document.getElementById("usage-by").addEventListener("change", loadUsage);
+const fmtTok = (n) => { n = n || 0; return n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : "" + n; };
+const uSum = (rows, c) => rows.reduce((a, r) => a + (r[c] || 0), 0);
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let usageData = null;     // { day, session, model } row arrays
+let usageKind = "session"; // active breakdown dimension
+
 async function loadUsage() {
   const el = document.getElementById("usage-body");
-  const window = document.getElementById("usage-window").value;
-  const by = document.getElementById("usage-by").value;
+  const win = document.getElementById("usage-window").value;
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const data = await apiGet("/api/usage", { window, by });
-    if (!data.rows.length) { el.innerHTML = '<span class="muted">No usage in window.</span>'; return; }
-    const key = by === "day" ? "day" : "model";
-    const cols = [["calls", fmtNum], ["prompt_tokens", fmtNum], ["completion_tokens", fmtNum],
-      ["cached_prompt_tokens", fmtNum], ["reasoning_tokens", fmtNum], ["cost_usd", fmtUsd], ["elapsed_sec", (n) => n.toFixed(1) + "s"]];
-    const head = `<tr><th>${key}</th>${cols.map(([c]) => `<th class="num">${c}</th>`).join("")}</tr>`;
-    const body = data.rows.map((r) =>
-      `<tr><td>${r[key]}</td>${cols.map(([c, f]) => `<td class="num">${f(r[c])}</td>`).join("")}</tr>`).join("");
-    const sum = (c) => data.rows.reduce((a, r) => a + (r[c] || 0), 0);
-    const tot = `<tr><td><b>TOTAL</b></td>${cols.map(([c, f]) => `<td class="num"><b>${f(sum(c))}</b></td>`).join("")}</tr>`;
-    el.innerHTML = `<table>${head}${body}${tot}</table>`;
-  } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+    const [day, session, model] = await Promise.all([
+      apiGet("/api/usage", { window: win, by: "day" }),
+      apiGet("/api/usage", { window: win, by: "session" }),
+      apiGet("/api/usage", { window: win, by: "model" }),
+    ]);
+    // Daily rows ascending by date for the trend + day breakdown.
+    const dayRows = (day.rows || []).slice().sort((a, b) => (a.day < b.day ? -1 : 1));
+    usageData = { day: dayRows, session: session.rows || [], model: model.rows || [] };
+    renderUsage(el);
+  } catch (e) { el.innerHTML = `<span class="err">${escHtml(e.message)}</span>`; }
+}
+
+function renderUsage(el) {
+  const { day, session } = usageData;
+  if (!day.length) { el.innerHTML = '<span class="muted">No usage in window.</span>'; return; }
+  const tIn = uSum(day, "prompt_tokens"), tOut = uSum(day, "completion_tokens");
+  const tCache = uSum(day, "cached_prompt_tokens"), tReason = uSum(day, "reasoning_tokens");
+  const tCalls = uSum(day, "calls");
+  const cachePct = tIn ? Math.round((tCache / tIn) * 100) : 0;
+
+  const card = (sw, label, value, sub) =>
+    `<div class="u-card"${sw ? ` style="--swatch:${sw}"` : ""}>
+       <div class="label">${sw ? `<span class="u-dot" style="background:${sw}"></span>` : ""}${label}</div>
+       <div class="value">${value}</div><div class="sub">${sub}</div></div>`;
+  const cards = `<div class="u-cards">
+    ${card("var(--c-in)", "Input tokens", fmtTok(tIn), `incl. ${fmtTok(tCache)} cached`)}
+    ${card("var(--c-out)", "Output tokens", fmtTok(tOut), tReason ? `+${fmtTok(tReason)} reasoning` : "&nbsp;")}
+    ${card("var(--c-cache)", "Cached input", fmtTok(tCache), `${cachePct}% of input cache-hit`)}
+    ${card("", "Calls", fmtNum(tCalls), `across ${session.length} conversation${session.length === 1 ? "" : "s"} / jobs`)}
+  </div>`;
+
+  // Daily stacked-bar trend. Total bar height = input + output; segments
+  // (bottom→top via column-reverse) are cached, non-cached input, output.
+  const maxDay = Math.max(...day.map((r) => r.prompt_tokens + r.completion_tokens), 1);
+  const seg = (v, tot, h, color) =>
+    `<div class="u-seg" style="height:${tot ? (v / tot) * h : 0}px;background:${color}" title="${fmtTok(v)}"></div>`;
+  const bars = day.map((r) => {
+    const nonCached = Math.max(0, r.prompt_tokens - r.cached_prompt_tokens);
+    const tot = r.prompt_tokens + r.completion_tokens;
+    const h = Math.round((tot / maxDay) * 170);
+    return `<div class="u-bcol"><div class="u-stack" style="height:${h}px">
+        ${seg(r.completion_tokens, tot, h, "var(--c-out)")}${seg(nonCached, tot, h, "var(--c-in)")}${seg(r.cached_prompt_tokens, tot, h, "var(--c-cache)")}
+      </div><div class="u-blabel">${escHtml((r.day || "").slice(5))}</div></div>`;
+  }).join("");
+  const trend = `<div class="u-sec">
+    <div class="u-sec-head"><h3>Daily tokens</h3>
+      <div class="u-legend">
+        <span class="it"><span class="u-dot" style="background:var(--c-in)"></span>input</span>
+        <span class="it"><span class="u-dot" style="background:var(--c-out)"></span>output</span>
+        <span class="it"><span class="u-dot" style="background:var(--c-cache)"></span>cached</span>
+      </div>
+    </div>
+    <div class="u-chart"><div class="u-bars">${bars}</div></div>
+  </div>`;
+
+  const breakdown = `<div class="u-sec">
+    <div class="u-sec-head"><h3>Breakdown</h3>
+      <div class="u-toggle" id="u-toggle">
+        <button data-k="session">Conversation / job</button>
+        <button data-k="model">Model</button>
+        <button data-k="day">Day</button>
+      </div>
+    </div>
+    <div class="u-brk" id="u-brk"></div>
+  </div>`;
+
+  el.innerHTML = cards + trend + breakdown;
+  el.querySelectorAll("#u-toggle button").forEach((b) =>
+    b.addEventListener("click", () => { usageKind = b.dataset.k; renderBreakdown(); }));
+  renderBreakdown();
+}
+
+function renderBreakdown() {
+  document.querySelectorAll("#u-toggle button").forEach((b) =>
+    b.classList.toggle("on", b.dataset.k === usageKind));
+  const rows = usageData[usageKind] || [];
+  const nameOf = (r) => usageKind === "session" ? (r.label || r.session)
+    : usageKind === "model" ? r.model : r.day;
+  const max = Math.max(...rows.map((r) => r.prompt_tokens + r.completion_tokens), 1);
+  const wseg = (v, tot, color) =>
+    `<div class="u-seg" style="width:${tot ? (v / tot) * 100 : 0}%;background:${color}" title="${fmtTok(v)}"></div>`;
+  const html = rows.map((r) => {
+    const nonCached = Math.max(0, r.prompt_tokens - r.cached_prompt_tokens);
+    const tot = r.prompt_tokens + r.completion_tokens;
+    const w = (tot / max) * 100;
+    const chan = usageKind === "session" && r.channel
+      ? `<span class="u-chan ${["sched", "cli"].includes(r.channel) ? r.channel : ""}">${escHtml(r.channel)}</span>` : "";
+    return `<div class="u-brow">
+      <div class="u-bname">${chan}<span class="t" title="${escHtml(nameOf(r))}">${escHtml(nameOf(r))}</span></div>
+      <div class="u-bbar" style="width:${w}%">${wseg(nonCached, tot, "var(--c-in)")}${wseg(r.cached_prompt_tokens, tot, "var(--c-cache)")}${wseg(r.completion_tokens, tot, "var(--c-out)")}</div>
+      <div class="u-btot"><b>${fmtTok(tot)}</b></div>
+    </div>`;
+  }).join("");
+  document.getElementById("u-brk").innerHTML = html;
 }
 
 // === Portfolio panel (single-page balance-sheet dashboard) ===

@@ -98,7 +98,7 @@ class UsageStore:
     def summary(
         self,
         window: timedelta,
-        group_by: Literal["model", "day"] = "model",
+        group_by: Literal["model", "day", "session"] = "model",
     ) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - window).isoformat()
         if group_by == "model":
@@ -107,6 +107,11 @@ class UsageStore:
         elif group_by == "day":
             group_expr = "substr(ts, 1, 10)"
             select_expr = f"{group_expr} AS day"
+        elif group_by == "session":
+            # Group by raw session_id; scheduled-job runs (each a unique
+            # ``sched:<id>:<ts>``) are collapsed under ``sched:<id>`` below.
+            group_expr = "session_id"
+            select_expr = "session_id"
         else:
             raise ValueError(f"unknown group_by: {group_by}")
 
@@ -129,8 +134,55 @@ class UsageStore:
         """
         with self._lock:
             cur = self._conn.execute(sql, (cutoff,))
-            return [dict(r) for r in cur.fetchall()]
+            rows = [dict(r) for r in cur.fetchall()]
+        if group_by == "session":
+            rows = _collapse_sessions(rows)
+        return rows
 
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+# Numeric columns summed when collapsing scheduled-job runs into one session.
+_SESSION_SUM_COLS = (
+    "calls", "prompt_tokens", "completion_tokens", "cached_prompt_tokens",
+    "reasoning_tokens", "image_tokens", "audio_tokens", "cost_usd", "elapsed_sec",
+)
+
+
+def normalize_session(session_id: str) -> str:
+    """Collapse a scheduled run's ``sched:<id>:<ts>`` to its job key ``sched:<id>``.
+
+    Every scheduler dispatch mints a unique session ``sched:<id>:<timestamp>``;
+    rolling those up by job id keeps a recurring task to a single breakdown row.
+    Non-scheduled session ids (chat UUIDs, ``cli``, email thread ids) pass
+    through unchanged.
+    """
+    if session_id.startswith("sched:"):
+        parts = session_id.split(":")
+        if len(parts) >= 3:
+            return ":".join(parts[:-1])
+    return session_id
+
+
+def _collapse_sessions(rows: list[dict]) -> list[dict]:
+    """Merge per-``session_id`` rows by :func:`normalize_session`.
+
+    Returns rows keyed ``session`` (the normalized id), summing token/cost/call
+    columns, sorted by total tokens (prompt + completion) descending.
+    """
+    merged: dict[str, dict] = {}
+    for r in rows:
+        key = normalize_session(r["session_id"])
+        m = merged.get(key)
+        if m is None:
+            m = {"session": key, **{c: 0 for c in _SESSION_SUM_COLS}}
+            merged[key] = m
+        for c in _SESSION_SUM_COLS:
+            m[c] += r.get(c) or 0
+    out = list(merged.values())
+    out.sort(
+        key=lambda r: r["prompt_tokens"] + r["completion_tokens"], reverse=True
+    )
+    return out
