@@ -119,10 +119,12 @@ def _is_mobile_ua(user_agent: str | None) -> bool:
 @app.get("/")
 async def root(request: Request, user=Depends(auth.optional_current_user)):
     if user is None:
-        # Public landing page — same file served at /curunir/ for direct linking.
+        # Public landing page. The finance assistant is the primary public face
+        # of curunir.ai, so unauthenticated `/` serves the finance landing; the
+        # research assistant lives at /assistant (and the legacy /curunir alias).
         # Unauthenticated phone visitors stay here rather than being bounced to
         # /m (which 401s) — that would trap them with no next step.
-        return FileResponse(_LANDING_DIR / "index.html")
+        return FileResponse(_FINANCE_DIR / "index.html")
     # Authenticated: redirect phones to the mobile UI unless ?desktop=1 forces
     # the desktop SPA.
     if "desktop" not in request.query_params and _is_mobile_ua(
@@ -159,15 +161,17 @@ async def healthz():
     return JSONResponse({"status": "ok" if ok else "degraded"})
 
 
-# Public landing page assets. Reports are mounted at /r/ so the in-page
-# absolute links resolve regardless of which URL serves the page.
-# /curunir/ is also kept as a stable alias for direct linking. The
-# `reports` subdir is checked separately so a landing checkout without
+# Research-assistant landing assets. Reports are mounted at /r/ so the in-page
+# absolute links resolve regardless of which URL serves the page (the finance
+# page reuses this same /r/ mount for its real memos). The research page is
+# served at /assistant; /curunir/ is kept as a legacy alias for direct linking.
+# The `reports` subdir is checked separately so a landing checkout without
 # reports (e.g. a fresh dev clone) doesn't crash uvicorn at startup.
 if _LANDING_DIR.exists():
     if (_LANDING_DIR / "reports").exists():
         app.mount("/r", StaticFiles(directory=_LANDING_DIR / "reports"), name="landing-reports")
     app.mount("/curunir", StaticFiles(directory=_LANDING_DIR, html=True), name="landing")
+    app.mount("/assistant", StaticFiles(directory=_LANDING_DIR, html=True), name="assistant")
 
 # Second landing for the GTM pipeline, aimed at solo operators (founders,
 # solopreneurs, in-house marketers running it alone). Beta form posts to
