@@ -271,7 +271,7 @@
   <nav>
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
-    <button data-tab="portfolio">Balance Sheet</button>
+    <button data-tab="portfolio" data-module="portfolio">Balance Sheet</button>
     <button data-tab="crm">CRM</button>
     <button data-tab="memory">Memory</button>
     <button data-tab="schedules">Schedules</button>
@@ -299,7 +299,7 @@
     </div>
     <div id="usage-body"></div>
   </div>
-  <div class="tab" id="tab-portfolio"><h2>Balance Sheet</h2><div id="portfolio-body"></div></div>
+  <div class="tab" id="tab-portfolio" data-module="portfolio"><h2>Balance Sheet</h2><div id="portfolio-body"></div></div>
   <div class="tab" id="tab-crm"><h2>CRM</h2><div id="crm-body"></div></div>
   <div class="tab" id="tab-memory"><h2>Memory</h2>
     <div class="mem-layout">
@@ -962,11 +962,22 @@ function setPersonaTag(persona) {
   }
 }
 
+// Persona-gated modules: remove every [data-module] tab + panel whose module
+// isn't enabled for the active persona. Universal tabs carry no data-module
+// and always render; Chat is default-active so removing a module never orphans
+// the view.
+function applyModules(modules) {
+  const enabled = new Set(modules || []);
+  document.querySelectorAll("[data-module]").forEach((el) => {
+    if (!enabled.has(el.dataset.module)) el.remove();
+  });
+}
+
 const conn = createConnection({
   url: wsUrl,
   onFrame: (msg) => {
     // The header (persona/model) is the page's concern, not the chat pane's.
-    if (msg && msg.type === "meta") { setPersonaTag(msg.persona); return; }
+    if (msg && msg.type === "meta") { setPersonaTag(msg.persona); applyModules(msg.modules); return; }
     chat && chat.handleFrame(msg);
   },
   onStatus: (state) => chat && chat.setStatus(state),
