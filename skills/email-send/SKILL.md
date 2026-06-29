@@ -57,17 +57,24 @@ python skills/email-send/email_send.py send \
     --body-file /tmp/email-body.txt
 ```
 
-## HTML body
+## HTML body (automatic)
 
-Provide a plain-text body plus an HTML file; the recipient's client chooses which
-to display. `--body`/`--body-file` is the text part, `--html-file` the HTML part.
+You do **not** need to render HTML yourself. By default the CLI renders the
+plain-text body — which it treats as markdown — into a styled HTML part and
+sends both, so headings, bold, links, and lists display cleanly in mail clients
+like Gmail. Just write markdown in `--body`/`--body-file`; the pretty HTML is
+produced at the transport boundary.
+
+Pass `--html-file` **only** when you need custom styling that the default
+renderer doesn't provide. When set, it overrides the auto-render: `--html-file`
+becomes the HTML part and `--body`/`--body-file` the text part.
 
 ```bash
 python skills/email-send/email_send.py send \
     --to recipient@example.com \
     --subject "Subject line" \
     --body-file /tmp/email-body.txt \
-    --html-file /tmp/email-body.html
+    --html-file /tmp/email-body.html  # optional — only for custom styling
 ```
 
 ## Multiple recipients, CC, BCC
