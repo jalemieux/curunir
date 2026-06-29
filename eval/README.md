@@ -13,6 +13,8 @@ suite, the report, and the conventions every suite follows. Per-persona specific
 
 - **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — ~34 tasks, market data + the owner's balance sheet.
 - **`eval/default/`** → the default persona; `default_tasks.py` is an empty `TASKS` placeholder to be populated from the capture-only prompts.
+- **`eval/skill_routing/`** → [`eval/skill_routing/README.md`](skill_routing/README.md) — routing + adherence for the `yfinance` / `fred` / `polymarket` live-data skills.
+- **`eval/reddit_research/`** → [`eval/reddit_research/README.md`](reddit_research/README.md) — routing + curl-vs-web_fetch method adherence for the `reddit-research` skill.
 
 ## The graded engine (`eval/harness/`)
 
