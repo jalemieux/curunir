@@ -148,6 +148,30 @@ def test_summary_session_sorted_by_tokens_desc(tmp_path):
     assert order == ["big", "mid", "small"]
 
 
+def test_summary_group_by_day_session_no_collapse(tmp_path):
+    """``day_session`` groups by (calendar-day, raw session_id) and — unlike
+    ``session`` — does NOT collapse scheduled runs, so each firing is its own
+    row for the By-day drill-down."""
+    store = UsageStore(tmp_path / "usage.db")
+    now = datetime.now(timezone.utc)
+    earlier = now - timedelta(days=1, hours=1)
+    # Two firings of the same job today + one yesterday + a normal convo today.
+    store.record(_record(ts=now, session_id="sched:digest:1000", prompt=100, completion=10))
+    store.record(_record(ts=now, session_id="sched:digest:2000", prompt=200, completion=20))
+    store.record(_record(ts=earlier, session_id="sched:digest:500", prompt=50, completion=5))
+    store.record(_record(ts=now, session_id="conv-a", prompt=10, completion=1))
+
+    rows = store.summary(timedelta(days=7), group_by="day_session")
+    # Each (day, raw session_id) is a distinct row — no sched collapse.
+    keys = {(r["day"], r["session_id"]) for r in rows}
+    assert len(rows) == 4
+    today = now.date().isoformat()
+    assert (today, "sched:digest:1000") in keys
+    assert (today, "sched:digest:2000") in keys
+    assert (today, "conv-a") in keys
+    assert (earlier.date().isoformat(), "sched:digest:500") in keys
+
+
 def test_summary_rejects_unknown_group_by(tmp_path):
     store = UsageStore(tmp_path / "usage.db")
     store.record(_record())

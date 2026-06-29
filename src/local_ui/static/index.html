@@ -168,6 +168,25 @@
   .u-bbar .u-seg { height: 100%; }
   .u-btot { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
   .u-btot b { color: var(--fg); }
+  .u-bcost { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  /* Cost-rate inputs: narrow, sit beside the window selector. */
+  .rate-grp { display: inline-flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    padding-left: 14px; margin-left: 4px; border-left: 1px solid var(--border); }
+  input.rate { width: 64px; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 13px; }
+  /* By-day drill-down: reuse the portfolio collapsible-group look. */
+  .u-day { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .u-dayhd { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 12px;
+    padding: 10px 14px; cursor: pointer; user-select: none; }
+  .u-dayhd:hover { background: var(--bg); }
+  .u-dayname { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .u-daytot { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .u-daytot b { color: var(--fg); }
+  .u-caret { color: var(--muted); transition: transform .15s; }
+  .u-day.open .u-caret { transform: rotate(90deg); }
+  .u-daykids { display: none; padding: 0 14px 6px; }
+  .u-day.open .u-daykids { display: block; }
+  .u-daykids .u-brow { grid-template-columns: 200px 1fr 92px; }
   .u-toggle { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
     border-radius: 7px; padding: 2px; }
   .u-toggle button { background: transparent; border: none; color: var(--muted); font: inherit;
@@ -296,6 +315,11 @@
           <option value="7d" selected>7d</option><option value="30d">30d</option>
         </select>
       </label>
+      <span class="rate-grp" title="Token prices in dollars per million tokens. Stored only in this browser; leave blank to hide cost.">
+        <label>Input $/M <input type="number" id="rate-in" class="rate" step="0.01" min="0" placeholder="0"></label>
+        <label>Cached $/M <input type="number" id="rate-cached" class="rate" step="0.01" min="0" placeholder="0"></label>
+        <label>Output $/M <input type="number" id="rate-out" class="rate" step="0.01" min="0" placeholder="0"></label>
+      </span>
     </div>
     <div id="usage-body"></div>
   </div>
@@ -406,22 +430,51 @@ document.getElementById("usage-window").addEventListener("change", loadUsage);
 const fmtTok = (n) => { n = n || 0; return n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : "" + n; };
 const uSum = (rows, c) => rows.reduce((a, r) => a + (r[c] || 0), 0);
 const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let usageData = null;     // { day, session, model } row arrays
+let usageData = null;     // { day, session, model, day_session } row arrays
 let usageKind = "session"; // active breakdown dimension
+
+// === Cost rates (browser-only) ===
+// User-supplied $/million-token prices, persisted in localStorage — no backend.
+// The dashboard shows dollars only once at least one rate is set; otherwise it
+// looks exactly as before (tokens-only).
+const RATE_KEY = "curunir.usage.rates";
+let usageRates = (() => { try { return JSON.parse(localStorage.getItem(RATE_KEY)) || {}; } catch { return {}; } })();
+const ratesActive = () => ((+usageRates.in || 0) + (+usageRates.cached || 0) + (+usageRates.out || 0)) > 0;
+// Cost for one row: non-cached input, cached input, and output (+reasoning,
+// billed at the output rate) each priced per million tokens.
+function rowCost(r) {
+  const nonCached = Math.max(0, (r.prompt_tokens || 0) - (r.cached_prompt_tokens || 0));
+  const out = (r.completion_tokens || 0) + (r.reasoning_tokens || 0);
+  return (nonCached * (+usageRates.in || 0) + (r.cached_prompt_tokens || 0) * (+usageRates.cached || 0) + out * (+usageRates.out || 0)) / 1e6;
+}
+const sumCost = (rows) => rows.reduce((a, r) => a + rowCost(r), 0);
+const fmtUsd = (n) => "$" + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Hydrate the inputs from storage and re-render the dashboard on edit.
+["in", "cached", "out"].forEach((k) => {
+  const el = document.getElementById("rate-" + k);
+  if (usageRates[k] != null) el.value = usageRates[k];
+  el.addEventListener("input", () => {
+    const v = parseFloat(el.value);
+    if (Number.isFinite(v) && v >= 0) usageRates[k] = v; else delete usageRates[k];
+    localStorage.setItem(RATE_KEY, JSON.stringify(usageRates));
+    if (usageData) renderUsage(document.getElementById("usage-body"));
+  });
+});
 
 async function loadUsage() {
   const el = document.getElementById("usage-body");
   const win = document.getElementById("usage-window").value;
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const [day, session, model] = await Promise.all([
+    const [day, session, model, daySession] = await Promise.all([
       apiGet("/api/usage", { window: win, by: "day" }),
       apiGet("/api/usage", { window: win, by: "session" }),
       apiGet("/api/usage", { window: win, by: "model" }),
+      apiGet("/api/usage", { window: win, by: "day_session" }),
     ]);
     // Daily rows ascending by date for the trend + day breakdown.
     const dayRows = (day.rows || []).slice().sort((a, b) => (a.day < b.day ? -1 : 1));
-    usageData = { day: dayRows, session: session.rows || [], model: model.rows || [] };
+    usageData = { day: dayRows, session: session.rows || [], model: model.rows || [], day_session: daySession.rows || [] };
     renderUsage(el);
   } catch (e) { el.innerHTML = `<span class="err">${escHtml(e.message)}</span>`; }
 }
@@ -443,6 +496,7 @@ function renderUsage(el) {
     ${card("var(--c-out)", "Output tokens", fmtTok(tOut), tReason ? `+${fmtTok(tReason)} reasoning` : "&nbsp;")}
     ${card("var(--c-cache)", "Cached input", fmtTok(tCache), `${cachePct}% of input cache-hit`)}
     ${card("", "Calls", fmtNum(tCalls), `across ${session.length} conversation${session.length === 1 ? "" : "s"} / jobs`)}
+    ${ratesActive() ? card("", "Cost", fmtUsd(sumCost(day)), "at your token rates") : ""}
   </div>`;
 
   // Daily stacked-bar trend. Total bar height = input + output; segments
@@ -475,6 +529,7 @@ function renderUsage(el) {
         <button data-k="session">Conversation / job</button>
         <button data-k="model">Model</button>
         <button data-k="day">Day</button>
+        <button data-k="day_session">By day</button>
       </div>
     </div>
     <div class="u-brk" id="u-brk"></div>
@@ -486,28 +541,75 @@ function renderUsage(el) {
   renderBreakdown();
 }
 
+// Shared segmented-bar cell. Returns the inner HTML of a ``.u-bbar``.
+const wseg = (v, tot, color) =>
+  `<div class="u-seg" style="width:${tot ? (v / tot) * 100 : 0}%;background:${color}" title="${fmtTok(v)}"></div>`;
+const barCell = (r, max) => {
+  const nonCached = Math.max(0, r.prompt_tokens - r.cached_prompt_tokens);
+  const tot = r.prompt_tokens + r.completion_tokens;
+  return `<div class="u-bbar" style="width:${(tot / max) * 100}%">${wseg(nonCached, tot, "var(--c-in)")}${wseg(r.cached_prompt_tokens, tot, "var(--c-cache)")}${wseg(r.completion_tokens, tot, "var(--c-out)")}</div>`;
+};
+const chanTag = (ch) => ch
+  ? `<span class="u-chan ${["sched", "cli"].includes(ch) ? ch : ""}">${escHtml(ch)}</span>` : "";
+// Right-hand total cell: tokens + (when rates are set) the row's cost.
+const totCell = (r) =>
+  `<div class="u-btot"><b>${fmtTok(r.prompt_tokens + r.completion_tokens)}</b>${ratesActive() ? `<div class="u-bcost">${fmtUsd(rowCost(r))}</div>` : ""}</div>`;
+
 function renderBreakdown() {
   document.querySelectorAll("#u-toggle button").forEach((b) =>
     b.classList.toggle("on", b.dataset.k === usageKind));
+  if (usageKind === "day_session") { renderByDay(); return; }
   const rows = usageData[usageKind] || [];
   const nameOf = (r) => usageKind === "session" ? (r.label || r.session)
     : usageKind === "model" ? r.model : r.day;
   const max = Math.max(...rows.map((r) => r.prompt_tokens + r.completion_tokens), 1);
-  const wseg = (v, tot, color) =>
-    `<div class="u-seg" style="width:${tot ? (v / tot) * 100 : 0}%;background:${color}" title="${fmtTok(v)}"></div>`;
   const html = rows.map((r) => {
-    const nonCached = Math.max(0, r.prompt_tokens - r.cached_prompt_tokens);
-    const tot = r.prompt_tokens + r.completion_tokens;
-    const w = (tot / max) * 100;
-    const chan = usageKind === "session" && r.channel
-      ? `<span class="u-chan ${["sched", "cli"].includes(r.channel) ? r.channel : ""}">${escHtml(r.channel)}</span>` : "";
+    const chan = usageKind === "session" ? chanTag(r.channel) : "";
     return `<div class="u-brow">
       <div class="u-bname">${chan}<span class="t" title="${escHtml(nameOf(r))}">${escHtml(nameOf(r))}</span></div>
-      <div class="u-bbar" style="width:${w}%">${wseg(nonCached, tot, "var(--c-in)")}${wseg(r.cached_prompt_tokens, tot, "var(--c-cache)")}${wseg(r.completion_tokens, tot, "var(--c-out)")}</div>
-      <div class="u-btot"><b>${fmtTok(tot)}</b></div>
+      ${barCell(r, max)}
+      ${totCell(r)}
     </div>`;
   }).join("");
   document.getElementById("u-brk").innerHTML = html;
+}
+
+// "By day" drill-down: each day is a collapsible header (day total tokens + $);
+// expanding reveals that day's conversations — raw, NOT collapsed, so every
+// scheduled firing is its own row (disambiguated by firing time).
+function renderByDay() {
+  const rows = usageData.day_session || [];
+  const byDay = new Map();
+  for (const r of rows) {
+    if (!byDay.has(r.day)) byDay.set(r.day, []);
+    byDay.get(r.day).push(r);
+  }
+  const days = [...byDay.keys()].sort().reverse();  // newest day first
+  const max = Math.max(...rows.map((r) => r.prompt_tokens + r.completion_tokens), 1);
+  const tot = (r) => r.prompt_tokens + r.completion_tokens;
+  const html = days.map((day) => {
+    const kids = byDay.get(day).slice().sort((a, b) => tot(b) - tot(a));
+    const dTokens = kids.reduce((a, r) => a + tot(r), 0);
+    const dCost = ratesActive() ? ` · ${fmtUsd(sumCost(kids))}` : "";
+    const childRows = kids.map((r) => {
+      const nm = (r.label || r.session_id) + (r.detail ? ` · ${r.detail}` : "");
+      return `<div class="u-brow">
+        <div class="u-bname">${chanTag(r.channel)}<span class="t" title="${escHtml(nm)}">${escHtml(nm)}</span></div>
+        ${barCell(r, max)}
+        ${totCell(r)}
+      </div>`;
+    }).join("");
+    return `<div class="u-day">
+      <div class="u-dayhd"><span class="u-caret">▸</span>
+        <span class="u-dayname">${escHtml(day)}</span>
+        <span class="u-daytot"><b>${fmtTok(dTokens)}</b>${dCost}</span></div>
+      <div class="u-daykids">${childRows}</div>
+    </div>`;
+  }).join("");
+  const brk = document.getElementById("u-brk");
+  brk.innerHTML = html || '<span class="muted">No usage in window.</span>';
+  brk.querySelectorAll(".u-dayhd").forEach((h) =>
+    h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
 }
 
 // === Portfolio panel (single-page balance-sheet dashboard) ===
