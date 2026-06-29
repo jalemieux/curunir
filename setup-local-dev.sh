@@ -41,9 +41,12 @@ PY
 echo "    deps installed"
 
 echo "==> PDF toolchain (report attachments)"
-# deep-research / investment-memo render markdown reports to PDF via pandoc.
-# pandoc's default engine is pdflatex; the Docker image ships texlive for it.
-# Match that locally, or PDF attachments silently fall back to .md.
+# deep-research / investment-memo render markdown reports to PDF via the shared
+# helper `python -m src.md2pdf`, which calls pandoc with --pdf-engine=xelatex
+# (broad Unicode, DejaVu font) and falls back to pdflatex. The Docker image
+# ships texlive-xetex + fonts-dejavu for the preferred path and
+# texlive-latex-recommended for the fallback. Match that locally, or PDF
+# attachments degrade (xelatex→pdflatex) or silently fall back to .md.
 if command -v pandoc >/dev/null 2>&1 && command -v pdflatex >/dev/null 2>&1; then
   echo "    pandoc + pdflatex present"
 elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
@@ -58,6 +61,18 @@ else
   echo "    skipped — install pandoc + a LaTeX engine manually:"
   echo "      Debian/Ubuntu: apt-get install pandoc texlive-latex-recommended lmodern"
   echo "      macOS:         brew install pandoc && brew install --cask basictex"
+fi
+
+# xelatex is src.md2pdf's preferred engine — broad Unicode coverage with a
+# DejaVu font. Non-fatal: the helper falls back to pdflatex when it's absent.
+if command -v xelatex >/dev/null 2>&1; then
+  echo "    xelatex present (preferred engine for src.md2pdf)"
+elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  echo "    note: xelatex not found — optional. For broad-Unicode PDFs install it:"
+  echo "      macOS: with basictex, run 'sudo tlmgr install xetex' (DejaVu fonts ship system-wide)"
+else
+  echo "    note: xelatex not found — optional (pdflatex fallback handles sanitized text):"
+  echo "      Debian/Ubuntu: apt-get install texlive-xetex fonts-dejavu"
 fi
 
 echo "==> portal/.env"
