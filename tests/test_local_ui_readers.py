@@ -83,6 +83,61 @@ def test_usage_summary_rejects_bad_window(config):
         readers.usage_summary(config, window="banana", by="model")
 
 
+def test_usage_summary_by_session_labels_conversations(config):
+    """``by=session`` rows are enriched with a human title + channel from the
+    conversation store, and scheduled jobs are labeled by job id."""
+    from src.agent import conversation_store
+
+    store = UsageStore(config.usage_db)
+    now = datetime.now(timezone.utc)
+    store.record(UsageRecord(ts=now, session_id="conv1", model="m",
+                             prompt_tokens=100, completion_tokens=10))
+    store.record(UsageRecord(ts=now, session_id="sched:digest:1700000000", model="m",
+                             prompt_tokens=50, completion_tokens=5))
+    store.close()
+    # A saved conversation gives conv1 a real title + channel.
+    conversation_store.save(
+        config.context_dir, "conv1",
+        [{"role": "user", "content": "Help me rebalance my portfolio"}],
+        channel="portal",
+    )
+
+    out = readers.usage_summary(config, window="7d", by="session")
+    rows = {r["session"]: r for r in out["rows"]}
+    assert rows["conv1"]["label"].startswith("Help me rebalance")
+    assert rows["conv1"]["channel"] == "portal"
+    # Scheduled job: collapsed to sched:digest, labeled by job id.
+    assert rows["sched:digest"]["label"] == "digest"
+    assert rows["sched:digest"]["channel"] == "sched"
+
+
+def test_usage_summary_session_fallback_labels(config):
+    """Sessions without a conversation record fall back to friendly/short labels."""
+    store = UsageStore(config.usage_db)
+    now = datetime.now(timezone.utc)
+    store.record(UsageRecord(ts=now, session_id="cli", model="m",
+                             prompt_tokens=100, completion_tokens=10))
+    store.record(UsageRecord(ts=now, session_id="deadbeefcafebabe1234", model="m",
+                             prompt_tokens=10, completion_tokens=1))
+    store.close()
+
+    out = readers.usage_summary(config, window="7d", by="session")
+    rows = {r["session"]: r for r in out["rows"]}
+    assert rows["cli"]["label"] == "CLI"
+    assert rows["cli"]["channel"] == "cli"
+    # Unknown chat session: short id prefix, generic channel.
+    assert rows["deadbeefcafebabe1234"]["label"] == "deadbeef"
+    assert rows["deadbeefcafebabe1234"]["channel"] == "web"
+
+
+def test_usage_summary_non_session_rows_unchanged(config):
+    """``by=model``/``by=day`` rows are not labeled (no session enrichment)."""
+    _seed_usage(config)
+    out = readers.usage_summary(config, window="7d", by="model")
+    assert "label" not in out["rows"][0]
+    assert "channel" not in out["rows"][0]
+
+
 # --- portfolio_overview ----------------------------------------------------
 
 

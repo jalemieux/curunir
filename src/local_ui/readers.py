@@ -20,6 +20,7 @@ from pathlib import Path
 
 from croniter import croniter
 
+from src.agent import conversation_store
 from src.config import AgentConfig
 from src.portfolio import engine
 from src.scheduler import _load_tasks
@@ -62,7 +63,53 @@ def usage_summary(
         rows = store.summary(td, group_by=by)
     finally:
         store.close()
+    if by == "session":
+        rows = _label_sessions(config, rows)
     return {"window": window, "by": by, "rows": rows, "available": True}
+
+
+# Fixed-session ids that have no conversation transcript get a friendly label.
+_FIXED_SESSION_LABELS = {
+    "cli": ("CLI", "cli"),
+    "local": ("Local", "local"),
+    "portal": ("Portal", "portal"),
+}
+
+
+def _session_label(session: str, convs: dict[str, dict]) -> tuple[str, str]:
+    """Map a (normalized) session id to a ``(label, channel)`` for the UI.
+
+    Scheduled jobs (``sched:<id>``) are labeled by job id; chat/email sessions
+    borrow their conversation's title + channel; the fixed cli/local/portal
+    slots get a friendly name; anything else shows a short id prefix.
+    """
+    if session.startswith("sched:"):
+        return session.split(":", 1)[1], "sched"
+    conv = convs.get(session)
+    if conv and conv.get("title"):
+        return conv["title"], conv.get("channel") or "web"
+    if session in _FIXED_SESSION_LABELS:
+        return _FIXED_SESSION_LABELS[session]
+    return session[:8], "web"
+
+
+def _label_sessions(config: AgentConfig, rows: list[dict]) -> list[dict]:
+    """Annotate each ``by=session`` row with ``label`` + ``channel`` in place.
+
+    Joins against the conversation store (read-only) so the breakdown shows
+    real titles. A missing/unreadable store just yields fallback labels.
+    """
+    convs: dict[str, dict] = {}
+    if getattr(config, "context_dir", None):
+        convs = {
+            c["session_id"]: c
+            for c in conversation_store.list_conversations(config.context_dir)
+        }
+    for r in rows:
+        label, channel = _session_label(r["session"], convs)
+        r["label"] = label
+        r["channel"] = channel
+    return rows
 
 
 def portfolio_overview(config: AgentConfig, year: int | None = None) -> dict:

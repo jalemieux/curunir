@@ -108,3 +108,48 @@ def test_summary_group_by_day(tmp_path):
     assert len(rows) == 2
     days = {r["day"] for r in rows}
     assert len(days) == 2
+
+
+def test_summary_group_by_session(tmp_path):
+    store = UsageStore(tmp_path / "usage.db")
+    now = datetime.now(timezone.utc)
+    store.record(_record(ts=now, session_id="conv-a", prompt=100, completion=10))
+    store.record(_record(ts=now, session_id="conv-a", prompt=50, completion=5))
+    store.record(_record(ts=now, session_id="conv-b", prompt=10, completion=1))
+    rows = {r["session"]: r for r in store.summary(timedelta(days=1), group_by="session")}
+    assert set(rows) == {"conv-a", "conv-b"}
+    assert rows["conv-a"]["calls"] == 2
+    assert rows["conv-a"]["prompt_tokens"] == 150
+    assert rows["conv-a"]["completion_tokens"] == 15
+
+
+def test_summary_session_collapses_scheduled_runs(tmp_path):
+    """Each scheduled run gets a unique ``sched:<id>:<ts>`` session; a job's
+    runs must roll up under ``sched:<id>`` so the breakdown shows one row."""
+    store = UsageStore(tmp_path / "usage.db")
+    now = datetime.now(timezone.utc)
+    store.record(_record(ts=now, session_id="sched:digest:1000", prompt=100, completion=10))
+    store.record(_record(ts=now, session_id="sched:digest:2000", prompt=200, completion=20))
+    store.record(_record(ts=now, session_id="sched:digest:3000", prompt=300, completion=30))
+    rows = {r["session"]: r for r in store.summary(timedelta(days=1), group_by="session")}
+    assert set(rows) == {"sched:digest"}
+    assert rows["sched:digest"]["calls"] == 3
+    assert rows["sched:digest"]["prompt_tokens"] == 600
+    assert rows["sched:digest"]["completion_tokens"] == 60
+
+
+def test_summary_session_sorted_by_tokens_desc(tmp_path):
+    store = UsageStore(tmp_path / "usage.db")
+    now = datetime.now(timezone.utc)
+    store.record(_record(ts=now, session_id="small", prompt=10, completion=1))
+    store.record(_record(ts=now, session_id="big", prompt=1000, completion=100))
+    store.record(_record(ts=now, session_id="mid", prompt=200, completion=20))
+    order = [r["session"] for r in store.summary(timedelta(days=1), group_by="session")]
+    assert order == ["big", "mid", "small"]
+
+
+def test_summary_rejects_unknown_group_by(tmp_path):
+    store = UsageStore(tmp_path / "usage.db")
+    store.record(_record())
+    with pytest.raises(ValueError):
+        store.summary(timedelta(days=1), group_by="banana")
