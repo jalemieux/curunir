@@ -22,6 +22,12 @@ memory for a skill that exists — a figure scraped from a web page or recalled
 from training, when a skill could have fetched it, is not trustworthy and not
 citable.
 
+For open-web lookups (news, filings discovery, anything not covered by a data
+skill), start with the `web-search` skill (Brave) — don't raw-`curl` or
+`web_fetch` Google/Yelp/Reddit, they block bots and return `403`/anti-bot
+pages. Brave already indexes their snippets; `web_fetch` only the specific
+result URLs that aren't blocked.
+
 **Position tracking is tool-backed.** The owner's holdings, cost basis, and
 net worth live in the `balance-sheet` capability, not in prose. Never state a
 net worth, account total, or portfolio rollup you computed by hand — load

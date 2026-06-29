@@ -138,6 +138,8 @@ appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+Because the manifest `description` is always in the system prompt (before any skill loads), it carries routing reflexes the agent must see *first*: e.g. `web-search` is flagged as the first stop for scraping-blocked consumer sites (Google/Yelp/Reddit return `403`/anti-bot pages), steering the agent to Brave instead of re-discovering the block via `web_fetch`/`curl` every session (#450). A `tests/test_skills.py` guard keeps that hint in the description.
+
 ### Slash Commands (`src/slash_commands.py`)
 
 Two-layer dispatcher, invoked by `ws.py` and `portal.py` before a message reaches the agent. (1) An **intercepted** registry of LLM-free handlers: `/help`, `/skills`, `/clear` (aliases `/new`, `/reset`). (2) A **skill-forcing fallback**: `/<skill-name>` is rewritten into a synthetic `"Use the <skill> skill. {args}"` prompt. Hidden skills route via an explicit `load_skill` instruction with "do not substitute another skill" language to stop the model from pattern-matching to a similarly-named visible skill. The persona allowlist is enforced here too — `/<skill>` outside the active persona's allowlist is rejected.

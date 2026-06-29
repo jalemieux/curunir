@@ -448,3 +448,41 @@ def test_memo_skill_documents_current_delegate_timeout(skill):
             f"skills/{skill}/SKILL.md still references the stale 300s delegate "
             f"timeout; the real limit is {timeout}s"
         )
+
+
+# Routing-hint guard (#450): the agent used to re-discover every session that
+# Google/Yelp/Reddit block scraping, burning ~5-6 tool calls before falling back
+# to Brave. The fix lands the hint where the agent always sees it — the always-on
+# skill-manifest `description`. These tests fail if that steering text is dropped.
+class TestWebSearchScrapingHint:
+    def _web_search_description(self) -> str:
+        skill_md = _REPO_ROOT / "skills" / "web-search" / "SKILL.md"
+        fm = parse_frontmatter(skill_md.read_text())
+        return fm["description"]
+
+    def test_description_names_blocked_consumer_sites(self):
+        """The manifest description must name the bot-blocked consumer sites so
+        routing steers to Brave before any web_fetch/curl."""
+        desc = self._web_search_description().lower()
+        assert "block" in desc
+        for site in ("yelp", "reddit"):
+            assert site in desc, f"web-search description should name {site}"
+
+    def test_manifest_carries_the_routing_hint(self):
+        """The built manifest (in every system prompt) carries the hint."""
+        manifest = build_skill_manifest([_REPO_ROOT / "skills"])
+        # The web-search row is present and carries the scraping-block steer.
+        web_row = next(
+            (l for l in manifest.splitlines() if l.startswith("| web-search ")),
+            None,
+        )
+        assert web_row is not None, "web-search row missing from manifest"
+        low = web_row.lower()
+        assert "block" in low and "yelp" in low and "reddit" in low
+
+    def test_skill_body_documents_blocked_sites_section(self):
+        """Once loaded, the skill body spells out the blocked domains + rationale."""
+        body = (_REPO_ROOT / "skills" / "web-search" / "SKILL.md").read_text().lower()
+        assert "block" in body
+        for site in ("yelp.com", "reddit.com"):
+            assert site in body, f"skill body should document {site}"

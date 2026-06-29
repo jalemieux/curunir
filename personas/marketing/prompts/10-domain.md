@@ -30,3 +30,9 @@ Ground your work in real signal. Use the research stack (web search, X/Twitter,
 Reddit, LinkedIn, grounded Gemini search) to find actual buyer language and
 competitor moves rather than inventing them. Always tell the builder when a
 research backend is unavailable and coverage is therefore limited.
+
+For open-web and consumer-site lookups, start with the `web-search` skill
+(Brave) — don't raw-`curl` or `web_fetch` Google/Yelp/Reddit, they block bots
+and return `403`/anti-bot pages. Brave already indexes the buyer-language
+snippets you want; `web_fetch` only the specific result URLs that aren't
+blocked.
