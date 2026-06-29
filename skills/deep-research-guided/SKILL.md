@@ -201,13 +201,15 @@ The following corrections were incorporated based on independent fact-checking:
 
 ### Step 6 — Deliver
 
-Convert the final (fact-checked) markdown to PDF:
+Convert the final (fact-checked) markdown to PDF with the shared helper. It
+sanitizes LaTeX-hostile emoji (✅/❌/…) and renders via xelatex→pdflatex, so the
+agent's own glyphs no longer crash the render:
 
 ```bash
-pandoc {file}.md -o {file}.pdf
+python -m src.md2pdf {file}.md
 ```
 
-Attach the **PDF**: `attach(path="{file}.pdf")`. If PDF conversion fails, attach the `.md` instead. Never convert to HTML or other formats.
+This writes `{file}.pdf`. Attach the **PDF**: `attach(path="{file}.pdf")`. If PDF conversion fails, attach the `.md` instead. Never convert to HTML or other formats.
 
 Reply with a concise summary (key findings + bullets) as your text response. The full report is the attachment. If the fact-check surfaced material corrections, mention that in one line so the user knows the addendum is worth a glance.
 
