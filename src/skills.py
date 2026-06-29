@@ -93,6 +93,10 @@ def build_skill_manifest(
 
     lines = [
         "## Available Skills",
+        "Load any skill below by name with the `load_skill` tool (or "
+        "`/<skill-name>`) — do not `find`/`ls`/`grep` the filesystem to "
+        "locate its `SKILL.md`.",
+        "",
         "| Skill | When to Use |",
         "|-------|-------------|",
     ]
