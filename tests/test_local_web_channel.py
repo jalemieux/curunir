@@ -111,12 +111,56 @@ def test_api_usage(client):
     assert body["rows"][0]["calls"] == 1
 
 
-def test_api_portfolio(client):
+def _portfolio_client(config):
+    """A client whose persona owns the portfolio module (balance-sheet)."""
+    config.skill_allowlist = ["balance-sheet"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    return TestClient(ch.app)
+
+
+def test_api_portfolio(config):
+    client = _portfolio_client(config)
     r = client.get("/api/portfolio", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200
     body = r.json()
     assert body["available"] is True
     assert body["networth"]["assets"] == 100
+
+
+def test_api_portfolio_404_when_module_disabled(config):
+    # Marketing-style allowlist: no balance-sheet → module off → 404.
+    config.skill_allowlist = ["crm", "research"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/portfolio", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_portfolio_404_for_default_persona(config):
+    # default persona: None allowlist → no modules → 404.
+    config.skill_allowlist = None
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/portfolio", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_portfolio_token_takes_precedence_over_404(config):
+    # Unauthenticated probe gets 401, not 404 — can't enumerate modules.
+    config.skill_allowlist = ["crm"]  # module disabled
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get("/api/portfolio").status_code == 401
 
 
 def test_api_crm(client):
@@ -361,6 +405,41 @@ def test_ws_meta_frame_carries_model_and_persona(config):
             assert meta["type"] == "meta"
             assert meta["model"] == "anthropic/x"
             assert meta["persona"] == "finance"
+
+
+def _meta_frame(ch):
+    with TestClient(ch.app) as c:
+        with c.websocket_connect(
+            f"/ws/browser?token={TOKEN}", headers=GOOD_ORIGIN
+        ) as ws:
+            json.loads(ws.receive_text())  # agent_status
+            return json.loads(ws.receive_text())
+
+
+def test_ws_meta_frame_lists_enabled_modules_for_finance(config):
+    config.skill_allowlist = ["balance-sheet", "research"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        persona="finance",
+    )
+    assert _meta_frame(ch)["modules"] == ["portfolio"]
+
+
+def test_ws_meta_frame_no_modules_for_marketing(config):
+    config.skill_allowlist = ["crm", "research"]  # no balance-sheet
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        persona="marketing",
+    )
+    assert _meta_frame(ch)["modules"] == []
+
+
+def test_ws_meta_frame_no_modules_for_default(config):
+    config.skill_allowlist = None  # default persona — full catalog, no allowlist
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+    )
+    assert _meta_frame(ch)["modules"] == []
 
 
 def test_ws_no_token_configured_allows_connection(config):

@@ -53,6 +53,7 @@ from src.channels.base import IncomingMessage, OutgoingMessage
 from src.channels.ws import _DEFAULT_LOCALHOST_ORIGINS, _origin_allowed
 from src.config import AgentConfig
 from src.local_ui import readers
+from src.modules import enabled_modules
 from src.schedule_store import db as sdb
 from src.schedule_store import engine as sengine
 
@@ -96,6 +97,10 @@ class LocalWebChannel:
             else _DEFAULT_LOCALHOST_ORIGINS
         )
         self.pairing_token = pairing_token
+        # Persona-gated UI modules (tab + read endpoints), derived once from
+        # the persona's skill allowlist. None/empty allowlist → no modules.
+        self._modules = enabled_modules(self.config.skill_allowlist)
+        self._module_panels = {m.panel_id for m in self._modules}
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
@@ -119,6 +124,10 @@ class LocalWebChannel:
         return request.headers.get("X-Curunir-Token") or request.query_params.get(
             "token"
         )
+
+    def _module_enabled(self, panel_id: str) -> bool:
+        """True if the named UI module is owned by the active persona."""
+        return panel_id in self._module_panels
 
     def _schedules_db(self) -> str:
         """Initialize (if needed) and return the schedule store path.
@@ -161,6 +170,8 @@ class LocalWebChannel:
         async def api_portfolio(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            if not self._module_enabled("portfolio"):
+                return JSONResponse({"error": "not found"}, status_code=404)
             return JSONResponse(readers.portfolio_overview(self.config))
 
         @app.get("/api/crm")
@@ -283,7 +294,12 @@ class LocalWebChannel:
         await ws.send_text(json.dumps({"type": "agent_status", "status": "online"}))
         # Surface the active model/persona so the console header can label them.
         await ws.send_text(json.dumps(
-            {"type": "meta", "model": self.model, "persona": self.persona}
+            {
+                "type": "meta",
+                "model": self.model,
+                "persona": self.persona,
+                "modules": [m.panel_id for m in self._modules],
+            }
         ))
 
         async def respond(frame: dict) -> None:
