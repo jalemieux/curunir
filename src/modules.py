@@ -34,6 +34,13 @@ MODULES: list[Module] = [
         panel_label="Balance Sheet",
         endpoint_prefixes=("/api/portfolio",),
     ),
+    Module(
+        name="crm",
+        gating_skill="crm",
+        panel_id="crm",
+        panel_label="CRM",
+        endpoint_prefixes=("/api/crm",),
+    ),
 ]
 
 
