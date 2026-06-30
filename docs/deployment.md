@@ -9,6 +9,13 @@ The portal is a separate service that runs on **render.com**. It has its
 own image (`ghcr.io/jalemieux/curunir-portal`) and is not part of the
 host-side SSH fan-out described below.
 
+This doc assumes a host that's already provisioned (Docker installed, a
+deploy user with docker-group access, GHCR credentials). For standing up a
+fresh/bare Ubuntu box from scratch — decommissioning prior services, SSH
+keys, the docker group, per-instance deploy-dir conventions, operational
+gotchas, and the auto-updater — see
+[`ubuntu-server-setup.md`](ubuntu-server-setup.md).
+
 ## Image tagging
 
 CI publishes both images on every push to `main` and on `v*` tags. Tags
