@@ -178,6 +178,8 @@ class LocalWebChannel:
         async def api_crm(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            if not self._module_enabled("crm"):
+                return JSONResponse({"error": "not found"}, status_code=404)
             return JSONResponse(readers.crm_overview(self.config))
 
         @app.get("/api/schedules")
