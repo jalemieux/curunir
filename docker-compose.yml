@@ -78,6 +78,17 @@ services:
       - ./workspace:/app/workspace         # Workspace persistence
       - ./context:/app/context             # Context/memory (sync with ./sync-context.sh before starting)
     restart: unless-stopped
+    # Cap the container's stdout/stderr json-file log. Without this the
+    # default driver grows unbounded under /var/lib/docker until it fills
+    # the host disk (the in-app RotatingFileHandler only bounds
+    # workspace/curunir.log, not the container log). Scoped here rather
+    # than a global /etc/docker/daemon.json so it travels with the compose
+    # file and survives `docker compose up -d` recreates (incl. auto-updaters).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"                      # ≈ 50MB ceiling per container
 
 volumes:
   portal-postgres-data:
