@@ -10,6 +10,52 @@ The running example is **llama.cpp `llama-server`** hosting
 `unsloth/Qwen3.6-35B-A3B-GGUF` (a MoE: 35B total params, ~3B active per
 token) on a 48 GB Apple Silicon Mac, with curunir running in Docker.
 
+## Building `llama-server` (Apple Silicon)
+
+There are no custom build flags to set. On macOS, llama.cpp's defaults
+already do the right thing — the plain build is the correct build:
+
+```bash
+cd ~/Dev/models/llama.cpp   # wherever your clone lives
+cmake -B build
+cmake --build build --config Release -j
+# binaries land in build/bin/ — llama-server, llama-bench, etc.
+```
+
+**Why no flags.** The defaults enable Metal, link Accelerate (BLAS), and
+detect CPU features automatically. On Apple Silicon the configure step finds
+`dotprod + i8mm + sme` and auto-compiles with
+`-mcpu=native+dotprod+i8mm+nosve+sme`. The **SME path** (Scalable Matrix
+Extension, exposed on M4/M5-class chips) matters: llama.cpp ships SME-tuned
+CPU kernels that get used automatically when the chip exposes it. Passing
+`GGML_METAL`/BLAS/`-march` flags by hand is redundant at best and can
+*disable* this auto-detection — leave them off.
+
+**Two benign configure-time warnings**, neither of which affects runtime
+throughput:
+
+| Warning | Meaning |
+| ------- | ------- |
+| `OpenMP not found` | irrelevant on this stack — Accelerate and Metal carry the compute |
+| `ccache not found` | only a rebuild-speedup tool; install it (`brew install ccache`) if you rebuild often |
+
+**Updating + rebuilding.** A rebuild takes ~2–5 min on this machine, so only
+rebuild when the source actually changed:
+
+```bash
+cd ~/Dev/models/llama.cpp
+git fetch origin
+git pull --ff-only origin master      # fast-forward only
+cmake -B build                        # re-run only if sources changed
+cmake --build build --config Release -j
+git rev-parse --short=9 HEAD          # record the commit you built
+```
+
+If the repo is already at the latest commit and `build/bin/llama-server`
+exists, the build is a no-op — skip it. **Never auto-stash:** if the working
+tree is dirty, stop and resolve it by hand rather than stashing, or you risk
+losing local work.
+
 ## Pointing curunir at the model
 
 Two `.env` keys:
