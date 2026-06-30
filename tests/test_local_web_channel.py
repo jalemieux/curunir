@@ -163,7 +163,17 @@ def test_api_portfolio_token_takes_precedence_over_404(config):
     assert client.get("/api/portfolio").status_code == 401
 
 
-def test_api_crm(client):
+def _crm_client(config):
+    """A client whose persona owns the crm module (crm skill)."""
+    config.skill_allowlist = ["crm"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    return TestClient(ch.app)
+
+
+def test_api_crm(config):
+    client = _crm_client(config)
     r = client.get("/api/crm", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200
     body = r.json()
@@ -172,7 +182,42 @@ def test_api_crm(client):
     assert body["leads"][0]["name"] == "Jane"
 
 
-def test_api_crm_requires_token(client):
+def test_api_crm_404_when_module_disabled(config):
+    # Finance-style allowlist: no crm → module off → 404.
+    config.skill_allowlist = ["balance-sheet", "research"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/crm", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_crm_404_for_default_persona(config):
+    # default persona: None allowlist → no modules → 404.
+    config.skill_allowlist = None
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/crm", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_crm_token_takes_precedence_over_404(config):
+    # Unauthenticated probe gets 401, not 404 — can't enumerate modules.
+    config.skill_allowlist = ["balance-sheet"]  # module disabled
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get("/api/crm").status_code == 401
+
+
+def test_api_crm_requires_token(config):
+    client = _crm_client(config)
     assert client.get("/api/crm").status_code == 401
 
 
@@ -425,13 +470,22 @@ def test_ws_meta_frame_lists_enabled_modules_for_finance(config):
     assert _meta_frame(ch)["modules"] == ["portfolio"]
 
 
-def test_ws_meta_frame_no_modules_for_marketing(config):
+def test_ws_meta_frame_lists_crm_module_for_marketing(config):
     config.skill_allowlist = ["crm", "research"]  # no balance-sheet
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
         persona="marketing",
     )
-    assert _meta_frame(ch)["modules"] == []
+    assert _meta_frame(ch)["modules"] == ["crm"]
+
+
+def test_ws_meta_frame_finance_excludes_crm(config):
+    config.skill_allowlist = ["balance-sheet", "research"]  # no crm
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        persona="finance",
+    )
+    assert "crm" not in _meta_frame(ch)["modules"]
 
 
 def test_ws_meta_frame_no_modules_for_default(config):
