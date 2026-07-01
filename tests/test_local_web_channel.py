@@ -389,6 +389,79 @@ def test_api_memory_file_traversal_rejected(client):
     assert r.status_code == 400
 
 
+# --- generated files (deliverables) ----------------------------------------
+
+
+@pytest.fixture
+def files_config(config):
+    gen = config.context_dir / "workspace" / "generated"
+    gen.mkdir(parents=True)
+    (gen / "memo.md").write_text("# Memo\nbody")
+    (gen / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    return config
+
+
+@pytest.fixture
+def files_client(files_config):
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=files_config, pairing_token=TOKEN
+    )
+    return TestClient(ch.app)
+
+
+def test_api_files_list(files_client):
+    r = files_client.get("/api/files", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    names = {f["name"] for f in r.json()}
+    assert names == {"memo.md", "report.pdf"}
+
+
+def test_api_files_list_requires_token(files_client):
+    assert files_client.get("/api/files").status_code == 401
+
+
+def test_api_files_download(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "memo.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 200
+    assert r.content == b"# Memo\nbody"
+    assert "attachment" in r.headers["content-disposition"]
+    assert "memo.md" in r.headers["content-disposition"]
+
+
+def test_api_files_download_requires_token(files_client):
+    r = files_client.get("/api/files/download", params={"path": "memo.md"})
+    assert r.status_code == 401
+
+
+def test_api_files_download_traversal_400(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "../../identity.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 400
+
+
+def test_api_files_download_missing_404(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "nope.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 404
+
+
+def test_api_files_download_token_precedes_error(files_client):
+    # Unauthenticated caller gets 401, not 400/404 — can't probe existence.
+    assert files_client.get(
+        "/api/files/download", params={"path": "../../identity.md"}
+    ).status_code == 401
+    assert files_client.get(
+        "/api/files/download", params={"path": "nope.md"}
+    ).status_code == 401
+
+
 def test_api_requires_token(client):
     assert client.get("/api/usage").status_code == 401
     assert client.get("/api/usage",
