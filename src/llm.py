@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -15,6 +16,59 @@ log = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2  # seconds
+
+# HTTP statuses that are always worth a re-request (rate-limit + transient 5xx).
+_RETRYABLE_STATUS = (429, 502, 503)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning("Invalid %s=%r; falling back to %s", name, raw, default)
+        return default
+
+
+# Client-side per-request timeout (seconds), forwarded to litellm/httpx. In
+# streaming mode httpx applies this as an inter-chunk *read* timeout, so it
+# bounds how long curunir waits on a silent/hung upstream (e.g. an OpenRouter
+# upstream idle timeout) before failing fast — letting the retry loop below
+# re-request instead of blocking on the provider's much longer idle limit.
+LLM_REQUEST_TIMEOUT = _env_float("LLM_REQUEST_TIMEOUT", 120.0)
+
+
+def _retryable_exception_types() -> tuple[type, ...]:
+    """Resolve retryable litellm exception classes, version-safely.
+
+    Uses ``getattr`` so a litellm release that renames one of these doesn't
+    break import. ``MidStreamFallbackError`` (raised when an upstream provider
+    goes idle mid-stream) is a ``ServiceUnavailableError`` subclass, so it's
+    covered by that entry without needing a direct reference to a symbol that
+    isn't exported at the top level.
+    """
+    candidates = (
+        getattr(litellm, "Timeout", None),
+        getattr(litellm, "APIConnectionError", None),
+        getattr(litellm, "ServiceUnavailableError", None),
+        getattr(litellm, "InternalServerError", None),
+    )
+    return tuple(c for c in candidates if isinstance(c, type))
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Whether an LLM call/stream failure is worth a re-request.
+
+    Retries on the explicit rate-limit/5xx statuses plus the timeout /
+    connection / service-unavailable exception classes — the last of which
+    includes LiteLLM's ``MidStreamFallbackError`` from an upstream idle timeout.
+    """
+    if getattr(exc, "status_code", None) in _RETRYABLE_STATUS:
+        return True
+    return isinstance(exc, _retryable_exception_types())
+
 
 _QUOTA_MSG = "I've hit my allocated quota — please try again later."
 _RATE_LIMIT_MSG = (
@@ -207,6 +261,7 @@ async def call_llm(
         "messages": messages,
         "max_tokens": 16000,
         "num_retries": 0,  # disable LiteLLM's internal retries; we handle retries below
+        "timeout": LLM_REQUEST_TIMEOUT,
     }
     if api_base:
         kwargs["api_base"] = api_base
@@ -248,22 +303,51 @@ async def call_llm(
             log.debug("  %s", _summarize(m))
 
     t0 = time.monotonic()
+
+    # Track whether any *visible* text delta has streamed to the user. Once it
+    # has, a mid-stream drop can't be retried — a re-request would duplicate
+    # everything already shown. `_emit` flips the flag as it forwards deltas.
+    emitted_any = False
+
+    async def _emit(piece: str) -> None:
+        nonlocal emitted_any
+        emitted_any = True
+        await on_text_delta(piece)
+
+    text: str | None = None
+    tc_by_index: dict[int, dict] = {}
+    usage = LLMUsage()
+    finish_reason: str | None = None
+
     for attempt in range(MAX_RETRIES):
         try:
             response = await litellm.acompletion(**kwargs)
+            if streaming:
+                # Drain the stream *inside* the retry loop: in streaming mode
+                # acompletion returns the iterator immediately without error and
+                # the real network read happens here, so a mid-stream drop (e.g.
+                # an upstream idle timeout) is only catchable — and retryable —
+                # from within the loop.
+                text, tc_by_index, usage, finish_reason = await _consume_stream(
+                    response, _emit
+                )
             break
         except Exception as exc:
-            status = getattr(exc, "status_code", None)
-            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+            # Never re-request once visible text has streamed — a retry would
+            # duplicate output. The reported upstream idle timeout fires before
+            # any content, so the pre-emission case is still covered.
+            if emitted_any:
+                raise
+            if _is_retryable(exc) and attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("LLM returned %s, retrying in %ss (attempt %d/%d)",
-                            status, delay, attempt + 1, MAX_RETRIES)
+                detail = getattr(exc, "status_code", None) or type(exc).__name__
+                log.warning("LLM call failed (%s), retrying in %ss (attempt %d/%d)",
+                            detail, delay, attempt + 1, MAX_RETRIES)
                 await asyncio.sleep(delay)
             else:
                 raise
 
     if streaming:
-        text, tc_by_index, usage, finish_reason = await _consume_stream(response, on_text_delta)
         usage.elapsed_sec = time.monotonic() - t0
         if not usage.model:
             usage.model = model
@@ -360,6 +444,7 @@ async def describe_image(
         "messages": messages,
         "max_tokens": 1000,
         "num_retries": 0,
+        "timeout": LLM_REQUEST_TIMEOUT,
     }
     if api_base:
         kwargs["api_base"] = api_base
@@ -369,11 +454,11 @@ async def describe_image(
             response = await litellm.acompletion(**kwargs)
             break
         except Exception as exc:
-            status = getattr(exc, "status_code", None)
-            if status in (429, 502, 503) and attempt < MAX_RETRIES - 1:
+            if _is_retryable(exc) and attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("Vision model returned %s, retrying in %ss (attempt %d/%d)",
-                            status, delay, attempt + 1, MAX_RETRIES)
+                detail = getattr(exc, "status_code", None) or type(exc).__name__
+                log.warning("Vision model call failed (%s), retrying in %ss (attempt %d/%d)",
+                            detail, delay, attempt + 1, MAX_RETRIES)
                 await asyncio.sleep(delay)
             else:
                 raise
