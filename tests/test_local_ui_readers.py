@@ -356,3 +356,101 @@ def test_memory_file_missing(config):
     _seed_memory(config)
     with pytest.raises(FileNotFoundError):
         readers.memory_file(config, "nope.md")
+
+
+# --- generated files (deliverables) ----------------------------------------
+
+
+def _seed_generated(config):
+    gen = config.context_dir / "workspace" / "generated"
+    gen.mkdir(parents=True)
+    (gen / "memo.md").write_text("# Memo\nbody")
+    (gen / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    return gen
+
+
+def test_generated_files_lists_newest_first(config):
+    import os
+    import time
+
+    gen = _seed_generated(config)
+    # Force distinct mtimes: memo older, report newer.
+    old = time.time() - 100
+    os.utime(gen / "memo.md", (old, old))
+    files = readers.generated_files(config)
+    names = [f["name"] for f in files]
+    assert names == ["report.pdf", "memo.md"]
+    memo = next(f for f in files if f["name"] == "memo.md")
+    assert memo["relpath"] == "memo.md"
+    assert memo["size"] == len("# Memo\nbody")
+    assert memo["mime"] == "text/markdown"
+    assert isinstance(memo["mtime"], (int, float))
+
+
+def test_generated_files_empty_when_dir_missing(config):
+    assert readers.generated_files(config) == []
+
+
+def test_generated_files_skips_dotfiles_and_pycache(config):
+    gen = _seed_generated(config)
+    (gen / ".hidden").write_text("x")
+    (gen / "__pycache__").mkdir()
+    (gen / "__pycache__" / "x.pyc").write_text("x")
+    names = {f["name"] for f in readers.generated_files(config)}
+    assert ".hidden" not in names
+    assert "x.pyc" not in names
+
+
+def test_generated_files_subdir_relpath(config):
+    gen = _seed_generated(config)
+    (gen / "sub").mkdir()
+    (gen / "sub" / "nested.txt").write_text("hi")
+    relpaths = {f["relpath"] for f in readers.generated_files(config)}
+    assert "sub/nested.txt" in relpaths
+
+
+def test_generated_file_path_resolves_real_file(config):
+    _seed_generated(config)
+    p = readers.generated_file_path(config, "memo.md")
+    assert p.is_file()
+    assert p.read_text() == "# Memo\nbody"
+
+
+def test_generated_file_path_nested(config):
+    gen = _seed_generated(config)
+    (gen / "sub").mkdir()
+    (gen / "sub" / "nested.txt").write_text("hi")
+    p = readers.generated_file_path(config, "sub/nested.txt")
+    assert p.read_text() == "hi"
+
+
+def test_generated_file_path_rejects_traversal(config):
+    _seed_generated(config)
+    (config.context_dir / "identity.md").write_text("secret")
+    with pytest.raises(ValueError):
+        readers.generated_file_path(config, "../../identity.md")
+
+
+def test_generated_file_path_rejects_absolute(config):
+    _seed_generated(config)
+    with pytest.raises(ValueError):
+        readers.generated_file_path(config, "/etc/passwd")
+
+
+def test_generated_file_path_missing(config):
+    _seed_generated(config)
+    with pytest.raises(FileNotFoundError):
+        readers.generated_file_path(config, "nope.md")
+
+
+def test_generated_file_path_rejects_symlink_escape(config):
+    gen = _seed_generated(config)
+    secret = config.context_dir / "identity.md"
+    secret.write_text("secret")
+    link = gen / "link"
+    try:
+        link.symlink_to(secret)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform")
+    with pytest.raises(ValueError):
+        readers.generated_file_path(config, "link")

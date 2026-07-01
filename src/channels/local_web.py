@@ -16,6 +16,8 @@ directly:
 - ``DELETE /api/schedules/{id}`` → remove a task (``engine.delete``)
 - ``GET /api/memory``     → ``context/memory/`` tree
 - ``GET /api/memory/file``→ one memory file (path-traversal guarded)
+- ``GET /api/files``      → ``context/workspace/generated/`` deliverables listing
+- ``GET /api/files/download`` → stream one deliverable (path-traversal guarded)
 - ``WS  /ws/browser``     → chat bridged straight into the agent queues
 
 Security mirrors ``ws.py``: an Origin allowlist (loopback by default) plus the
@@ -35,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -270,6 +273,32 @@ class LocalWebChannel:
                 return JSONResponse({"error": str(e)}, status_code=400)
             except FileNotFoundError as e:
                 return JSONResponse({"error": str(e)}, status_code=404)
+
+        @app.get("/api/files")
+        async def api_files(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return JSONResponse(readers.generated_files(self.config))
+
+        @app.get("/api/files/download")
+        async def api_files_download(
+            request: Request, path: str = Query(...)
+        ):
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            try:
+                target = readers.generated_file_path(self.config, path)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            except FileNotFoundError as e:
+                return JSONResponse({"error": str(e)}, status_code=404)
+            mime, _ = mimetypes.guess_type(target.name)
+            return FileResponse(
+                str(target),
+                filename=target.name,
+                media_type=mime or "application/octet-stream",
+                content_disposition_type="attachment",
+            )
 
         @app.websocket("/ws/browser")
         async def ws_browser(ws: WebSocket) -> None:
