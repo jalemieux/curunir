@@ -69,6 +69,15 @@ def test_tool_bad_args_returns_error_json(tmp_path):
     assert "error" in out
 
 
+def test_engine_exception_hint_points_at_crm_skill(tmp_path):
+    # Symmetric with portfolio: an engine-level failure signposts the `crm`
+    # skill so the model loads its SKILL.md instead of source-diving (#478).
+    cfg = _cfg(tmp_path)
+    out = json.loads(exec_crm({"action": "show", "args": {"id": "nope"}}, cfg))
+    assert "error" in out
+    assert "crm" in out["hint"]
+
+
 def test_tool_every_read_action_returns_valid_json(tmp_path):
     cfg = _cfg(tmp_path)
     exec_crm({"action": "add", "args": {"name": "Jane", "email": "jane@x.com"}}, cfg)

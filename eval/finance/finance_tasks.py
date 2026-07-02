@@ -484,6 +484,31 @@ TASKS: list[dict] = [
             )
         },
     },
+    {
+        "id": "F14",
+        "name": "unknown-syntax-loads-skill-not-source-dive",
+        "intent": "Unknown portfolio-tool syntax must route through the balance-sheet SKILL.md, not a framework source-dive (the #478 read-thrash: the agent grep/read src/portfolio and raw sqlite3 instead of reading the skill).",
+        "expected": "Loads the balance-sheet skill to learn the write syntax, then updates the Line of Credit balance — without ever grep/reading src/portfolio or shelling out to raw sqlite3.",
+        "tags": ["failure-mode", "source-dive", "tracking"],
+        # #478: when the agent doesn't know the portfolio tool's arg syntax for a
+        # liability write, its reflex was to reverse-engineer it — grep/read over
+        # src/portfolio/engine.py and raw `sqlite3` — a 27-iteration thrash. The
+        # documented path is the balance-sheet SKILL.md. Contract: load that skill
+        # by name; NEVER source-dive the engine or hit the store with sqlite3. The
+        # write's numeric result isn't graded (like F9) — the routing IS the test.
+        "prompt": "I just paid off my Line of Credit in full — set its balance to zero on my books.",
+        "max_loops": 15,
+        "grader": "action_used",
+        "spec": {
+            "require": ["load_skill: balance-sheet"],
+            # The source-dive signatures from #478: reading/grepping the engine
+            # source or its helper module, or bypassing the tool with raw sqlite3.
+            "forbid": ["src/portfolio", "sqlite3"],
+        },
+        # The clean fix took ~4 iterations; a correct-but-loopy run (the thrash)
+        # surfaces as PASS-SLOW rather than silently passing.
+        "budget": {"max_actions": 6},
+    },
 
     # ── 3. COMPOSITION POINTS — "where do capabilities meet?" ───────────────
     {

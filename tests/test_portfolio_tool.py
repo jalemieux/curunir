@@ -44,6 +44,17 @@ def test_tool_sell_unknown_lot_errors(tmp_path):
     assert "error" in out
 
 
+def test_engine_exception_hint_points_at_balance_sheet_skill(tmp_path):
+    # An engine-level failure (bad args reaching the handler) must signpost the
+    # owning skill so the model loads `balance-sheet`'s SKILL.md instead of
+    # source-diving to reverse-engineer the syntax (#478).
+    cfg = _cfg(tmp_path)
+    out = json.loads(exec_portfolio({"action": "sell", "args": {
+        "asset_id": "nope", "qty": 1, "price": 1, "trade_date": "2026-01-01"}}, cfg))
+    assert "error" in out
+    assert "balance-sheet" in out["hint"]
+
+
 def test_tool_snapshot_list_show_diff(tmp_path):
     cfg = _cfg(tmp_path)
     exec_portfolio({"action": "add",
