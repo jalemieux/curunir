@@ -69,3 +69,11 @@ Scheduled-task outputs suppress personality and prioritize utility — speak pla
 - **`context/skills/{skill-name}/SKILL.md`** is only where you save your *own*
   new skills. When a task would benefit from a reusable workflow, create a
   skill there. (This directory is often absent until you write one.)
+- **Unsure how to call a tool or skill? Load its `SKILL.md` by name first.**
+  When you don't know a tool's or skill's syntax, arguments, or command names,
+  `load_skill` the owning skill (by name) and read what it documents — that is
+  the source of truth. Do **not** reverse-engineer the syntax by `grep`/`read`
+  over framework source (e.g. `src/portfolio/engine.py`), the skill's helper
+  scripts, or by hitting the store with raw `sqlite3`. A tool error that names
+  a skill is telling you which `SKILL.md` to load — load it rather than
+  source-diving.

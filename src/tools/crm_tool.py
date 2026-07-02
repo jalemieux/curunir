@@ -47,4 +47,6 @@ def exec_crm(args: dict, config: AgentConfig) -> str:
         cdb.init_db(db)
         return json.dumps(handler(db, payload), default=str)
     except Exception as e:  # noqa: BLE001
-        return json.dumps({"error": str(e), "hint": "check action args; see SKILL.md"})
+        return json.dumps({"error": str(e), "hint": (
+            "load the crm skill (/crm) or read its SKILL.md for correct "
+            "action/args")})
