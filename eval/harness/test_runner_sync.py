@@ -181,6 +181,32 @@ async def test_reconciles_grader() -> bool:
     return ok
 
 
+async def test_anchor_equals_and_cleanup() -> bool:
+    """`anchor_equals` grades the STORE value (text-blind), and the runner's
+    per-task cleanup runs commands best-effort after grading (K1's mechanics)."""
+    ok = True
+    r = R.G.Result(final_text="anything — this grader must ignore the text")
+    st, why = R.G.anchor_equals(r, {"expected": "0 7 * * *", "equals": "0 7 * * *"})
+    ok &= check("store value matching `equals` passes", st == R.G.PASS, why)
+    st, why = R.G.anchor_equals(r, {"expected": "", "equals": "0 7 * * *"})
+    ok &= check("absent row (empty store value) fails", st == R.G.FAIL, why)
+    st, why = R.G.anchor_equals(r, {"equals": "0 7 * * *", "_anchor_error": "boom"})
+    ok &= check("unresolved anchor is ERROR, not FAIL", st == R.G.ERROR, why)
+
+    # Cleanup: the command runs (repo-root cwd), and a broken one is non-fatal.
+    import tempfile
+    marker = Path(tempfile.gettempdir()) / "curunir_eval_cleanup_marker"
+    marker.unlink(missing_ok=True)
+    R._run_cleanup({"cleanup": [
+        [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('x')"],
+        ["definitely-not-a-command-zzz"],  # must not raise
+    ]})
+    ok &= check("cleanup command executed", marker.exists())
+    marker.unlink(missing_ok=True)
+    ok &= check("task without cleanup is a no-op", R._run_cleanup({}) is None)
+    return ok
+
+
 async def test_timeout_interrupts_and_resyncs() -> bool:
     """On timeout the runner must interrupt out-of-band and still drain the one
     interrupted final — keeping the stream synced for the next task."""
@@ -239,11 +265,13 @@ async def main() -> None:
     b = await test_multi_turn_readback()
     print("test_reconciles_grader:")
     c = await test_reconciles_grader()
+    print("test_anchor_equals_and_cleanup:")
+    f = await test_anchor_equals_and_cleanup()
     print("test_timeout_interrupts_and_resyncs:")
     d = await test_timeout_interrupts_and_resyncs()
     print("test_socket_close_is_not_a_hang:")
     e = await test_socket_close_is_not_a_hang()
-    results = [a, b, c, d, e]
+    results = [a, b, c, d, e, f]
     print(f"\n{'ALL PASS' if all(results) else 'FAILURES ABOVE'}")
     sys.exit(0 if all(results) else 1)
 

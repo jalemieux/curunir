@@ -43,6 +43,46 @@ This suite is the discriminator for #457: on the pre-fix prompt the documented
 hunting should turn the S3/S4/S5 probes red (or PASS-SLOW); the prompt/manifest
 signpost should turn them green. Substring matching is case-sensitive, anchored
 on the canonical ``SKILL.md`` filename and the literal ``context/skills`` path.
+
+The K-family covers the FRAMEWORK KERNEL — the capabilities every persona
+rests on (scheduling, memory recall, delegation, attachments, slash dispatch,
+context retention). One deliberately-easy tripwire each, so a model or quant
+swap that breaks a basic path goes red instantly. K1 writes to the live
+``context/schedules.db`` and is verified by ``anchor_equals`` against the store
+(via ``_schedules.py`` — the same engine the ``schedule`` tool uses), then
+cleaned up by the runner's per-task ``cleanup``. K2/K3 read seeded memory and
+carry the ``fixture`` tag — run them with ``--fixture baseline``.
+
+The RS-family is the ROUTING SWEEP: one canonical trigger prompt per visible
+catalog skill not already covered by a dedicated suite, graded on
+``action_used: load_skill: <name>`` only. It answers exactly one question —
+"given natural phrasing, does the manifest description still route?" — which is
+the regression a model/quant swap or a description edit most commonly causes.
+Sweep tasks set ``allow_error: True`` and a small ``max_loops``-scaled timeout:
+routing is decided in the first action or two, so a run that gets interrupted
+mid-execution still grades cleanly (truncation is tolerated BY DESIGN; the
+sweep never grades output quality). A budget of ``max_actions: 4`` turns
+"routed, but explored first" into PASS-SLOW.
+
+Deliberately NOT in the sweep (so this list is a decision, not a gap):
+hidden skills (``deep-research``, ``podcast-ingest``, ``conversation-to-audio``
+— excluded from the manifest, so auto-routing to them is not a contract);
+``email-send`` (side-effecting: every sweep run would email the owner);
+``git-contribute`` (autonomous repo mutation); ``web-search`` /
+``reddit-research`` (own adherence suites); ``gemini-search`` (a backend whose
+trigger space deliberately overlaps web-search/youtube-transcript — no crisp
+single-skill routing contract); ``yfinance``/``fred``/``polymarket`` (the
+skill_routing suite); the gtm*/crm/finance orchestrators (persona suites);
+``dreaming``/``extract-learnings``/``onboarding`` (scheduler/first-run paths, no
+user-phrased trigger); ``superheroes``/``humanizer`` (S-family).
+
+Run everything (G + S + K + RS) for a model-swap smoke:
+
+    CURUNIR_PERSONA=default python run.py                      # SUT
+    python eval/default/run_default_evals.py --fixture baseline
+
+or across models: SUITE=eval/default/run_default_evals.py \
+EVAL_ARGS="--fixture baseline" eval/model_sweep.sh
 """
 
 TASKS: list[dict] = [
@@ -385,4 +425,217 @@ TASKS: list[dict] = [
             "forbid": ["write: skills/", "edit: skills/"],
         },
     },
+
+    # ── K-family: framework kernel — one tripwire per core capability ───────
+    # Deliberately easy; their job is to go red instantly when a model/quant
+    # swap breaks a basic path. See the module docstring for the fixture and
+    # cleanup mechanics.
+    {
+        "id": "K1",
+        "name": "kernel-schedule-persists",
+        "intent": (
+            "The scheduling write path: a natural-language recurring request "
+            "must land as a real row in schedules.db with the right cron — "
+            "verified in the STORE, not the reply (a readback can't fake it)."
+        ),
+        "expected": (
+            "Calls the schedule tool (create) and the store afterwards holds id "
+            "eval-k1-smoke with cron '0 7 * * *'; the row is deleted by cleanup."
+        ),
+        "tags": ["regression", "kernel", "scheduling"],
+        "prompt": (
+            "Set up a schedule for me: every day at 7:00 AM, run the prompt "
+            "'Say good morning.' Use exactly the id 'eval-k1-smoke' for it, "
+            "then confirm it's in place."
+        ),
+        "max_loops": 6,
+        "grader": "composite",
+        "spec": {
+            "all": [
+                {"label": "schedule-tool-called", "grader": "action_used",
+                 "spec": {"require": ["schedule: create"]}},
+                {"label": "row-persisted-with-cron", "grader": "anchor_equals",
+                 "spec": {"equals": "0 7 * * *",
+                          "anchor": {"cmd": ["python", "eval/default/_schedules.py",
+                                             "show", "eval-k1-smoke"],
+                                     "json_path": "cron"}}},
+            ]
+        },
+        "cleanup": [["python", "eval/default/_schedules.py", "delete", "eval-k1-smoke"]],
+    },
+    {
+        "id": "K2",
+        "name": "kernel-memory-recall",
+        "intent": (
+            "The memory read path: a personal fact that exists ONLY in seeded "
+            "context/memory/ must be retrieved, not guessed or refused."
+        ),
+        "expected": (
+            "Reads the fixture memory and answers 'Dr. Amara Okafor' (profile.md); "
+            "requires --fixture baseline."
+        ),
+        "tags": ["regression", "kernel", "memory", "fixture"],
+        "prompt": "What's the name of my dentist?",
+        "max_loops": 8,
+        "grader": "regex_present",
+        "spec": {"require": [r"Okafor"]},
+    },
+    {
+        "id": "K3",
+        "name": "kernel-delegate-handoff",
+        "intent": (
+            "The delegation seam: a value retrieved by a sub-agent must survive "
+            "the handoff back into the parent's final reply (classic "
+            "handoff-drop). The passphrase exists only in seeded memory."
+        ),
+        "expected": (
+            "Uses the delegate tool AND the final reply carries the sub-agent's "
+            "finding 'quartz-heron-42' verbatim; requires --fixture baseline."
+        ),
+        "tags": ["regression", "kernel", "delegation", "handoff-drop", "fixture"],
+        "prompt": (
+            "Use your delegate tool for this: have a sub-agent read "
+            "context/memory/vault.md and report back the delegation passphrase "
+            "it contains. Then tell me the passphrase."
+        ),
+        "max_loops": 8,
+        "grader": "composite",
+        "spec": {
+            "all": [
+                {"label": "actually-delegated", "grader": "action_used",
+                 "spec": {"require": ["delegate:"]}},
+                {"label": "value-survived-handoff", "grader": "regex_present",
+                 "spec": {"require": [r"quartz-heron-42"]}},
+            ]
+        },
+    },
+    {
+        "id": "K4",
+        "name": "kernel-attach-file",
+        "intent": (
+            "The attachment path: 'make me a file' must end in a real attach "
+            "action on the reply, not just prose describing a file."
+        ),
+        "expected": "Writes a small file and attaches it (an `attach:` action).",
+        "tags": ["regression", "kernel", "attachments"],
+        "prompt": (
+            "Write a two-line note that says 'model smoke test' into a text "
+            "file and attach the file to your reply."
+        ),
+        "max_loops": 6,
+        "grader": "action_used",
+        "spec": {"require": ["attach:"]},
+        "budget": {"max_actions": 5},
+    },
+    {
+        "id": "K5",
+        "name": "kernel-slash-dispatch",
+        "intent": (
+            "The slash-command layer: a /<skill> message must be rewritten into "
+            "a skill-forcing prompt the model then honors with load_skill."
+        ),
+        "expected": "The /humanizer message ends in `load_skill: humanizer`.",
+        "tags": ["regression", "kernel", "slash-dispatch"],
+        "prompt": (
+            "/humanizer It is important to note that this cutting-edge solution "
+            "leverages synergies to deliver best-in-class value."
+        ),
+        "max_loops": 5,
+        "grader": "action_used",
+        "spec": {"require": ["load_skill: humanizer"]},
+    },
+    {
+        "id": "K6",
+        "name": "kernel-context-retention",
+        "intent": (
+            "Multi-turn context integrity — the cheapest quant-degradation "
+            "canary: a value stated two turns ago must be recalled exactly, "
+            "with no tools involved."
+        ),
+        "expected": "Recalls bravo=42 from the prior turn (no tool calls needed).",
+        "tags": ["regression", "kernel", "context-retention"],
+        "prompts": [
+            "I'm going to give you three reference codes for later: alpha=17, "
+            "bravo=42, charlie=93. Just acknowledge them for now.",
+            "What was the bravo code I gave you earlier? Answer with just the number.",
+        ],
+        "max_loops": 4,
+        "grader": "regex_present",
+        "spec": {"require": [r"(?<!\d)42(?!\d)"]},
+        "budget": {"max_actions": 2},
+    },
 ]
+
+# ── RS-family: routing sweep — one trigger prompt per uncovered visible skill ─
+# Graded on routing ONLY (see module docstring): did the manifest description
+# carry this natural phrasing to `load_skill: <name>`? `forbid` entries mark
+# documented confusable pairs. `allow_error: True` + a small max_loops keeps the
+# sweep cheap: a run interrupted mid-execution still grades its routing.
+_ROUTING_SWEEP: list[dict] = [
+    {"skill": "deep-research-guided",
+     "prompt": ("Research how small manufacturers are adopting collaborative "
+                "robots and put together a short report — walk me through your "
+                "plan first.")},
+    {"skill": "fact-checker",
+     "prompt": ("Fact-check these two claims for me: (1) the Eiffel Tower is "
+                "about 330 meters tall; (2) the Great Wall of China is visible "
+                "from the Moon with the naked eye.")},
+    {"skill": "digest",
+     "prompt": "Give me today's digest of AI news — a short briefing, fresh stories only."},
+    {"skill": "gemini-image",
+     "prompt": ("Generate an image of a lighthouse on a rocky coast at dawn, "
+                "painterly style.")},
+    {"skill": "github",
+     "prompt": "Check GitHub and list the open issues on this project's repo.",
+     "forbid": ["load_skill: git-contribute"]},
+    {"skill": "linkedin-research",
+     "prompt": ("Pull the LinkedIn backgrounds of Figma's founders — current "
+                "roles and prior companies.")},
+    {"skill": "medical-research",
+     "prompt": ("What are the common side effects of metformin, and is there "
+                "anything serious to watch for?")},
+    {"skill": "playwright",
+     "prompt": ("Grab the text content of https://quotes.toscrape.com/js/ — "
+                "it's JavaScript-rendered, so you'll need a real browser, not a "
+                "plain fetch.")},
+    {"skill": "youtube-transcript",
+     "prompt": ("What does this YouTube video actually say? Summarize the "
+                "discussion: https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+     "forbid": ["load_skill: gemini-search"]},
+    {"skill": "introspect",
+     "prompt": "Check your own logs — any errors or weird behavior in the last day?"},
+    {"skill": "identity",
+     "prompt": "Show me your current identity configuration — who are you set up to be?"},
+    {"skill": "skill-factory",
+     "prompt": ("Create a new skill of your own for turning CSV data into "
+                "markdown tables.")},
+    {"skill": "xai-search",
+     "prompt": ("What are people on X/Twitter saying right now about the "
+                "latest Fed rate decision?")},
+]
+
+
+def _sweep_task(i: int, row: dict) -> dict:
+    spec: dict = {"require": [f"load_skill: {row['skill']}"]}
+    if row.get("forbid"):
+        spec["forbid"] = row["forbid"]
+    return {
+        "id": f"RS{i}",
+        "name": f"route-{row['skill']}",
+        "intent": (
+            f"Routing sweep: natural phrasing for the {row['skill']} capability "
+            "must route to it via the manifest — the regression a model/quant "
+            "swap or a description edit most commonly causes."
+        ),
+        "expected": f"Loads {row['skill']} by name; truncated execution is fine.",
+        "tags": ["regression", "routing-sweep", row["skill"]],
+        "prompt": row["prompt"],
+        "max_loops": 5,
+        "allow_error": True,  # routing is graded even if the run is interrupted
+        "grader": "action_used",
+        "spec": spec,
+        "budget": {"max_actions": 4},  # routed-but-explored surfaces as PASS-SLOW
+    }
+
+
+TASKS += [_sweep_task(i, row) for i, row in enumerate(_ROUTING_SWEEP, 1)]
