@@ -72,6 +72,15 @@ export function createChat(config) {
   }
   const md = (text) => (window.marked ? window.marked.parse(text) : text);
 
+  // Stable per-send id so the connection layer can buffer+replay a durable
+  // frame across a reconnect without the server processing it twice (the
+  // server dedups on client_msg_id — mirrors the email channel's stable
+  // Message-ID dedup).
+  const newClientMsgId = () =>
+    window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : "cid-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+
   // === Per-instance state ===
   let agentOnline = false;
   let staged = [];          // {filename, mime_type, data(base64), size}
@@ -564,9 +573,13 @@ export function createChat(config) {
   function launchSkill(slashText) {
     closeSkills();
     if (!agentOnline) return;
+    const delivered = connection.send({
+      command: "slash", text: slashText, session_id: getSessionId(),
+      client_msg_id: newClientMsgId(), durable: true,
+    });
+    if (!delivered) return;
     const el = appendMessage("user");
     setUserBody(el.querySelector(".body"), slashText);
-    connection.send({ command: "slash", text: slashText, session_id: getSessionId() });
     if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
     updateComposerMode();
   }
@@ -577,23 +590,32 @@ export function createChat(config) {
     if (!content && staged.length === 0) return;
     if (!agentOnline) return;
     if (content.startsWith("/") && staged.length === 0) {
+      // Durable: buffered + replayed if the socket is mid-reconnect. Only
+      // paint the optimistic bubble once delivery is guaranteed — a dropped
+      // frame must not leave a phantom message + spinner (issue #474).
+      const delivered = connection.send({
+        command: "slash", text: content, session_id: getSessionId(),
+        client_msg_id: newClientMsgId(), durable: true,
+      });
+      if (!delivered) return;
       const el = appendMessage("user");
       setUserBody(el.querySelector(".body"), content);
-      connection.send({ command: "slash", text: content, session_id: getSessionId() });
       inputEl.value = "";
       if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
       updateComposerMode();
       return;
     }
-    const el = appendMessage("user");
-    el.querySelector(".body").textContent = content;
-    renderAttachments(el, staged.map((a) => ({ filename: a.filename })));
-    connection.send({
+    const delivered = connection.send({
       content, session_id: getSessionId(),
+      client_msg_id: newClientMsgId(), durable: true,
       attachments: staged.length ? staged.map((a) => ({
         filename: a.filename, mime_type: a.mime_type, data: a.data,
       })) : null,
     });
+    if (!delivered) return;
+    const el = appendMessage("user");
+    el.querySelector(".body").textContent = content;
+    renderAttachments(el, staged.map((a) => ({ filename: a.filename })));
     inputEl.value = "";
     staged = [];
     renderStaged();
