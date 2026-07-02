@@ -136,6 +136,48 @@ async def test_extraction_pass_skips_fresh_conversation(agent_config, memory_dir
     assert cs.load(agent_config.context_dir, "fresh")["last_extracted_at"] is None
 
 
+@pytest.mark.asyncio
+async def test_periodic_extraction_survives_pass_error(agent_config, caplog):
+    """A filesystem error in the pass body (e.g. OSError from walking the
+    conversations dir) must be logged and swallowed so the loop lives to the
+    next tick instead of killing the run.py TaskGroup — parity with
+    periodic_dreaming's guard."""
+    import logging
+
+    from run import periodic_extraction
+
+    agent = Agent(agent_config)
+
+    calls = 0
+    raised = asyncio.Event()
+
+    async def boom(_agent):
+        nonlocal calls
+        calls += 1
+        raised.set()
+        raise OSError("disk full")
+
+    with patch("run._run_extraction_pass", side_effect=boom):
+        with caplog.at_level(logging.ERROR, logger="run"):
+            task = asyncio.create_task(periodic_extraction(agent, interval_sec=0))
+            try:
+                await asyncio.wait_for(raised.wait(), timeout=2.0)
+                # Let the loop spin a few more ticks; a bare raise would have
+                # already terminated the coroutine.
+                for _ in range(20):
+                    await asyncio.sleep(0)
+                assert not task.done()
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    assert calls >= 1
+    assert any("extraction pass failed" in r.message for r in caplog.records)
+
+
 # --- delete (clear/reset): force-extract, then remove the transcript ------
 
 @pytest.mark.asyncio
