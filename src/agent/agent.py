@@ -187,6 +187,42 @@ def _arg_parse_error_message(name: str, args_str: str, exc: Exception, max_chars
     return "\n".join(lines)
 
 
+def _stub_missing_tool_responses(
+    history: list[dict], tool_calls: list[dict], max_chars: int
+) -> None:
+    """Repair `history` so every `tool_call` id has a matching `role: tool` reply.
+
+    Defense-in-depth for the chat schema. The assistant `tool_calls` message is
+    appended to `history` *before* the tool batch runs, but if any exception
+    escapes the batch dispatch (e.g. a raise in the streaming callback that the
+    executor backstop doesn't cover) the loop unwinds with a dangling
+    `tool_calls` message and zero `role: tool` responses. `agent_worker` then
+    persists that transcript, and every subsequent turn fails provider
+    validation ("tool_use without tool_result") — permanently bricking the
+    session. Stubbing the unanswered ids keeps the persisted transcript
+    schema-valid so the conversation survives the escaped turn.
+
+    Idempotent: only ids without an existing `role: tool` message are stubbed,
+    so it's safe if the batch's append loop ran partially.
+    """
+    answered = {
+        m.get("tool_call_id")
+        for m in history
+        if m.get("role") == "tool"
+    }
+    for tool_call in tool_calls:
+        tc_id = tool_call.get("id")
+        if tc_id in answered:
+            continue
+        history.append({
+            "role": "tool",
+            "tool_call_id": tc_id,
+            "content": _cap_tool_result(
+                "Error: tool call did not complete (turn aborted).", max_chars
+            ),
+        })
+
+
 def _is_context_overflow(exc: Exception) -> bool:
     """Check if an exception is a context window / input length overflow."""
     if isinstance(exc, litellm.ContextWindowExceededError):
@@ -693,7 +729,18 @@ class Agent:
                             logger.info("  %s", line)
 
                         if on_tool_call:
-                            await on_tool_call(name, args_str)
+                            # Systemic backstop: the streaming callback is
+                            # best-effort UI notification. A raise here would
+                            # escape asyncio.gather (return_exceptions=False) and
+                            # kill the turn — the same failure class the executor
+                            # backstop below prevents. Log and swallow so a broken
+                            # callback never affects tool execution or the turn.
+                            try:
+                                await on_tool_call(name, args_str)
+                            except Exception as exc:
+                                logger.warning(
+                                    "[%s] on_tool_call callback raised: %s", sid, exc
+                                )
 
                         try:
                             args = json.loads(args_str)
@@ -742,20 +789,34 @@ class Agent:
                             "_tool_name": name,
                         }
 
-                    tool_messages = await asyncio.gather(
-                        *(_run_tool_call(tc) for tc in response.tool_calls)
-                    )
+                    # Defense-in-depth: the assistant tool_calls message is
+                    # already in history. If ANY exception (or BaseException,
+                    # e.g. CancelledError) escapes the batch dispatch before every
+                    # tool_call_id has a matching response, repair history first so
+                    # a persisted transcript is never schema-invalid (dangling
+                    # tool_calls with no tool_result bricks the session), then
+                    # re-raise. This backstops future raises anywhere in the batch,
+                    # not just the on_tool_call callback handled above.
+                    try:
+                        tool_messages = await asyncio.gather(
+                            *(_run_tool_call(tc) for tc in response.tool_calls)
+                        )
 
-                    for tool_msg in tool_messages:
-                        # After load_skill, check for required tools in frontmatter.
-                        # Done post-gather so concurrent skill loads apply in order.
-                        if tool_msg.pop("_tool_name", None) == "load_skill":
-                            required = _parse_skill_tools(tool_msg["content"])
-                            if required:
-                                self._session_tools.setdefault(session_id, set()).update(required)
-                                tool_schemas = self._get_tool_schemas(session_id)
-                                logger.info("[%s] skill loaded tools: %s", sid, required)
-                        history.append(tool_msg)
+                        for tool_msg in tool_messages:
+                            # After load_skill, check for required tools in frontmatter.
+                            # Done post-gather so concurrent skill loads apply in order.
+                            if tool_msg.pop("_tool_name", None) == "load_skill":
+                                required = _parse_skill_tools(tool_msg["content"])
+                                if required:
+                                    self._session_tools.setdefault(session_id, set()).update(required)
+                                    tool_schemas = self._get_tool_schemas(session_id)
+                                    logger.info("[%s] skill loaded tools: %s", sid, required)
+                            history.append(tool_msg)
+                    except BaseException:
+                        _stub_missing_tool_responses(
+                            history, response.tool_calls, self.config.max_tool_result_chars
+                        )
+                        raise
 
                     _trim_history(history, max_chars=self.config.max_history_chars)
                     messages = _assemble_messages()
