@@ -20,10 +20,22 @@ If `session_id` is missing on either frame (stale container build), the
 frame is dropped on the assumption that legacy single-session use is
 already on its way out — fanning out without a session_id was the
 source of the cross-tab bleed we are fixing.
+
+Heartbeat contract. Between agent turns the socket carries no application
+traffic, so Render's proxy hangs it up at its ~25–36s idle window and the
+container flaps (issue #481). To hold the socket open the server drives an
+application-level heartbeat: after accept it sends `{"type": "ping"}` every
+`PORTAL_WS_HEARTBEAT_SEC` (env-overridable, default 15s — inside the idle
+window with margin). The container answers `{"type": "pong"}`; both `ping`
+and `pong` are silent no-ops here (no routing, no `unknown type` warning).
+Data frames are used rather than protocol ping frames so the keepalive works
+regardless of whether the proxy counts WS control frames as activity.
 """
 
+import asyncio
 import json
 import logging
+import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -33,6 +45,28 @@ from portal.routing import routing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Interval between server→container heartbeat `ping` frames. Sits inside the
+# observed ~25–36s proxy idle window with margin; env-overridable so the
+# interval can be tightened without a code redeploy if the real timeout is
+# lower.
+PORTAL_WS_HEARTBEAT_SEC = float(os.environ.get("PORTAL_WS_HEARTBEAT_SEC", "15"))
+
+
+async def _heartbeat(ws: WebSocket) -> None:
+    """Send an application-level `ping` frame every heartbeat interval.
+
+    Runs until cancelled (on disconnect) or the send fails because the socket
+    closed. The interval is read from the module global on each tick so a
+    test can shorten it via monkeypatch.
+    """
+    try:
+        while True:
+            await asyncio.sleep(PORTAL_WS_HEARTBEAT_SEC)
+            await ws.send_text(json.dumps({"type": "ping"}))
+    except (WebSocketDisconnect, RuntimeError):
+        # Socket closed under us; the receive loop will unwind and clean up.
+        pass
 
 
 def _bearer_from_headers(ws: WebSocket) -> str | None:
@@ -60,6 +94,7 @@ async def ws_agent(ws: WebSocket) -> None:
     await routing.register_agent(user.id, ws)
     logger.info("agent connected", extra={"user_id": user.id})
 
+    heartbeat_task = asyncio.create_task(_heartbeat(ws))
     try:
         while True:
             raw = await ws.receive_text()
@@ -69,6 +104,10 @@ async def ws_agent(ws: WebSocket) -> None:
                 logger.warning("agent sent invalid json", extra={"user_id": user.id})
                 continue
             mtype = msg.get("type")
+            if mtype in ("ping", "pong"):
+                # Heartbeat frames (the container's `pong` reply, or a `ping`
+                # it might originate) — silent no-op, not an agent turn.
+                continue
             if mtype == "agent_message":
                 payload = msg.get("payload") or {}
                 session_id = payload.get("session_id")
@@ -114,5 +153,6 @@ async def ws_agent(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        heartbeat_task.cancel()
         await routing.unregister_agent(user.id, ws)
         logger.info("agent disconnected", extra={"user_id": user.id})

@@ -23,6 +23,15 @@ agent turn. An identical frame for the same session seen within
 `_DEDUP_WINDOW_SEC` is dropped. Control frames (interrupt, history,
 skills) are not deduped.
 
+Heartbeat contract. The portal server drives an application-level
+heartbeat (a `{"type": "ping"}` data frame every ~15s) to hold the
+socket open past the proxy's ~25–36s idle window — otherwise the
+connection carries no traffic between agent turns and flaps (issue
+#481). This channel answers each `ping` with `{"type": "pong"}` and
+treats a `pong` as a silent no-op; neither runs an agent turn. As
+belt-and-suspenders, `websockets.connect` is given explicit protocol-
+level `ping_interval`/`ping_timeout` keepalive too.
+
 Enabled when both CURUNIR_PORTAL_URL and CURUNIR_PORTAL_TOKEN are set.
 """
 
@@ -67,6 +76,13 @@ _STABLE_CONNECTION_SEC = 30.0
 # (text + attachments) is one frame, so this is generous; the oldest frames
 # are dropped first if it overflows.
 _OUTBOUND_BUFFER_MAX = 64
+
+# Protocol-level keepalive for the client socket (belt-and-suspenders
+# alongside the portal-driven application heartbeat). websockets sends a WS
+# ping every _WS_PING_INTERVAL and drops the socket if no pong arrives within
+# _WS_PING_TIMEOUT.
+_WS_PING_INTERVAL = 20.0
+_WS_PING_TIMEOUT = 20.0
 
 # Inbound dedup: an identical content frame for the same session seen
 # within this window is treated as a duplicate and dropped. The observed
@@ -124,6 +140,8 @@ class PortalChannel:
                     self.url,
                     additional_headers={"Authorization": f"Bearer {self.token}"},
                     max_size=32 * 1024 * 1024,
+                    ping_interval=_WS_PING_INTERVAL,
+                    ping_timeout=_WS_PING_TIMEOUT,
                 ) as ws:
                     logger.info("PortalChannel connected to %s", self.url)
                     connected_at = time.monotonic()
@@ -174,9 +192,11 @@ class PortalChannel:
             if clean_close:
                 logger.warning(
                     "Portal closed connection cleanly after %.1fs (no error "
-                    "code); will retry. Repeated short-lived closes mean the "
-                    "portal/proxy is hanging up right after accept — check the "
-                    "portal logs and replica count.", uptime,
+                    "code); will retry. The portal-driven heartbeat should "
+                    "hold the socket open between turns; repeated short-lived "
+                    "closes mean the heartbeat isn't reaching us (proxy "
+                    "stripping data frames, or PORTAL_WS_HEARTBEAT_SEC set "
+                    "above the proxy idle window).", uptime,
                 )
             # Only a connection that *stayed up* long enough is treated as
             # healthy and resets the backoff. A connect-then-immediate-close
@@ -197,7 +217,15 @@ class PortalChannel:
                 logger.warning("Portal sent invalid JSON; ignoring")
                 continue
             mtype = msg.get("type")
-            if mtype == "user_message":
+            if mtype == "ping":
+                # Portal-driven heartbeat — answer over the same socket so the
+                # connection carries traffic past the proxy idle window. Not an
+                # agent turn.
+                await self._send_pong()
+            elif mtype == "pong":
+                # A pong (portal echoing our own heartbeat) — silent no-op.
+                pass
+            elif mtype == "user_message":
                 await self._handle_user_message(msg.get("payload") or {})
             elif mtype == "history_request":
                 await self._handle_history_request(msg.get("payload") or {})
@@ -207,6 +235,16 @@ class PortalChannel:
                 await self._handle_conversations_request(msg.get("payload") or {})
             else:
                 logger.warning("Portal sent unknown type %r; ignoring", mtype)
+
+    async def _send_pong(self) -> None:
+        """Reply to a portal heartbeat `ping` with a `pong` data frame."""
+        if self._connection is None:
+            return
+        try:
+            await self._connection.send(json.dumps({"type": "pong"}))
+        except websockets.exceptions.ConnectionClosed:
+            self._connection = None
+            logger.warning("Portal closed while sending heartbeat pong")
 
     async def _handle_user_message(self, payload: dict) -> None:
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
