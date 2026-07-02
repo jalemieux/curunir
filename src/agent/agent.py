@@ -147,6 +147,46 @@ def _cap_tool_result(content: str, max_chars: int) -> str:
     return content[:max_chars] + marker
 
 
+def _arg_parse_error_message(name: str, args_str: str, exc: Exception, max_chars: int) -> str:
+    """Build a corrective, model-visible message for a tool call whose
+    ``arguments`` string wasn't valid JSON.
+
+    The thin "retry with well-formed JSON" hint was too easy to ignore — in
+    session e8ce5d0a the model abandoned a truncated ``portfolio set`` call and
+    escalated into ``bash`` + source-diving instead of re-emitting it. This
+    makes the correction actionable: it (1) echoes the *raw* argument string the
+    model actually sent (capped, so a huge blob can't re-bloat history) so a
+    truncation is visible at the cut point, (2) explicitly tells the model to
+    re-emit the *same* call rather than switch tools, and (3) appends the tool's
+    parameter schema so the retry matches the expected fields. We deliberately do
+    NOT try to "repair"/complete the truncated JSON — guessing the missing tail
+    could silently execute a half-specified write on a tool like ``portfolio``.
+    """
+    lines = [
+        f"Error: the arguments you sent for tool '{name}' were not valid JSON ({exc}).",
+        "",
+        "What you sent (raw — a JSON syntax error here usually means it was cut off):",
+        _cap_tool_result(args_str, max_chars),
+        "",
+        (
+            f"Re-emit the SAME `{name}` tool call with complete, well-formed JSON "
+            "arguments. Do not switch to another tool, and do not investigate this "
+            "failure — just resend the call with valid JSON."
+        ),
+    ]
+
+    schema = get_tool_schemas([name])
+    params = schema[0]["function"].get("parameters") if schema else None
+    if params:
+        lines += [
+            "",
+            f"Expected argument schema for `{name}`:",
+            json.dumps(params, indent=2),
+        ]
+
+    return "\n".join(lines)
+
+
 def _is_context_overflow(exc: Exception) -> bool:
     """Check if an exception is a context window / input length overflow."""
     if isinstance(exc, litellm.ContextWindowExceededError):
@@ -662,7 +702,9 @@ class Agent:
                             return {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
-                                "content": f"Error: tool arguments were not valid JSON ({exc}). Retry with well-formed JSON arguments.",
+                                "content": _arg_parse_error_message(
+                                    name, args_str, exc, self.config.max_tool_result_chars
+                                ),
                                 "_tool_name": name,
                             }
 
