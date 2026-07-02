@@ -39,6 +39,7 @@ import json
 import logging
 import mimetypes
 import os
+from collections import deque
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -64,6 +65,12 @@ logger = logging.getLogger(__name__)
 
 #: Fixed session id for the local console. Single-user, single-session.
 LOCAL_SESSION_ID = "local"
+
+#: Bound on the recent-``client_msg_id`` dedup ledger (see ``_seen_msg``). The
+#: browser buffers durable frames and replays them on reconnect, so the same
+#: frame can arrive twice; this keeps a small window of recently-seen ids to
+#: drop replays without letting the ledger grow unbounded.
+_RECENT_MSG_CAP = 256
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "local_ui" / "static"
 
@@ -109,6 +116,9 @@ class LocalWebChannel:
         self.conversations_provider = conversations_provider or (lambda: [])
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
+        # Bounded recent-``client_msg_id`` ledger for idempotent replay dedup.
+        self._recent_msg_ids: set[str] = set()
+        self._recent_msg_order: deque[str] = deque()
         self.app = self._build_app()
 
     # --- auth helpers ------------------------------------------------------
@@ -131,6 +141,25 @@ class LocalWebChannel:
     def _module_enabled(self, panel_id: str) -> bool:
         """True if the named UI module is owned by the active persona."""
         return panel_id in self._module_panels
+
+    def _seen_msg(self, client_msg_id: str | None) -> bool:
+        """Record a ``client_msg_id`` and report whether it was already seen.
+
+        The browser buffers durable chat/slash frames and replays them on
+        reconnect (the outbound delivery guarantee), so the same frame can be
+        received twice. This bounded ledger drops the replay so a message
+        isn't processed twice. A missing/empty id is never deduped — a client
+        that doesn't stamp ids keeps the old at-most-once-per-send behavior.
+        """
+        if not client_msg_id:
+            return False
+        if client_msg_id in self._recent_msg_ids:
+            return True
+        self._recent_msg_ids.add(client_msg_id)
+        self._recent_msg_order.append(client_msg_id)
+        if len(self._recent_msg_order) > _RECENT_MSG_CAP:
+            self._recent_msg_ids.discard(self._recent_msg_order.popleft())
+        return False
 
     def _schedules_db(self) -> str:
         """Initialize (if needed) and return the schedule store path.
@@ -419,6 +448,8 @@ class LocalWebChannel:
             return
 
         if command == "slash":
+            if self._seen_msg(payload.get("client_msg_id")):
+                return
             await self.in_queue.put(IncomingMessage(
                 content=payload.get("text", ""),
                 channel="local_web",
@@ -426,6 +457,9 @@ class LocalWebChannel:
                 reply_address={},
                 command="slash",
             ))
+            return
+
+        if self._seen_msg(payload.get("client_msg_id")):
             return
 
         decoded, err = _decode_attachments(payload.get("attachments"))

@@ -5,7 +5,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _is_context_overflow, _trim_history
+from src.agent.agent import (
+    Agent,
+    _arg_parse_error_message,
+    _cap_tool_result,
+    _estimate_chars,
+    _is_context_overflow,
+    _trim_history,
+)
 from src.llm import LLMResponse
 
 
@@ -179,12 +186,13 @@ class TestAgentHandle:
         assert agent.sessions["s1"][1].get("tool_calls") is not None
 
     async def test_unparseable_tool_arguments_do_not_crash(self, agent):
+        bad_args = '{"file_path": "/tmp/x", "content": "unterminated'
         bad_tool = LLMResponse(
             text=None,
             tool_calls=[{
                 "id": "call_bad",
                 "type": "function",
-                "function": {"name": "write", "arguments": '{"file_path": "/tmp/x", "content": "unterminated'},
+                "function": {"name": "write", "arguments": bad_args},
             }],
         )
         recovery = LLMResponse(text="recovered", tool_calls=None)
@@ -196,7 +204,15 @@ class TestAgentHandle:
         history = agent.sessions["s1"]
         tool_msg = next(m for m in history if m.get("role") == "tool")
         assert tool_msg["tool_call_id"] == "call_bad"
-        assert "not valid JSON" in tool_msg["content"]
+        content = tool_msg["content"]
+        assert "not valid JSON" in content
+        # The corrective message must be actionable: echo the raw arg the model
+        # sent (so a truncation is visible), name the tool, tell it to re-emit
+        # the same call, and include the tool's parameter schema.
+        assert bad_args in content
+        assert "write" in content
+        assert "re-emit" in content.lower()
+        assert "file_path" in content  # from the write tool's schema
 
     async def test_tool_executor_exception_does_not_crash(self, agent):
         # A tool executor raising an unanticipated exception must become a
@@ -1099,6 +1115,55 @@ class TestCapToolResult:
 
     def test_none_passthrough(self):
         assert _cap_tool_result(None, 100) is None
+
+
+class TestArgParseErrorMessage:
+    """Unit tests for the pure _arg_parse_error_message helper."""
+
+    def _make_exc(self, args_str):
+        try:
+            json.loads(args_str)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return exc
+        raise AssertionError("expected a JSON parse error")
+
+    def test_truncated_json_message_is_actionable(self):
+        args_str = '{"file_path": "/tmp/x", "content": "unterminated'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("write", args_str, exc, max_chars=1000)
+        # Parse error surfaced
+        assert "not valid JSON" in msg
+        # Raw arg the model sent is echoed so the cut point is visible
+        assert args_str in msg
+        # Tool named + explicit re-emit-the-same-call instruction
+        assert "write" in msg
+        assert "re-emit" in msg.lower()
+        assert "do not switch" in msg.lower()
+
+    def test_known_tool_includes_schema_fields(self):
+        args_str = '{"action": "set", "args": {"id": 1, "cr'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("portfolio", args_str, exc, max_chars=2000)
+        # The tool's parameter schema (field names) is appended
+        assert "action" in msg
+        assert "args" in msg
+
+    def test_oversized_args_str_is_truncated(self):
+        args_str = '{"x": "' + ("y" * 500)  # unterminated + long
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("write", args_str, exc, max_chars=100)
+        # The echoed raw argument respects the cap
+        assert "truncated" in msg
+        assert ("y" * 500) not in msg
+
+    def test_unknown_tool_omits_schema_no_crash(self):
+        args_str = '{"foo": "bar'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("no_such_tool", args_str, exc, max_chars=1000)
+        # No crash; still actionable, just no schema section
+        assert "not valid JSON" in msg
+        assert args_str in msg
+        assert "no_such_tool" in msg
 
 
 class TestToolResultCapInHistory:

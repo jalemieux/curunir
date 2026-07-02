@@ -16,6 +16,16 @@ The container dials *out* to the portal on startup. The portal multiplexes
 each browser session to the matching container. See `docs/superpowers/plans/2026-04-30-curunir-portal.md`
 for the full design.
 
+The container↔portal socket carries no traffic between agent turns, so a
+proxy idle timeout (Render's is ~25–36s) would otherwise hang it up and the
+container would flap. The portal server drives an **application-level
+heartbeat** — a `{"type": "ping"}` data frame every `PORTAL_WS_HEARTBEAT_SEC`
+(default 15s), which the container answers with `{"type": "pong"}` — to keep
+the socket alive. Data frames (not just protocol pings) are used so the
+keepalive works regardless of whether the proxy counts WS control frames as
+activity. Tighten `PORTAL_WS_HEARTBEAT_SEC` (no code change needed) if the
+real idle window turns out lower than 15s.
+
 ## Browser UIs: desktop and mobile
 
 The portal serves two browser front-ends over the **same** `/ws/browser`

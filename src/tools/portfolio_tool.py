@@ -63,4 +63,6 @@ def exec_portfolio(args: dict, config: AgentConfig) -> str:
         pdb.init_db(db)
         return json.dumps(handler(db, payload), default=str)
     except Exception as e:  # noqa: BLE001
-        return json.dumps({"error": str(e), "hint": "check action args; see SKILL.md"})
+        return json.dumps({"error": str(e), "hint": (
+            "load the balance-sheet skill (/balance-sheet) or read its SKILL.md "
+            "for correct action/args")})
