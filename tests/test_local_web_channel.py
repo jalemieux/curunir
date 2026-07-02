@@ -660,6 +660,54 @@ async def test_skills_snapshot_echoes_requested_session_id(config):
     assert sent[0]["session_id"] == "abc-123"
 
 
+# --- client_msg_id idempotency (durable-frame replay dedup) ----------------
+
+
+@pytest.mark.asyncio
+async def test_duplicate_client_msg_id_enqueues_once(channel):
+    # The browser buffers durable frames and replays them on reconnect, so a
+    # frame can arrive twice. A repeated client_msg_id must enqueue only once.
+    frame = {"content": "hi", "client_msg_id": "abc"}
+    await channel._handle_inbound_frame(frame)
+    await channel._handle_inbound_frame(frame)
+    assert channel.in_queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_distinct_client_msg_ids_enqueue_twice(channel):
+    await channel._handle_inbound_frame({"content": "a", "client_msg_id": "id1"})
+    await channel._handle_inbound_frame({"content": "b", "client_msg_id": "id2"})
+    assert channel.in_queue.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_client_msg_id_always_enqueues(channel):
+    # Back-compat: a client that doesn't stamp ids is never deduped.
+    await channel._handle_inbound_frame({"content": "a"})
+    await channel._handle_inbound_frame({"content": "a"})
+    assert channel.in_queue.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_slash_client_msg_id_enqueues_once(channel):
+    frame = {"command": "slash", "text": "/skills", "client_msg_id": "s1"}
+    await channel._handle_inbound_frame(frame)
+    await channel._handle_inbound_frame(frame)
+    assert channel.in_queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_msg_id_set_is_bounded(channel):
+    # The dedup ledger is bounded; old ids age out so it can't grow unbounded.
+    from src.channels.local_web import _RECENT_MSG_CAP
+
+    for i in range(_RECENT_MSG_CAP + 50):
+        await channel._handle_inbound_frame(
+            {"content": "x", "client_msg_id": f"id{i}"}
+        )
+    assert len(channel._recent_msg_ids) <= _RECENT_MSG_CAP
+
+
 # --- send() ----------------------------------------------------------------
 
 
