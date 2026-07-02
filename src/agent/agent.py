@@ -530,8 +530,28 @@ class Agent:
                 "llm_elapsed_sec": round(total_llm_elapsed, 2),
                 "wall_elapsed_sec": round(wall, 2),
                 "completion_tps": round(tps, 1),
-                "iterations": 0,  # filled at return site
+                "iterations": 0,  # filled by _finish
             }
+
+        def _finish(result_text: str, iterations: int, *, record_reply: bool = False) -> str:
+            """Single turn-epilogue for every return from the loop.
+
+            Records accumulated stats (stamping the final iteration count) and
+            returns ``result_text``. System-task session cleanup is NOT here —
+            it lives in the ``finally`` so it also runs on an uncaught re-raise.
+
+            ``record_reply=True`` appends ``result_text`` as an assistant turn
+            first — used on error paths so the transcript isn't left ending on
+            an unanswered user message. Success paths append their own reply
+            before calling this (the attachment-only case appends "" but returns
+            a different string), so they pass ``record_reply=False``.
+            """
+            if record_reply:
+                history.append({"role": "assistant", "content": result_text})
+            _finalize_stats()
+            if metadata and "stats" in metadata:
+                metadata["stats"]["iterations"] = iterations
+            return result_text
 
         async def _call_and_record():
             """Single LLM call + usage accumulation + context-overflow recovery.
@@ -623,17 +643,11 @@ class Agent:
                 if cancel_event.is_set():
                     logger.info("[%s] interrupted by user after %d iteration(s)", sid, iteration)
                     history.append({"role": "assistant", "content": "(interrupted)"})
-                    _finalize_stats()
-                    if metadata and "stats" in metadata:
-                        metadata["stats"]["iterations"] = iteration
-                    if system_task_prompt:
-                        self.sessions.pop(session_id, None)
-                        self._session_prompts.pop(session_id, None)
-                    return "(interrupted)"
+                    return _finish("(interrupted)", iteration)
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 response, err = await _call_and_record()
                 if err is not None:
-                    return err
+                    return _finish(err, iteration + 1, record_reply=True)
 
                 # Empty response (no text, no tool_calls): a transient model
                 # glitch that otherwise kills the session. Retry the same call
@@ -646,7 +660,7 @@ class Agent:
                     )
                     response, err = await _call_and_record()
                     if err is not None:
-                        return err
+                        return _finish(err, iteration + 1, record_reply=True)
                 if not response.tool_calls and not response.text:
                     logger.warning(
                         "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
@@ -657,7 +671,7 @@ class Agent:
                     messages = _assemble_messages()
                     response, err = await _call_and_record()
                     if err is not None:
-                        return err
+                        return _finish(err, iteration + 1, record_reply=True)
 
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -765,37 +779,25 @@ class Agent:
                 if response.text:
                     logger.info("[%s] agent done after %d iteration(s), response length: %d chars", sid, iteration + 1, len(response.text))
                     history.append({"role": "assistant", "content": response.text})
-                    _finalize_stats()
-                    if metadata and "stats" in metadata:
-                        metadata["stats"]["iterations"] = iteration + 1
-                    if system_task_prompt:
-                        self.sessions.pop(session_id, None)
-                        self._session_prompts.pop(session_id, None)
-                    return response.text
+                    return _finish(response.text, iteration + 1)
 
                 history.append({"role": "assistant", "content": ""})
-                _finalize_stats()
-                if metadata and "stats" in metadata:
-                    metadata["stats"]["iterations"] = iteration + 1
-                if system_task_prompt:
-                    self.sessions.pop(session_id, None)
-                    self._session_prompts.pop(session_id, None)
                 # Empty text is fine when the agent already attached a file this
                 # turn — the attachment is the reply.
                 if attachments:
                     logger.info("[%s] agent done with attachment-only reply", sid)
-                    return ""
+                    return _finish("", iteration + 1)
                 logger.warning("[%s] LLM returned empty response", sid)
-                return "Error: LLM returned empty response."
+                return _finish("Error: LLM returned empty response.", iteration + 1)
 
             logger.warning("[%s] iteration limit reached (%d)", sid, self.config.max_iterations)
-            _finalize_stats()
-            if metadata and "stats" in metadata:
-                metadata["stats"]["iterations"] = self.config.max_iterations
-            if system_task_prompt:
-                self.sessions.pop(session_id, None)
-                self._session_prompts.pop(session_id, None)
-            return "Iteration limit reached."
+            return _finish("Iteration limit reached.", self.config.max_iterations)
         finally:
             self._running_sessions.discard(session_id)
             cancel_event.clear()
+            # System-task session cleanup runs on EVERY exit — including an
+            # uncaught re-raise from _call_and_record — so sched:<id>:<ts> /
+            # system:dreaming:<ts> sessions can never leak on a failed run.
+            if system_task_prompt:
+                self.sessions.pop(session_id, None)
+                self._session_prompts.pop(session_id, None)
