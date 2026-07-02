@@ -859,6 +859,125 @@ async def test_conversations_request_command_triggers_snapshot(portal_server):
 
 
 @pytest.mark.asyncio
+async def test_ping_frame_answered_with_pong(portal_server):
+    """The portal drives an application-level heartbeat: a `{"type": "ping"}`
+    from the portal is answered with `{"type": "pong"}` over the same socket,
+    holding the connection open past the proxy idle window (issue #481). It is
+    NOT enqueued to the agent."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        await portal_server["send"]({"type": "ping"})
+        raw = await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+        assert json.loads(raw) == {"type": "pong"}
+        assert in_q.empty()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ping_frame_does_not_warn(portal_server, caplog):
+    """A heartbeat `ping` is a known frame type — it must not be logged as an
+    `unknown type`."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    caplog.set_level("WARNING", logger="src.channels.portal")
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        await portal_server["send"]({"type": "ping"})
+        await asyncio.wait_for(portal_server["received"].get(), timeout=2.0)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    assert not any("unknown type" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_pong_frame_is_silent_noop(portal_server, caplog):
+    """A `pong` from the portal (e.g. echoing our own protocol) is a silent
+    no-op: nothing enqueued, no reply sent, no `unknown type` warning."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(
+        in_queue=in_q, url=portal_server["url"], token="t",
+    )
+    caplog.set_level("WARNING", logger="src.channels.portal")
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        await portal_server["send"]({"type": "pong"})
+        await asyncio.sleep(0.1)
+        assert in_q.empty()
+        assert portal_server["received"].empty()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    assert not any("unknown type" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_connect_passes_protocol_keepalive_params(portal_server, monkeypatch):
+    """Belt-and-suspenders: the client connect sets explicit protocol-level
+    `ping_interval`/`ping_timeout` alongside `max_size`, so the socket has
+    keepalive even if the application heartbeat is somehow starved."""
+    real_connect = portal_mod.websockets.connect
+    seen_kwargs: dict = {}
+
+    def spy_connect(*args, **kwargs):
+        seen_kwargs.update(kwargs)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(portal_mod.websockets, "connect", spy_connect)
+
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url=portal_server["url"], token="t")
+    task = asyncio.create_task(ch.start())
+    try:
+        await portal_server["accept"]()
+        for _ in range(200):
+            if ch._connection is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert "ping_interval" in seen_kwargs
+        assert "ping_timeout" in seen_kwargs
+        assert seen_kwargs["ping_interval"] is not None
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_conversations_request_no_connection_no_send(portal_server):
     """A conversations_request with no live connection produces no send."""
     in_q: asyncio.Queue = asyncio.Queue()
