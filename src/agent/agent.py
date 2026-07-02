@@ -78,6 +78,12 @@ def _estimate_chars(messages: list[dict]) -> int:
     For list-form content (multimodal messages), text blocks count their
     text length and image blocks charge a fixed per-image cost so images
     age out of history alongside text on long sessions.
+
+    Assistant tool-call `arguments` are counted too: write/edit calls embed
+    entire file bodies there, and (unlike tool results) arguments are never
+    capped, so they must be visible to the trimmer or write/edit-heavy
+    sessions silently over-budget. Access is defensive so a malformed or
+    absent function/arguments never raises inside the accounting path.
     """
     total = 0
     for msg in messages:
@@ -96,6 +102,12 @@ def _estimate_chars(messages: list[dict]) -> int:
                     total += _IMAGE_COST_CHARS
                 else:
                     total += len(str(block))
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if isinstance(fn, dict):
+                total += len(fn.get("arguments") or "")
     return total
 
 
