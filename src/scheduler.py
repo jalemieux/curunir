@@ -17,6 +17,13 @@ from src.skills import load_skill
 
 logger = logging.getLogger(__name__)
 
+# Strong references to in-flight scheduled tasks. asyncio only keeps a *weak*
+# reference to a running task, so a fire-and-forget task with no live strong
+# reference can be garbage-collected mid-run — silently aborting the task
+# before mark_run records its outcome. Holding it here (self-removed via a
+# done-callback) keeps it alive for its full lifetime. See issue #493.
+_background_tasks: set[asyncio.Task] = set()
+
 
 def _db(config) -> str:
     return str(config.schedules_db)
@@ -92,7 +99,11 @@ async def _check_and_fire(agent) -> list[str]:
         engine.mark_attempt(_db(config), task_id, timestamp)
 
         logger.info("Firing scheduled task: %s (session %s)", task_id, session_id)
-        asyncio.create_task(_run_task(agent, config, task_id, session_id, prompt))
+        task = asyncio.create_task(_run_task(agent, config, task_id, session_id, prompt))
+        # Retain a strong reference so the task cannot be GC'd mid-run; drop it
+        # once done (see _background_tasks above).
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         fired.append(task_id)
 
     return fired
