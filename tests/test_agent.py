@@ -778,6 +778,20 @@ class TestSystemTaskMode:
         # Session cleaned up after completion
         assert "sched:test:456" not in agent.sessions
 
+    async def test_system_task_cleans_up_all_session_state(self, agent):
+        """System-task completion clears every per-session dict, not just
+        sessions + _session_prompts (the pre-existing partial-cleanup leak)."""
+        sid = "sched:test:789"
+        mock_response = LLMResponse(text="Done", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
+            await agent.handle("", sid, system_task_prompt="Do it.")
+        assert sid not in agent.sessions
+        assert sid not in agent._session_prompts
+        assert sid not in agent._session_started_at_cache
+        assert sid not in agent._cancel_events
+        assert sid not in agent._session_tools
+        assert sid not in agent._last_access
+
     async def test_normal_handle_unchanged(self, agent):
         """Ensure regular user messages still work as before."""
         mock_response = LLMResponse(text="Hello!", tool_calls=None)
@@ -787,6 +801,75 @@ class TestSystemTaskMode:
         history = agent.sessions["normal-session"]
         assert history[0]["role"] == "user"
         assert history[0]["content"] == "hi"
+
+
+class TestIdleSessionEviction:
+    """Interactive sessions idle past session_idle_ttl_sec are evicted from
+    every per-session dict; transcripts stay on disk and rehydrate lazily on
+    next access (issue #495)."""
+
+    async def _run_turn(self, agent, session_id, text="hi"):
+        mock_response = LLMResponse(text="Hello!", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
+            await agent.handle(text, session_id)
+
+    async def test_last_access_stamped_after_turn(self, agent):
+        await self._run_turn(agent, "s1")
+        assert "s1" in agent._last_access
+
+    async def test_idle_session_evicted_from_all_dicts(self, agent):
+        await self._run_turn(agent, "stale")
+        agent._session_tools["stale"] = {"to_audio"}
+        now = agent._last_access["stale"] + agent.config.session_idle_ttl_sec + 1
+        assert agent.evict_idle_sessions(now=now) == 1
+        assert "stale" not in agent.sessions
+        assert "stale" not in agent._session_prompts
+        assert "stale" not in agent._session_started_at_cache
+        assert "stale" not in agent._cancel_events
+        assert "stale" not in agent._session_tools
+        assert "stale" not in agent._last_access
+
+    async def test_fresh_session_survives_sweep(self, agent):
+        await self._run_turn(agent, "stale")
+        await self._run_turn(agent, "fresh")
+        agent._last_access["stale"] -= agent.config.session_idle_ttl_sec + 1
+        assert agent.evict_idle_sessions() == 1
+        assert "stale" not in agent.sessions
+        assert "fresh" in agent.sessions
+        assert "fresh" in agent._last_access
+
+    async def test_running_session_never_evicted(self, agent):
+        await self._run_turn(agent, "busy")
+        agent._running_sessions.add("busy")
+        agent._last_access["busy"] -= agent.config.session_idle_ttl_sec + 1
+        try:
+            assert agent.evict_idle_sessions() == 0
+            assert "busy" in agent.sessions
+            assert "busy" in agent._last_access
+        finally:
+            agent._running_sessions.discard("busy")
+
+    async def test_evicted_session_rehydrates_from_disk(self, agent):
+        await self._run_turn(agent, "resume", text="remember me")
+        # The agent worker persists each turn; mirror that here.
+        cs.save(agent.config.context_dir, "resume", agent.sessions["resume"])
+        agent._last_access["resume"] -= agent.config.session_idle_ttl_sec + 1
+        agent.evict_idle_sessions()
+        assert "resume" not in agent.sessions
+
+        mock_response = LLMResponse(text="ok", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("again", "resume")
+        user_msgs = _real_user_msgs(mock_llm.call_args[0][1])
+        assert [m["content"] for m in user_msgs] == ["remember me", "again"]
+
+    async def test_nonpositive_ttl_disables_eviction(self, agent_config):
+        agent_config.session_idle_ttl_sec = 0
+        agent = Agent(agent_config)
+        await self._run_turn(agent, "s")
+        agent._last_access["s"] -= 100_000
+        assert agent.evict_idle_sessions() == 0
+        assert "s" in agent.sessions
 
 
 class TestOnboardingGate:

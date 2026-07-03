@@ -249,6 +249,51 @@ class Agent:
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
+        # Last-turn timestamp (time.monotonic()) per session, stamped at the
+        # top of handle(). Drives idle eviction: sessions untouched for
+        # config.session_idle_ttl_sec are dropped from memory by
+        # evict_idle_sessions() and rehydrated from disk on next access.
+        self._last_access: dict[str, float] = {}
+
+    def _evict_session(self, session_id: str) -> None:
+        """Drop *all* in-memory state for a session.
+
+        The single cleanup primitive for both system-task completion and idle
+        eviction. The transcript persists in context/conversations/ and is
+        lazily rehydrated by handle() on next access, so eviction is invisible
+        to the user (session-scoped opt-in tools are re-unlocked by re-running
+        load_skill, same as after a process restart).
+        """
+        self.sessions.pop(session_id, None)
+        self._session_prompts.pop(session_id, None)
+        self._session_started_at_cache.pop(session_id, None)
+        self._cancel_events.pop(session_id, None)
+        self._session_tools.pop(session_id, None)
+        self._last_access.pop(session_id, None)
+
+    def evict_idle_sessions(self, now: float | None = None) -> int:
+        """Evict sessions idle longer than config.session_idle_ttl_sec.
+
+        Skips sessions with an in-flight handle() (_running_sessions).
+        Synchronous (pure dict pops, no await) so it is atomic w.r.t. the
+        event loop. Returns the number of sessions evicted; a TTL <= 0
+        disables eviction entirely.
+        """
+        ttl = self.config.session_idle_ttl_sec
+        if ttl <= 0:
+            return 0
+        if now is None:
+            now = time.monotonic()
+        evicted = 0
+        for session_id, last_access in list(self._last_access.items()):
+            if session_id in self._running_sessions:
+                continue
+            if now - last_access > ttl:
+                self._evict_session(session_id)
+                evicted += 1
+        if evicted:
+            logger.info("evicted %d idle session(s) from memory", evicted)
+        return evicted
 
     def request_cancel(self, session_id: str) -> bool:
         """Signal an in-flight handle() to stop after the current iteration.
@@ -437,6 +482,8 @@ class Agent:
             attachments: Optional list that will be populated with any files
                          the agent attaches during this request via the attach tool.
         """
+        self._last_access[session_id] = time.monotonic()
+
         # Lazy-load a persisted transcript when resuming a conversation that
         # is not currently in memory — agent.sessions holds active sessions
         # only, so a past conversation must be rehydrated on first access.
@@ -627,8 +674,7 @@ class Agent:
                     if metadata and "stats" in metadata:
                         metadata["stats"]["iterations"] = iteration
                     if system_task_prompt:
-                        self.sessions.pop(session_id, None)
-                        self._session_prompts.pop(session_id, None)
+                        self._evict_session(session_id)
                     return "(interrupted)"
                 logger.debug("[%s] iteration %d — calling LLM (%d messages)", sid, iteration + 1, len(messages))
                 response, err = await _call_and_record()
@@ -769,8 +815,7 @@ class Agent:
                     if metadata and "stats" in metadata:
                         metadata["stats"]["iterations"] = iteration + 1
                     if system_task_prompt:
-                        self.sessions.pop(session_id, None)
-                        self._session_prompts.pop(session_id, None)
+                        self._evict_session(session_id)
                     return response.text
 
                 history.append({"role": "assistant", "content": ""})
@@ -778,8 +823,7 @@ class Agent:
                 if metadata and "stats" in metadata:
                     metadata["stats"]["iterations"] = iteration + 1
                 if system_task_prompt:
-                    self.sessions.pop(session_id, None)
-                    self._session_prompts.pop(session_id, None)
+                    self._evict_session(session_id)
                 # Empty text is fine when the agent already attached a file this
                 # turn — the attachment is the reply.
                 if attachments:
@@ -793,8 +837,7 @@ class Agent:
             if metadata and "stats" in metadata:
                 metadata["stats"]["iterations"] = self.config.max_iterations
             if system_task_prompt:
-                self.sessions.pop(session_id, None)
-                self._session_prompts.pop(session_id, None)
+                self._evict_session(session_id)
             return "Iteration limit reached."
         finally:
             self._running_sessions.discard(session_id)
