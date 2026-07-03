@@ -950,6 +950,77 @@ class TestSystemTaskMode:
         assert history[0]["content"] == "hi"
 
 
+class TestErrorReturnEpilogue:
+    """Error-return paths run the same turn epilogue as success paths:
+    stats are recorded, system-task sessions are cleaned up, and the error
+    text is appended to history so the transcript isn't left dangling."""
+
+    def _quota_error(self):
+        import litellm
+
+        return litellm.APIError(
+            status_code=403,
+            message="Key limit exceeded (monthly limit)",
+            llm_provider="openrouter",
+            model="test",
+        )
+
+    async def test_error_return_records_stats(self, agent):
+        """A provider-error return still populates metadata['stats']."""
+        metadata: dict = {}
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=self._quota_error(),
+        ):
+            result = await agent.handle("hi", "s1", metadata=metadata)
+        assert "quota" in result.lower()
+        assert "stats" in metadata
+        assert metadata["stats"]["iterations"] == 1
+
+    async def test_error_return_appends_reply_to_history(self, agent):
+        """The error text is recorded as an assistant turn so the transcript
+        doesn't end on an unanswered user message."""
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=self._quota_error(),
+        ):
+            result = await agent.handle("hi", "s1")
+        history = agent.sessions["s1"]
+        assert history[-1]["role"] == "assistant"
+        assert history[-1]["content"] == result
+
+    async def test_error_return_cleans_up_system_task_session(self, agent):
+        """A scheduled task whose LLM call errors must still tear down its
+        session — otherwise sched:<id>:<ts> sessions leak on every failed run."""
+        sid = "sched:test:err"
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=self._quota_error(),
+        ):
+            await agent.handle("", sid, system_task_prompt="Do it.")
+        assert sid not in agent.sessions
+        assert sid not in agent._session_prompts
+        assert sid not in agent._running_sessions
+
+    async def test_uncaught_exception_still_cleans_up_system_task_session(self, agent):
+        """Even an unclassified exception that re-raises out of handle() must
+        not leak the system-task session (cleanup lives in the finally)."""
+        sid = "sched:test:boom"
+        with patch(
+            "src.agent.agent.call_llm",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(RuntimeError):
+                await agent.handle("", sid, system_task_prompt="Do it.")
+        assert sid not in agent.sessions
+        assert sid not in agent._session_prompts
+        assert sid not in agent._running_sessions
+
+
 class TestOnboardingGate:
     """Hard gate fires on first un-onboarded turn; passes through otherwise."""
 
