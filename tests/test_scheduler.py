@@ -7,6 +7,7 @@ import pytest
 
 from src.schedule_store import db as sdb
 from src.schedule_store import engine
+import src.scheduler as scheduler
 from src.scheduler import _check_and_fire, _is_due
 
 
@@ -205,6 +206,33 @@ class TestCheckAndFire:
         prompt = mock_agent.handle.call_args.kwargs["system_task_prompt"]
         assert "Do special things." in prompt
         assert "do it" in prompt
+
+    async def test_fired_task_held_then_discarded(self, schedule_db, agent_config):
+        # The scheduler must keep a strong reference to the in-flight task so
+        # the event loop cannot garbage-collect it mid-run; the reference is
+        # dropped once the task finishes.
+        _seed(schedule_db)
+        gate = asyncio.Event()
+
+        async def slow_handle(**kwargs):
+            await gate.wait()
+
+        mock_agent = AsyncMock()
+        mock_agent.config = agent_config
+        mock_agent.handle.side_effect = slow_handle
+
+        fired = await _check_and_fire(mock_agent)
+        assert fired == ["t1"]
+
+        # While in-flight, the task is held in the module-level set.
+        held = [t for t in scheduler._background_tasks if not t.done()]
+        assert len(held) == 1
+        task = held[0]
+
+        # Let it finish; the done-callback discards it from the set.
+        gate.set()
+        await task
+        assert task not in scheduler._background_tasks
 
     async def test_fires_multiple_tasks_concurrently(self, schedule_db, agent_config):
         engine.create(schedule_db, {"id": "t1", "cron": "* * * * *", "prompt": "p1"})
