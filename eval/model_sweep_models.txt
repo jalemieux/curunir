@@ -1,0 +1,18 @@
+# Models for eval/model_sweep.sh — one entry per line:  <model-id>  [provider]
+#   <model-id>  a LiteLLM model id (OpenRouter models need the openrouter/ prefix)
+#   [provider]  optional OpenRouter provider slug -> sets OPENROUTER_PROVIDER for
+#               that run (provider.order routing; same field as .env's z-ai/f8)
+# Blank lines and '#' comments are ignored. A line with no provider column runs
+# with NO provider pin (it does NOT inherit OPENROUTER_PROVIDER from .env).
+# Each model needs its provider key in .env. Positional args to model_sweep.sh
+# override this file (model ids only, no provider column).
+
+openrouter/anthropic/claude-opus-4.7     anthropic/2
+openrouter/deepseek/deepseek-v4-pro      baidu/fp8
+openrouter/z-ai/glm-5.2                   baidu/fp8
+openrouter/moonshotai/kimi-k2.6          siliconflow/fp8
+openrouter/deepseek/deepseek-v4-flash    gmicloud/fp8
+
+# Previous sample entries (uncomment to include):
+# openrouter/z-ai/glm-5.2
+# anthropic/claude-sonnet-4-20250514
