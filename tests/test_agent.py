@@ -11,6 +11,7 @@ from src.agent.agent import (
     _cap_tool_result,
     _estimate_chars,
     _is_context_overflow,
+    _stub_missing_tool_responses,
     _trim_history,
 )
 from src.llm import LLMResponse
@@ -241,6 +242,69 @@ class TestAgentHandle:
         assert tool_msg["tool_call_id"] == "call_boom"
         assert "web_fetch" in tool_msg["content"]
         assert "label too long" in tool_msg["content"]
+
+    async def test_on_tool_call_callback_raise_does_not_crash(self, agent):
+        # The streaming callback is best-effort UI notification. A raise in it
+        # must be logged and swallowed — never escape asyncio.gather and kill the
+        # turn, and never stop the tool from executing (parity with the executor
+        # backstop above).
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_cb",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo cb_test"})},
+            }],
+        )
+        recovery = LLMResponse(text="recovered after callback error", tool_calls=None)
+        bad_callback = AsyncMock(side_effect=RuntimeError("ui socket exploded"))
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, recovery]):
+            result = await agent.handle("run something", "s1", on_tool_call=bad_callback)
+
+        assert result == "recovered after callback error"
+        # The tool still ran despite the callback raising.
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        assert tool_msg["tool_call_id"] == "call_cb"
+        assert "cb_test" in tool_msg["content"]
+
+    async def test_history_stays_schema_valid_when_batch_escapes(self, agent):
+        # If any exception escapes the batch dispatch after the assistant
+        # tool_calls message is appended, history must be repaired (every
+        # tool_call_id gets a role: tool response) before it propagates, so the
+        # persisted transcript is never schema-invalid.
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[
+                {"id": "c1", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 1"})}},
+                {"id": "c2", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 2"})}},
+            ],
+        )
+
+        class Boom(BaseException):
+            pass
+
+        async def boom(*a, **k):
+            # A BaseException bypasses the executor's `except Exception` backstop,
+            # so it escapes gather and the whole batch dispatch — the worst case
+            # for the dangling-tool_calls bug.
+            raise Boom("boom")
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response), \
+             patch("src.agent.agent.execute_tool_call", new=boom):
+            with pytest.raises(Boom):
+                await agent.handle("run", "s1")
+
+        history = agent.sessions["s1"]
+        # The assistant tool_calls message is present, and every tool_call_id it
+        # names has a matching role: tool response — schema-valid for resume.
+        assistant = next(m for m in history if m.get("tool_calls"))
+        answered = {m["tool_call_id"] for m in history if m.get("role") == "tool"}
+        for tc in assistant["tool_calls"]:
+            assert tc["id"] in answered
 
     async def test_empty_response_returns_error(self, agent):
         empty = LLMResponse(text=None, tool_calls=None)
@@ -1261,6 +1325,41 @@ class TestArgParseErrorMessage:
         assert "not valid JSON" in msg
         assert args_str in msg
         assert "no_such_tool" in msg
+
+
+class TestStubMissingToolResponses:
+    """_stub_missing_tool_responses repairs a dangling tool_calls transcript."""
+
+    def _tc(self, tc_id):
+        return {"id": tc_id, "type": "function",
+                "function": {"name": "bash", "arguments": "{}"}}
+
+    def test_stubs_all_missing_ids(self):
+        history = [{"role": "assistant", "tool_calls": [self._tc("a"), self._tc("b")]}]
+        _stub_missing_tool_responses(
+            history, [self._tc("a"), self._tc("b")], max_chars=2000
+        )
+        answered = {m["tool_call_id"] for m in history if m.get("role") == "tool"}
+        assert answered == {"a", "b"}
+
+    def test_idempotent_only_stubs_missing(self):
+        # One response already present; only the missing id is stubbed.
+        history = [
+            {"role": "assistant", "tool_calls": [self._tc("a"), self._tc("b")]},
+            {"role": "tool", "tool_call_id": "a", "content": "real result"},
+        ]
+        _stub_missing_tool_responses(
+            history, [self._tc("a"), self._tc("b")], max_chars=2000
+        )
+        tool_msgs = [m for m in history if m.get("role") == "tool"]
+        assert len(tool_msgs) == 2  # 'a' not duplicated
+        assert next(m for m in tool_msgs if m["tool_call_id"] == "a")["content"] == "real result"
+
+    def test_stub_content_is_capped(self):
+        history = [{"role": "assistant", "tool_calls": [self._tc("a")]}]
+        _stub_missing_tool_responses(history, [self._tc("a")], max_chars=10)
+        stub = next(m for m in history if m.get("role") == "tool")
+        assert "truncated" in stub["content"]
 
 
 class TestToolResultCapInHistory:
