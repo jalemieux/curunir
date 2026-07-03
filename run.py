@@ -494,7 +494,10 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
     """Periodically extract learnings from settled conversations on disk."""
     while True:
         await asyncio.sleep(interval_sec)
-        await _run_extraction_pass(agent)
+        try:
+            await _run_extraction_pass(agent)
+        except Exception as e:
+            logger.exception("extraction pass failed: %s", e)
 
 
 async def periodic_dreaming(agent: Agent, interval_sec: int):
