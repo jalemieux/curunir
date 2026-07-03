@@ -567,6 +567,103 @@ class TestTrimHistoryMultimodal:
         assert history[0]["content"][0]["text"] == "recent"
 
 
+class TestEstimateCharsToolCalls:
+    def test_tool_call_arguments_are_counted(self):
+        # An assistant message whose payload lives entirely in a write's
+        # tool-call arguments (empty content) must be measured, not undercounted.
+        big_args = '{"path": "x", "content": "' + ("A" * 50_000) + '"}'
+        msg = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "write", "arguments": big_args},
+                }
+            ],
+        }
+        assert _estimate_chars([msg]) == len(big_args)
+
+    def test_content_and_arguments_both_counted(self):
+        msg = {
+            "role": "assistant",
+            "content": "here you go",
+            "tool_calls": [
+                {"function": {"name": "edit", "arguments": "ARGS"}},
+            ],
+        }
+        assert _estimate_chars([msg]) == len("here you go") + len("ARGS")
+
+    def test_malformed_tool_calls_do_not_raise(self):
+        # Missing/absent function/arguments and non-dict entries must not raise.
+        msg = {
+            "role": "assistant",
+            "content": "hi",
+            "tool_calls": [
+                {},                          # no function
+                {"function": {}},            # no arguments
+                {"function": {"arguments": None}},  # non-string arguments
+                "junk",                      # non-dict entry
+            ],
+        }
+        assert _estimate_chars([msg]) == len("hi")
+
+    def test_trim_drops_group_with_oversized_arguments(self):
+        # Bulk lives in the first assistant message's tool-call arguments.
+        # Previously it measured as ~0 and survived trimming.
+        history = [
+            {"role": "user", "content": "write a big file"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": '{"content": "' + ("A" * 10_000) + '"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "you're welcome"},
+        ]
+        _trim_history(history, max_chars=5_000)
+        # The oversized write group must have aged out.
+        assert history[0]["content"] == "thanks"
+        assert len(history) == 2
+
+    def test_trim_keeps_group_with_below_threshold_arguments(self):
+        history = [
+            {"role": "user", "content": "write a small file"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": '{"content": "' + ("A" * 100) + '"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "you're welcome"},
+        ]
+        _trim_history(history, max_chars=5_000)
+        # Well under the limit — nothing should be trimmed.
+        assert len(history) == 5
+        assert history[0]["content"] == "write a small file"
+
+
 class TestIsContextOverflow:
     def test_openrouter_max_context_message(self):
         import litellm
