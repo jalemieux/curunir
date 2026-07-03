@@ -497,6 +497,21 @@ async def periodic_extraction(agent: Agent, interval_sec: int):
         await _run_extraction_pass(agent)
 
 
+async def periodic_session_eviction(agent: Agent, interval_sec: int = 60):
+    """Periodically evict in-memory sessions idle past the configured TTL.
+
+    Transcripts persist in context/conversations/ and rehydrate lazily on
+    next access, so eviction only frees memory — no user-visible change.
+    Sleep-first so a fresh boot (nothing in memory yet) skips a no-op pass.
+    """
+    while True:
+        await asyncio.sleep(interval_sec)
+        try:
+            agent.evict_idle_sessions()
+        except Exception as e:
+            logger.exception("Idle-session eviction failed: %s", e)
+
+
 async def periodic_dreaming(agent: Agent, interval_sec: int):
     """Periodically run the dreaming skill to keep memory tidy.
 
@@ -615,6 +630,7 @@ async def main():
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     max_tool_result_chars = os.environ.get("MAX_TOOL_RESULT_CHARS")
     max_iterations = os.environ.get("MAX_ITERATIONS")
+    session_idle_ttl_sec = os.environ.get("SESSION_IDLE_TTL_SEC")
     attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
@@ -641,6 +657,7 @@ async def main():
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
         **({"max_tool_result_chars": int(max_tool_result_chars)} if max_tool_result_chars else {}),
         **({"max_iterations": int(max_iterations)} if max_iterations else {}),
+        **({"session_idle_ttl_sec": int(session_idle_ttl_sec)} if session_idle_ttl_sec else {}),
         **({"attachment_dir": attachment_dir} if attachment_dir else {}),
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
@@ -790,6 +807,8 @@ async def main():
         tg.create_task(agent_worker(agent, in_queue, out_queue))
         tg.create_task(periodic_extraction(agent, extraction_interval))
         tg.create_task(periodic_dreaming(agent, dreaming_interval))
+        if config.session_idle_ttl_sec > 0:
+            tg.create_task(periodic_session_eviction(agent))
         tg.create_task(run_scheduler(agent))
 
 
