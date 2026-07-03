@@ -15,8 +15,10 @@ Prereqs (the SUT runs the persona being evaluated):
     CURUNIR_PERSONA=<persona> python run.py     # in one shell (the SUT)
     python eval/<persona>/run_<persona>_evals.py # in another
 
-The judge grader (`llm_judge`) needs JUDGE_MODEL or MODEL + a key in the env
-where the runner script runs (the shim loads .env, same as run.py).
+The judge grader (`llm_judge`) uses $JUDGE_MODEL, else the default Claude judge
+(`graders.DEFAULT_JUDGE_MODEL`) — never the SUT's MODEL — and needs that
+provider's key in the env where the runner script runs (the shim loads .env,
+same as run.py).
 """
 
 import argparse
@@ -240,6 +242,22 @@ async def run_one(ws, task: dict, verbose: bool = False) -> G.Result:
     )
 
 
+def _run_cleanup(task: dict) -> None:
+    """Best-effort post-task cleanup (`task['cleanup']: [[cmd, ...], ...]`).
+
+    Runs AFTER grading, so anchors see the task's side effects first. Use it to
+    undo writes a task deliberately made against the SUT's live stores (e.g.
+    delete the schedule row K1 created) so eval runs leave no residue. Failures
+    are printed, never fatal — the grade is already recorded.
+    """
+    for cmd in task.get("cleanup", []):
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                           cwd=str(REPO_ROOT))
+        except Exception as exc:  # noqa: BLE001 — cleanup must never kill the run
+            print(f"  (cleanup {cmd!r} failed: {exc})")
+
+
 def select(cfg: SuiteConfig, args) -> list[dict]:
     tasks = cfg.tasks
     if args.id:
@@ -331,6 +349,7 @@ async def _run_suite(cfg: SuiteConfig, args, tasks: list[dict]) -> None:
                 status, why, checks = "—", "(not graded)", []
             else:
                 status, why, checks = G.grade_detailed(task, result)
+            _run_cleanup(task)  # after grading — anchors must see the side effects
             prefix = "  => " if args.verbose else ""
             print(f"\n{prefix}{STATUS_MARK.get(status, status)} {why}" if args.verbose
                   else f"{STATUS_MARK.get(status, status)} {why}")

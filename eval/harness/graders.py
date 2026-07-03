@@ -220,6 +220,24 @@ def action_used(result: Result, spec: dict) -> Verdict:
     return PASS, "routing/actions as expected"
 
 
+def anchor_equals(result: Result, spec: dict) -> Verdict:
+    """PASS iff the anchor-resolved value equals `spec['equals']` — a pure
+    STORE-side check, deliberately blind to the reply text.
+
+    Use when the contract is "the write actually persisted": the anchor cmd
+    queries the store (schedules.db, portfolio.db, …) at grade time and this
+    grader compares what it finds against a frozen expectation. A readback
+    answered from conversation history can't fake this — only a durable write
+    satisfies it. `resolve_anchor` puts the queried value in `expected`.
+    """
+    if "expected" not in spec:
+        return ERROR, f"anchor did not resolve ({spec.get('_anchor_error')})"
+    want, got = spec.get("equals"), spec["expected"]
+    if got == want:
+        return PASS, f"store value {got!r} matches"
+    return FAIL, f"store has {got!r}, expected {want!r}"
+
+
 # A capable model, separate from the system under test, judges structural
 # tasks. Deliberately NOT $MODEL: a model grading its own output is a known
 # eval anti-pattern. Override with $JUDGE_MODEL (needs the matching API key).
@@ -364,6 +382,7 @@ GRADERS: dict[str, Callable[[Result, dict], Verdict]] = {
     "set_match": set_match,
     "regex_present": regex_present,
     "action_used": action_used,
+    "anchor_equals": anchor_equals,
     "llm_judge": llm_judge,
     "reconciles": reconciles,
     "composite": composite,

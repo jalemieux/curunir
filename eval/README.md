@@ -12,7 +12,7 @@ suite, the report, and the conventions every suite follows. Per-persona specific
 (which tasks, which fixtures) live in each suite's own README:
 
 - **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — ~34 tasks, market data + the owner's balance sheet.
-- **`eval/default/`** → the default persona; `default_tasks.py` is an empty `TASKS` placeholder to be populated from the capture-only prompts.
+- **`eval/default/`** → the default persona, ~30 tasks in four families: **G** (the no-general-knowledge guardrail, #338), **S** (skill discovery — `load_skill` by name, no filesystem hunting, #451/#457), **K** (framework-kernel tripwires: scheduling persisted to `schedules.db` via `anchor_equals`, memory recall + delegate handoff from a seeded fixture, attachments, slash dispatch, multi-turn retention), and **RS** (a routing sweep — one canonical trigger prompt per visible catalog skill not covered by a dedicated suite, graded on routing only). The K+RS families make this suite the **model/quant-swap smoke test** (see below).
 - **`eval/skill_routing/`** → [`eval/skill_routing/README.md`](skill_routing/README.md) — routing + adherence for the `yfinance` / `fred` / `polymarket` live-data skills.
 - **`eval/reddit_research/`** → [`eval/reddit_research/README.md`](reddit_research/README.md) — routing + curl-vs-web_fetch method adherence for the `reddit-research` skill.
 - **`eval/web_search/`** → [`eval/web_search/README.md`](web_search/README.md) — routing + no-rediscovery-loop adherence for the `web-search` skill (consumer/local-business lookups start with Brave, not a Google/Yelp/Reddit scrape).
@@ -89,6 +89,64 @@ exact server frame sequence — run it after touching `eval/harness/runner.py`:
 ```bash
 python eval/harness/test_runner_sync.py
 ```
+
+## Swapping a model or quant? Run the smoke suite
+
+The default suite doubles as the regression signal for a model or quant change:
+the K family tripwires every framework capability (scheduling, memory,
+delegation, attachments, slash dispatch, context retention) and the RS family
+checks that natural phrasing still routes to each catalog skill — the two
+things a weaker model or a bad quant breaks first.
+
+```bash
+CURUNIR_PERSONA=default python run.py                       # SUT on the candidate model
+python eval/default/run_default_evals.py --fixture baseline # G + S + K + RS, graded
+```
+
+K2/K3 read the seeded fixture, so pass `--fixture baseline`. RS tasks are
+routing-only and tolerate truncated execution (`allow_error`), so the sweep is
+cheap; K1 writes a real schedule row, verifies it **in the store** with
+`anchor_equals`, and removes it via the task's `cleanup`. Compare candidates
+with `eval/model_sweep.sh` (below):
+`SUITE=eval/default/run_default_evals.py EVAL_ARGS="--fixture baseline" eval/model_sweep.sh`.
+
+## Model A/B sweep (`eval/model_sweep.sh`)
+
+To compare the *same* suite across models without hand-swapping `MODEL` and
+restarting the SUT each time, use the sweep. For each model it relaunches the
+server with `MODEL=<m>`, waits for `:8765`, runs the suite, kills the server,
+and moves on. The SUT reports its model in the welcome frame, so each run's
+report auto-labels by model and lands in its own file under the suite's
+`results/` — ready to diff.
+
+```bash
+# models from eval/model_sweep_models.txt:
+eval/model_sweep.sh
+
+# or name them explicitly (overrides the file):
+eval/model_sweep.sh openrouter/z-ai/glm-5.2 anthropic/claude-sonnet-4-20250514
+
+# a different suite, or a single task, via env:
+SUITE=eval/finance/run_finance_evals.py EVAL_ARGS="--id R6" eval/model_sweep.sh
+```
+
+Model list resolution (first match wins): positional args → `MODELS_FILE` →
+`eval/model_sweep_models.txt` → a built-in fallback. The file is one entry per
+line — `<model-id>  [provider]` — where the optional second column is an
+OpenRouter provider slug applied as `OPENROUTER_PROVIDER` for that run (same
+field as `.env`; a line with no provider column runs with **no** provider pin
+rather than inheriting `.env`'s). `#` comments and blank lines are ignored;
+positional args are model ids only (no provider column). Other env knobs:
+`SUITE` (default web-search), `EVAL_ARGS` (e.g. `--id WS3`), `WS_PORT`, `LOGDIR`
+(SUT boot logs, default `/tmp/curunir_model_sweep_logs`), `PYTHON`.
+
+The sweep passes `MODEL` **only** to each server subprocess — never to the shell
+running the grader — so the judge stays fixed (see below) across all models
+rather than each model grading its own output. It also holds the web-search
+backend (Brave vs Gemini `SKILL.md`) constant: it sweeps *models*, not backends.
+Each model needs its provider key in `.env`. The sweep restarts the SUT
+repeatedly and leaves none running when it finishes — relaunch your own dev
+instance afterward.
 
 ## The judge model
 
@@ -181,6 +239,7 @@ fields can reuse `eval/harness/graders.py` unchanged.
 | `set_match` | every item in `expected` appears (case-insensitive); `groups` = one-of-each |
 | `regex_present` | all `require` regexes match and no `forbid` regex matches |
 | `action_used` | routing contract: `require` / `require_any` actions ran, `forbid` didn't |
+| `anchor_equals` | the anchor-queried **store** value equals a frozen `equals` — text-blind persistence check (a readback from chat history can't fake it) |
 | `llm_judge` | a separate judge model rules PASS against a crisp `rubric` |
 | `reconciles` | a stated balance sheet adds up (`assets − liabilities == net worth`) and matches an anchored truth |
 | `composite` | ANDs a list of sub-graders; reports every sub-check |
