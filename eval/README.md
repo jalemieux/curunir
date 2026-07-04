@@ -8,14 +8,25 @@ Two eval systems live here, at different maturity:
 | **Graded harness** | `eval/harness/` + a persona suite | pure-function + LLM-judge graders, pass/fail/slow with a one-line reason, interactive HTML report | regression + failure-mode benchmarking of a persona |
 
 The rest of this file documents the **graded harness** — the engine, how to run a
-suite, the report, and the conventions every suite follows. Per-persona specifics
-(which tasks, which fixtures) live in each suite's own README:
+suite, the report, and the conventions every suite follows. Suites come in two
+kinds, split by what they own:
 
-- **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — ~34 tasks, market data + the owner's balance sheet.
-- **`eval/default/`** → the default persona, ~30 tasks in four families: **G** (the no-general-knowledge guardrail, #338), **S** (skill discovery — `load_skill` by name, no filesystem hunting, #451/#457), **K** (framework-kernel tripwires: scheduling persisted to `schedules.db` via `anchor_equals`, memory recall + delegate handoff from a seeded fixture, attachments, slash dispatch, multi-turn retention), and **RS** (a routing sweep — one canonical trigger prompt per visible catalog skill not covered by a dedicated suite, graded on routing only). The K+RS families make this suite the **model/quant-swap smoke test** (see below).
-- **`eval/skill_routing/`** → [`eval/skill_routing/README.md`](skill_routing/README.md) — routing + adherence for the `yfinance` / `fred` / `polymarket` live-data skills.
-- **`eval/reddit_research/`** → [`eval/reddit_research/README.md`](reddit_research/README.md) — routing + curl-vs-web_fetch method adherence for the `reddit-research` skill.
-- **`eval/web_search/`** → [`eval/web_search/README.md`](web_search/README.md) — routing + no-rediscovery-loop adherence for the `web-search` skill (consumer/local-business lookups start with Brave, not a Google/Yelp/Reddit scrape).
+- **Persona suites** (`eval/<persona>/`) own persona-level behavior: the
+  persona's system-prompt specifics (guardrails, domain rules) and **skill
+  routing across the persona's catalog** — given the full catalog, does a
+  trigger prompt reach the *right* skill with no collision/shadowing?
+- **Skill suites** (`eval/skills/<name>/`) own one skill's (or skill family's)
+  contract in depth: method adherence, failure modes, output rules. They run
+  against any persona whose allowlist carries the skill.
+
+Per-suite specifics (which tasks, which fixtures) live in each suite's own README:
+
+- **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — 38 tasks: market data, the owner's balance sheet, and the live-data routing tripwires (FR1/PM1/PM2, migrated from the skill_routing suite; R1 is the yfinance routing contract).
+- **`eval/default/`** → [`eval/default/README.md`](default/README.md) — 34 tasks in five families: **G** (the no-general-knowledge guardrail, #338), **S** (skill discovery — `load_skill` by name, no filesystem hunting, #451/#457), **K** (framework-kernel tripwires: scheduling persisted to `schedules.db` via `anchor_equals`, memory recall + delegate handoff from a seeded fixture, attachments, slash dispatch, multi-turn retention), **RS** (a routing sweep — one canonical trigger prompt per visible catalog skill not covered by a dedicated task, graded on routing only), and **WS/RR** (richer routing tripwires migrated from the web_search / reddit_research suites). The K+RS+WS/RR families make this suite the **model/quant-swap smoke test** (see below).
+- **`eval/skills/`** → [`eval/skills/README.md`](skills/README.md) — the per-skill adherence suites:
+  - [`skill_routing/`](skills/skill_routing/README.md) — adherence for the `yfinance` / `fred` / `polymarket` live-data skills (freshness citations, smallest subcommand, the CPI trap, priced probabilities; routing lives in `eval/finance/`).
+  - [`reddit_research/`](skills/reddit_research/README.md) — curl-vs-web_fetch method adherence for the `reddit-research` skill (routing lives in `eval/default/`).
+  - [`web_search/`](skills/web_search/README.md) — no-rediscovery-loop method adherence for the `web-search` skill (consumer/local-business lookups start with Brave, not a Google/Yelp/Reddit scrape; routing lives in `eval/default/`).
 
 ## The graded engine (`eval/harness/`)
 

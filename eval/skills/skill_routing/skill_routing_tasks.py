@@ -2,24 +2,19 @@
 
 Scope: the three live-data skills whose descriptions were reframed to lead with
 the *capability* (hard, sourced numbers) rather than the *source brand* —
-`yfinance`, `fred`, `polymarket`. The suite answers two questions the reframe
-was meant to move:
+`yfinance`, `fred`, `polymarket`. This suite grades ADHERENCE — given the
+intent, does the answer follow the skill's rules? Cite the freshness stamp
+(`as_of` / observation date / `fetched_at`), use the SMALLEST subcommand (no
+`info`-by-reflex), report YoY inflation rather than the raw CPI index level,
+frame prediction-market numbers as priced probabilities (not certainties).
+Graded with `regex_present` / `numeric_tolerance` (anchored to the SAME driver
+the agent uses) / `llm_judge`.
 
-  1. ROUTING — given a use case that REQUIRES the skill, does the agent load it
-     and call its driver, instead of answering from memory / training data?
-     Graded with `action_used` (the routing contract IS the action: the
-     skill loaded from the catalog AND the driver ran). The path to a driver
-     (`yfin.py`, `fred.py`, `polymarket.py`) is documented nowhere but the
-     skill, so running it without `load_skill` means the agent globbed the
-     catalog by hand; a bare-memory answer does neither.
-
-  2. ADHERENCE — given the intent, does the answer follow the skill's rules?
-     Cite the freshness stamp (`as_of` / observation date / `fetched_at`), use
-     the SMALLEST subcommand (no `info`-by-reflex), report YoY inflation rather
-     than the raw CPI index level, frame prediction-market numbers as priced
-     probabilities (not certainties). Graded with `regex_present` /
-     `numeric_tolerance` (anchored to the SAME driver the agent uses) /
-     `llm_judge`.
+The pure ROUTING contracts (does natural phrasing reach the skill at all?)
+live in the persona suite — `eval/finance/finance_tasks.py` (FR1, PM1, PM2;
+yfinance routing is finance's R1) — because routing is a property of the
+persona's catalog, not the skill. YF1 was retired outright as an exact
+duplicate of finance R1.
 
 Run under a persona that allowlists all three skills (`finance` does):
 
@@ -32,10 +27,10 @@ the citation/format probes) need the skill's network/keys to be present in BOTH
 the SUT's env and this runner's env. `llm_judge` needs ANTHROPIC_API_KEY (or
 JUDGE_MODEL). See README.md.
 
-Tasks are organised by the four eval-design sources:
-  1. Regression tripwires  — one easy routing task per skill
-  2. Failure-mode probes   — answer-from-memory, info-by-reflex, the CPI trap,
-                             capability-triggered routing for the brand we hid
+Tasks are organised by the four eval-design sources (the routing tripwires
+YF1/FR1/PM1/PM2 migrated to eval/finance — ids are stable, so the gaps are
+deliberate):
+  2. Failure-mode probes   — answer-from-memory, info-by-reflex, the CPI trap
   3. Composition points    — cross-skill seams (P/E vs treasury yield)
   4. Grader-first          — applied as a filter (every task has a crisp grader)
 
@@ -60,22 +55,6 @@ TASKS: list[dict] = [
     # ════════════════════════════════════════════════════════════════════════
     # YFINANCE — equity market data
     # ════════════════════════════════════════════════════════════════════════
-
-    # ── 1. Regression tripwire: bare price must hit the live driver ──────────
-    {
-        "id": "YF1",
-        "name": "yfinance-route-price",
-        "intent": "Core routing: a bare price request must load yfinance and call yfin.py, not answer from memory.",
-        "expected": "Loads yfinance from the catalog AND runs yfin.py in ~1 data call; no orchestration.",
-        "tags": ["regression", "yfinance", "routing"],
-        "prompt": "What is Apple (AAPL) trading at right now? Just the price.",
-        "max_loops": 5,
-        "grader": "action_used",
-        # require BOTH: load_skill proves catalog routing; yfin.py proves the
-        # real data call. A memory answer produces neither.
-        "spec": {"require": ["load_skill: yfinance", "yfin.py"]},
-        "budget": {"max_actions": 4},  # a bare price is ~1 data call
-    },
 
     # ── 2. Failure-mode: a known fundamental the model might recite ──────────
     {
@@ -171,20 +150,6 @@ TASKS: list[dict] = [
     # FRED — US macroeconomic data
     # ════════════════════════════════════════════════════════════════════════
 
-    # ── 1. Regression tripwire: a rate lookup must hit the live driver ───────
-    {
-        "id": "FR1",
-        "name": "fred-route-treasury",
-        "intent": "Core routing: a treasury-yield lookup must load fred and call fred.py, not answer from memory.",
-        "expected": "Loads fred from the catalog AND runs fred.py (e.g. DGS10).",
-        "tags": ["regression", "fred", "routing"],
-        "prompt": "What is the current US 10-year Treasury yield?",
-        "max_loops": 6,
-        "grader": "action_used",
-        "spec": {"require": ["load_skill: fred", "fred.py"]},
-        "budget": {"max_actions": 5},
-    },
-
     # ── 2. Failure-mode: answer-from-memory + citation adherence ─────────────
     {
         "id": "FR2",
@@ -264,42 +229,6 @@ TASKS: list[dict] = [
     # ════════════════════════════════════════════════════════════════════════
     # POLYMARKET — prediction-market probabilities (un-hidden so it can route)
     # ════════════════════════════════════════════════════════════════════════
-
-    # ── 1. Regression tripwire: brand-named request routes to the driver ─────
-    {
-        "id": "PM1",
-        "name": "polymarket-route-named",
-        "intent": "Core routing: an explicitly brand-named request must load polymarket and call polymarket.py.",
-        "expected": "Loads polymarket from the catalog AND runs polymarket.py.",
-        "tags": ["regression", "polymarket", "routing"],
-        "prompt": (
-            "What is Polymarket showing right now for which party is favored to "
-            "control the US House after the 2026 midterms?"
-        ),
-        "max_loops": 7,
-        "grader": "action_used",
-        "spec": {"require": ["load_skill: polymarket", "polymarket.py"]},
-        "budget": {"max_actions": 6},
-    },
-
-    # ── 2. Failure-mode: CAPABILITY-triggered routing (no brand named) ───────
-    # This is the central test of the reframe + un-hide: a prediction-market
-    # question phrased purely by capability ("market-implied probability")
-    # should now route to polymarket on its own.
-    {
-        "id": "PM2",
-        "name": "polymarket-route-by-capability",
-        "intent": "The reframe+un-hide payoff: a betting-market question that never names Polymarket must still auto-route to it (capability-first description in the catalog).",
-        "expected": "Auto-routes to polymarket (load_skill / polymarket.py) for an implied-probability question, without the brand being named.",
-        "tags": ["failure-mode", "polymarket", "routing", "capability-trigger"],
-        "prompt": (
-            "What's the market-implied probability of a Fed interest-rate cut "
-            "at the next FOMC meeting?"
-        ),
-        "max_loops": 8,
-        "grader": "action_used",
-        "spec": {"require_any": ["load_skill: polymarket", "polymarket.py"]},
-    },
 
     # ── 2./4. Failure-mode: adherence — cite prob + URL + snapshot, framed as
     #          a PRICED probability, not a certainty ────────────────────────
