@@ -69,10 +69,13 @@ hidden skills (``deep-research``, ``podcast-ingest``, ``conversation-to-audio``
 — excluded from the manifest, so auto-routing to them is not a contract);
 ``email-send`` (side-effecting: every sweep run would email the owner);
 ``git-contribute`` (autonomous repo mutation); ``web-search`` /
-``reddit-research`` (own adherence suites); ``gemini-search`` (a backend whose
-trigger space deliberately overlaps web-search/youtube-transcript — no crisp
-single-skill routing contract); ``yfinance``/``fred``/``polymarket`` (the
-skill_routing suite); the gtm*/crm/finance orchestrators (persona suites);
+``reddit-research`` (richer routing tasks WS*/RR* live at the end of this file,
+migrated from their eval/skills/ suites — which keep the method/adherence
+tasks); ``gemini-search`` (a backend whose trigger space deliberately overlaps
+web-search/youtube-transcript — no crisp single-skill routing contract);
+``yfinance``/``fred``/``polymarket`` (routing lives in the finance suite —
+R1/FR1/PM1/PM2 — with adherence in eval/skills/skill_routing); the
+gtm*/crm/finance orchestrators (persona suites);
 ``dreaming``/``extract-learnings``/``onboarding`` (scheduler/first-run paths, no
 user-phrased trigger); ``superheroes``/``humanizer`` (S-family).
 
@@ -639,3 +642,129 @@ def _sweep_task(i: int, row: dict) -> dict:
 
 
 TASKS += [_sweep_task(i, row) for i, row in enumerate(_ROUTING_SWEEP, 1)]
+
+# ── Migrated skill-routing tasks: routing lives with the persona catalog ────
+# Moved from eval/skills/web_search and eval/skills/reddit_research: a routing
+# contract is only meaningful against a specific persona's catalog (collision/
+# shadowing is a property of the catalog, not the skill), so the default
+# persona — full catalog, hardest routing test — owns them. The skill suites
+# keep the METHOD/adherence tasks. Original ids (WS*/RR*) preserved for
+# result-history continuity. These are richer than the RS sweep (budgets,
+# forbid-lists), which is why web-search/reddit-research stay out of the sweep.
+
+# Hosts that only appear in an action when the agent scrapes a bot-blocked
+# site — the rediscovery loop PR #458/#450 exists to skip. Kept in sync with
+# eval/skills/web_search/web_search_tasks.py (the method suite).
+_BLOCKED_SCRAPE = [
+    "google.com/search",            # raw-curl of Google results
+    "yelp.com",                     # curl or web_fetch of Yelp (any tool)
+    "web_fetch: https://www.reddit",
+    "web_fetch: https://reddit",
+    "web_fetch: https://old.reddit",
+    "web_fetch: https://www.google",
+    "web_fetch: https://google",
+    "web_fetch: https://www.yelp",
+    "web_fetch: https://yelp",
+]
+
+_BRAVE_ROUTE = {
+    "require": ["load_skill: web-search"],
+    "require_any": ["api.search.brave.com", "curl"],
+}
+
+TASKS += [
+    {
+        "id": "WS1",
+        "name": "salon-route-brave",
+        "intent": (
+            "Core routing: the canonical consumer lookup (PR #458/#450) must "
+            "load the web-search skill and run a Brave search, not scrape "
+            "Google/Yelp."
+        ),
+        "expected": (
+            "Loads web-search from the catalog AND runs a curl against the Brave "
+            "API."
+        ),
+        "tags": ["regression", "web-search", "routing"],
+        "prompt": "Find me a well-reviewed hair salon around San Mateo, CA.",
+        "max_loops": 12,
+        "grader": "action_used",
+        "spec": dict(_BRAVE_ROUTE),
+        # The whole point of the PR: reach Brave without the 5-6-call rediscovery
+        # loop. A correct answer that burned it still scores PASS-SLOW.
+        "budget": {"max_actions": 6},
+    },
+    {
+        "id": "WS5",
+        "name": "route-by-capability",
+        "intent": (
+            "Capability-first routing: a local-business ask that never says "
+            "'search', 'Brave', or 'web' should still route to web-search — the "
+            "manifest description triggers on the consumer-lookup capability, not "
+            "a keyword."
+        ),
+        "expected": (
+            "Auto-routes to web-search + Brave for a 'where should I...' local "
+            "lookup with no search-tool keyword in the prompt, and skips the "
+            "blocked-site scrape."
+        ),
+        "tags": ["failure-mode", "web-search", "routing", "capability-trigger"],
+        "prompt": (
+            "Where should I take my parents for a nice anniversary dinner in "
+            "Healdsburg next weekend? Somewhere people rate highly."
+        ),
+        "max_loops": 14,
+        "grader": "action_used",
+        "spec": {**_BRAVE_ROUTE, "forbid": list(_BLOCKED_SCRAPE)},
+        "budget": {"max_actions": 8},
+    },
+    {
+        "id": "RR1",
+        "name": "reddit-route-sentiment",
+        "intent": (
+            "Core routing: an explicit Reddit-sentiment request must load the "
+            "reddit-research skill and actually curl Reddit, not answer from "
+            "memory."
+        ),
+        "expected": (
+            "Loads reddit-research from the catalog AND runs a curl against "
+            "Reddit/Brave."
+        ),
+        "tags": ["regression", "reddit-research", "routing"],
+        "prompt": (
+            "What are people on Reddit saying about the Logitech MX Master 3S "
+            "mouse? Give me the gist of the community sentiment."
+        ),
+        "max_loops": 14,
+        "grader": "action_used",
+        # load_skill proves catalog routing; curl proves the skill's actual
+        # data-fetch method ran (vs a fabricated answer that does neither).
+        "spec": {
+            "require": ["load_skill: reddit-research"],
+            "require_any": ["curl", "reddit.com", "brave"],
+        },
+        "budget": {"max_actions": 12},  # discover a few posts + extract them
+    },
+    {
+        "id": "RR5",
+        "name": "reddit-route-by-capability",
+        "intent": (
+            "Capability-first routing: a request for real community/user voice "
+            "that never says 'Reddit' should still route to reddit-research "
+            "(the description triggers on the capability, not just the brand)."
+        ),
+        "expected": (
+            "Auto-routes to reddit-research for a 'what are real users "
+            "complaining about' ask without the word 'Reddit' in the prompt."
+        ),
+        "tags": ["failure-mode", "reddit-research", "routing", "capability-trigger"],
+        "prompt": (
+            "I'm researching the Rivian R1S as a competitor. What are real "
+            "owners actually complaining about in online communities? I want "
+            "genuine user voices, not reviews or marketing copy."
+        ),
+        "max_loops": 16,
+        "grader": "action_used",
+        "spec": {"require": ["load_skill: reddit-research"]},
+    },
+]

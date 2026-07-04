@@ -14,7 +14,7 @@ never internals like "did it call skill X" (except where a routing/privacy
 
 | File | Role |
 |------|------|
-| `finance_tasks.py` | Tasks as data: `{id, name, tags, prompt`/`prompts, max_loops, grader, spec, budget}`. R/F/C = market data; **P/T/W = position-tracking** (the owner's balance sheet) |
+| `finance_tasks.py` | Tasks as data: `{id, name, tags, prompt`/`prompts, max_loops, grader, spec, budget}`. R/F/C = market data; **P/T/W = position-tracking** (the owner's balance sheet); **FR/PM = skill routing** (migrated from `eval/skills/skill_routing`) |
 | `run_finance_evals.py` | Thin shim: builds the finance `SuiteConfig` and calls `eval.harness.runner.main` |
 | `_pe_gap.py` | Anchor helper for C1 (live forward-P/E gap) |
 | `_networth.py` | Anchor helper for the T family: queries the seeded SQLite store's shared `v_networth` / `v_rollup_by_class` / `v_collectibles_pnl` views for `total` / `rollup` / `re-equity` / `collectibles` |
@@ -145,6 +145,15 @@ surface with the better pass-rate and tool-call efficiency.
    winners/losers + odds (`C2`), analysis pulling a real FRED discount rate
    (`C3`), position-tracking ⋈ tax-timing (`C4`).
 4. **Position-tracking** (`P*`/`T*`/`W*`) — the owner's balance sheet; see above.
+5. **Skill routing** (`FR1`, `PM1`, `PM2`) — the live-data routing tripwires,
+   migrated from `eval/skills/skill_routing` (routing is a property of the
+   persona's catalog — see the taxonomy in [`eval/README.md`](../README.md)):
+   a treasury-yield lookup must reach `fred.py` (`FR1`); a brand-named
+   Polymarket ask must reach `polymarket.py` (`PM1`); and a "market-implied
+   probability" ask that never names the brand must still auto-route (`PM2` —
+   requires `polymarket` to stay un-hidden; re-hiding it fails PM2 by design).
+   yfinance routing needs no extra task — `R1` *is* that contract (the suite's
+   old `YF1` was retired as an exact duplicate). Run them with `--tag routing`.
 
 ### Anchors
 

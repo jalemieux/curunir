@@ -33,7 +33,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${PYTHON:-$REPO/.venv/bin/python}"
 PORT="${WS_PORT:-8765}"
-SUITE="${SUITE:-eval/web_search/run_web_search_evals.py}"
+SUITE="${SUITE:-eval/skills/web_search/run_web_search_evals.py}"
 EVAL_ARGS="${EVAL_ARGS:-}"
 LOGDIR="${LOGDIR:-/tmp/curunir_model_sweep_logs}"
 MODELS_FILE="${MODELS_FILE:-$REPO/eval/model_sweep_models.txt}"
