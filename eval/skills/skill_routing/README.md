@@ -1,22 +1,24 @@
-# Skill-Routing & Adherence Evals
+# Live-Data Skill Adherence Evals
 
 Behavioral eval suite for the three reframed live-data skills — **`yfinance`,
-`fred`, `polymarket`**. It exists to measure the two things the description
-reframe was meant to move:
+`fred`, `polymarket`**. It grades **adherence**: given the intent, does the
+answer **follow the skill's rules**? Cite the freshness stamp (`as_of` /
+observation date / `fetched_at`), use the smallest subcommand (no
+`info`-by-reflex), report YoY inflation rather than the raw CPI index level,
+frame prediction-market numbers as *priced probabilities*. (Graded with
+`regex_present` / anchored `numeric_tolerance` / `llm_judge`.)
 
-1. **Routing** — given a use case that *requires* a skill, does the agent
-   **load it and call its driver** instead of answering from memory / training
-   data? (Graded with `action_used`: the routing contract *is* the action.)
-2. **Adherence** — given the intent, does the answer **follow the skill's
-   rules**? Cite the freshness stamp (`as_of` / observation date / `fetched_at`),
-   use the smallest subcommand (no `info`-by-reflex), report YoY inflation
-   rather than the raw CPI index level, frame prediction-market numbers as
-   *priced probabilities*. (Graded with `regex_present` / anchored
-   `numeric_tolerance` / `llm_judge`.)
+The pure **routing** contracts (does natural phrasing reach the skill at all?)
+live in the **finance persona suite** — [`eval/finance/`](../../finance/)
+carries FR1/PM1/PM2, and its R1 *is* the yfinance routing tripwire (the
+suite's old YF1 was retired as an exact duplicate of R1). Routing is a
+property of the persona's catalog (collision/shadowing among ~27 allowlisted
+skills), not of the skill — see the taxonomy in
+[`eval/README.md`](../../README.md).
 
 > The shared machinery — the graded engine, run flags, report format, statuses,
 > the grader catalog, anchoring, and the `Result` contract — is documented once
-> in [`eval/README.md`](../README.md). This file covers only what's specific to
+> in [`eval/README.md`](../../README.md). This file covers only what's specific to
 > this suite.
 
 ## Why these graders are allowed to assert "the skill was used"
@@ -27,7 +29,10 @@ request ("what's the market-implied probability of …") must reach the live dat
 path; "it loaded the skill and ran the driver" is the user-visible promise, not
 an implementation detail. So `action_used` requiring `load_skill: <skill>` +
 the driver (`yfin.py` / `fred.py` / `polymarket.py`) is a legitimate contract,
-the same exception the finance suite carves out for routing/privacy.
+the same exception the finance suite carves out for routing/privacy. (The
+adherence tasks keep those `action_used` legs — "fetched, not recited" is part
+of each rule — even though the dedicated routing tripwires now live in the
+finance suite.)
 
 ## Files
 
@@ -50,33 +55,30 @@ source .venv/bin/activate
 CURUNIR_PERSONA=finance python run.py
 
 # 2. Terminal B — run the graded suite against it
-python eval/skill_routing/run_skill_routing_evals.py              # full suite
-python eval/skill_routing/run_skill_routing_evals.py --tag yfinance
-python eval/skill_routing/run_skill_routing_evals.py --tag routing
-python eval/skill_routing/run_skill_routing_evals.py --id YF2,PM2 # iterate cheap
-python eval/skill_routing/run_skill_routing_evals.py --list       # no server needed
+python eval/skills/skill_routing/run_skill_routing_evals.py              # full suite
+python eval/skills/skill_routing/run_skill_routing_evals.py --tag yfinance
+python eval/skills/skill_routing/run_skill_routing_evals.py --id YF2,PM3 # iterate cheap
+python eval/skills/skill_routing/run_skill_routing_evals.py --list       # no server needed
 ```
 
 Any persona whose catalog includes all three skills works; `finance` allowlists
-them. **`polymarket` must be un-hidden** for the autonomous-routing probe (PM2)
-to be valid — it now is (`skills/polymarket/SKILL.md` no longer sets
-`hidden: true`). If you re-hide it, PM2 will fail by design, not by model error.
+them. (The `polymarket` un-hide note now lives with PM2 in the finance suite,
+where the autonomous-routing probe moved.)
 
 ## The tasks
 
+Ids are stable, so the gaps are deliberate: YF1/FR1/PM1/PM2 (the routing
+tripwires) migrated to [`eval/finance/`](../../finance/).
+
 | id | skill | source | what it catches |
 |----|-------|--------|-----------------|
-| YF1 | yfinance | regression | bare price routes to `yfin.py` (≤4 actions) |
 | YF2 | yfinance | failure-mode | a known fundamental is **fetched + dated**, not recited from memory |
 | YF3 | yfinance | failure-mode | smallest subcommand — `quote`, **not** `info`/`financials` by reflex |
 | YF4 | yfinance | regression | trailing P/E within 8% of the **live** `yfin.py` value (anchored) |
 | YF5 | yfinance | composition | two fetches chain into one ranked comparison (LLY vs NVO) |
-| FR1 | fred | regression | treasury-yield lookup routes to `fred.py` |
 | FR2 | fred | failure-mode | macro stat fetched **and** cited (series ID + date + %) |
 | FR3 | fred | failure-mode | reports **YoY inflation %**, not the raw CPI index level |
 | FR4 | fred + yfinance | composition | earnings-yield-vs-treasury seam forces **both** drivers |
-| PM1 | polymarket | regression | brand-named request routes to `polymarket.py` |
-| PM2 | polymarket | failure-mode | **capability-triggered** routing — auto-routes with the brand *unnamed* (the reframe+un-hide payoff) |
 | PM3 | polymarket | failure-mode | cites market URL + implied % + snapshot, framed as a **priced probability** |
 
 ## Anchoring
@@ -89,13 +91,12 @@ the same choice the finance suite makes for its `fred` citation task.
 
 ## Notes & gotchas
 
-- **Routing graders pass without API keys** — `action_used` only checks the call
-  was *attempted*. The value-reading checks (YF4's anchor, the citation probes)
+- **`action_used` legs pass without API keys** — they only check the call was
+  *attempted*. The value-reading checks (YF4's anchor, the citation probes)
   and the judges (FR3/PM3) do need the keys above, in **both** the SUT's env and
   this runner's env.
-- **PM2/PM3 prompts don't depend on a specific live market existing** — the
-  graders check the routing, the citation *format*, and the *framing*, so they
-  stay valid as markets open and resolve.
+- **PM3's prompt doesn't depend on a specific live market existing** — the
+  graders check the citation *format* and the *framing*, so it stays valid as
+  markets open and resolve.
 - The full suite spends real model tokens on the SUT; iterate with `--id` /
-  `--tag`. See [`eval/README.md`](../README.md) for the report format and flags.
-```
+  `--tag`. See [`eval/README.md`](../../README.md) for the report format and flags.
