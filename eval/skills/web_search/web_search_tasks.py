@@ -15,19 +15,16 @@ does the agent route to Brave first and NOT scrape the blocked sites?
 unit test cannot: the agent's actual end-to-end routing behaviour on a real
 consumer lookup.
 
-The suite answers the two questions worth grading for this fix:
+This suite grades METHOD ADHERENCE — does the agent avoid the documented
+mistake of `web_fetch`/raw-`curl` against the bot-blocked sites (Google search,
+Yelp, Reddit), ground its answer in fetched results, and chain search→fetch
+correctly? Graded with `action_used` `forbid` (no `web_fetch`/`curl` of those
+hosts) plus a `max_actions` budget — a correct answer that still burned the
+5-6-call rediscovery loop scores PASS-SLOW, the exact signal this PR moves.
 
-  1. ROUTING — given a consumer/local-business lookup, does the agent load the
-     `web-search` skill and actually run a Brave search? Graded with
-     `action_used` — the routing contract IS the action (`load_skill: web-search`
-     + a `curl` to the Brave API). A bare-memory answer or a raw-scrape attempt
-     does neither.
-
-  2. NO REDISCOVERY LOOP — does the agent AVOID the documented mistake of
-     `web_fetch`/raw-`curl` against the bot-blocked sites (Google search, Yelp,
-     Reddit)? Graded with `action_used` `forbid` (no `web_fetch`/`curl` of those
-     hosts) plus a `max_actions` budget — a correct answer that still burned the
-     5-6-call rediscovery loop scores PASS-SLOW, the exact signal this PR moves.
+The pure ROUTING contracts (does natural phrasing reach the skill at all?)
+live in the persona suite — `eval/default/default_tasks.py` (WS1, WS5) —
+because routing is a property of the persona's catalog, not the skill.
 
 Run under any persona that allowlists `web-search` and carries the reflex prompt
 (`default`, `finance`, `marketing`, `companion` all do — `default` is the most
@@ -35,7 +32,7 @@ realistic routing test because the full catalog is present and the agent must
 still pick `web-search`):
 
     CURUNIR_PERSONA=default python run.py                 # SUT, one shell
-    python eval/web_search/run_web_search_evals.py        # this suite, another
+    python eval/skills/web_search/run_web_search_evals.py        # this suite, another
 
 Routing graders (`action_used`) check the call was ATTEMPTED, so they pass even
 without a key — but the prompts genuinely need `BRAVE_API_KEY` + network for the
@@ -44,11 +41,10 @@ agent to produce a grounded answer, and the `llm_judge` checks need a judge key
 exact value — they grade routing, method, and grounding, all of which stay valid
 as listings change.
 
-Tasks are organised by the four eval-design sources:
-  1. Regression tripwires  — the core routing path must never break (WS1)
+Tasks are organised by the four eval-design sources (WS1/WS5, the routing
+tripwires, migrated to eval/default — ids are stable, so the gap is deliberate):
   2. Failure-mode probes    — raw-scrape the blocked sites (WS2), answer-from-
-                              memory (WS3), capability-triggered routing with the
-                              tool un-named (WS5)
+                              memory (WS3)
   3. Composition points     — search → fetch the right (non-blocked) URL →
                               synthesize seam (WS4)
   4. Grader-first           — applied as a filter (every task has a crisp grader)
@@ -102,30 +98,6 @@ _BRAVE_ROUTE = {
 }
 
 TASKS: list[dict] = [
-    # ════════════════════════════════════════════════════════════════════════
-    # 1. Regression tripwire — the core routing path (the issue's literal scenario)
-    # ════════════════════════════════════════════════════════════════════════
-    {
-        "id": "WS1",
-        "name": "salon-route-brave",
-        "intent": (
-            "Core routing: the issue's canonical consumer lookup must load the "
-            "web-search skill and run a Brave search, not scrape Google/Yelp."
-        ),
-        "expected": (
-            "Loads web-search from the catalog AND runs a curl against the Brave "
-            "API."
-        ),
-        "tags": ["regression", "web-search", "routing"],
-        "prompt": "Find me a well-reviewed hair salon around San Mateo, CA.",
-        "max_loops": 12,
-        "grader": "action_used",
-        "spec": dict(_BRAVE_ROUTE),
-        # The whole point of the PR: reach Brave without the 5-6-call rediscovery
-        # loop. A correct answer that burned it still scores PASS-SLOW.
-        "budget": {"max_actions": 6},
-    },
-
     # ════════════════════════════════════════════════════════════════════════
     # 2. Failure-mode — the central fix: don't raw-scrape the blocked sites
     # ════════════════════════════════════════════════════════════════════════
@@ -247,33 +219,5 @@ TASKS: list[dict] = [
             ]
         },
         "budget": {"max_actions": 10},
-    },
-
-    # ════════════════════════════════════════════════════════════════════════
-    # 2. Failure-mode — capability-triggered routing (the tool is never named)
-    # ════════════════════════════════════════════════════════════════════════
-    {
-        "id": "WS5",
-        "name": "route-by-capability",
-        "intent": (
-            "Capability-first routing: a local-business ask that never says "
-            "'search', 'Brave', or 'web' should still route to web-search — the "
-            "manifest description triggers on the consumer-lookup capability, not "
-            "a keyword."
-        ),
-        "expected": (
-            "Auto-routes to web-search + Brave for a 'where should I...' local "
-            "lookup with no search-tool keyword in the prompt, and skips the "
-            "blocked-site scrape."
-        ),
-        "tags": ["failure-mode", "web-search", "routing", "capability-trigger"],
-        "prompt": (
-            "Where should I take my parents for a nice anniversary dinner in "
-            "Healdsburg next weekend? Somewhere people rate highly."
-        ),
-        "max_loops": 14,
-        "grader": "action_used",
-        "spec": {**_BRAVE_ROUTE, "forbid": list(_BLOCKED_SCRAPE)},
-        "budget": {"max_actions": 8},
     },
 ]

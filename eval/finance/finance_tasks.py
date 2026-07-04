@@ -2,7 +2,8 @@
 
 Run with `CURUNIR_PERSONA=finance`. Each task is a dict:
 
-    id       — stable short id (R*/F*/C* market data; P*/T*/W* position-tracking)
+    id       — stable short id (R*/F*/C* market data; P*/T*/W* position-tracking;
+               FR*/PM* skill routing, migrated from eval/skills/skill_routing)
     name     — kebab slug
     tags     — source tag (regression|failure-mode|composition) + symptom tag;
                `tracking` marks the fixture-seeded position-tracking tasks
@@ -897,6 +898,60 @@ TASKS: list[dict] = [
                 "equity, or conflates it with the GLD ETF position."
             )
         },
+    },
+]
+
+# ── Skill-routing tasks migrated from eval/skills/skill_routing ─────────────
+# Routing is a property of the persona's catalog (collision/shadowing against
+# ~27 allowlisted skills), so the finance persona owns the routing contracts
+# for its live-data skills; eval/skills/skill_routing keeps the ADHERENCE
+# tasks (citation rules, smallest-subcommand, the CPI trap, priced
+# probabilities). Original ids preserved for result-history continuity.
+# yfinance routing needs no migrated task — R1 above IS that contract.
+TASKS += [
+    {
+        "id": "FR1",
+        "name": "fred-route-treasury",
+        "intent": "Core routing: a treasury-yield lookup must load fred and call fred.py, not answer from memory.",
+        "expected": "Loads fred from the catalog AND runs fred.py (e.g. DGS10).",
+        "tags": ["regression", "fred", "routing"],
+        "prompt": "What is the current US 10-year Treasury yield?",
+        "max_loops": 6,
+        "grader": "action_used",
+        "spec": {"require": ["load_skill: fred", "fred.py"]},
+        "budget": {"max_actions": 5},
+    },
+    {
+        "id": "PM1",
+        "name": "polymarket-route-named",
+        "intent": "Core routing: an explicitly brand-named request must load polymarket and call polymarket.py.",
+        "expected": "Loads polymarket from the catalog AND runs polymarket.py.",
+        "tags": ["regression", "polymarket", "routing"],
+        "prompt": (
+            "What is Polymarket showing right now for which party is favored to "
+            "control the US House after the 2026 midterms?"
+        ),
+        "max_loops": 7,
+        "grader": "action_used",
+        "spec": {"require": ["load_skill: polymarket", "polymarket.py"]},
+        "budget": {"max_actions": 6},
+    },
+    # The central test of the polymarket reframe + un-hide: a prediction-market
+    # question phrased purely by capability ("market-implied probability")
+    # should route to polymarket on its own.
+    {
+        "id": "PM2",
+        "name": "polymarket-route-by-capability",
+        "intent": "The reframe+un-hide payoff: a betting-market question that never names Polymarket must still auto-route to it (capability-first description in the catalog).",
+        "expected": "Auto-routes to polymarket (load_skill / polymarket.py) for an implied-probability question, without the brand being named.",
+        "tags": ["failure-mode", "polymarket", "routing", "capability-trigger"],
+        "prompt": (
+            "What's the market-implied probability of a Fed interest-rate cut "
+            "at the next FOMC meeting?"
+        ),
+        "max_loops": 8,
+        "grader": "action_used",
+        "spec": {"require_any": ["load_skill: polymarket", "polymarket.py"]},
     },
 ]
 

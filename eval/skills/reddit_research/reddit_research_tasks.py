@@ -8,27 +8,22 @@ headless browsers — so the *method* (curl the public JSON API, never a browser
 or `web_fetch` on a `.json` endpoint) is itself part of the contract, not just
 the answer.
 
-The suite answers the two questions worth grading for this skill:
+This suite grades METHOD ADHERENCE — does extraction follow the skill's
+documented method (curl the JSON API), NOT the documented mistakes (a headless
+browser, or `web_fetch`/trafilatura pointed at a `.json` URL, which return
+mangled output)? Graded with `action_used` (require `curl`, forbid a
+`web_fetch` of Reddit) + `llm_judge` for whether the synthesis is grounded in
+fetched discussion rather than generic.
 
-  1. ROUTING — given a request that REQUIRES live Reddit community voice (which
-     cannot be answered from training data), does the agent load the skill and
-     actually fetch, instead of fabricating sentiment from memory? Graded with
-     `action_used` — the routing contract IS the action: the skill loaded from
-     the catalog AND a `curl` to Reddit/Brave ran. A bare-memory answer does
-     neither.
-
-  2. METHOD ADHERENCE — does extraction follow the skill's documented method
-     (curl the JSON API), NOT the documented mistakes (a headless browser, or
-     `web_fetch`/trafilatura pointed at a `.json` URL, which return mangled
-     output)? Graded with `action_used` (require `curl`, forbid a `web_fetch`
-     of Reddit) + `llm_judge` for whether the synthesis is grounded in fetched
-     discussion rather than generic.
+The pure ROUTING contracts (does natural phrasing reach the skill at all?)
+live in the persona suite — `eval/default/default_tasks.py` (RR1, RR5) —
+because routing is a property of the persona's catalog, not the skill.
 
 Run under a persona that allowlists `reddit-research` (`marketing` and `finance`
 both do):
 
     CURUNIR_PERSONA=marketing python run.py                       # SUT, one shell
-    python eval/reddit_research/run_reddit_research_evals.py      # this suite, another
+    python eval/skills/reddit_research/run_reddit_research_evals.py      # this suite, another
 
 Routing graders (`action_used`) check the call was ATTEMPTED, so they pass even
 without keys — but the prompts genuinely need `BRAVE_API_KEY` + network for the
@@ -37,11 +32,10 @@ agent to produce a grounded answer, and the `llm_judge` checks need a judge key
 an exact value — they grade routing, method, and grounding, all of which stay
 valid as threads come and go.
 
-Tasks are organised by the four eval-design sources:
-  1. Regression tripwires  — the core routing path must never break (RR1)
+Tasks are organised by the four eval-design sources (RR1/RR5, the routing
+tripwires, migrated to eval/default — ids are stable, so the gap is deliberate):
   2. Failure-mode probes    — answer-from-memory (RR2), wrong extraction tool
-                              (RR3), capability-triggered routing with the
-                              source un-named (RR5)
+                              (RR3)
   3. Composition points     — discovery → extraction → synthesis seam (RR4)
   4. Grader-first           — applied as a filter (every task has a crisp grader)
 
@@ -70,36 +64,6 @@ skill's commands) match reliably; the `User-Agent` header and the trailing
 _REDDIT_MARKER = r"r/\w+|reddit\.com"
 
 TASKS: list[dict] = [
-    # ════════════════════════════════════════════════════════════════════════
-    # 1. Regression tripwire — the core routing path must never break
-    # ════════════════════════════════════════════════════════════════════════
-    {
-        "id": "RR1",
-        "name": "reddit-route-sentiment",
-        "intent": (
-            "Core routing: an explicit Reddit-sentiment request must load the "
-            "skill and actually curl Reddit, not answer from memory."
-        ),
-        "expected": (
-            "Loads reddit-research from the catalog AND runs a curl against "
-            "Reddit/Brave."
-        ),
-        "tags": ["regression", "reddit-research", "routing"],
-        "prompt": (
-            "What are people on Reddit saying about the Logitech MX Master 3S "
-            "mouse? Give me the gist of the community sentiment."
-        ),
-        "max_loops": 14,
-        "grader": "action_used",
-        # load_skill proves catalog routing; curl proves the skill's actual
-        # data-fetch method ran (vs a fabricated answer that does neither).
-        "spec": {
-            "require": ["load_skill: reddit-research"],
-            "require_any": ["curl", "reddit.com", "brave"],
-        },
-        "budget": {"max_actions": 12},  # discover a few posts + extract them
-    },
-
     # ════════════════════════════════════════════════════════════════════════
     # 2. Failure-mode — answer-from-memory: sentiment MUST be fetched live
     # ════════════════════════════════════════════════════════════════════════
@@ -230,31 +194,5 @@ TASKS: list[dict] = [
             ]
         },
         "budget": {"max_actions": 16},
-    },
-
-    # ════════════════════════════════════════════════════════════════════════
-    # 2. Failure-mode — capability-triggered routing (source un-named)
-    # ════════════════════════════════════════════════════════════════════════
-    {
-        "id": "RR5",
-        "name": "reddit-route-by-capability",
-        "intent": (
-            "Capability-first routing: a request for real community/user voice "
-            "that never says 'Reddit' should still route to reddit-research "
-            "(the description triggers on the capability, not just the brand)."
-        ),
-        "expected": (
-            "Auto-routes to reddit-research for a 'what are real users "
-            "complaining about' ask without the word 'Reddit' in the prompt."
-        ),
-        "tags": ["failure-mode", "reddit-research", "routing", "capability-trigger"],
-        "prompt": (
-            "I'm researching the Rivian R1S as a competitor. What are real "
-            "owners actually complaining about in online communities? I want "
-            "genuine user voices, not reviews or marketing copy."
-        ),
-        "max_loops": 16,
-        "grader": "action_used",
-        "spec": {"require": ["load_skill: reddit-research"]},
     },
 ]

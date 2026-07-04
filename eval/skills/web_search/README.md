@@ -1,29 +1,28 @@
-# Web-Search Routing Evals
+# Web-Search Method Evals
 
-Behavioral eval suite for the routing reflex added in **PR #458 / #450**: for
+Behavioral eval suite for the search method fixed in **PR #458 / #450**: for
 consumer and local-business lookups (salons, restaurants, local reviews,
 Yelp/Reddit threads), the agent must **start with the `web-search` skill (Brave
 Search API)** instead of re-discovering, every session, that Google/Yelp/Reddit
 block scraping. The old behaviour burned ~5-6 tool calls (raw-`curl` of
 `google.com/search`, `web_fetch` of Yelp → `403`, Reddit → blocked) before
-falling back to Brave — the tool that actually works. It exists to measure the
-two things that actually matter for this fix:
+falling back to Brave — the tool that actually works. This suite grades the
+**no-rediscovery-loop method**: does the agent avoid `web_fetch`/raw-`curl`
+against Google search / Yelp / Reddit, ground its answer in fetched results,
+and chain search→fetch onto a *non-blocked* URL? (Graded with `action_used`
+`forbid` on those hosts, plus a `max_actions` budget — a correct answer that
+still burned the 5-6-call loop scores **PASS-SLOW**, the exact axis this PR
+moves.)
 
-1. **Routing** — given a consumer/local-business lookup, does the agent **load
-   the `web-search` skill and run a Brave search**, rather than scraping the
-   blocked sites or answering from memory? (Graded with `action_used`: the
-   routing contract *is* the action — `load_skill: web-search` + a real `curl`
-   to the Brave API.)
-2. **No rediscovery loop** — does the agent **avoid** the documented mistake of
-   `web_fetch`/raw-`curl` against Google search / Yelp / Reddit? (Graded with
-   `action_used` `forbid` on those hosts, plus a `max_actions` budget — a correct
-   answer that still burned the 5-6-call loop scores **PASS-SLOW**, the exact
-   axis this PR moves.)
+The pure **routing** contracts (does a consumer lookup reach the skill at
+all?) live in the **default persona suite** — [`eval/default/`](../../default/)
+carries WS1 and WS5 — because routing is a property of the persona's catalog,
+not the skill. See the taxonomy in [`eval/README.md`](../../README.md).
 
 > The shared machinery — the graded engine, run flags, report format, statuses,
 > the grader catalog, anchoring, and the `Result` contract — is documented once
-> in [`eval/README.md`](../README.md). This file covers only what's specific to
-> this suite. The design mirrors [`eval/reddit_research/`](../reddit_research/).
+> in [`eval/README.md`](../../README.md). This file covers only what's specific to
+> this suite. The design mirrors [`eval/skills/reddit_research/`](../reddit_research/).
 
 ## Relationship to `tests/test_skills.py`
 
@@ -55,13 +54,14 @@ suites carve out for routing.
 
 ## Tasks (the four eval-design sources)
 
+Ids are stable, so the gaps are deliberate: WS1/WS5 (the routing tripwires)
+migrated to [`eval/default/`](../../default/).
+
 | id | source | symptom | what it catches |
 |----|--------|---------|-----------------|
-| `WS1` | regression | routing | the issue's literal "find a hair salon near San Mateo" must load web-search + curl Brave |
 | `WS2` | failure-mode | no-rediscovery | a restaurant lookup must NOT `web_fetch`/`curl` Google/Yelp/Reddit |
 | `WS3` | failure-mode | answer-from-memory | a current-listing ask must be searched, not invented; answer grounded (judge) |
 | `WS4` | composition | search-then-fetch | Brave first, then fetch only a *non-blocked* result URL; concrete synthesis (judge) |
-| `WS5` | failure-mode | capability-trigger | a local lookup that never says "search"/"web" still routes to web-search |
 
 Brave results are live and non-deterministic, so **no task anchors an exact
 value** — the graders check routing, the forbidden-scrape avoidance, and
@@ -76,13 +76,13 @@ rather than a clean pass.
 CURUNIR_PERSONA=default python run.py
 
 # Terminal B — the graded suite
-python eval/web_search/run_web_search_evals.py            # all tasks
-python eval/web_search/run_web_search_evals.py --tag routing
-python eval/web_search/run_web_search_evals.py --id WS1,WS2
-python eval/web_search/run_web_search_evals.py --list     # no server needed
+python eval/skills/web_search/run_web_search_evals.py            # all tasks
+python eval/skills/web_search/run_web_search_evals.py --tag method
+python eval/skills/web_search/run_web_search_evals.py --id WS2,WS3
+python eval/skills/web_search/run_web_search_evals.py --list     # no server needed
 ```
 
-**Keys.** The routing graders (`action_used`) only check the call was
+**Keys.** The `action_used` graders only check the call was
 *attempted*, so they pass without a key. But the prompts genuinely need
 `BRAVE_API_KEY` + network in the **SUT's** env to produce a grounded answer, and
 the `llm_judge` checks (WS3, WS4) need `JUDGE_MODEL`/`MODEL` + a key in the env
