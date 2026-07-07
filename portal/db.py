@@ -23,6 +23,7 @@ class User:
     sign_in_token: str
     container_token: str
     is_active: bool
+    client_token: Optional[str] = None
 
 
 @dataclass
@@ -43,6 +44,7 @@ def _row_to_user(row: asyncpg.Record) -> User:
         sign_in_token=row["sign_in_token"],
         container_token=row["container_token"],
         is_active=row["is_active"],
+        client_token=row["client_token"],
     )
 
 
@@ -81,16 +83,18 @@ async def ping() -> bool:
 async def create_user(email: str) -> User:
     sign_in_token = make_token()
     container_token = make_token()
+    client_token = make_token()
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO users (email, sign_in_token, container_token)
-            VALUES ($1, $2, $3)
-            RETURNING id, email, sign_in_token, container_token, is_active
+            INSERT INTO users (email, sign_in_token, container_token, client_token)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, email, sign_in_token, container_token, is_active, client_token
             """,
             email.strip().lower(),
             sign_in_token,
             container_token,
+            client_token,
         )
     return _row_to_user(row)
 
@@ -103,19 +107,22 @@ async def upsert_user_with_container_token(
     fresh sign-in token alongside the given container token.
     """
     sign_in_token = make_token()
+    client_token = make_token()
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO users (email, sign_in_token, container_token, is_active)
-            VALUES ($1, $2, $3, TRUE)
+            INSERT INTO users (email, sign_in_token, container_token, client_token, is_active)
+            VALUES ($1, $2, $3, $4, TRUE)
             ON CONFLICT (email) DO UPDATE
               SET container_token = EXCLUDED.container_token,
+                  client_token = COALESCE(users.client_token, EXCLUDED.client_token),
                   is_active = TRUE
-            RETURNING id, email, sign_in_token, container_token, is_active
+            RETURNING id, email, sign_in_token, container_token, is_active, client_token
             """,
             email.strip().lower(),
             sign_in_token,
             container_token,
+            client_token,
         )
     return _row_to_user(row)
 
@@ -123,7 +130,7 @@ async def upsert_user_with_container_token(
 async def get_user_by_id(user_id: int) -> Optional[User]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, sign_in_token, container_token, is_active "
+            "SELECT id, email, sign_in_token, container_token, is_active, client_token "
             "FROM users WHERE id = $1",
             user_id,
         )
@@ -133,7 +140,7 @@ async def get_user_by_id(user_id: int) -> Optional[User]:
 async def get_active_user_by_sign_in_token(token: str) -> Optional[User]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, sign_in_token, container_token, is_active "
+            "SELECT id, email, sign_in_token, container_token, is_active, client_token "
             "FROM users WHERE sign_in_token = $1 AND is_active",
             token,
         )
@@ -143,7 +150,7 @@ async def get_active_user_by_sign_in_token(token: str) -> Optional[User]:
 async def get_active_user_by_container_token(token: str) -> Optional[User]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, sign_in_token, container_token, is_active "
+            "SELECT id, email, sign_in_token, container_token, is_active, client_token "
             "FROM users WHERE container_token = $1 AND is_active",
             token,
         )
@@ -153,7 +160,7 @@ async def get_active_user_by_container_token(token: str) -> Optional[User]:
 async def list_users() -> list[User]:
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, email, sign_in_token, container_token, is_active "
+            "SELECT id, email, sign_in_token, container_token, is_active, client_token "
             "FROM users ORDER BY id"
         )
     return [_row_to_user(r) for r in rows]
@@ -178,6 +185,25 @@ async def regenerate_container_token(user_id: int) -> str:
     async with get_pool().acquire() as conn:
         await conn.execute(
             "UPDATE users SET container_token = $1 WHERE id = $2", new_token, user_id
+        )
+    return new_token
+
+
+async def get_active_user_by_client_token(token: str) -> Optional[User]:
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, sign_in_token, container_token, is_active, client_token "
+            "FROM users WHERE client_token = $1 AND is_active",
+            token,
+        )
+    return _row_to_user(row) if row else None
+
+
+async def regenerate_client_token(user_id: int) -> str:
+    new_token = make_token()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET client_token = $1 WHERE id = $2", new_token, user_id
         )
     return new_token
 
