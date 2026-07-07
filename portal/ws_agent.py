@@ -29,25 +29,16 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from portal import db
 from portal.routing import routing
+from portal.ws_common import bearer_from_headers
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _bearer_from_headers(ws: WebSocket) -> str | None:
-    auth = ws.headers.get("authorization") or ws.headers.get("Authorization")
-    if not auth:
-        return None
-    parts = auth.split(None, 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
-    return parts[1].strip() or None
-
-
 @router.websocket("/ws/agent")
 async def ws_agent(ws: WebSocket) -> None:
-    token = _bearer_from_headers(ws)
+    token = bearer_from_headers(ws)
     if not token:
         await ws.close(code=4003, reason="missing bearer token")
         return
