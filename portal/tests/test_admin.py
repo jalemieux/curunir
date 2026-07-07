@@ -210,3 +210,54 @@ async def test_admin_beta_page_escapes_html_in_signup_fields(client):
     assert "onerror=1>" not in body
     assert "&quot;" in body or "&#34;" in body
     assert "&lt;svg/onload=1&gt;" in body
+
+
+@pytest.mark.asyncio
+async def test_show_client_token_renders_token(client):
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("ct-admin@example.com")
+    token = csrf.issue_csrf(admin_id)
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-client-token",
+        data={"csrf": token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    assert target.client_token in resp.text
+
+
+@pytest.mark.asyncio
+async def test_show_client_token_mints_when_null(client):
+    """Pre-migration users have client_token NULL — show must mint one."""
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("ct-null@example.com")
+    pool = db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET client_token = NULL WHERE id = $1", target.id
+        )
+    token = csrf.issue_csrf(admin_id)
+    resp = await client.post(
+        f"/admin/users/{target.id}/show-client-token",
+        data={"csrf": token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    refreshed = await db.get_user_by_id(target.id)
+    assert refreshed.client_token
+    assert refreshed.client_token in resp.text
+
+
+@pytest.mark.asyncio
+async def test_regenerate_client_token_rotates(client):
+    admin_id, cookies = await _signed_cookie_for("admin@example.com")
+    target = await db.create_user("ct-admin2@example.com")
+    token = csrf.issue_csrf(admin_id)
+    resp = await client.post(
+        f"/admin/users/{target.id}/regenerate-client",
+        data={"csrf": token},
+        cookies=cookies,
+    )
+    assert resp.status_code == 303
+    refreshed = await db.get_user_by_id(target.id)
+    assert refreshed.client_token != target.client_token
