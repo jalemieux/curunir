@@ -52,20 +52,21 @@ SPEECH_REWRITE_PROMPT = (
 )
 
 
-async def exec_to_audio(
-    args: dict,
+async def synthesize_speech(
+    content: str,
     config: AgentConfig,
-    attachments: list[dict] | None = None,
-    on_tool_call=None,
-) -> str:
-    """Rewrite ``content`` for speech, synthesize an MP3, and attach it."""
-    content = args.get("content")
-    if not content:
-        return "Error: 'content' is required"
+    *,
+    voice: str | None = None,
+    model: str | None = None,
+    filename: str | None = None,
+) -> tuple[dict | None, str | None]:
+    """Rewrite ``content`` for spoken delivery and synthesize an MP3.
 
-    voice = args.get("voice") or config.tts_voice
-    model = args.get("model") or config.tts_model
-    filename = args.get("filename") or f"digest-{date.today().isoformat()}.mp3"
+    Returns (attachment, None) on success or (None, error) on failure.
+    """
+    voice = voice or config.tts_voice
+    model = model or config.tts_model
+    filename = filename or f"digest-{date.today().isoformat()}.mp3"
 
     try:
         rewrite = await call_llm(
@@ -80,10 +81,10 @@ async def exec_to_audio(
         )
         script = (rewrite.text or "").strip()
         if not script:
-            return "Error: speech rewrite produced empty output"
+            return None, "speech rewrite produced empty output"
     except Exception as exc:
-        logger.warning("to_audio rewrite failed: %s", exc)
-        return f"Error: speech rewrite failed: {exc}"
+        logger.warning("speech rewrite failed: %s", exc)
+        return None, f"speech rewrite failed: {exc}"
 
     try:
         client = AsyncOpenAI()
@@ -94,8 +95,8 @@ async def exec_to_audio(
         )
         audio_bytes = _extract_audio_bytes(response)
     except Exception as exc:
-        logger.warning("to_audio TTS failed: %s", exc)
-        return f"Error: text-to-speech failed: {exc}"
+        logger.warning("text-to-speech failed: %s", exc)
+        return None, f"text-to-speech failed: {exc}"
 
     out_dir = os.path.join(os.path.abspath(config.attachment_dir), "audio")
     os.makedirs(out_dir, exist_ok=True)
@@ -103,17 +104,41 @@ async def exec_to_audio(
     with open(out_path, "wb") as f:
         f.write(audio_bytes)
 
-    size = len(audio_bytes)
-    attachment = {
+    return {
         "filename": filename,
         "path": out_path,
         "mime_type": "audio/mpeg",
-        "size": size,
-    }
+        "size": len(audio_bytes),
+    }, None
+
+
+async def exec_to_audio(
+    args: dict,
+    config: AgentConfig,
+    attachments: list[dict] | None = None,
+    on_tool_call=None,
+) -> str:
+    """Rewrite ``content`` for speech, synthesize an MP3, and attach it."""
+    content = args.get("content")
+    if not content:
+        return "Error: 'content' is required"
+
+    attachment, err = await synthesize_speech(
+        content,
+        config,
+        voice=args.get("voice"),
+        model=args.get("model"),
+        filename=args.get("filename"),
+    )
+    if err is not None:
+        return f"Error: {err}"
+
     if attachments is not None:
         attachments.append(attachment)
-
-    return f"Audio attached: {filename} ({_format_size(size)})"
+    return (
+        f"Audio attached: {attachment['filename']} "
+        f"({_format_size(attachment['size'])})"
+    )
 
 
 def _extract_audio_bytes(response) -> bytes:
