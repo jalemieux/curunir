@@ -284,6 +284,7 @@ class PortalChannel:
             reply_address={},
             command=payload.get("command") or None,
             attachments=manifest,
+            voice=bool(payload.get("voice")),
         ))
 
     def _is_duplicate(self, payload: dict) -> bool:
