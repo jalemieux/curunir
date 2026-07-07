@@ -34,6 +34,7 @@ from src.schedule_store import db as schedule_db
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
+from src.tools.to_audio import synthesize_speech
 from src.usage_store import UsageStore
 
 
@@ -467,6 +468,22 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 agent.sessions[msg.session_id],
                 channel=msg.channel,
             )
+
+        # Voice turns (voice-only clients like the iOS PTT app): synthesize
+        # the reply as speech so the client can play it. On failure the frame
+        # ships text-only — the app falls back to on-device TTS.
+        if msg.voice and text.strip():
+            voice_att, voice_err = await synthesize_speech(
+                text, agent.config,
+                filename=f"voice-{int(time.time() * 1000)}.mp3",
+            )
+            if voice_att is not None:
+                attachments.append(voice_att)
+            else:
+                logger.warning(
+                    "Voice synthesis failed for session %s: %s",
+                    msg.session_id, voice_err,
+                )
 
         # Final reply: routed back to the originating channel by route_outbound.
         await out_queue.put(OutgoingMessage(
