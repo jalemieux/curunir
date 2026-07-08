@@ -59,8 +59,14 @@ async def synthesize_speech(
     voice: str | None = None,
     model: str | None = None,
     filename: str | None = None,
+    rewrite: bool = True,
+    instructions: str | None = None,
 ) -> tuple[dict | None, str | None]:
     """Rewrite ``content`` for spoken delivery and synthesize an MP3.
+
+    When ``rewrite`` is False, uses content directly without LLM processing.
+    When ``instructions`` is provided, passes it to the TTS model's
+    instructions parameter (tts-1/tts-1-hd only; ignored by other models).
 
     Returns (attachment, None) on success or (None, error) on failure.
     """
@@ -68,31 +74,35 @@ async def synthesize_speech(
     model = model or config.tts_model
     filename = filename or f"digest-{date.today().isoformat()}.mp3"
 
-    try:
-        rewrite = await call_llm(
-            model=config.model,
-            messages=[
-                {"role": "system", "content": SPEECH_REWRITE_PROMPT},
-                {"role": "user", "content": content},
-            ],
-            tools=[],
-            api_base=config.api_base,
-            openrouter_provider=config.openrouter_provider,
-        )
-        script = (rewrite.text or "").strip()
+    if rewrite:
+        try:
+            rewrite_response = await call_llm(
+                model=config.model,
+                messages=[
+                    {"role": "system", "content": SPEECH_REWRITE_PROMPT},
+                    {"role": "user", "content": content},
+                ],
+                tools=[],
+                api_base=config.api_base,
+                openrouter_provider=config.openrouter_provider,
+            )
+            script = (rewrite_response.text or "").strip()
+            if not script:
+                return None, "speech rewrite produced empty output"
+        except Exception as exc:
+            logger.warning("speech rewrite failed: %s", exc)
+            return None, f"speech rewrite failed: {exc}"
+    else:
+        script = content.strip()
         if not script:
-            return None, "speech rewrite produced empty output"
-    except Exception as exc:
-        logger.warning("speech rewrite failed: %s", exc)
-        return None, f"speech rewrite failed: {exc}"
+            return None, "empty content"
 
     try:
         client = AsyncOpenAI()
-        response = await client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=script,
-        )
+        tts_kwargs: dict = {"model": model, "voice": voice, "input": script}
+        if instructions:
+            tts_kwargs["instructions"] = instructions
+        response = await client.audio.speech.create(**tts_kwargs)
         audio_bytes = _extract_audio_bytes(response)
     except Exception as exc:
         logger.warning("text-to-speech failed: %s", exc)

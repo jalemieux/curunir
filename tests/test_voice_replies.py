@@ -67,3 +67,29 @@ async def test_voice_synth_failure_ships_text_only():
     synth.assert_awaited_once()
     assert result.attachments is None
     assert result.content == "hello there"
+
+
+@pytest.mark.asyncio
+async def test_voice_turn_synthesizes_without_rewrite():
+    result, synth = await _run_one_turn(
+        _mock_agent(), _incoming(voice=True), (FAKE_ATT, None)
+    )
+    kwargs = synth.await_args.kwargs
+    assert kwargs["rewrite"] is False
+    assert kwargs["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_voice_turn_appends_style_note_to_agent_input():
+    agent = _mock_agent()
+    await _run_one_turn(agent, _incoming(voice=True), (FAKE_ATT, None))
+    sent = agent.handle.await_args.args[0]
+    assert "[voice note:" in str(sent)
+
+
+@pytest.mark.asyncio
+async def test_text_turn_does_not_get_style_note():
+    agent = _mock_agent()
+    await _run_one_turn(agent, _incoming(voice=False), (FAKE_ATT, None))
+    sent = agent.handle.await_args.args[0]
+    assert "[voice note:" not in str(sent)

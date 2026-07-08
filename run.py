@@ -38,6 +38,17 @@ from src.tools.to_audio import synthesize_speech
 from src.usage_store import UsageStore
 
 
+# Voice turns skip the digest-style speech rewrite (a full main-model
+# round-trip of tail latency). Instead the reply is steered to be speakable
+# at the source, and the TTS model's instructions handle delivery tone.
+_VOICE_STYLE_NOTE = (
+    "\n\n[voice note: this is a spoken conversation — answer briefly in "
+    "plain conversational prose; no markdown, bullets, headings, or code "
+    "blocks.]"
+)
+_VOICE_TTS_INSTRUCTIONS = "Warm, natural, conversational delivery at an easy pace."
+
+
 def _summarize_tool_call(name: str, args_str: str) -> str:
     """Format a tool call for display, e.g. 'Read src/config.py'."""
     try:
@@ -440,7 +451,10 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             msg_attachments = await _vision_prepass(
                 agent.config, msg.content, msg.attachments,
             )
-            content = build_multimodal_content(msg.content, msg_attachments)
+            agent_input = (
+                msg.content + _VOICE_STYLE_NOTE if msg.voice else msg.content
+            )
+            content = build_multimodal_content(agent_input, msg_attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
@@ -476,6 +490,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             voice_att, voice_err = await synthesize_speech(
                 text, agent.config,
                 filename=f"voice-{int(time.time() * 1000)}.mp3",
+                rewrite=False,
+                instructions=_VOICE_TTS_INSTRUCTIONS,
             )
             if voice_att is not None:
                 attachments.append(voice_att)

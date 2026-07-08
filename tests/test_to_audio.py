@@ -253,3 +253,35 @@ class TestSynthesizeSpeech:
             attachment, err = await synthesize_speech("hi", tts_config)
         assert attachment is None
         assert "disk full" in err
+
+    async def test_rewrite_false_skips_llm_and_passes_content_direct(self, tts_config):
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock
+        ) as mock_llm, patcher:
+            attachment, err = await synthesize_speech(
+                "Hello there, friend.", tts_config,
+                filename="direct.mp3", rewrite=False,
+            )
+        assert err is None
+        assert mock_llm.await_count == 0
+        assert create_mock.await_args.kwargs["input"] == "Hello there, friend."
+        assert "instructions" not in create_mock.await_args.kwargs
+
+    async def test_instructions_passed_to_tts(self, tts_config):
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patcher:
+            attachment, err = await synthesize_speech(
+                "Hi.", tts_config, rewrite=False, instructions="Speak warmly.",
+            )
+        assert err is None
+        assert create_mock.await_args.kwargs["instructions"] == "Speak warmly."
+
+    async def test_rewrite_false_empty_content_errors(self, tts_config):
+        patcher, _ = _patch_openai(b"MP3")
+        with patcher:
+            attachment, err = await synthesize_speech(
+                "   ", tts_config, rewrite=False,
+            )
+        assert attachment is None
+        assert "empty" in err
