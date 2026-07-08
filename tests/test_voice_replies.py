@@ -80,16 +80,18 @@ async def test_voice_turn_synthesizes_without_rewrite():
 
 
 @pytest.mark.asyncio
-async def test_voice_turn_appends_style_note_to_agent_input():
+async def test_voice_turn_passes_style_note_as_turn_note():
     agent = _mock_agent()
     await _run_one_turn(agent, _incoming(voice=True), (FAKE_ATT, None))
+    kwargs = agent.handle.await_args.kwargs
+    assert "voice note" in kwargs["turn_note"]
     sent = agent.handle.await_args.args[0]
-    assert "[voice note:" in str(sent)
+    assert "[voice note" not in str(sent)
 
 
 @pytest.mark.asyncio
 async def test_text_turn_does_not_get_style_note():
     agent = _mock_agent()
     await _run_one_turn(agent, _incoming(voice=False), (FAKE_ATT, None))
-    sent = agent.handle.await_args.args[0]
-    assert "[voice note:" not in str(sent)
+    kwargs = agent.handle.await_args.kwargs
+    assert kwargs["turn_note"] is None
