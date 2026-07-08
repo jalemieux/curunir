@@ -104,7 +104,8 @@ async def upsert_user_with_container_token(
 ) -> User:
     """Idempotent seed for dev. If the email exists, refreshes its
     container token and reactivates; otherwise creates the row with a
-    fresh sign-in token alongside the given container token.
+    fresh sign-in token alongside the given container token. An existing
+    client_token is preserved; new rows mint one.
     """
     sign_in_token = make_token()
     client_token = make_token()

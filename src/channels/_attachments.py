@@ -83,7 +83,7 @@ def _assert_within(parent: Path, child: Path) -> bool:
         return False
     return True
 
-# Size caps (mirrored in cli.py)
+# Size caps (inbound caps mirrored in cli.py; audio is outbound-only, not mirrored)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
 _MAX_TEXT_BYTES = 256 * 1024                # 256 KB
 _MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDF, DOCX)
