@@ -241,3 +241,15 @@ class TestSynthesizeSpeech:
             attachment, err = await synthesize_speech("hi", tts_config)
         assert attachment is None
         assert "tts down" in err
+
+    async def test_write_failure_returns_error(self, tts_config):
+        rewrite = LLMResponse(text="Spoken script.", tool_calls=None)
+        patcher, _create_mock = _patch_openai(b"MP3")
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock, return_value=rewrite
+        ), patcher, patch(
+            "src.tools.to_audio.os.makedirs", side_effect=OSError("disk full")
+        ):
+            attachment, err = await synthesize_speech("hi", tts_config)
+        assert attachment is None
+        assert "disk full" in err
