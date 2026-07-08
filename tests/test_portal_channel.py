@@ -988,3 +988,26 @@ async def test_conversations_request_no_connection_no_send(portal_server):
     # No start() — _connection is None.
     await ch._handle_conversations_request({})
     assert ch._connection is None
+
+
+@pytest.mark.asyncio
+async def test_voice_flag_rides_incoming_message(tmp_path):
+    q = asyncio.Queue()
+    ch = PortalChannel(in_queue=q, url="ws://unused", token="t",
+                       uploads_dir=str(tmp_path))
+    await ch._handle_user_message(
+        {"session_id": "s-voice", "content": "hello", "voice": True}
+    )
+    msg = q.get_nowait()
+    assert msg.voice is True
+    assert msg.content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_voice_flag_defaults_false(tmp_path):
+    q = asyncio.Queue()
+    ch = PortalChannel(in_queue=q, url="ws://unused", token="t",
+                       uploads_dir=str(tmp_path))
+    await ch._handle_user_message({"session_id": "s-text", "content": "hello"})
+    msg = q.get_nowait()
+    assert msg.voice is False

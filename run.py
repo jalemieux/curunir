@@ -34,7 +34,18 @@ from src.schedule_store import db as schedule_db
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
+from src.tools.to_audio import synthesize_speech
 from src.usage_store import UsageStore
+
+
+# Voice turns skip the digest-style speech rewrite (a full main-model
+# round-trip of tail latency). Instead the reply is steered to be speakable
+# at the source, and the TTS model's instructions handle delivery tone.
+_VOICE_STYLE_NOTE = (
+    "[voice note: this is a spoken conversation — answer briefly in plain "
+    "conversational prose; no markdown, bullets, headings, or code blocks.]"
+)
+_VOICE_TTS_INSTRUCTIONS = "Warm, natural, conversational delivery at an easy pace."
 
 
 def _summarize_tool_call(name: str, args_str: str) -> str:
@@ -445,6 +456,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 on_tool_call=on_tool_call, attachments=attachments,
                 metadata=metadata,
                 on_text_delta=on_text_delta,
+                turn_note=_VOICE_STYLE_NOTE if msg.voice else None,
             )
         except Exception as e:
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
@@ -467,6 +479,24 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 agent.sessions[msg.session_id],
                 channel=msg.channel,
             )
+
+        # Voice turns (voice-only clients like the iOS PTT app): synthesize
+        # the reply as speech so the client can play it. On failure the frame
+        # ships text-only — the app falls back to on-device TTS.
+        if msg.voice and text.strip():
+            voice_att, voice_err = await synthesize_speech(
+                text, agent.config,
+                filename=f"voice-{int(time.time() * 1000)}.mp3",
+                rewrite=False,
+                instructions=_VOICE_TTS_INSTRUCTIONS,
+            )
+            if voice_att is not None:
+                attachments.append(voice_att)
+            else:
+                logger.warning(
+                    "Voice synthesis failed for session %s: %s",
+                    msg.session_id, voice_err,
+                )
 
         # Final reply: routed back to the originating channel by route_outbound.
         await out_queue.put(OutgoingMessage(

@@ -601,6 +601,28 @@ class TestAgentHandle:
         user_msg = _real_user_msgs(captured["messages"])[-1]
         assert user_msg["content"] == content_blocks
 
+    async def test_turn_note_reaches_llm_but_not_history(self, agent):
+        """turn_note rides the ephemeral live-time note to the LLM call, but
+        is never written into persisted session history."""
+        captured: dict = {}
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured["messages"] = messages
+            return LLMResponse(text="ack", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle(
+                "hi", "s1", turn_note="[voice note: test]",
+            )
+
+        final_message = captured["messages"][-1]
+        assert "[voice note: test]" in final_message["content"]
+
+        history = agent.sessions["s1"]
+        assert not any(
+            "[voice note" in str(m.get("content", "")) for m in history
+        )
+
 
 class TestTrimHistoryMultimodal:
     def test_image_block_costs_fixed_amount(self):

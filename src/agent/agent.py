@@ -474,6 +474,7 @@ class Agent:
         system_task_prompt: str | None = None,
         metadata: dict | None = None,
         on_text_delta=None,
+        turn_note: str | None = None,
     ) -> str:
         """Process a message and return the agent's response.
 
@@ -484,6 +485,9 @@ class Agent:
                           for each tool call, enabling real-time UI updates.
             attachments: Optional list that will be populated with any files
                          the agent attaches during this request via the attach tool.
+            turn_note: Optional ephemeral per-turn guidance appended to the
+                       live note for the LLM call only — never persisted to
+                       history.
         """
         # Lazy-load a persisted transcript when resuming a conversation that
         # is not currently in memory — agent.sessions holds active sessions
@@ -526,10 +530,10 @@ class Agent:
         # iterations, so it gives the model a fresh clock without busting the
         # prefix cache. tz-aware (.astimezone()) so the offset is explicit.
         now = datetime.now().astimezone()
-        live_time_note = {
-            "role": "user",
-            "content": f"Current date/time: {now.isoformat()} ({now.strftime('%A')})",
-        }
+        live_content = f"Current date/time: {now.isoformat()} ({now.strftime('%A')})"
+        if turn_note:
+            live_content += f"\n{turn_note}"
+        live_time_note = {"role": "user", "content": live_content}
 
         def _assemble_messages() -> list[dict]:
             """[system] + history + live-time note. The note is never written

@@ -6,7 +6,7 @@ import pytest
 
 from src.config import AgentConfig
 from src.llm import LLMResponse
-from src.tools.to_audio import SPEECH_REWRITE_PROMPT, exec_to_audio
+from src.tools.to_audio import SPEECH_REWRITE_PROMPT, exec_to_audio, synthesize_speech
 
 
 def _mock_tts_response(audio_bytes: bytes):
@@ -203,3 +203,86 @@ class TestSpeechRewritePrompt:
         prompt = SPEECH_REWRITE_PROMPT.lower()
         # OpenAI tts-1/tts-1-hd read SSML literally — the prompt must forbid it.
         assert "ssml" in prompt
+
+
+class TestSynthesizeSpeech:
+    async def test_success_returns_attachment(self, tts_config):
+        rewrite = LLMResponse(text="Spoken script.", tool_calls=None)
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock, return_value=rewrite
+        ), patcher:
+            attachment, err = await synthesize_speech(
+                "# Heading\n- bullet", tts_config, filename="reply.mp3"
+            )
+        assert err is None
+        assert attachment["filename"] == "reply.mp3"
+        assert attachment["mime_type"] == "audio/mpeg"
+        assert Path(attachment["path"]).read_bytes() == b"MP3"
+
+    async def test_rewrite_failure_returns_error(self, tts_config):
+        with patch(
+            "src.tools.to_audio.call_llm",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("llm down"),
+        ):
+            attachment, err = await synthesize_speech("hi", tts_config)
+        assert attachment is None
+        assert "llm down" in err
+
+    async def test_tts_failure_returns_error(self, tts_config):
+        rewrite = LLMResponse(text="Spoken script.", tool_calls=None)
+        create_mock = AsyncMock(side_effect=RuntimeError("tts down"))
+        client = MagicMock()
+        client.audio.speech.create = create_mock
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock, return_value=rewrite
+        ), patch("src.tools.to_audio.AsyncOpenAI", return_value=client):
+            attachment, err = await synthesize_speech("hi", tts_config)
+        assert attachment is None
+        assert "tts down" in err
+
+    async def test_write_failure_returns_error(self, tts_config):
+        rewrite = LLMResponse(text="Spoken script.", tool_calls=None)
+        patcher, _create_mock = _patch_openai(b"MP3")
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock, return_value=rewrite
+        ), patcher, patch(
+            "src.tools.to_audio.os.makedirs", side_effect=OSError("disk full")
+        ):
+            attachment, err = await synthesize_speech("hi", tts_config)
+        assert attachment is None
+        assert "disk full" in err
+
+    async def test_rewrite_false_skips_llm_and_passes_content_direct(self, tts_config):
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patch(
+            "src.tools.to_audio.call_llm", new_callable=AsyncMock
+        ) as mock_llm, patcher:
+            attachment, err = await synthesize_speech(
+                "Hello there, friend.", tts_config,
+                filename="direct.mp3", rewrite=False,
+            )
+        assert err is None
+        assert mock_llm.await_count == 0
+        assert create_mock.await_args.kwargs["input"] == "Hello there, friend."
+        assert "instructions" not in create_mock.await_args.kwargs
+
+    async def test_instructions_passed_to_tts(self, tts_config):
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patcher:
+            attachment, err = await synthesize_speech(
+                "Hi.", tts_config, rewrite=False, instructions="Speak warmly.",
+            )
+        assert err is None
+        assert create_mock.await_args.kwargs["instructions"] == "Speak warmly."
+
+    async def test_rewrite_false_empty_content_errors(self, tts_config):
+        patcher, create_mock = _patch_openai(b"MP3")
+        with patcher:
+            attachment, err = await synthesize_speech(
+                "   ", tts_config, rewrite=False,
+            )
+        assert attachment is None
+        assert "empty" in err
+        assert create_mock.await_count == 0

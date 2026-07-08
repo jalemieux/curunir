@@ -83,10 +83,11 @@ def _assert_within(parent: Path, child: Path) -> bool:
         return False
     return True
 
-# Size caps (mirrored in cli.py)
+# Size caps (inbound caps mirrored in cli.py; audio is outbound-only, not mirrored)
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024          # 5 MB
 _MAX_TEXT_BYTES = 256 * 1024                # 256 KB
 _MAX_DOC_BYTES = 10 * 1024 * 1024           # 10 MB (PDF, DOCX)
+_MAX_AUDIO_BYTES = 10 * 1024 * 1024         # 10 MB — ample for TTS replies
 _MAX_TOTAL_BYTES = 20 * 1024 * 1024         # 20 MB
 _ALLOWED_IMAGE_MIMES = frozenset({
     "image/png", "image/jpeg", "image/gif", "image/webp",
@@ -95,6 +96,7 @@ _ALLOWED_DOC_MIMES = frozenset({
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 })
+_ALLOWED_AUDIO_MIMES = frozenset({"audio/mpeg"})
 
 _MAX_ATTACHMENT_CONTENT_SIZE = 512 * 1024  # 512KB
 
@@ -134,6 +136,8 @@ def _attach_download_data(att: dict, path: str) -> None:
         cap = _MAX_IMAGE_BYTES
     elif mime in _ALLOWED_DOC_MIMES:
         cap = _MAX_DOC_BYTES
+    elif mime in _ALLOWED_AUDIO_MIMES:
+        cap = _MAX_AUDIO_BYTES
     elif mime.startswith("text/") or mime == "application/json":
         cap = _MAX_TEXT_BYTES
     else:

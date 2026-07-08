@@ -42,3 +42,29 @@ async def test_regenerate_tokens_invalidates_old(client):
     assert new_sign_in != old_sign_in
     assert await db.get_active_user_by_sign_in_token(old_sign_in) is None
     assert await db.get_active_user_by_sign_in_token(new_sign_in) is not None
+
+
+@pytest.mark.asyncio
+async def test_create_user_mints_client_token(client):
+    user = await db.create_user("ct@example.com")
+    assert user.client_token
+    found = await db.get_active_user_by_client_token(user.client_token)
+    assert found is not None
+    assert found.id == user.id
+
+
+@pytest.mark.asyncio
+async def test_regenerate_client_token_rotates(client):
+    user = await db.create_user("ct2@example.com")
+    new_token = await db.regenerate_client_token(user.id)
+    assert new_token != user.client_token
+    assert await db.get_active_user_by_client_token(user.client_token) is None
+    refetched = await db.get_active_user_by_client_token(new_token)
+    assert refetched.id == user.id
+
+
+@pytest.mark.asyncio
+async def test_client_token_rejected_when_inactive(client):
+    user = await db.create_user("ct3@example.com")
+    await db.deactivate_user(user.id)
+    assert await db.get_active_user_by_client_token(user.client_token) is None
