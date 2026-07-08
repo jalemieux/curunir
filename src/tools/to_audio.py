@@ -98,11 +98,15 @@ async def synthesize_speech(
         logger.warning("text-to-speech failed: %s", exc)
         return None, f"text-to-speech failed: {exc}"
 
-    out_dir = os.path.join(os.path.abspath(config.attachment_dir), "audio")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, filename)
-    with open(out_path, "wb") as f:
-        f.write(audio_bytes)
+    try:
+        out_dir = os.path.join(os.path.abspath(config.attachment_dir), "audio")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+        with open(out_path, "wb") as f:
+            f.write(audio_bytes)
+    except OSError as exc:
+        logger.warning("audio write failed: %s", exc)
+        return None, f"audio write failed: {exc}"
 
     return {
         "filename": filename,
