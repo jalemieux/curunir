@@ -42,9 +42,8 @@ from src.usage_store import UsageStore
 # round-trip of tail latency). Instead the reply is steered to be speakable
 # at the source, and the TTS model's instructions handle delivery tone.
 _VOICE_STYLE_NOTE = (
-    "\n\n[voice note: this is a spoken conversation — answer briefly in "
-    "plain conversational prose; no markdown, bullets, headings, or code "
-    "blocks.]"
+    "[voice note: this is a spoken conversation — answer briefly in plain "
+    "conversational prose; no markdown, bullets, headings, or code blocks.]"
 )
 _VOICE_TTS_INSTRUCTIONS = "Warm, natural, conversational delivery at an easy pace."
 
@@ -451,15 +450,13 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             msg_attachments = await _vision_prepass(
                 agent.config, msg.content, msg.attachments,
             )
-            agent_input = (
-                msg.content + _VOICE_STYLE_NOTE if msg.voice else msg.content
-            )
-            content = build_multimodal_content(agent_input, msg_attachments)
+            content = build_multimodal_content(msg.content, msg_attachments)
             text = await agent.handle(
                 content, msg.session_id,
                 on_tool_call=on_tool_call, attachments=attachments,
                 metadata=metadata,
                 on_text_delta=on_text_delta,
+                turn_note=_VOICE_STYLE_NOTE if msg.voice else None,
             )
         except Exception as e:
             logger.exception("Agent error for session %s: %s", msg.session_id, e)

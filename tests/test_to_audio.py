@@ -278,10 +278,11 @@ class TestSynthesizeSpeech:
         assert create_mock.await_args.kwargs["instructions"] == "Speak warmly."
 
     async def test_rewrite_false_empty_content_errors(self, tts_config):
-        patcher, _ = _patch_openai(b"MP3")
+        patcher, create_mock = _patch_openai(b"MP3")
         with patcher:
             attachment, err = await synthesize_speech(
                 "   ", tts_config, rewrite=False,
             )
         assert attachment is None
         assert "empty" in err
+        assert create_mock.await_count == 0
