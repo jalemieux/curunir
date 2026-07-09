@@ -695,17 +695,18 @@ class Agent:
                     response, err = await _call_and_record()
                     if err is not None:
                         return err
-                if not response.tool_calls and not response.text:
-                    logger.warning(
-                        "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
-                        sid, response.finish_reason,
-                    )
-                    nudge = {"role": "user", "content": "Continue."}
-                    history.append(nudge)
-                    messages = _assemble_messages()
-                    response, err = await _call_and_record()
-                    if err is not None:
-                        return err
+
+                    if not response.tool_calls and not response.text:
+                        logger.warning(
+                            "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
+                            sid, response.finish_reason,
+                        )
+                        nudge = {"role": "user", "content": "Continue."}
+                        history.append(nudge)
+                        messages = _assemble_messages()
+                        response, err = await _call_and_record()
+                        if err is not None:
+                            return err
 
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
