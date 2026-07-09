@@ -1,6 +1,7 @@
 # Document Ingestion Pipeline (design)
 
-Status: **design agreed, not yet implemented** (2026-07-09)
+Status: steps 1–2 implemented (ingestion core + local-UI eager trigger);
+steps 3–4 (read gate, dedup) pending. (2026-07-09)
 
 ## Problem
 
