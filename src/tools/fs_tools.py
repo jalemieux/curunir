@@ -102,14 +102,17 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    import pymupdf
-    doc = pymupdf.open(str(path))
+    # pypdf, not pymupdf: it's the PDF engine the attachment path
+    # (document_text.py) already depends on — one extractor repo-wide, and
+    # no native wheel. pymupdf was never in requirements.txt, so this
+    # reader was a latent ModuleNotFoundError in every environment.
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
     pages = []
-    for i, page in enumerate(doc, 1):
-        text = page.get_text()
+    for i, page in enumerate(reader.pages, 1):
+        text = page.extract_text() or ""
         if text.strip():
             pages.append(f"--- Page {i} ---\n{text}")
-    doc.close()
     return "\n".join(pages) if pages else "(no text content found in PDF)"
 
 

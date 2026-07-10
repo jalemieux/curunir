@@ -195,3 +195,35 @@ class TestReadGate:
         assert "2\ta2\tb2" in result
         assert "3\ta3\tb3" in result
         assert "1\ta1" not in result
+
+    def test_pdf_read_extracts_numbered_text(self, tmp_path, agent_config):
+        # Minimal one-page PDF assembled with a correct xref table.
+        # Guards the pypdf-based reader: exec_read on a PDF must return
+        # extracted text, line-numbered, not an import error.
+        stream = b"BT /F1 12 Tf 72 720 Td (Ingestion smoke line) Tj ET"
+        objs = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        out, offsets = bytearray(b"%PDF-1.4\n"), []
+        for i, body in enumerate(objs, 1):
+            offsets.append(len(out))
+            out += b"%d 0 obj\n%s\nendobj\n" % (i, body)
+        xref_at = len(out)
+        out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+        for off in offsets:
+            out += b"%010d 00000 n \n" % off
+        out += (
+            b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+            % (len(objs) + 1, xref_at)
+        )
+        f = tmp_path / "doc.pdf"
+        f.write_bytes(bytes(out))
+        result = exec_read({"file_path": str(f)}, agent_config)
+        assert "error" not in result.lower()
+        assert "Ingestion smoke line" in result
+        assert "\t" in result  # line-numbered like every other format
