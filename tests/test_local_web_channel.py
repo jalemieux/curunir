@@ -809,3 +809,226 @@ async def test_send_without_socket_is_noop(channel):
     await channel.send(OutgoingMessage(
         content="x", channel="local_web", session_id="local", reply_address={},
     ))
+
+
+# --- upload frame + eager document ingestion --------------------------------
+
+
+def _b64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
+def _upload_channel(config, tmp_path, ingest=None, doc_card_min_bytes=10):
+    return LocalWebChannel(
+        in_queue=asyncio.Queue(),
+        config=config,
+        pairing_token=TOKEN,
+        uploads_dir=str(tmp_path / "uploads"),
+        ingest=ingest,
+        doc_card_min_bytes=doc_card_min_bytes,
+    )
+
+
+async def _drain_ingest(channel):
+    if channel._ingest_tasks:
+        await asyncio.gather(*list(channel._ingest_tasks))
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_stages_files_and_responds_with_manifest(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)  # no ingest callable
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u1",
+        "attachments": [
+            {"filename": "doc.txt", "mime_type": "text/plain", "data": _b64("x" * 50)},
+        ],
+    }, respond=respond)
+
+    assert ch.in_queue.empty()
+    assert sent[0]["type"] == "upload_result"
+    assert sent[0]["upload_id"] == "u1"
+    files = sent[0]["files"]
+    assert len(files) == 1
+    assert files[0]["filename"] == "doc.txt"
+    assert files[0]["ingest"] == "skipped"  # no ingest callable wired
+    from pathlib import Path
+    staged = Path(files[0]["path"])
+    assert staged.is_file()
+    assert staged.read_text() == "x" * 50
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_ingests_eligible_docs_and_sends_card_frames(config, tmp_path):
+    seen = []
+
+    async def fake_ingest(path):
+        seen.append(path)
+        return "# Document card"
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u2",
+        "attachments": [
+            {"filename": "big.txt", "mime_type": "text/plain", "data": _b64("y" * 100)},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    assert sent[0]["files"][0]["ingest"] == "pending"
+    cards = [f for f in sent if f.get("type") == "document_card"]
+    assert len(cards) == 1
+    assert cards[0]["upload_id"] == "u2"
+    assert cards[0]["filename"] == "big.txt"
+    assert cards[0]["status"] == "ok"
+    assert seen == [sent[0]["files"][0]["path"]]
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_skips_images_and_small_files(config, tmp_path):
+    async def fake_ingest(path):  # pragma: no cover - must not be called
+        raise AssertionError("ingest called for ineligible file")
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=50)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    png = "\x89PNG fake" + "p" * 100
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u3",
+        "attachments": [
+            {"filename": "img.png", "mime_type": "image/png", "data": _b64(png)},
+            {"filename": "tiny.txt", "mime_type": "text/plain", "data": _b64("hi")},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    statuses = {f["filename"]: f["ingest"] for f in sent[0]["files"]}
+    assert statuses == {"img.png": "skipped", "tiny.txt": "skipped"}
+    assert not [f for f in sent if f.get("type") == "document_card"]
+
+
+@pytest.mark.asyncio
+async def test_upload_ingest_failure_sends_error_card_frame(config, tmp_path):
+    async def fake_ingest(path):
+        raise RuntimeError("model unavailable")
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u4",
+        "attachments": [
+            {"filename": "bad.txt", "mime_type": "text/plain", "data": _b64("z" * 100)},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    cards = [f for f in sent if f.get("type") == "document_card"]
+    assert len(cards) == 1
+    assert cards[0]["status"] == "error"
+    assert "model unavailable" in cards[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_rejects_bad_attachments(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u5",
+        "attachments": [{"filename": "doc.txt", "mime_type": "text/plain", "data": "!!not-b64!!"}],
+    }, respond=respond)
+
+    assert sent[0]["type"] == "upload_result"
+    assert sent[0]["upload_id"] == "u5"
+    assert "base64" in sent[0]["error"]
+    assert ch.in_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_message_frame_with_staged_files_builds_manifest(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    staged_dir = tmp_path / "uploads" / "local" / "batch1"
+    staged_dir.mkdir(parents=True)
+    doc = staged_dir / "report.txt"
+    doc.write_text("q" * 30)
+
+    await ch._handle_inbound_frame({
+        "content": "what does this say?",
+        "staged_files": [{"path": str(doc), "filename": "report.txt"}],
+    })
+
+    msg = ch.in_queue.get_nowait()
+    assert msg.content == "what does this say?"
+    assert len(msg.attachments) == 1
+    att = msg.attachments[0]
+    assert att["filename"] == "report.txt"
+    assert att["path"] == str(doc)
+    assert att["size"] == 30
+    assert att["mime_type"] == "text/plain"
+
+
+@pytest.mark.asyncio
+async def test_message_frame_rejects_staged_path_outside_uploads(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private")
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "content": "read it",
+        "staged_files": [{"path": str(secret), "filename": "secret.txt"}],
+    }, respond=respond)
+
+    assert ch.in_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_upload_flow_end_to_end_over_websocket(config, tmp_path):
+    """Full socket path: upload frame in → upload_result + document_card out."""
+    async def fake_ingest(path):
+        return "# card"
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    with TestClient(ch.app) as c:
+        with c.websocket_connect(
+            f"/ws/browser?token={TOKEN}", headers=GOOD_ORIGIN
+        ) as ws:
+            assert json.loads(ws.receive_text())["type"] == "agent_status"
+            assert json.loads(ws.receive_text())["type"] == "meta"
+            ws.send_text(json.dumps({
+                "command": "upload", "upload_id": "e2e",
+                "attachments": [{
+                    "filename": "doc.txt", "mime_type": "text/plain",
+                    "data": _b64("d" * 100),
+                }],
+            }))
+            result = json.loads(ws.receive_text())
+            assert result["type"] == "upload_result"
+            assert result["files"][0]["ingest"] == "pending"
+            card = json.loads(ws.receive_text())
+            assert card["type"] == "document_card"
+            assert card["status"] == "ok"
+            assert card["upload_id"] == "e2e"

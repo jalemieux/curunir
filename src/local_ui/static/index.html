@@ -1155,7 +1155,7 @@ chat = createChat({
   container: document.getElementById("chat-root"),
   connection: conn,
   getSessionId: () => activeSessionId,
-  features: { attachments: true, skills: true, theme: true, emptyState: true },
+  features: { attachments: true, skills: true, theme: true, emptyState: true, eagerIngest: true },
   hooks: {
     // Socket just opened — pull the conversation list for the sidebar.
     onSocketOpen: () => requestConversations(),
