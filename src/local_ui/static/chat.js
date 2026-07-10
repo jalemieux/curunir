@@ -59,6 +59,18 @@ const DL_ICON =
   '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" ' +
   'y2="3"/></svg>';
 
+// === Stick-to-bottom (pure helpers, node-tested in tests/js/test_chat_scroll.mjs) ===
+// The pane auto-follows a streaming response only while the reader is at (or
+// within `threshold` px of) the bottom; scrolling up detaches it until they
+// return. Forced scrolls (own send, history load) always win.
+export function computeScrollPinned(scrollTop, scrollHeight, clientHeight, threshold = 48) {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function shouldAutoScroll(pinned, force) {
+  return force || pinned;
+}
+
 export function createChat(config) {
   const {
     container,
@@ -506,11 +518,24 @@ export function createChat(config) {
     el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
     if (thinking) ensureActivityIndicator(el, true);
     messagesEl.appendChild(el);
-    scrollToBottom();
+    // New bubbles (own send, history load) always scroll; only streaming
+    // deltas into an existing bubble respect the reader's position.
+    scrollToBottom(true);
     return el;
   }
 
-  function scrollToBottom() {
+  // Updated on user scrolls; content growth fires no scroll event, so a
+  // pinned reader stays pinned while the stream grows the pane. The
+  // programmatic scroll below lands at the bottom and re-confirms the flag.
+  let scrollPinned = true;
+  messagesEl.addEventListener("scroll", () => {
+    scrollPinned = computeScrollPinned(
+      messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight);
+  });
+
+  function scrollToBottom(force = false) {
+    if (!shouldAutoScroll(scrollPinned, force)) return;
+    scrollPinned = true;
     requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
   }
 
