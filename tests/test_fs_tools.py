@@ -127,3 +127,71 @@ class TestExecGrep:
         (tmp_path / "a.py").write_text("nothing here\n")
         result = exec_grep({"pattern": "zzzzz", "path": str(tmp_path)}, agent_config)
         assert result == "" or "no matches" in result.lower()
+
+
+class TestReadGate:
+    """Large-document pre-gate on exec_read (docs/document-ingestion.md step 3)."""
+
+    def _cfg(self, agent_config, gate=200):
+        import dataclasses
+        return dataclasses.replace(agent_config, read_gate_bytes=gate)
+
+    def _big_file(self, tmp_path, lines=100):
+        f = tmp_path / "big.txt"
+        f.write_text("\n".join(f"row-{i:04d}" for i in range(1, lines + 1)))
+        return f
+
+    def test_gated_read_returns_structural_preview(self, tmp_path, agent_config):
+        f = self._big_file(tmp_path)
+        result = exec_read({"file_path": str(f)}, self._cfg(agent_config))
+        assert "1\trow-0001" in result          # head preview, numbered
+        assert "row-0100" not in result          # tail withheld
+        assert "100 lines" in result             # totals for offset planning
+        assert "offset" in result and "limit" in result
+        assert "document-ingest" in result       # routes to the card CLI
+
+    def test_gated_read_returns_card_when_present(self, tmp_path, agent_config):
+        f = self._big_file(tmp_path)
+        (tmp_path / "big.txt.card.md").write_text("# Document card: big.txt")
+        result = exec_read({"file_path": str(f)}, self._cfg(agent_config))
+        assert "# Document card: big.txt" in result
+        assert str(f) in result                  # points back at the raw file
+        assert "row-0001" not in result          # body not inlined
+
+    def test_explicit_limit_bypasses_gate(self, tmp_path, agent_config):
+        f = self._big_file(tmp_path)
+        result = exec_read(
+            {"file_path": str(f), "offset": 98, "limit": 3}, self._cfg(agent_config)
+        )
+        assert "98\trow-0098" in result
+        assert "100\trow-0100" in result
+        assert "document-ingest" not in result
+
+    def test_small_file_not_gated(self, tmp_path, agent_config):
+        f = tmp_path / "small.txt"
+        f.write_text("a\nb\n")
+        result = exec_read({"file_path": str(f)}, self._cfg(agent_config))
+        assert "1\ta" in result and "2\tb" in result
+        assert "document-ingest" not in result
+
+    def test_gate_disabled_when_zero(self, tmp_path, agent_config):
+        f = self._big_file(tmp_path)
+        result = exec_read({"file_path": str(f)}, self._cfg(agent_config, gate=0))
+        assert "row-0100" in result              # full read
+
+    def test_empty_card_falls_back_to_preview(self, tmp_path, agent_config):
+        f = self._big_file(tmp_path)
+        (tmp_path / "big.txt.card.md").write_text("  \n")
+        result = exec_read({"file_path": str(f)}, self._cfg(agent_config))
+        assert "1\trow-0001" in result
+        assert "document-ingest" in result
+
+    def test_binary_reader_output_is_numbered_and_pageable(self, tmp_path, agent_config):
+        # CSV goes through _BINARY_READERS like PDF/DOCX; extracted text must
+        # be line-numbered so document-card line refs are read-addressable.
+        f = tmp_path / "data.csv"
+        f.write_text("\n".join(f"a{i},b{i}" for i in range(1, 11)))
+        result = exec_read({"file_path": str(f), "offset": 2, "limit": 2}, agent_config)
+        assert "2\ta2\tb2" in result
+        assert "3\ta3\tb3" in result
+        assert "1\ta1" not in result

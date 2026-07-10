@@ -86,7 +86,15 @@ _SCHEMAS = [
             "type": "function",
             "function": {
                 "name": "read",
-                "description": "Read a file. Supports text files (with line numbers), PDF, DOCX, XLSX, and CSV.",
+                "description": (
+                    "Read a file. Supports text files, PDF, DOCX, XLSX, and "
+                    "CSV; output is line-numbered. Reading a large file "
+                    "without `limit` returns its document card or a head "
+                    "preview instead of the full body — use offset/limit for "
+                    "a specific range, grep to locate content, or the "
+                    "document-ingest skill to card a big document for "
+                    "navigation."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
