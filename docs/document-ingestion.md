@@ -1,7 +1,7 @@
 # Document Ingestion Pipeline (design)
 
-Status: steps 1–3 implemented (ingestion core, local-UI eager trigger,
-read gate); step 4 (dedup) pending. (2026-07-09)
+Status: **implemented** — steps 1–4 (ingestion core, local-UI eager
+trigger, read gate, byte-hash dedup). (2026-07-09)
 
 ## Problem
 
@@ -86,8 +86,11 @@ only routes.
 
 ### Dedup
 
-Hash document bytes (sha256); on re-upload of identical bytes, reuse the
-existing card. Versioning/invalidation deferred.
+Cards are also stored content-addressed at `context/cards/<sha256>.card.md`.
+Ingestion checks the sibling card first, then the hash store: identical
+bytes at any path (re-upload, reconnect re-stage, email copy of the same
+filing) copy the stored card to the new sibling and skip the LLM.
+Versioning/invalidation deferred.
 
 ### Grounding rule (finance guardrail)
 

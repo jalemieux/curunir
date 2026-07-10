@@ -135,6 +135,65 @@ async def test_skill_card_spec_injected_without_frontmatter(tmp_path, agent_conf
     assert "routing text for the agent" not in system
 
 
+async def test_hash_dedup_reuses_card_for_identical_bytes(tmp_path, agent_config):
+    """Same bytes at a different path (re-upload, re-stage) never re-ingest."""
+    doc_a = tmp_path / "a" / "report.txt"
+    doc_a.parent.mkdir()
+    doc_a.write_text("identical body " * 10)
+    doc_b = tmp_path / "b" / "renamed.txt"
+    doc_b.parent.mkdir()
+    doc_b.write_text("identical body " * 10)
+
+    with patch("src.document_ingest.call_llm", new_callable=AsyncMock) as llm:
+        llm.return_value = LLMResponse(text=CARD, tool_calls=None)
+        card_a = await ingest_document(doc_a, agent_config)
+        card_b = await ingest_document(doc_b, agent_config)
+
+    assert llm.await_count == 1                      # second ingest was free
+    assert card_b == card_a == CARD
+    # The reused card also lands as B's sibling so the read gate finds it.
+    assert (tmp_path / "b" / "renamed.txt.card.md").read_text() == CARD
+
+
+async def test_ingest_writes_hash_store_copy(tmp_path, agent_config):
+    import hashlib
+    doc = _make_doc(tmp_path)
+    with patch("src.document_ingest.call_llm", new_callable=AsyncMock) as llm:
+        llm.return_value = LLMResponse(text=CARD, tool_calls=None)
+        await ingest_document(doc, agent_config)
+
+    digest = hashlib.sha256(doc.read_bytes()).hexdigest()
+    stored = agent_config.context_dir / "cards" / f"{digest}.card.md"
+    assert stored.read_text() == CARD
+
+
+async def test_different_bytes_are_not_deduped(tmp_path, agent_config):
+    doc_a = _make_doc(tmp_path, name="a.txt", lines=("one", "two"))
+    doc_b = _make_doc(tmp_path, name="b.txt", lines=("three", "four"))
+    with patch("src.document_ingest.call_llm", new_callable=AsyncMock) as llm:
+        llm.return_value = LLMResponse(text=CARD, tool_calls=None)
+        await ingest_document(doc_a, agent_config)
+        await ingest_document(doc_b, agent_config)
+
+    assert llm.await_count == 2
+
+
+async def test_empty_hash_store_entry_is_ignored(tmp_path, agent_config):
+    import hashlib
+    doc = _make_doc(tmp_path)
+    digest = hashlib.sha256(doc.read_bytes()).hexdigest()
+    store = agent_config.context_dir / "cards" / f"{digest}.card.md"
+    store.parent.mkdir(parents=True)
+    store.write_text("  \n")
+
+    with patch("src.document_ingest.call_llm", new_callable=AsyncMock) as llm:
+        llm.return_value = LLMResponse(text=CARD, tool_calls=None)
+        card = await ingest_document(doc, agent_config)
+
+    assert card == CARD
+    assert llm.await_count == 1
+
+
 async def test_card_short_circuit_ignores_empty_card_file(tmp_path, agent_config):
     doc = _make_doc(tmp_path)
     (tmp_path / "report.txt.card.md").write_text("")
