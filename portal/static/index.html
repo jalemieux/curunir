@@ -1463,11 +1463,26 @@ function appendMessage(role, thinking = false) {
   el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
   if (thinking) ensureActivityIndicator(el, /*live=*/true);
   messagesEl.appendChild(el);
-  scrollToBottom();
+  // New bubbles (own send, history load) always scroll; only streaming
+  // deltas into an existing bubble respect the reader's position.
+  scrollToBottom(true);
   return el;
 }
 
-function scrollToBottom() {
+// Stick-to-bottom: auto-follow the stream only while the reader is at (or
+// within 48px of) the bottom. Updated on user scrolls; content growth fires
+// no scroll event, so a pinned reader stays pinned while the stream grows
+// the pane. The programmatic scroll lands at the bottom and re-confirms it.
+// (Canonical copy with node tests: src/local_ui/static/chat.js.)
+let scrollPinned = true;
+messagesEl.addEventListener("scroll", () => {
+  scrollPinned =
+    messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight <= 48;
+});
+
+function scrollToBottom(force = false) {
+  if (!force && !scrollPinned) return;
+  scrollPinned = true;
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
