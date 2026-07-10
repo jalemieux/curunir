@@ -98,6 +98,25 @@ def card_path(path: Path) -> Path:
     return path.with_name(path.name + CARD_SUFFIX)
 
 
+def hash_card_path(config: AgentConfig, digest: str) -> Path:
+    """Content-addressed card store: context/cards/<sha256>.card.md.
+
+    Dedup across paths — a re-upload or re-staged copy of identical bytes
+    (uploads mint a fresh uuid dir per batch) reuses the stored card instead
+    of paying a second ingestion.
+    """
+    return Path(config.context_dir) / "cards" / f"{digest}{CARD_SUFFIX}"
+
+
+def _read_card(p: Path) -> str | None:
+    """Card file content, or None when missing/empty (empty → re-ingest)."""
+    try:
+        card = p.read_text()
+    except OSError:
+        return None
+    return card if card.strip() else None
+
+
 def _extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in _IMAGE_EXTENSIONS:
@@ -171,14 +190,24 @@ async def ingest_document(
         raise DocumentIngestError(f"Document not found: {path}")
 
     cpath = card_path(path)
-    if cpath.is_file():
-        cached = cpath.read_text()
-        if cached.strip():
-            log.info("ingest: reusing existing card %s", cpath)
-            return cached
+    cached = _read_card(cpath)
+    if cached:
+        log.info("ingest: reusing existing card %s", cpath)
+        return cached
 
     raw = path.read_bytes()
-    session_id = f"ingest:{hashlib.sha256(raw).hexdigest()[:16]}"
+    digest = hashlib.sha256(raw).hexdigest()
+    session_id = f"ingest:{digest[:16]}"
+
+    hpath = hash_card_path(config, digest)
+    stored = _read_card(hpath)
+    if stored:
+        # Identical bytes were carded before under another path — copy the
+        # card next to this document (the read gate looks for the sibling)
+        # and skip the LLM entirely.
+        cpath.write_text(stored)
+        log.info("ingest: hash-dedup hit for %s (%s)", path.name, digest[:16])
+        return stored
 
     text = _extract_text(path)
     if not text.strip():
@@ -239,5 +268,10 @@ async def ingest_document(
         card = await _call(f"{_MERGE_PROMPT}\nDocument: {path.name}\n\n{joined}")
 
     cpath.write_text(card)
+    try:
+        hpath.parent.mkdir(parents=True, exist_ok=True)
+        hpath.write_text(card)
+    except OSError as exc:  # the sibling card still works; dedup just misses
+        log.warning("ingest: could not write hash-store card %s: %s", hpath, exc)
     log.info("ingest: wrote card %s (%d chars) as %s", cpath, len(card), session_id)
     return card
