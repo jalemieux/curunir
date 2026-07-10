@@ -39,6 +39,7 @@ _TOOL_KEY_ARGS: dict[str, list[str]] = {
 }
 
 _MAX_ARG_LEN = 120
+_MAX_EXTRA_ARG_LEN = 40
 
 
 def _display_name(tool_name: str) -> str:
@@ -54,6 +55,16 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
         return [f"├─ {_display_name(name)} (unparseable args)"]
 
     key_names = _TOOL_KEY_ARGS.get(name, list(args.keys())[:1])
+    extras = []
+    for key, val in args.items():
+        if key in key_names:
+            continue
+        val_str = " ".join(str(val).split())
+        if len(val_str) > _MAX_EXTRA_ARG_LEN:
+            val_str = val_str[:_MAX_EXTRA_ARG_LEN] + "..."
+        extras.append(f"{key}={val_str}")
+    extras_str = f" ({', '.join(extras)})" if extras else ""
+
     lines = []
     for key in key_names:
         val = args.get(key, "")
@@ -61,6 +72,8 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
         if len(val_str) > _MAX_ARG_LEN:
             val_str = val_str[:_MAX_ARG_LEN] + "..."
         lines.append(f"{_display_name(name)} {val_str}")
+    if lines and extras_str:
+        lines[-1] += extras_str
 
     if not lines:
         return [f"╰─ {_display_name(name)}"]
