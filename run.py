@@ -27,6 +27,7 @@ from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
 from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
 from onboarding.bootstrap import bootstrap_context
+from src.document_ingest import ingest_document
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
 from src.memory_extractor import extract_learnings
@@ -121,6 +122,34 @@ async def _fetch_llamacpp_stats(api_base: str) -> dict | None:
         return None
 
 
+def _document_card_block(att: dict) -> dict | None:
+    """Card-instead-of-content block for an ingested document, else None.
+
+    When a staged document has a sibling card (written by
+    src.document_ingest — see docs/document-ingestion.md), the conversation
+    carries the ~1k-token card rather than the full text: the card's section
+    map cites line numbers in the staged file, so details come from targeted
+    `read` calls on the path below instead of a full inline dump.
+    """
+    path = att.get("path", "")
+    try:
+        card = Path(str(path) + ".card.md").read_text()
+    except OSError:
+        return None
+    if not card.strip():
+        return None
+    return {
+        "type": "text",
+        "text": (
+            f"[Document attachment: {att.get('filename', 'file')} — full text "
+            f"staged at {path}, not inlined. The document card below maps its "
+            f"contents; line references are line numbers in the staged file. "
+            f"Use the read tool with offset/limit (or grep) on that path when "
+            f"you need exact wording or figures.]\n{card}"
+        ),
+    }
+
+
 def build_multimodal_content(text: str, attachments: list[dict] | None) -> str | list:
     """Build LiteLLM content from text + a staged-attachment manifest.
 
@@ -169,6 +198,10 @@ def build_multimodal_content(text: str, attachments: list[dict] | None) -> str |
                 "type": "image_url",
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
             })
+            continue
+        card = _document_card_block(att)
+        if card is not None:
+            blocks.append(card)
         elif mime == "application/pdf":
             blocks.append({
                 "type": "text",
@@ -617,6 +650,7 @@ async def main():
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
     max_history_chars = os.environ.get("MAX_HISTORY_CHARS")
     max_tool_result_chars = os.environ.get("MAX_TOOL_RESULT_CHARS")
+    read_gate_bytes = os.environ.get("READ_GATE_BYTES")
     max_iterations = os.environ.get("MAX_ITERATIONS")
     attachment_dir = os.environ.get("EMAIL_ATTACHMENT_DIR")
     tts_model = os.environ.get("TTS_MODEL")
@@ -643,6 +677,7 @@ async def main():
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
         **({"max_history_chars": int(max_history_chars)} if max_history_chars else {}),
         **({"max_tool_result_chars": int(max_tool_result_chars)} if max_tool_result_chars else {}),
+        **({"read_gate_bytes": int(read_gate_bytes)} if read_gate_bytes is not None else {}),
         **({"max_iterations": int(max_iterations)} if max_iterations else {}),
         **({"attachment_dir": attachment_dir} if attachment_dir else {}),
         **({"tts_model": tts_model} if tts_model else {}),
@@ -773,6 +808,11 @@ async def main():
                 c for c in agent.conversations_snapshot()
                 if not str(c.get("session_id", "")).startswith("sched:")
             ],
+            # Eager document ingestion on upload (docs/document-ingestion.md):
+            # one tool-less LLM pass writes <path>.card.md; the SPA blocks
+            # submit until the card frame lands.
+            ingest=lambda path: ingest_document(path, config, usage_store=usage_store),
+            doc_card_min_bytes=int(os.environ.get("DOC_CARD_MIN_BYTES", "50000")),
         )
         channels["local_web"] = local_web_channel
         logger.info(

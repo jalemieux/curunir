@@ -554,3 +554,60 @@ async def test_describe_image_cache_persists_across_worker_calls(image_file):
     llm_module._description_cache.clear()
 
 
+
+
+# --- document cards (docs/document-ingestion.md) -----------------------------
+
+
+def test_card_replaces_inlined_text_content(tmp_path):
+    from run import build_multimodal_content
+    doc = tmp_path / "report.txt"
+    doc.write_text("SECRET FULL BODY " * 100)
+    (tmp_path / "report.txt.card.md").write_text("# Document card: report.txt\n- lines 1-3")
+
+    blocks = build_multimodal_content("summarize", [_att(doc, "text/plain")])
+
+    assert blocks[0] == {"type": "text", "text": "summarize"}
+    body = blocks[1]["text"]
+    assert "# Document card: report.txt" in body
+    assert str(doc) in body            # staged path for targeted reads
+    assert "SECRET FULL BODY" not in body  # full text NOT inlined
+
+
+def test_card_short_circuits_pdf_extraction(tmp_path):
+    from run import build_multimodal_content
+    # Not a real PDF — if the card didn't short-circuit, pdf extraction
+    # would produce an unreadable-file block instead of the card.
+    doc = tmp_path / "filing.pdf"
+    doc.write_bytes(b"%PDF fake body")
+    (tmp_path / "filing.pdf.card.md").write_text("# Document card: filing.pdf")
+
+    blocks = build_multimodal_content("q", [_att(doc, "application/pdf")])
+
+    assert "# Document card: filing.pdf" in blocks[1]["text"]
+
+
+def test_missing_card_keeps_inline_behavior(text_file):
+    from run import build_multimodal_content
+    blocks = build_multimodal_content("q", [_att(text_file, "text/plain")])
+    assert "hello world" in blocks[1]["text"]
+
+
+def test_empty_card_file_keeps_inline_behavior(tmp_path):
+    from run import build_multimodal_content
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello world")
+    (tmp_path / "notes.txt.card.md").write_text("   \n")
+
+    blocks = build_multimodal_content("q", [_att(doc, "text/plain")])
+    assert "hello world" in blocks[1]["text"]
+
+
+def test_card_never_applies_to_images(tmp_path):
+    from run import build_multimodal_content
+    img = tmp_path / "img.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    (tmp_path / "img.png.card.md").write_text("# bogus card")
+
+    blocks = build_multimodal_content("q", [_att(img, "image/png")])
+    assert blocks[1]["type"] == "image_url"

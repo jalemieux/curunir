@@ -275,6 +275,13 @@
   background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: 4px;
   padding: 3px 8px; font-size: 11px; color: var(--accent);
 }
+/* Document being ingested: dimmed until its card frame lands. */
+.cu-chat .attachment.analyzing { opacity: 0.65; font-style: italic; }
+/* Send attempted while a document is still analyzing: pulse the chips. */
+.cu-chat .cu-waiting .attachment.analyzing { animation: cu-waiting-pulse 0.45s ease-in-out 2; }
+@keyframes cu-waiting-pulse {
+  50% { opacity: 1; border-color: var(--accent); }
+}
 .cu-chat .attachment-card {
   display: inline-flex; align-items: center; gap: 11px;
   background: var(--bg); border: 1px solid var(--border-strong);
