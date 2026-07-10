@@ -251,6 +251,7 @@ See `.env.example` for full list. Critical ones:
 - `LLM_REQUEST_TIMEOUT` — client-side per-request LLM timeout in seconds (default 120), forwarded to litellm/httpx. In streaming mode it bounds the inter-chunk idle wait so curunir fails fast on a hung upstream and its retry loop re-requests. Raise it if long silent reasoning gaps trip false timeouts
 - `MAX_HISTORY_CHARS` — conversation history limit in chars (default 250000; lower for small-context models)
 - `MAX_TOOL_RESULT_CHARS` — per-tool-result truncation cap in chars (default 100000 ≈ 25k tokens; defense-in-depth, lower for small-context models)
+- `READ_GATE_BYTES` — no-`limit` reads of files above this size are gated: the `read` tool returns the file's document card or a numbered head preview instead of the full body (default 50000; 0 disables). `DOC_CARD_MIN_BYTES` — eager-ingestion threshold for local-console uploads (default 50000). Both per docs/document-ingestion.md
 - `LOCAL_UI_ENABLED`, `LOCAL_UI_HOST` (default `127.0.0.1`), `LOCAL_UI_PORT` (default `8766`) — the loopback-bound local web console (`local_web.py`). Reuses the `context/.ws-token` pairing token + `WS_ALLOWED_ORIGINS` allowlist; no dedicated auth env vars
 - `LOG_LEVEL` — set to `DEBUG` for detailed agent tracing
 - `LOG_FILE` — path to a log file written via `RotatingFileHandler` (10MB × 3 backups). Docker compose sets this to `/app/workspace/curunir.log` so the introspection skill and `docker exec ... tail` can read agent activity. Unset → stderr only.

@@ -14,6 +14,15 @@
 // Canonical home: src/local_ui/static/. See the design doc:
 // docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md
 
+import {
+  beginUpload,
+  markUploadUndeliverable,
+  applyUploadResult,
+  applyDocumentCard,
+  pendingIngest,
+  toWireAttachments,
+} from "./uploads.js";
+
 // === Attachment limits (mirror the portal + server allowlist) ===
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_PDF = 10 * 1024 * 1024;
@@ -59,7 +68,12 @@ export function createChat(config) {
     hooks = {},
   } = config;
   const feat = {
-    attachments: true, skills: true, theme: true, emptyState: true, ...features,
+    attachments: true, skills: true, theme: true, emptyState: true,
+    // Eager document ingestion (docs/document-ingestion.md): upload on
+    // attach, block send until each document's card frame lands. Off by
+    // default — only hosts whose server handles `upload` frames enable it.
+    eagerIngest: false,
+    ...features,
   };
 
   // marked is shared/global; configuring it is idempotent.
@@ -205,12 +219,28 @@ export function createChat(config) {
   function bootstrap() {
     connection.send({ content: "", command: "history_request", session_id: getSessionId() });
     if (feat.skills) connection.send({ command: "skills_request", session_id: getSessionId() });
+    if (feat.eagerIngest) {
+      // A reconnect may have eaten upload_result/document_card frames;
+      // re-upload anything still in flight so entries can't stay blocked.
+      for (const e of staged) {
+        if (e.status && e.status !== "ready") uploadEntry(e);
+      }
+      renderStaged();
+    }
     if (hooks.onSocketOpen) hooks.onSocketOpen();
   }
 
   // === Inbound frame routing ===
   function handleFrame(msg) {
     if (msg.type === "agent_status") { setStatus(msg.status); return; }
+    if (msg.type === "upload_result") {
+      if (applyUploadResult(staged, msg)) renderStaged();
+      return;
+    }
+    if (msg.type === "document_card") {
+      if (applyDocumentCard(staged, msg)) renderStaged();
+      return;
+    }
     if (msg.session_id && msg.session_id !== getSessionId()) {
       if (hooks.onUnhandledFrame) hooks.onUnhandledFrame(msg);
       return;
@@ -605,12 +635,26 @@ export function createChat(config) {
       updateComposerMode();
       return;
     }
+    if (feat.eagerIngest && pendingIngest(staged)) {
+      // A document is still being analyzed — pulse the chips instead of
+      // sending; the card frame will land shortly and unblock.
+      stagedEl.classList.add("cu-waiting");
+      setTimeout(() => stagedEl.classList.remove("cu-waiting"), 900);
+      return;
+    }
+    const wire = feat.eagerIngest
+      ? toWireAttachments(staged)
+      : {
+          stagedFiles: [],
+          inline: staged.map((a) => ({
+            filename: a.filename, mime_type: a.mime_type, data: a.data,
+          })),
+        };
     const delivered = connection.send({
       content, session_id: getSessionId(),
       client_msg_id: newClientMsgId(), durable: true,
-      attachments: staged.length ? staged.map((a) => ({
-        filename: a.filename, mime_type: a.mime_type, data: a.data,
-      })) : null,
+      attachments: wire.inline.length ? wire.inline : null,
+      staged_files: wire.stagedFiles.length ? wire.stagedFiles : null,
     });
     if (!delivered) return;
     const el = appendMessage("user");
@@ -662,21 +706,44 @@ export function createChat(config) {
     const totalAfter = staged.reduce((s, a) => s + a.size, 0) + file.size;
     if (totalAfter > MAX_TOTAL) { alert("Total > 20 MB"); return; }
     const buf = await file.arrayBuffer();
-    staged.push({
+    const entry = {
       filename: file.name,
       mime_type: file.type || "application/octet-stream",
       data: bytesToBase64(new Uint8Array(buf)),
       size: file.size,
-    });
+      status: "staging",
+    };
+    staged.push(entry);
+    if (feat.eagerIngest) uploadEntry(entry);
     renderStaged();
+  }
+
+  // Eager upload: bytes leave the browser at attach time so document
+  // ingestion runs while the user is still typing. An undeliverable upload
+  // degrades to the pre-ingestion inline path — never blocks composing.
+  function uploadEntry(entry) {
+    beginUpload(entry, newClientMsgId());
+    const delivered = connection.send({
+      command: "upload",
+      upload_id: entry.uploadId,
+      session_id: getSessionId(),
+      attachments: [{
+        filename: entry.filename, mime_type: entry.mime_type, data: entry.data,
+      }],
+    });
+    if (!delivered) markUploadUndeliverable(entry);
   }
 
   function renderStaged() {
     stagedEl.innerHTML = "";
     staged.forEach((a, i) => {
       const chip = document.createElement("span");
-      chip.className = "attachment";
-      chip.textContent = `📎 ${a.filename} ✕`;
+      const analyzing = feat.eagerIngest && a.status && a.status !== "ready";
+      chip.className = "attachment" + (analyzing ? " analyzing" : "");
+      const icon = analyzing ? "⏳" : a.error ? "⚠️" : "📎";
+      const note = analyzing ? " (analyzing…)" : "";
+      chip.textContent = `${icon} ${a.filename}${note} ✕`;
+      if (a.error) chip.title = a.error;
       chip.onclick = () => { staged.splice(i, 1); renderStaged(); };
       stagedEl.appendChild(chip);
     });
