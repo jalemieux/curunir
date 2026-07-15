@@ -340,6 +340,23 @@
   .sched-body .edit-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
   .sched-body .edit-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
   .sched-body .edit-form textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; resize: vertical; }
+
+  /* Brokerage sync (inside the Balance Sheet tab) */
+  .brk-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 12px 16px; margin-bottom: 12px; }
+  .brk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .brk-name { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .brk-badge { font-size: 11px; padding: 1px 9px; border-radius: 10px; }
+  .brk-badge.ok { background: rgba(74,222,128,.15); color: var(--ok); }
+  .brk-badge.warn { background: rgba(210,153,34,.18); color: var(--warn); }
+  .brk-badge.off { background: rgba(139,148,158,.15); color: var(--muted); }
+  .brk-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .brk-verify { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .brk-verify input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; min-width: 200px; }
+  .brk-msg { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .brk-msg.err { color: var(--err); }
+  .brk-diff { margin-top: 12px; }
+  .brk-bucket { margin-bottom: 8px; }
+  .brk-bucket .cnt { color: var(--muted); font-weight: 400; margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -812,13 +829,163 @@ async function loadPortfolio() {
       : `<span class="muted">No trades recorded for ${d.year}.</span>`;
 
     el.innerHTML = hero + cards +
+      `<div id="brokerage-section"></div>` +
       `<h3>Allocation</h3>${bar}${legend}` +
       `<h3>Holdings</h3>${groupsHtml}` +
       `<h3>Trades — ${d.year} to date</h3>${tradeCards}${tradesBody}`;
 
     el.querySelectorAll(".pf-grp-head").forEach((h) =>
       h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+    loadBrokerage();
   } catch (e) { el.innerHTML = `<span class="err">${e.message}</span>`; }
+}
+
+// === Brokerage sync (a section inside the Balance Sheet tab) ===
+// Renders only when at least one BROKERAGE_ADAPTERS adapter is enabled. The
+// OAuth verifier flow, the diff view (grouped buckets), and a confirm-gated
+// Sync all live here — auth can't be completed anywhere else (no CLI).
+const BRK_BUCKETS = [
+  { key: "price_stale", label: "Price-stale (will re-price)" },
+  { key: "matched", label: "Matched" },
+  { key: "qty_drift", label: "Qty drift (reported only)" },
+  { key: "missing_local", label: "New at broker (will insert)" },
+  { key: "missing_remote", label: "Not at broker (reported only)" },
+];
+
+function brkNum(n) { return n == null ? "" : (+n).toLocaleString(undefined, { maximumFractionDigits: 4 }); }
+
+function brkBucketTable(key, rows) {
+  const cells = (r) => {
+    if (key === "missing_local")
+      return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.broker_qty)}</td><td class="num">${PF_MONEY(r.market_value)}</td>`;
+    if (key === "missing_remote")
+      return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.local_qty)}</td><td class="num">${PF_MONEY(r.local_value)}</td>`;
+    return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.local_qty)} → ${brkNum(r.broker_qty)}</td><td class="num">${PF_MONEY(r.local_value)} → ${PF_MONEY(r.market_value)}</td>`;
+  };
+  const head = key === "missing_local"
+    ? `<th>Ticker</th><th>Account</th><th class="num">Broker qty</th><th class="num">Market value</th>`
+    : key === "missing_remote"
+    ? `<th>Ticker</th><th>Account</th><th class="num">Local qty</th><th class="num">Local value</th>`
+    : `<th>Ticker</th><th>Account</th><th class="num">Qty (local→broker)</th><th class="num">Value (local→broker)</th>`;
+  return `<table><tr>${head}</tr>${rows.map((r) => `<tr>${cells(r)}</tr>`).join("")}</table>`;
+}
+
+function brkDiffHtml(diff) {
+  const parts = BRK_BUCKETS.map((b, i) => {
+    const rows = diff[b.key] || [];
+    if (!rows.length) return "";
+    return `<div class="pf-grp brk-bucket${i === 0 ? " open" : ""}">
+      <div class="pf-grp-head"><span class="pf-caret">▸</span>
+        <span class="pf-grp-name">${b.label}<span class="cnt">${rows.length}</span></span></div>
+      <div class="pf-grp-body">${brkBucketTable(b.key, rows)}</div></div>`;
+  }).join("");
+  return parts || '<span class="muted">No differences — the broker and the local store agree.</span>';
+}
+
+function brkAuthBadge(a) {
+  if (a.needs_reauth || a.error) return `<span class="brk-badge warn">needs re-auth</span>`;
+  if (a.authed) return `<span class="brk-badge ok">connected${a.sandbox ? " · sandbox" : ""}</span>`;
+  return `<span class="brk-badge off">not connected</span>`;
+}
+
+function brkCardHtml(a) {
+  const connected = a.authed && !a.needs_reauth && !a.error;
+  const actions = connected
+    ? `<button class="btn" data-brk-diff="${esc(a.name)}">Preview diff</button>
+       <button class="btn" data-brk-sync="${esc(a.name)}">Sync</button>
+       <button class="btn" data-brk-connect="${esc(a.name)}">Re-connect</button>`
+    : `<button class="btn" data-brk-connect="${esc(a.name)}">Connect</button>`;
+  return `<div class="brk-card" data-brk-adapter="${esc(a.name)}">
+    <div class="brk-head"><span class="brk-name">${esc(a.name)}</span>${brkAuthBadge(a)}
+      <span class="brk-actions">${actions}</span></div>
+    <div class="brk-verify" style="display:none"></div>
+    <div class="brk-msg"></div>
+    <div class="brk-diff"></div>
+  </div>`;
+}
+
+async function loadBrokerage() {
+  const el = document.getElementById("brokerage-section");
+  if (!el) return;
+  el.innerHTML = "";
+  let st;
+  try { st = await apiGet("/api/portfolio/broker/status"); }
+  catch (e) { return; }  // no broker access on this persona → section hidden
+  if (!st.available || !st.adapters || !st.adapters.length) return;
+  el.innerHTML = `<h3>Brokerage sync</h3>` + st.adapters.map(brkCardHtml).join("");
+
+  el.querySelectorAll("[data-brk-connect]").forEach((btn) =>
+    btn.addEventListener("click", () => brkConnect(btn.dataset.brkConnect)));
+  el.querySelectorAll("[data-brk-diff]").forEach((btn) =>
+    btn.addEventListener("click", () => brkPreviewDiff(btn.dataset.brkDiff)));
+  el.querySelectorAll("[data-brk-sync]").forEach((btn) =>
+    btn.addEventListener("click", () => brkSync(btn.dataset.brkSync)));
+}
+
+function brkCard(name) {
+  return document.querySelector(`.brk-card[data-brk-adapter="${CSS.escape(name)}"]`);
+}
+function brkSetMsg(name, text, isErr) {
+  const m = brkCard(name)?.querySelector(".brk-msg");
+  if (m) { m.textContent = text || ""; m.classList.toggle("err", !!isErr); }
+}
+
+async function brkConnect(name) {
+  brkSetMsg(name, "Requesting authorization link…");
+  try {
+    const { authorize_url } = await apiSend("POST", "/api/portfolio/broker/auth/start", { adapter: name });
+    window.open(authorize_url, "_blank", "noopener");
+    const box = brkCard(name).querySelector(".brk-verify");
+    box.style.display = "flex";
+    box.innerHTML = `<input placeholder="Paste the verifier code" data-brk-code />
+      <button class="btn" data-brk-submit>Submit</button>`;
+    box.querySelector("[data-brk-submit]").addEventListener("click", () =>
+      brkVerify(name, box.querySelector("[data-brk-code]").value));
+    brkSetMsg(name, "A new tab opened at E*TRADE. Log in, then paste the verifier code above.");
+  } catch (e) { brkSetMsg(name, e.message, true); }
+}
+
+async function brkVerify(name, verifier) {
+  if (!verifier || !verifier.trim()) { brkSetMsg(name, "Enter the verifier code first.", true); return; }
+  brkSetMsg(name, "Exchanging verifier for access tokens…");
+  try {
+    await apiSend("POST", "/api/portfolio/broker/auth/verify", { adapter: name, verifier });
+    brkSetMsg(name, "Connected. Reloading status…");
+    loadBrokerage();
+  } catch (e) { brkSetMsg(name, e.message, true); }
+}
+
+async function brkPreviewDiff(name) {
+  const out = brkCard(name).querySelector(".brk-diff");
+  out.innerHTML = '<span class="muted">Fetching live positions…</span>';
+  try {
+    const d = await apiGet("/api/portfolio/broker/diff");
+    const entry = (d.adapters || []).find((a) => a.name === name);
+    if (!entry) { out.innerHTML = ""; return; }
+    if (entry.needs_reauth) { out.innerHTML = `<span class="err">${esc(entry.message || "re-auth needed")}</span>`; return; }
+    if (entry.error) { out.innerHTML = `<span class="err">${esc(entry.error)}</span>`; return; }
+    out.innerHTML = brkDiffHtml(entry.diff);
+    out.querySelectorAll(".pf-grp-head").forEach((h) =>
+      h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+  } catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function brkSync(name) {
+  if (!confirm("Sync will re-price matched holdings and insert new tickers from the broker. Qty drift and positions the broker no longer reports are left untouched. Continue?"))
+    return;
+  brkSetMsg(name, "Syncing…");
+  try {
+    const d = await apiSend("POST", "/api/portfolio/broker/sync", {});
+    const entry = (d.adapters || []).find((a) => a.name === name);
+    if (!entry) { brkSetMsg(name, "No adapter response."); return; }
+    if (entry.needs_reauth) { brkSetMsg(name, entry.message || "re-auth needed", true); return; }
+    if (entry.error) { brkSetMsg(name, entry.error, true); return; }
+    const rep = entry.report;
+    const upd = rep.applied.updated.length, ins = rep.applied.inserted.length;
+    const drift = rep.skipped.qty_drift.length, gone = rep.skipped.missing_remote.length;
+    brkSetMsg(name, `Synced: re-priced ${upd}, inserted ${ins}. Reported (not written): ${drift} qty drift, ${gone} missing-remote.`);
+    loadPortfolio();  // refresh the whole balance sheet with the new values
+  } catch (e) { brkSetMsg(name, e.message, true); }
 }
 
 // === CRM panel (read-only leads + pipeline dashboard) ===

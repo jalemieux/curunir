@@ -58,6 +58,9 @@ from src.channels.ws import _DEFAULT_LOCALHOST_ORIGINS, _origin_allowed
 from src.config import AgentConfig
 from src.local_ui import readers
 from src.modules import enabled_modules
+from src.portfolio.brokers import service as broker_service
+from src.portfolio.brokers.base import BrokerAuthRequired, BrokerError
+from src.portfolio.brokers.registry import enabled_adapters
 from src.schedule_store import db as sdb
 from src.schedule_store import engine as sengine
 
@@ -73,6 +76,15 @@ LOCAL_SESSION_ID = "local"
 _RECENT_MSG_CAP = 256
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "local_ui" / "static"
+
+
+async def _json_body(request: Request) -> dict:
+    """Parse a JSON request body, tolerating an empty/absent one → ``{}``."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - empty body / invalid JSON → treat as {}
+        return {}
+    return body if isinstance(body, dict) else {}
 
 
 class LocalWebChannel:
@@ -91,6 +103,7 @@ class LocalWebChannel:
         history_provider: Callable[[str], list[dict]] | None = None,
         skills_provider: Callable[[], list[dict]] | None = None,
         conversations_provider: Callable[[], list[dict]] | None = None,
+        broker_adapters_provider: Callable[[], list] | None = None,
     ):
         self.in_queue = in_queue
         self.config = config
@@ -114,6 +127,10 @@ class LocalWebChannel:
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
+        # Enabled brokerage adapters (config-only). Built per call so a
+        # disk-persisted pending OAuth token bridges start→verify even across
+        # a fresh build. Injectable for tests.
+        self._broker_adapters = broker_adapters_provider or enabled_adapters
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
         # Bounded recent-``client_msg_id`` ledger for idempotent replay dedup.
@@ -205,6 +222,87 @@ class LocalWebChannel:
             if not self._module_enabled("portfolio"):
                 return JSONResponse({"error": "not found"}, status_code=404)
             return JSONResponse(readers.portfolio_overview(self.config))
+
+        # --- brokerage sync (under /api/portfolio → portfolio module gating) ---
+        # The token check precedes the module 404 (established pattern) so an
+        # unauthenticated probe gets 401 and can't enumerate modules/adapters.
+
+        def _broker_guard(request: Request) -> JSONResponse | None:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            if not self._module_enabled("portfolio"):
+                return JSONResponse({"error": "not found"}, status_code=404)
+            return None
+
+        @app.get("/api/portfolio/broker/status")
+        async def api_broker_status(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            return JSONResponse(
+                readers.broker_status(self.config, self._broker_adapters()))
+
+        @app.get("/api/portfolio/broker/accounts")
+        async def api_broker_accounts(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            return JSONResponse(
+                readers.broker_accounts(self.config, self._broker_adapters()))
+
+        @app.get("/api/portfolio/broker/diff")
+        async def api_broker_diff(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            return JSONResponse(
+                readers.broker_diff(self.config, self._broker_adapters()))
+
+        @app.post("/api/portfolio/broker/auth/start")
+        async def api_broker_auth_start(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            body = await _json_body(request)
+            adapter = broker_service.find(
+                self._broker_adapters(), body.get("adapter"))
+            if adapter is None:
+                return JSONResponse(
+                    {"error": "no matching brokerage adapter configured"},
+                    status_code=400)
+            try:
+                return JSONResponse(adapter.auth_start())
+            except (BrokerError, ValueError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+        @app.post("/api/portfolio/broker/auth/verify")
+        async def api_broker_auth_verify(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            body = await _json_body(request)
+            verifier = (body.get("verifier") or "").strip()
+            if not verifier:
+                return JSONResponse(
+                    {"error": "verifier code is required"}, status_code=400)
+            adapter = broker_service.find(
+                self._broker_adapters(), body.get("adapter"))
+            if adapter is None:
+                return JSONResponse(
+                    {"error": "no matching brokerage adapter configured"},
+                    status_code=400)
+            try:
+                return JSONResponse(adapter.auth_complete(verifier))
+            except (BrokerError, ValueError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+        @app.post("/api/portfolio/broker/sync")
+        async def api_broker_sync(request: Request) -> JSONResponse:
+            blocked = _broker_guard(request)
+            if blocked is not None:
+                return blocked
+            return JSONResponse(broker_service.sync(
+                str(self.config.portfolio_db), self._broker_adapters()))
 
         @app.get("/api/crm")
         async def api_crm(request: Request) -> JSONResponse:

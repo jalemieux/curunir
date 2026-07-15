@@ -25,6 +25,8 @@ from src.agent import conversation_store
 from src.config import AgentConfig
 from src.crm import engine as crm_engine
 from src.portfolio import engine
+from src.portfolio.brokers import service as broker_service
+from src.portfolio.brokers.registry import enabled_adapters
 from src.scheduler import _load_tasks
 from src.usage_store import UsageStore, normalize_session
 
@@ -182,6 +184,37 @@ def portfolio_overview(config: AgentConfig, year: int | None = None) -> dict:
         "as_of": as_of,
         "year": yr,
     }
+
+
+def broker_status(config: AgentConfig, adapters=None) -> dict:
+    """Per-adapter brokerage auth state (``service.status``).
+
+    Thin wrapper over the config-driven registry — no query logic here, so the
+    console can't drift from the ``portfolio`` tool's ``broker_*`` actions. An
+    unconfigured deployment yields ``{"available": False, "adapters": []}``.
+    ``adapters`` is injectable (the channel passes its provider result); ``None``
+    builds them from the environment.
+    """
+    return broker_service.status(
+        enabled_adapters() if adapters is None else adapters)
+
+
+def broker_accounts(config: AgentConfig, adapters=None) -> dict:
+    """Each enabled adapter's accounts (``service.accounts``)."""
+    return broker_service.accounts(
+        enabled_adapters() if adapters is None else adapters)
+
+
+def broker_diff(config: AgentConfig, adapters=None) -> dict:
+    """Reconcile live broker positions against the local store (read only).
+
+    ``service.diff`` buckets matched / price-stale / qty-drift / missing-local
+    / missing-remote; an unauthed adapter reports ``needs_reauth`` rather than
+    raising.
+    """
+    return broker_service.diff(
+        str(config.portfolio_db),
+        enabled_adapters() if adapters is None else adapters)
 
 
 def crm_overview(config: AgentConfig, activity_limit: int = 25) -> dict:
