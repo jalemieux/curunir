@@ -39,3 +39,7 @@ keys:
   - BRAVE_API_KEY   # web-search, reddit-research, digest
   - XAI_API_KEY     # xai-search, reddit-research
   - GEMINI_API_KEY  # gemini-search
+  # Brokerage sync (optional — only if BROKERAGE_ADAPTERS names etrade).
+  # Auth is completed in the local web console's Balance Sheet tab.
+  - ETRADE_CONSUMER_KEY
+  - ETRADE_CONSUMER_SECRET

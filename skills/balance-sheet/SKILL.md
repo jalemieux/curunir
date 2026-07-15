@@ -38,6 +38,37 @@ hyphenate multi-word names — `re-equity`, `add-liability`, `import-rows`
 (the CLI `import-rows` takes `--rows-file <json>`), `show-snapshot`,
 `diff-snapshot`.
 
+## Brokerage sync (pull live positions from a broker)
+
+When a brokerage adapter is configured (`BROKERAGE_ADAPTERS`, E*TRADE today),
+three `portfolio`-tool actions reconcile live broker positions against the
+stored lots — **never a silent overwrite**:
+
+- `broker_accounts` — list the connected accounts.
+- `broker_diff` — bucket live positions vs. local lots: **matched**,
+  **price_stale** (qty agrees, value is stale), **qty_drift** (share count
+  differs — a real buy/sell), **missing_local** (broker holds a ticker we
+  don't), **missing_remote** (we hold a ticker the broker doesn't report).
+- `broker_sync` — apply the **conservative** subset: re-price matched/stale
+  holdings and insert brand-new tickers (tagged `extra.source=<adapter>`).
+  Qty drift and missing-remote are **reported, never auto-written** — those are
+  real trades the owner must confirm (record them with `buy`/`sell`).
+
+Trigger phrases: *"sync my brokerage"*, *"pull my E*TRADE positions"*,
+*"reconcile against my broker"*. Always show the diff before syncing, and after
+a sync surface the qty-drift/missing-remote items so the owner can decide.
+
+**Auth lives in the web console, not here.** Connecting a broker is a one-time
+interactive OAuth step done in the **Local Web UI → Balance Sheet tab →
+Brokerage sync** (E*TRADE tokens expire nightly at midnight ET, so a scheduled
+sync periodically needs a reconnect). If a `broker_*` action returns
+`needs_reauth` (or reports no adapter configured), tell the owner to reconnect
+there — you cannot complete the verifier flow yourself.
+
+A daily sync is just a scheduled prompt that loads this skill and runs
+`broker_diff` then `broker_sync`; when the token has expired the run reports the
+needs-reauth message rather than failing opaquely.
+
 ## Trades (the ledger)
 
 `buy` / `sell` are the **active, specific-lot trade ledger** over qty-bearing
