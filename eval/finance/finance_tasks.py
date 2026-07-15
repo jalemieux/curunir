@@ -909,7 +909,10 @@ TASKS: list[dict] = [
         # path: update in place + refresh Last touched. The action check proves
         # a write happened; the judge proves the entry stayed lightweight and
         # single — a read-only run fails the judge (stale Last touched), a
-        # memo-escalation fails the forbid list.
+        # memo-escalation fails the forbid list. Note the frozen seed date ages
+        # past the 90-day Dormant window over time; revival-on-mention keeps
+        # update-in-place correct either way, but an SUT that archives-then-
+        # revives spends extra actions and may surface as PASS-SLOW.
         "prompts": [
             "Quick thought, just log it in my idea log: ADBE still looks "
             "cheap — it's at $211 now, and if it breaks over $250 I'd look "
@@ -933,11 +936,12 @@ TASKS: list[dict] = [
                      "LEAPS-over-$250 trigger. The reply is a readback of the ADBE "
                      "entry. PASS if it shows a SINGLE ADBE entry that (a) carries a "
                      "funnel status (Spark or Monitoring), (b) states promote and/or "
-                     "kill criteria (the $250 reclaim trigger counts), (c) reflects "
-                     "the new mention — the ~$211 price and/or a Last touched date "
-                     "LATER than 2026-04-20 — and (d) remains a lightweight capture. "
-                     "FAIL if a second/duplicate ADBE entry was created, if Last "
-                     "touched still reads 2026-04-20 with no sign of the new mention "
+                     "kill criteria (the $250 reclaim trigger counts), (c) shows a "
+                     "Last touched date STRICTLY LATER than 2026-04-20 — the proof "
+                     "the log was actually rewritten; merely echoing the ~$211 price "
+                     "from conversation does NOT satisfy this — and (d) remains a "
+                     "lightweight capture. FAIL if a second/duplicate ADBE entry was "
+                     "created, if Last touched still reads 2026-04-20 or is absent "
                      "(nothing was written), or if the entry ballooned into a full "
                      "valuation/analysis memo."
                  )}},
