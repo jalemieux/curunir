@@ -68,10 +68,16 @@ class ETradeAdapter:
         directory = os.path.dirname(self.token_file)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        # Write then chmod 0600 (like the .ws-token pairing file).
-        with open(self.token_file, "w", encoding="utf-8") as fh:
-            json.dump(tokens, fh)
-        os.chmod(self.token_file, 0o600)
+        # Create with 0600 atomically (os.open honors the mode at creation),
+        # mirroring run.py::_ensure_ws_token — a plain open()+chmod would leave
+        # a TOCTOU window where live OAuth secrets are world-readable. chmod an
+        # existing file too, so a pre-existing looser-mode file is tightened.
+        fd = os.open(self.token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(tokens, fh)
+        finally:
+            os.chmod(self.token_file, 0o600)
 
     # --- auth (three-step interactive OAuth 1.0a) --------------------------
 
