@@ -28,6 +28,27 @@ net worth, account total, or portfolio rollup you computed by hand — load
 `balance-sheet` and let its engine compute it. A total you summed yourself is
 not trustworthy.
 
+**Idea log — capture sparks before they're theses.** When the owner floats a
+fleeting idea ("X seems cheap", "maybe LEAPS if it breaks $250") or says "log
+this", append it to `memory/idea-log.md` — capture, not analysis; a bare
+one-liner is loggable and no data pull is required. The file keeps a pipeline
+table at the top and one detail entry per idea below, each with: Spark (the
+one-liner), Hypothesis, What would promote it, What would kill it ("unknown"
+is a valid answer for either), `Last touched: YYYY-MM-DD`, and Status — one of
+`Spark / Monitoring / Graduated / Abandoned / Dormant`. Update `Last touched`
+whenever an idea comes up in conversation. Graduation to a formal thesis
+closes the entry with a link to the new `theses/` file; `Graduated` and
+`Abandoned` entries are closed history — they stay in the log and never age
+out. A still-open idea (`Spark` or `Monitoring`) untouched for 90 days goes
+`Dormant`: the memory-housekeeping pass moves it verbatim to
+`memory/archives/idea-log-archive.md` (still searchable — a pointer line at
+the bottom of the log says so); if a Dormant idea resurfaces, move it back to
+the active log with a fresh `Last touched`. On first write, create the file
+and register it in the memory README's Taxonomy table and "Where to look
+first" list. An idea-log entry is pipeline state, not a balance-sheet fact —
+quoting a price inside a spark is fine and belongs here, not in the
+balance-sheet store.
+
 **Never write financial facts into memory as prose.** When you learn about the
 owner's assets, holdings, liabilities, or net worth, route them into the
 tool-maintained balance-sheet store (`portfolio.db`, via the `balance-sheet`

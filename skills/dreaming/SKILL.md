@@ -24,18 +24,32 @@ DREAMING MAY CHANGE (wiring)            DREAMING MUST NEVER TOUCH (facts)
 • README.md (Taxonomy table, the           profile.md, preferences.md,
   "Where to look first" routing list)      core-insights.md, projects.md,
 • files under summaries/                   tasks.md, people/*.md,
-• references and links that point at       archives/conversations/*.md
-  memory files
+• references and links that point at       idea-log.md,
+  memory files                             archives/idea-log-archive.md,
+                                           archives/conversations/*.md
 ```
 
 The test for every edit: **"is this a fact, or is it wiring?"** Moving a file,
 renaming it, registering it, fixing a link to it — wiring. The sentences and
 facts *inside* a data file — frozen. You may not touch them.
 
-**The one allowed exception:** if a data file's prose contains a stale *path
-reference* (e.g. `projects.md` says "see `recipes.md`" after `recipes.md` was
+**The first allowed exception — stale path fixes:** if a data file's prose
+contains a stale *path reference* (e.g. `projects.md` says "see `recipes.md`" after `recipes.md` was
 renamed), you may fix that path. A path is wiring. You may fix the path and
 nothing else on that line.
+
+**The second allowed exception — the idea-log aging move.** If `idea-log.md` exists
+and holds an entry with status `Spark` or `Monitoring` whose `Last touched`
+date is more than 90 days old, move that entry — its pipeline-table row and
+its detail block, **verbatim** — to `archives/idea-log-archive.md` (create the
+archive if absent, and keep the "Dormant ideas: see
+`archives/idea-log-archive.md`" pointer line at the bottom of `idea-log.md`).
+The only permitted edits during the move: set the entry's Status to `Dormant`
+and append an `Archived: <date>` stamp. Relocation plus those two fields is
+the entire operation — never rewrite, expand, condense, or "improve" the entry
+body on the way. "May archive verbatim" is not "may edit." Sparks are the
+owner's words; inflating one into an analysis is exactly the drift this
+boundary exists to prevent.
 
 If you are ever unsure whether an edit crosses the line, do not make it —
 record it in the report (Step 4) as something a human should decide.
@@ -197,14 +211,16 @@ Before finishing, confirm in your reasoning:
 - [ ] `README.md` was read before any reconcile decision.
 - [ ] Every rename/move had its references re-pointed in the same pass
       (no dangling references introduced).
-- [ ] No memory data file's body content was edited (path-reference fixes only).
+- [ ] No memory data file's body content was edited (path-reference fixes and
+      the verbatim idea-log Dormant-archival move only).
 - [ ] `summaries/dreaming.md` was written.
 - [ ] Step 5 committed dreaming's changes as a separate commit.
 
 ## Hard rules
 
-- **Never** edit the body/prose/facts of a memory data file. The only edit
-  permitted inside a data file is correcting a stale path reference.
+- **Never** edit the body/prose/facts of a memory data file. The only edits
+  permitted inside a data file are correcting a stale path reference and the
+  verbatim idea-log Dormant-archival move (status + `Archived:` stamp only).
 - **Never** delete a memory file. Removing a dangling *reference* is fine;
   deleting a *file* is not.
 - **Never** merge, split, or rewrite the content of files.
