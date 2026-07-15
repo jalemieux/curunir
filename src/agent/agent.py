@@ -39,6 +39,7 @@ _TOOL_KEY_ARGS: dict[str, list[str]] = {
 }
 
 _MAX_ARG_LEN = 120
+_MAX_EXTRA_ARG_LEN = 40
 
 
 def _display_name(tool_name: str) -> str:
@@ -54,6 +55,16 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
         return [f"├─ {_display_name(name)} (unparseable args)"]
 
     key_names = _TOOL_KEY_ARGS.get(name, list(args.keys())[:1])
+    extras = []
+    for key, val in args.items():
+        if key in key_names:
+            continue
+        val_str = " ".join(str(val).split())
+        if len(val_str) > _MAX_EXTRA_ARG_LEN:
+            val_str = val_str[:_MAX_EXTRA_ARG_LEN] + "..."
+        extras.append(f"{key}={val_str}")
+    extras_str = f" ({', '.join(extras)})" if extras else ""
+
     lines = []
     for key in key_names:
         val = args.get(key, "")
@@ -61,6 +72,8 @@ def _tool_detail_lines(name: str, args_str: str) -> list[str]:
         if len(val_str) > _MAX_ARG_LEN:
             val_str = val_str[:_MAX_ARG_LEN] + "..."
         lines.append(f"{_display_name(name)} {val_str}")
+    if lines and extras_str:
+        lines[-1] += extras_str
 
     if not lines:
         return [f"╰─ {_display_name(name)}"]
@@ -78,6 +91,12 @@ def _estimate_chars(messages: list[dict]) -> int:
     For list-form content (multimodal messages), text blocks count their
     text length and image blocks charge a fixed per-image cost so images
     age out of history alongside text on long sessions.
+
+    Assistant tool-call `arguments` are counted too: write/edit calls embed
+    entire file bodies there, and (unlike tool results) arguments are never
+    capped, so they must be visible to the trimmer or write/edit-heavy
+    sessions silently over-budget. Access is defensive so a malformed or
+    absent function/arguments never raises inside the accounting path.
     """
     total = 0
     for msg in messages:
@@ -96,6 +115,12 @@ def _estimate_chars(messages: list[dict]) -> int:
                     total += _IMAGE_COST_CHARS
                 else:
                     total += len(str(block))
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if isinstance(fn, dict):
+                total += len(fn.get("arguments") or "")
     return total
 
 
@@ -145,6 +170,82 @@ def _cap_tool_result(content: str, max_chars: int) -> str:
         "use read offset/limit, or grep to narrow, before reading again ...]"
     )
     return content[:max_chars] + marker
+
+
+def _arg_parse_error_message(name: str, args_str: str, exc: Exception, max_chars: int) -> str:
+    """Build a corrective, model-visible message for a tool call whose
+    ``arguments`` string wasn't valid JSON.
+
+    The thin "retry with well-formed JSON" hint was too easy to ignore — in
+    session e8ce5d0a the model abandoned a truncated ``portfolio set`` call and
+    escalated into ``bash`` + source-diving instead of re-emitting it. This
+    makes the correction actionable: it (1) echoes the *raw* argument string the
+    model actually sent (capped, so a huge blob can't re-bloat history) so a
+    truncation is visible at the cut point, (2) explicitly tells the model to
+    re-emit the *same* call rather than switch tools, and (3) appends the tool's
+    parameter schema so the retry matches the expected fields. We deliberately do
+    NOT try to "repair"/complete the truncated JSON — guessing the missing tail
+    could silently execute a half-specified write on a tool like ``portfolio``.
+    """
+    lines = [
+        f"Error: the arguments you sent for tool '{name}' were not valid JSON ({exc}).",
+        "",
+        "What you sent (raw — a JSON syntax error here usually means it was cut off):",
+        _cap_tool_result(args_str, max_chars),
+        "",
+        (
+            f"Re-emit the SAME `{name}` tool call with complete, well-formed JSON "
+            "arguments. Do not switch to another tool, and do not investigate this "
+            "failure — just resend the call with valid JSON."
+        ),
+    ]
+
+    schema = get_tool_schemas([name])
+    params = schema[0]["function"].get("parameters") if schema else None
+    if params:
+        lines += [
+            "",
+            f"Expected argument schema for `{name}`:",
+            json.dumps(params, indent=2),
+        ]
+
+    return "\n".join(lines)
+
+
+def _stub_missing_tool_responses(
+    history: list[dict], tool_calls: list[dict], max_chars: int
+) -> None:
+    """Repair `history` so every `tool_call` id has a matching `role: tool` reply.
+
+    Defense-in-depth for the chat schema. The assistant `tool_calls` message is
+    appended to `history` *before* the tool batch runs, but if any exception
+    escapes the batch dispatch (e.g. a raise in the streaming callback that the
+    executor backstop doesn't cover) the loop unwinds with a dangling
+    `tool_calls` message and zero `role: tool` responses. `agent_worker` then
+    persists that transcript, and every subsequent turn fails provider
+    validation ("tool_use without tool_result") — permanently bricking the
+    session. Stubbing the unanswered ids keeps the persisted transcript
+    schema-valid so the conversation survives the escaped turn.
+
+    Idempotent: only ids without an existing `role: tool` message are stubbed,
+    so it's safe if the batch's append loop ran partially.
+    """
+    answered = {
+        m.get("tool_call_id")
+        for m in history
+        if m.get("role") == "tool"
+    }
+    for tool_call in tool_calls:
+        tc_id = tool_call.get("id")
+        if tc_id in answered:
+            continue
+        history.append({
+            "role": "tool",
+            "tool_call_id": tc_id,
+            "content": _cap_tool_result(
+                "Error: tool call did not complete (turn aborted).", max_chars
+            ),
+        })
 
 
 def _is_context_overflow(exc: Exception) -> bool:
@@ -607,17 +708,18 @@ class Agent:
                     response, err = await _call_and_record()
                     if err is not None:
                         return err
-                if not response.tool_calls and not response.text:
-                    logger.warning(
-                        "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
-                        sid, response.finish_reason,
-                    )
-                    nudge = {"role": "user", "content": "Continue."}
-                    history.append(nudge)
-                    messages = _assemble_messages()
-                    response, err = await _call_and_record()
-                    if err is not None:
-                        return err
+
+                    if not response.tool_calls and not response.text:
+                        logger.warning(
+                            "[%s] empty LLM response after retry (finish_reason=%s); nudging with 'Continue.'",
+                            sid, response.finish_reason,
+                        )
+                        nudge = {"role": "user", "content": "Continue."}
+                        history.append(nudge)
+                        messages = _assemble_messages()
+                        response, err = await _call_and_record()
+                        if err is not None:
+                            return err
 
                 if response.tool_calls:
                     assistant_msg: dict = {"role": "assistant", "tool_calls": response.tool_calls}
@@ -653,7 +755,18 @@ class Agent:
                             logger.info("  %s", line)
 
                         if on_tool_call:
-                            await on_tool_call(name, args_str)
+                            # Systemic backstop: the streaming callback is
+                            # best-effort UI notification. A raise here would
+                            # escape asyncio.gather (return_exceptions=False) and
+                            # kill the turn — the same failure class the executor
+                            # backstop below prevents. Log and swallow so a broken
+                            # callback never affects tool execution or the turn.
+                            try:
+                                await on_tool_call(name, args_str)
+                            except Exception as exc:
+                                logger.warning(
+                                    "[%s] on_tool_call callback raised: %s", sid, exc
+                                )
 
                         try:
                             args = json.loads(args_str)
@@ -662,7 +775,9 @@ class Agent:
                             return {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
-                                "content": f"Error: tool arguments were not valid JSON ({exc}). Retry with well-formed JSON arguments.",
+                                "content": _arg_parse_error_message(
+                                    name, args_str, exc, self.config.max_tool_result_chars
+                                ),
                                 "_tool_name": name,
                             }
 
@@ -700,20 +815,34 @@ class Agent:
                             "_tool_name": name,
                         }
 
-                    tool_messages = await asyncio.gather(
-                        *(_run_tool_call(tc) for tc in response.tool_calls)
-                    )
+                    # Defense-in-depth: the assistant tool_calls message is
+                    # already in history. If ANY exception (or BaseException,
+                    # e.g. CancelledError) escapes the batch dispatch before every
+                    # tool_call_id has a matching response, repair history first so
+                    # a persisted transcript is never schema-invalid (dangling
+                    # tool_calls with no tool_result bricks the session), then
+                    # re-raise. This backstops future raises anywhere in the batch,
+                    # not just the on_tool_call callback handled above.
+                    try:
+                        tool_messages = await asyncio.gather(
+                            *(_run_tool_call(tc) for tc in response.tool_calls)
+                        )
 
-                    for tool_msg in tool_messages:
-                        # After load_skill, check for required tools in frontmatter.
-                        # Done post-gather so concurrent skill loads apply in order.
-                        if tool_msg.pop("_tool_name", None) == "load_skill":
-                            required = _parse_skill_tools(tool_msg["content"])
-                            if required:
-                                self._session_tools.setdefault(session_id, set()).update(required)
-                                tool_schemas = self._get_tool_schemas(session_id)
-                                logger.info("[%s] skill loaded tools: %s", sid, required)
-                        history.append(tool_msg)
+                        for tool_msg in tool_messages:
+                            # After load_skill, check for required tools in frontmatter.
+                            # Done post-gather so concurrent skill loads apply in order.
+                            if tool_msg.pop("_tool_name", None) == "load_skill":
+                                required = _parse_skill_tools(tool_msg["content"])
+                                if required:
+                                    self._session_tools.setdefault(session_id, set()).update(required)
+                                    tool_schemas = self._get_tool_schemas(session_id)
+                                    logger.info("[%s] skill loaded tools: %s", sid, required)
+                            history.append(tool_msg)
+                    except BaseException:
+                        _stub_missing_tool_responses(
+                            history, response.tool_calls, self.config.max_tool_result_chars
+                        )
+                        raise
 
                     _trim_history(history, max_chars=self.config.max_history_chars)
                     messages = _assemble_messages()

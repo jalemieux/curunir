@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
-from src.agent.agent import Agent, _cap_tool_result, _estimate_chars, _is_context_overflow, _trim_history
+from src.agent.agent import (
+    Agent,
+    _arg_parse_error_message,
+    _cap_tool_result,
+    _estimate_chars,
+    _is_context_overflow,
+    _stub_missing_tool_responses,
+    _trim_history,
+)
 from src.llm import LLMResponse
 
 
@@ -179,12 +187,13 @@ class TestAgentHandle:
         assert agent.sessions["s1"][1].get("tool_calls") is not None
 
     async def test_unparseable_tool_arguments_do_not_crash(self, agent):
+        bad_args = '{"file_path": "/tmp/x", "content": "unterminated'
         bad_tool = LLMResponse(
             text=None,
             tool_calls=[{
                 "id": "call_bad",
                 "type": "function",
-                "function": {"name": "write", "arguments": '{"file_path": "/tmp/x", "content": "unterminated'},
+                "function": {"name": "write", "arguments": bad_args},
             }],
         )
         recovery = LLMResponse(text="recovered", tool_calls=None)
@@ -196,7 +205,15 @@ class TestAgentHandle:
         history = agent.sessions["s1"]
         tool_msg = next(m for m in history if m.get("role") == "tool")
         assert tool_msg["tool_call_id"] == "call_bad"
-        assert "not valid JSON" in tool_msg["content"]
+        content = tool_msg["content"]
+        assert "not valid JSON" in content
+        # The corrective message must be actionable: echo the raw arg the model
+        # sent (so a truncation is visible), name the tool, tell it to re-emit
+        # the same call, and include the tool's parameter schema.
+        assert bad_args in content
+        assert "write" in content
+        assert "re-emit" in content.lower()
+        assert "file_path" in content  # from the write tool's schema
 
     async def test_tool_executor_exception_does_not_crash(self, agent):
         # A tool executor raising an unanticipated exception must become a
@@ -225,6 +242,69 @@ class TestAgentHandle:
         assert tool_msg["tool_call_id"] == "call_boom"
         assert "web_fetch" in tool_msg["content"]
         assert "label too long" in tool_msg["content"]
+
+    async def test_on_tool_call_callback_raise_does_not_crash(self, agent):
+        # The streaming callback is best-effort UI notification. A raise in it
+        # must be logged and swallowed — never escape asyncio.gather and kill the
+        # turn, and never stop the tool from executing (parity with the executor
+        # backstop above).
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[{
+                "id": "call_cb",
+                "type": "function",
+                "function": {"name": "bash", "arguments": json.dumps({"command": "echo cb_test"})},
+            }],
+        )
+        recovery = LLMResponse(text="recovered after callback error", tool_calls=None)
+        bad_callback = AsyncMock(side_effect=RuntimeError("ui socket exploded"))
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, side_effect=[tool_response, recovery]):
+            result = await agent.handle("run something", "s1", on_tool_call=bad_callback)
+
+        assert result == "recovered after callback error"
+        # The tool still ran despite the callback raising.
+        history = agent.sessions["s1"]
+        tool_msg = next(m for m in history if m.get("role") == "tool")
+        assert tool_msg["tool_call_id"] == "call_cb"
+        assert "cb_test" in tool_msg["content"]
+
+    async def test_history_stays_schema_valid_when_batch_escapes(self, agent):
+        # If any exception escapes the batch dispatch after the assistant
+        # tool_calls message is appended, history must be repaired (every
+        # tool_call_id gets a role: tool response) before it propagates, so the
+        # persisted transcript is never schema-invalid.
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[
+                {"id": "c1", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 1"})}},
+                {"id": "c2", "type": "function",
+                 "function": {"name": "bash", "arguments": json.dumps({"command": "echo 2"})}},
+            ],
+        )
+
+        class Boom(BaseException):
+            pass
+
+        async def boom(*a, **k):
+            # A BaseException bypasses the executor's `except Exception` backstop,
+            # so it escapes gather and the whole batch dispatch — the worst case
+            # for the dangling-tool_calls bug.
+            raise Boom("boom")
+
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=tool_response), \
+             patch("src.agent.agent.execute_tool_call", new=boom):
+            with pytest.raises(Boom):
+                await agent.handle("run", "s1")
+
+        history = agent.sessions["s1"]
+        # The assistant tool_calls message is present, and every tool_call_id it
+        # names has a matching role: tool response — schema-valid for resume.
+        assistant = next(m for m in history if m.get("tool_calls"))
+        answered = {m["tool_call_id"] for m in history if m.get("role") == "tool"}
+        for tc in assistant["tool_calls"]:
+            assert tc["id"] in answered
 
     async def test_empty_response_returns_error(self, agent):
         empty = LLMResponse(text=None, tool_calls=None)
@@ -549,6 +629,103 @@ class TestTrimHistoryMultimodal:
         _trim_history(history, max_chars=5_000)
         assert len(history) == 2
         assert history[0]["content"][0]["text"] == "recent"
+
+
+class TestEstimateCharsToolCalls:
+    def test_tool_call_arguments_are_counted(self):
+        # An assistant message whose payload lives entirely in a write's
+        # tool-call arguments (empty content) must be measured, not undercounted.
+        big_args = '{"path": "x", "content": "' + ("A" * 50_000) + '"}'
+        msg = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "write", "arguments": big_args},
+                }
+            ],
+        }
+        assert _estimate_chars([msg]) == len(big_args)
+
+    def test_content_and_arguments_both_counted(self):
+        msg = {
+            "role": "assistant",
+            "content": "here you go",
+            "tool_calls": [
+                {"function": {"name": "edit", "arguments": "ARGS"}},
+            ],
+        }
+        assert _estimate_chars([msg]) == len("here you go") + len("ARGS")
+
+    def test_malformed_tool_calls_do_not_raise(self):
+        # Missing/absent function/arguments and non-dict entries must not raise.
+        msg = {
+            "role": "assistant",
+            "content": "hi",
+            "tool_calls": [
+                {},                          # no function
+                {"function": {}},            # no arguments
+                {"function": {"arguments": None}},  # non-string arguments
+                "junk",                      # non-dict entry
+            ],
+        }
+        assert _estimate_chars([msg]) == len("hi")
+
+    def test_trim_drops_group_with_oversized_arguments(self):
+        # Bulk lives in the first assistant message's tool-call arguments.
+        # Previously it measured as ~0 and survived trimming.
+        history = [
+            {"role": "user", "content": "write a big file"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": '{"content": "' + ("A" * 10_000) + '"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "you're welcome"},
+        ]
+        _trim_history(history, max_chars=5_000)
+        # The oversized write group must have aged out.
+        assert history[0]["content"] == "thanks"
+        assert len(history) == 2
+
+    def test_trim_keeps_group_with_below_threshold_arguments(self):
+        history = [
+            {"role": "user", "content": "write a small file"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": '{"content": "' + ("A" * 100) + '"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "you're welcome"},
+        ]
+        _trim_history(history, max_chars=5_000)
+        # Well under the limit — nothing should be trimmed.
+        assert len(history) == 5
+        assert history[0]["content"] == "write a small file"
 
 
 class TestIsContextOverflow:
@@ -1099,6 +1276,90 @@ class TestCapToolResult:
 
     def test_none_passthrough(self):
         assert _cap_tool_result(None, 100) is None
+
+
+class TestArgParseErrorMessage:
+    """Unit tests for the pure _arg_parse_error_message helper."""
+
+    def _make_exc(self, args_str):
+        try:
+            json.loads(args_str)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return exc
+        raise AssertionError("expected a JSON parse error")
+
+    def test_truncated_json_message_is_actionable(self):
+        args_str = '{"file_path": "/tmp/x", "content": "unterminated'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("write", args_str, exc, max_chars=1000)
+        # Parse error surfaced
+        assert "not valid JSON" in msg
+        # Raw arg the model sent is echoed so the cut point is visible
+        assert args_str in msg
+        # Tool named + explicit re-emit-the-same-call instruction
+        assert "write" in msg
+        assert "re-emit" in msg.lower()
+        assert "do not switch" in msg.lower()
+
+    def test_known_tool_includes_schema_fields(self):
+        args_str = '{"action": "set", "args": {"id": 1, "cr'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("portfolio", args_str, exc, max_chars=2000)
+        # The tool's parameter schema (field names) is appended
+        assert "action" in msg
+        assert "args" in msg
+
+    def test_oversized_args_str_is_truncated(self):
+        args_str = '{"x": "' + ("y" * 500)  # unterminated + long
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("write", args_str, exc, max_chars=100)
+        # The echoed raw argument respects the cap
+        assert "truncated" in msg
+        assert ("y" * 500) not in msg
+
+    def test_unknown_tool_omits_schema_no_crash(self):
+        args_str = '{"foo": "bar'
+        exc = self._make_exc(args_str)
+        msg = _arg_parse_error_message("no_such_tool", args_str, exc, max_chars=1000)
+        # No crash; still actionable, just no schema section
+        assert "not valid JSON" in msg
+        assert args_str in msg
+        assert "no_such_tool" in msg
+
+
+class TestStubMissingToolResponses:
+    """_stub_missing_tool_responses repairs a dangling tool_calls transcript."""
+
+    def _tc(self, tc_id):
+        return {"id": tc_id, "type": "function",
+                "function": {"name": "bash", "arguments": "{}"}}
+
+    def test_stubs_all_missing_ids(self):
+        history = [{"role": "assistant", "tool_calls": [self._tc("a"), self._tc("b")]}]
+        _stub_missing_tool_responses(
+            history, [self._tc("a"), self._tc("b")], max_chars=2000
+        )
+        answered = {m["tool_call_id"] for m in history if m.get("role") == "tool"}
+        assert answered == {"a", "b"}
+
+    def test_idempotent_only_stubs_missing(self):
+        # One response already present; only the missing id is stubbed.
+        history = [
+            {"role": "assistant", "tool_calls": [self._tc("a"), self._tc("b")]},
+            {"role": "tool", "tool_call_id": "a", "content": "real result"},
+        ]
+        _stub_missing_tool_responses(
+            history, [self._tc("a"), self._tc("b")], max_chars=2000
+        )
+        tool_msgs = [m for m in history if m.get("role") == "tool"]
+        assert len(tool_msgs) == 2  # 'a' not duplicated
+        assert next(m for m in tool_msgs if m["tool_call_id"] == "a")["content"] == "real result"
+
+    def test_stub_content_is_capped(self):
+        history = [{"role": "assistant", "tool_calls": [self._tc("a")]}]
+        _stub_missing_tool_responses(history, [self._tc("a")], max_chars=10)
+        stub = next(m for m in history if m.get("role") == "tool")
+        assert "truncated" in stub["content"]
 
 
 class TestToolResultCapInHistory:

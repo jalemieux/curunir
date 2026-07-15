@@ -1,6 +1,6 @@
 ---
 name: introspect
-description: "Use to review curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows. Trigger on a schedule (e.g. hourly via the `schedule` tool) — files GitHub issues for novel findings, deduping against open ones — or on demand when the user asks to scan logs / check on recent behavior ('check the logs', 'how has the agent been behaving', 'any errors lately'), in which case it just reports findings back in chat instead of filing issues."
+description: "Use to review curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows — and to review past conversation transcripts (context/conversations/) for how the agent actually behaved: memory slips, cut-off replies, loops, or botched answers. Trigger on a schedule (e.g. hourly via the `schedule` tool) — files GitHub issues for novel findings, deduping against open ones — or on demand when the user asks to scan logs / check on recent behavior / investigate how a past conversation went ('check the logs', 'how has the agent been behaving', 'any errors lately', 'you seemed to lose track in that thread yesterday', 'were you cutting off replies?'), in which case it just reports findings back in chat instead of filing issues."
 tools: bash
 ---
 
@@ -19,6 +19,44 @@ you do with the findings:
   issues unless they explicitly ask** ("...and open issues for anything new") —
   silently filing tickets in response to a question is the surprising part, so
   never do it unprompted. GitHub auth, dedup, and the ledger are all skippable.
+
+## Reviewing past conversations
+
+The log scan (Steps 1–3, below) captures errors and framework-level events. To
+investigate how you actually *behaved* — memory slips, cut-off replies, loops, a
+botched answer — read the conversation transcripts directly. Reach for these
+when the user points at a past conversation rather than the logs ("you seemed to
+lose track in the META thread yesterday", "were you cutting off replies?").
+
+- **Where:** one JSON file per session at `context/conversations/<session_id>.json`.
+- **What's in each:** `{ session_id, channel, title, preview, created_at,
+  updated_at, history: [...] }`. `history` is the complete message list
+  (role + content) for that session; `title`/`preview` are derived from the
+  first user turn; timestamps are ISO8601. So you can pick a conversation by
+  topic (grep `title`/`preview`) or by date range (filter on
+  `created_at`/`updated_at`).
+- **What to skip:** `email`, scratch, and `sched:*` sessions are
+  system/ephemeral — focus on real interactive conversations.
+- **Short version:** summarized past conversations also live at
+  `context/memory/archives/conversations/<date>-<slug>.md` if you want the gist
+  without the full transcript.
+
+**Match the effort to the request:**
+
+- **A specific symptom** ("connectivity problem yesterday", "you errored on the
+  tax thing") → grep the relevant day's transcript(s) *and* the log window for
+  matching error strings/patterns, and read only the hits. Cheap and targeted.
+- **An open-ended review** ("review how you've been behaving this week") → read
+  the actual dialogue of the selected conversations and judge it as a skeptical
+  outside observer. This is expensive, so only do it when the user actually asks
+  for a broad review.
+- **A vague request** with no symptom and no explicit "review everything" → ask
+  what specifically seemed off, or which conversation/timeframe, before reading
+  anything. Don't sweep every transcript by default.
+
+Cite the specific turn(s) behind any finding so it's verifiable, not a vibe.
+"Nothing notable" is a valid result. Report in chat; only file a GitHub issue if
+the user explicitly asks (same rule as the log scan).
 
 **Requires:**
 - A readable log source — either the rotating log file at `$LOG_FILE`

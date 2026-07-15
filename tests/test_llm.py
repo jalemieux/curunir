@@ -206,6 +206,190 @@ def _async_iter(chunks):
     return _AIter(chunks)
 
 
+def _failing_iter(fail_exc, chunks_before=None):
+    """Async iterator that yields `chunks_before` then raises `fail_exc`.
+
+    Simulates a stream that drops mid-flight (the real network read happens
+    while draining the iterator, not when `acompletion` returns).
+    """
+    chunks_before = list(chunks_before or [])
+
+    class _AIter:
+        def __init__(self):
+            self._it = iter(chunks_before)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._it)
+            except StopIteration:
+                raise fail_exc
+
+    return _AIter()
+
+
+def _mid_stream_error(is_pre_first_chunk=True):
+    """A litellm MidStreamFallbackError (ServiceUnavailableError, status 503)."""
+    return litellm.exceptions.MidStreamFallbackError(
+        message="upstream idle timeout",
+        model="test-model",
+        llm_provider="openrouter",
+        is_pre_first_chunk=is_pre_first_chunk,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_retries_when_no_text_emitted_yet():
+    """A mid-stream drop before any text delta re-requests and recovers cleanly."""
+    good = [
+        _make_stream_chunk(content="Hel"),
+        _make_stream_chunk(content="lo"),
+        _make_stream_chunk(usage=(10, 2, 12)),
+    ]
+    received: list[str] = []
+
+    async def on_delta(text: str):
+        received.append(text)
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion, \
+            patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+        mock_acompletion.side_effect = [
+            _failing_iter(_mid_stream_error()),
+            _async_iter(good),
+        ]
+        result = await call_llm(
+            "test-model", [{"role": "user", "content": "hi"}], [],
+            on_text_delta=on_delta,
+        )
+
+    assert mock_acompletion.await_count == 2
+    # No duplicated deltas: only the successful attempt's text reached the user.
+    assert received == ["Hel", "lo"]
+    assert result.text == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_stream_no_retry_after_text_emitted():
+    """A drop *after* visible text has streamed re-raises without re-requesting."""
+    received: list[str] = []
+
+    async def on_delta(text: str):
+        received.append(text)
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion, \
+            patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+        mock_acompletion.side_effect = [
+            _failing_iter(
+                _mid_stream_error(is_pre_first_chunk=False),
+                chunks_before=[_make_stream_chunk(content="Hel")],
+            ),
+        ]
+        with pytest.raises(litellm.exceptions.MidStreamFallbackError):
+            await call_llm(
+                "test-model", [{"role": "user", "content": "hi"}], [],
+                on_text_delta=on_delta,
+            )
+
+    # No re-request; the partial text was emitted exactly once (not duplicated).
+    assert mock_acompletion.await_count == 1
+    assert received == ["Hel"]
+
+
+@pytest.mark.asyncio
+async def test_timeout_is_retried_non_streaming():
+    """A litellm.Timeout on a non-streaming call retries and recovers."""
+    mock_message = MagicMock()
+    mock_message.content = "recovered"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    mock_response.model = "test-model"
+
+    timeout_exc = litellm.Timeout(
+        message="request timed out", model="test-model", llm_provider="openrouter"
+    )
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion, \
+            patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+        mock_acompletion.side_effect = [timeout_exc, mock_response]
+        result = await call_llm("test-model", [{"role": "user", "content": "hi"}], [])
+
+    assert mock_acompletion.await_count == 2
+    assert result.text == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_retry_exhaustion_reraises():
+    """After MAX_RETRIES retryable failures, the last exception propagates."""
+    timeout_exc = litellm.Timeout(
+        message="still timing out", model="test-model", llm_provider="openrouter"
+    )
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion, \
+            patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+        mock_acompletion.side_effect = [timeout_exc] * llm_module.MAX_RETRIES
+        with pytest.raises(litellm.Timeout):
+            await call_llm("test-model", [{"role": "user", "content": "hi"}], [])
+
+    assert mock_acompletion.await_count == llm_module.MAX_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_error_not_retried():
+    """A non-retryable error (e.g. BadRequest) propagates immediately."""
+    bad = litellm.BadRequestError(
+        message="bad request", model="test-model", llm_provider="openrouter"
+    )
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion, \
+            patch("src.llm.asyncio.sleep", new_callable=AsyncMock):
+        mock_acompletion.side_effect = [bad]
+        with pytest.raises(litellm.BadRequestError):
+            await call_llm("test-model", [{"role": "user", "content": "hi"}], [])
+
+    assert mock_acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_request_timeout_kwarg_forwarded():
+    """The client-side request timeout is forwarded to litellm.acompletion."""
+    mock_message = MagicMock()
+    mock_message.content = "ok"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    mock_response.model = "test-model"
+
+    with patch("src.llm.litellm.acompletion") as mock_acompletion:
+        mock_acompletion.return_value = mock_response
+        await call_llm("test-model", [{"role": "user", "content": "hi"}], [])
+
+    kwargs = mock_acompletion.call_args.kwargs
+    assert kwargs["timeout"] == llm_module.LLM_REQUEST_TIMEOUT
+
+
+def test_is_retryable_classification():
+    """_is_retryable covers timeout / mid-stream / connection classes and 5xx."""
+    assert llm_module._is_retryable(_mid_stream_error()) is True
+    assert llm_module._is_retryable(
+        litellm.Timeout(message="t", model="m", llm_provider="openrouter")
+    ) is True
+    assert llm_module._is_retryable(
+        litellm.ServiceUnavailableError(message="s", model="m", llm_provider="openrouter")
+    ) is True
+    assert llm_module._is_retryable(
+        litellm.APIConnectionError(message="c", model="m", llm_provider="openrouter")
+    ) is True
+    assert llm_module._is_retryable(
+        litellm.BadRequestError(message="b", model="m", llm_provider="openrouter")
+    ) is False
+    assert llm_module._is_retryable(ValueError("nope")) is False
+
+
 @pytest.mark.asyncio
 async def test_stream_text_fires_callback_per_chunk():
     chunks = [

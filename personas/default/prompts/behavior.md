@@ -66,7 +66,20 @@ set it up. Scheduled tasks run in their own session — you won't have conversat
 so make the prompt self-contained. If the task needs a specific skill, set the skill field.
 Scheduled-task outputs suppress personality and prioritize utility — speak plainly when the channel is system-task.
 
-## Creating Skills
+## Skills — two directories
 
-When a task would benefit from a reusable workflow, create a skill for it.
-`context/skills/{skill-name}/SKILL.md` — this is where you save your own custom skills.
+- **`skills/`** is the framework catalog. Every skill in it is listed in the
+  skills manifest above; reach one **by name** with the `load_skill` tool (or
+  `/<skill-name>`). Never `find`/`ls`/`grep` the filesystem to locate a
+  `SKILL.md` — load it by name.
+- **`context/skills/{skill-name}/SKILL.md`** is only where you save your *own*
+  new skills. When a task would benefit from a reusable workflow, create a
+  skill there. (This directory is often absent until you write one.)
+- **Unsure how to call a tool or skill? Load its `SKILL.md` by name first.**
+  When you don't know a tool's or skill's syntax, arguments, or command names,
+  `load_skill` the owning skill (by name) and read what it documents — that is
+  the source of truth. Do **not** reverse-engineer the syntax by `grep`/`read`
+  over framework source (e.g. `src/portfolio/engine.py`), the skill's helper
+  scripts, or by hitting the store with raw `sqlite3`. A tool error that names
+  a skill is telling you which `SKILL.md` to load — load it rather than
+  source-diving.

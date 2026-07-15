@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from portal import db
+from portal import ws_agent
 from portal.app import app
 from portal.routing import routing
 
@@ -187,6 +188,57 @@ def test_skills_snapshot_routes_by_session_id(sync_client, monkeypatch):
 
     targets = [(sid, json.loads(p)) for (_, sid, p) in captured]
     assert any(sid == "tab-K" and p == snapshot for sid, p in targets)
+
+
+def test_ws_agent_sends_heartbeat_ping(sync_client, monkeypatch):
+    """The server drives an application-level heartbeat: on an otherwise-idle
+    connection it emits a `{"type": "ping"}` data frame well inside the proxy
+    idle window, so the container↔portal socket carries wire traffic between
+    agent turns and the proxy doesn't hang it up (issue #481)."""
+    monkeypatch.setattr(ws_agent, "PORTAL_WS_HEARTBEAT_SEC", 0.05)
+    user = _create_user(sync_client, "heartbeat@example.com")
+    with sync_client.websocket_connect(
+        "/ws/agent",
+        headers={"Authorization": f"Bearer {user.container_token}"},
+    ) as ws:
+        msg = json.loads(ws.receive_text())
+        assert msg == {"type": "ping"}
+        ws.close()
+
+
+def test_ws_agent_accepts_pong_without_warning_or_disconnect(sync_client, monkeypatch, caplog):
+    """The container answers the heartbeat with `{"type": "pong"}`; the server
+    treats it as a silent no-op — no `unknown type` warning and the socket
+    stays up so subsequent frames still route."""
+    monkeypatch.setattr(ws_agent, "PORTAL_WS_HEARTBEAT_SEC", 0.05)
+    user = _create_user(sync_client, "pong@example.com")
+    captured = []
+
+    async def fake_route(user_id, session_id, payload):
+        captured.append((user_id, session_id, payload))
+        return 1
+
+    monkeypatch.setattr(routing, "route_to_session", fake_route)
+
+    with caplog.at_level("WARNING", logger="portal.ws_agent"):
+        with sync_client.websocket_connect(
+            "/ws/agent",
+            headers={"Authorization": f"Bearer {user.container_token}"},
+        ) as ws:
+            # Drain the first heartbeat, then answer it with a pong.
+            first = json.loads(ws.receive_text())
+            assert first == {"type": "ping"}
+            ws.send_text(json.dumps({"type": "pong"}))
+            # Connection is still alive: a following agent_message routes.
+            ws.send_text(json.dumps({
+                "type": "agent_message",
+                "payload": {"content": "still here", "final": True,
+                            "session_id": "tab-A"},
+            }))
+            ws.close()
+
+    assert any(sid == "tab-A" for (_, sid, _) in captured)
+    assert not any("unknown type" in r.message for r in caplog.records)
 
 
 def test_conversations_snapshot_routes_by_session_id(sync_client, monkeypatch):

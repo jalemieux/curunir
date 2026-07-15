@@ -16,6 +16,8 @@ directly:
 - ``DELETE /api/schedules/{id}`` → remove a task (``engine.delete``)
 - ``GET /api/memory``     → ``context/memory/`` tree
 - ``GET /api/memory/file``→ one memory file (path-traversal guarded)
+- ``GET /api/files``      → ``context/workspace/generated/`` deliverables listing
+- ``GET /api/files/download`` → stream one deliverable (path-traversal guarded)
 - ``WS  /ws/browser``     → chat bridged straight into the agent queues
 
 Security mirrors ``ws.py``: an Origin allowlist (loopback by default) plus the
@@ -35,7 +37,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import os
+from collections import deque
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -62,6 +66,12 @@ logger = logging.getLogger(__name__)
 #: Fixed session id for the local console. Single-user, single-session.
 LOCAL_SESSION_ID = "local"
 
+#: Bound on the recent-``client_msg_id`` dedup ledger (see ``_seen_msg``). The
+#: browser buffers durable frames and replays them on reconnect, so the same
+#: frame can arrive twice; this keeps a small window of recently-seen ids to
+#: drop replays without letting the ledger grow unbounded.
+_RECENT_MSG_CAP = 256
+
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "local_ui" / "static"
 
 
@@ -81,6 +91,8 @@ class LocalWebChannel:
         history_provider: Callable[[str], list[dict]] | None = None,
         skills_provider: Callable[[], list[dict]] | None = None,
         conversations_provider: Callable[[], list[dict]] | None = None,
+        ingest: Callable[[str], "asyncio.Future | object"] | None = None,
+        doc_card_min_bytes: int = 50_000,
     ):
         self.in_queue = in_queue
         self.config = config
@@ -106,6 +118,17 @@ class LocalWebChannel:
         self.conversations_provider = conversations_provider or (lambda: [])
         # The single connected browser socket (single-session console).
         self._socket: WebSocket | None = None
+        # Bounded recent-``client_msg_id`` ledger for idempotent replay dedup.
+        self._recent_msg_ids: set[str] = set()
+        self._recent_msg_order: deque[str] = deque()
+        # Eager document ingestion (docs/document-ingestion.md): async callable
+        # path -> card text, wired to src.document_ingest.ingest_document in
+        # run.py. None disables ingestion (uploads still stage, all `skipped`).
+        # Task refs are held so a running ingestion can't be garbage-collected
+        # mid-flight (same failure class as the scheduler's #500).
+        self._ingest = ingest
+        self.doc_card_min_bytes = doc_card_min_bytes
+        self._ingest_tasks: set[asyncio.Task] = set()
         self.app = self._build_app()
 
     # --- auth helpers ------------------------------------------------------
@@ -128,6 +151,25 @@ class LocalWebChannel:
     def _module_enabled(self, panel_id: str) -> bool:
         """True if the named UI module is owned by the active persona."""
         return panel_id in self._module_panels
+
+    def _seen_msg(self, client_msg_id: str | None) -> bool:
+        """Record a ``client_msg_id`` and report whether it was already seen.
+
+        The browser buffers durable chat/slash frames and replays them on
+        reconnect (the outbound delivery guarantee), so the same frame can be
+        received twice. This bounded ledger drops the replay so a message
+        isn't processed twice. A missing/empty id is never deduped — a client
+        that doesn't stamp ids keeps the old at-most-once-per-send behavior.
+        """
+        if not client_msg_id:
+            return False
+        if client_msg_id in self._recent_msg_ids:
+            return True
+        self._recent_msg_ids.add(client_msg_id)
+        self._recent_msg_order.append(client_msg_id)
+        if len(self._recent_msg_order) > _RECENT_MSG_CAP:
+            self._recent_msg_ids.discard(self._recent_msg_order.popleft())
+        return False
 
     def _schedules_db(self) -> str:
         """Initialize (if needed) and return the schedule store path.
@@ -178,6 +220,8 @@ class LocalWebChannel:
         async def api_crm(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            if not self._module_enabled("crm"):
+                return JSONResponse({"error": "not found"}, status_code=404)
             return JSONResponse(readers.crm_overview(self.config))
 
         @app.get("/api/schedules")
@@ -268,6 +312,32 @@ class LocalWebChannel:
                 return JSONResponse({"error": str(e)}, status_code=400)
             except FileNotFoundError as e:
                 return JSONResponse({"error": str(e)}, status_code=404)
+
+        @app.get("/api/files")
+        async def api_files(request: Request) -> JSONResponse:
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return JSONResponse(readers.generated_files(self.config))
+
+        @app.get("/api/files/download")
+        async def api_files_download(
+            request: Request, path: str = Query(...)
+        ):
+            if not self._token_ok(self._rest_token(request)):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            try:
+                target = readers.generated_file_path(self.config, path)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            except FileNotFoundError as e:
+                return JSONResponse({"error": str(e)}, status_code=404)
+            mime, _ = mimetypes.guess_type(target.name)
+            return FileResponse(
+                str(target),
+                filename=target.name,
+                media_type=mime or "application/octet-stream",
+                content_disposition_type="attachment",
+            )
 
         @app.websocket("/ws/browser")
         async def ws_browser(ws: WebSocket) -> None:
@@ -387,13 +457,36 @@ class LocalWebChannel:
                 })
             return
 
+        if command == "upload":
+            await self._handle_upload_frame(payload, sid, respond)
+            return
+
         if command == "slash":
+            if self._seen_msg(payload.get("client_msg_id")):
+                return
             await self.in_queue.put(IncomingMessage(
                 content=payload.get("text", ""),
                 channel="local_web",
                 session_id=sid,
                 reply_address={},
                 command="slash",
+            ))
+            return
+
+        if self._seen_msg(payload.get("client_msg_id")):
+            return
+
+        staged_manifest, staged_err = self._resolve_staged_files(
+            payload.get("staged_files")
+        )
+        if staged_err is not None:
+            logger.info("Rejected inbound message: %s", staged_err)
+            await self.send(OutgoingMessage(
+                content=f"Attachment rejected: {staged_err}",
+                channel="local_web",
+                session_id=sid,
+                reply_address={},
+                final=True,
             ))
             return
 
@@ -409,18 +502,128 @@ class LocalWebChannel:
             ))
             return
 
-        manifest = (
-            _stage_attachments(decoded, sid, self.uploads_dir)
-            if decoded else None
-        )
+        manifest = list(staged_manifest)
+        if decoded:
+            manifest.extend(_stage_attachments(decoded, sid, self.uploads_dir))
         await self.in_queue.put(IncomingMessage(
             content=payload.get("content", ""),
             channel="local_web",
             session_id=sid,
             reply_address={},
             command=command or None,
-            attachments=manifest,
+            attachments=manifest or None,
         ))
+
+    # --- document upload + eager ingestion ----------------------------------
+
+    def _resolve_staged_files(
+        self, staged: list | None
+    ) -> tuple[list[dict], str | None]:
+        """Turn client-supplied staged-file refs into a validated manifest.
+
+        The browser echoes back the ``path`` entries it received in an
+        ``upload_result``, so every path must resolve inside ``uploads_dir``
+        (``.resolve()`` collapses symlinks — same guard as the REST file
+        readers). Returns (manifest, None) or ([], error).
+        """
+        if not staged:
+            return [], None
+        if not isinstance(staged, list):
+            return [], "staged_files must be a list"
+        uploads_root = Path(self.uploads_dir).resolve()
+        manifest: list[dict] = []
+        for i, item in enumerate(staged):
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                return [], f"staged_files[{i}] missing or invalid 'path'"
+            path = Path(item["path"]).resolve()
+            if not path.is_relative_to(uploads_root):
+                return [], f"staged_files[{i}] is outside the uploads directory"
+            if not path.is_file():
+                return [], f"staged_files[{i}] not found: {item['path']}"
+            mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            manifest.append({
+                "filename": item.get("filename") or path.name,
+                "path": str(path),
+                "mime_type": mime,
+                "size": path.stat().st_size,
+            })
+        return manifest, None
+
+    def _ingest_eligible(self, entry: dict) -> bool:
+        """Card-worthy: a non-image document at or above the size threshold."""
+        if self._ingest is None:
+            return False
+        if entry["mime_type"].startswith("image/"):
+            return False
+        return entry["size"] >= self.doc_card_min_bytes
+
+    async def _handle_upload_frame(self, payload: dict, sid: str, respond) -> None:
+        """Stage an upload batch and eagerly ingest eligible documents.
+
+        Responds with an ``upload_result`` manifest (per-file ingest status:
+        ``pending``/``skipped``), then fires one background ingestion task per
+        pending file; each completion emits a ``document_card`` frame
+        (``ok``/``error``) that the SPA uses to unblock the composer. Nothing
+        is enqueued for the agent — the document enters the conversation with
+        the user's eventual message, which references the staged paths.
+        """
+        upload_id = payload.get("upload_id")
+
+        async def _respond(frame: dict) -> None:
+            if respond is not None:
+                await respond(frame)
+
+        decoded, err = _decode_attachments(payload.get("attachments"))
+        if err is not None:
+            logger.info("Rejected upload %s: %s", upload_id, err)
+            await _respond({
+                "type": "upload_result", "upload_id": upload_id, "error": err,
+            })
+            return
+
+        manifest = _stage_attachments(decoded, sid, self.uploads_dir)
+        files = [
+            {**entry, "ingest": "pending" if self._ingest_eligible(entry) else "skipped"}
+            for entry in manifest
+        ]
+        await _respond({
+            "type": "upload_result", "upload_id": upload_id, "files": files,
+        })
+
+        for entry in files:
+            if entry["ingest"] != "pending":
+                continue
+            task = asyncio.create_task(
+                self._ingest_and_notify(entry, upload_id, _respond)
+            )
+            self._ingest_tasks.add(task)
+            task.add_done_callback(self._ingest_tasks.discard)
+
+    async def _ingest_and_notify(self, entry: dict, upload_id, respond) -> None:
+        """Run one document ingestion and report the outcome to the browser.
+
+        Never raises: an ingestion failure becomes a ``status: error`` frame
+        (the SPA unblocks and the message falls back to the raw-document
+        path), and a notify failure is logged — the card is already on disk,
+        so the agent-side card lookup still works.
+        """
+        frame = {
+            "type": "document_card",
+            "upload_id": upload_id,
+            "path": entry["path"],
+            "filename": entry["filename"],
+        }
+        try:
+            await self._ingest(entry["path"])
+            frame["status"] = "ok"
+        except Exception as exc:  # noqa: BLE001 — failure must reach the UI
+            logger.warning("Ingestion failed for %s: %s", entry["path"], exc)
+            frame["status"] = "error"
+            frame["error"] = str(exc)
+        try:
+            await respond(frame)
+        except Exception as exc:  # noqa: BLE001 — socket may be gone
+            logger.warning("Could not deliver document_card frame: %s", exc)
 
     # --- channel protocol --------------------------------------------------
 

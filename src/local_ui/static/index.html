@@ -100,6 +100,64 @@
   .conv-del:hover { opacity: 1; color: var(--accent); }
   .conv-empty { padding: 14px; font-size: 12px; color: var(--muted); }
 
+  /* Files right-rail — scoped to the Chat tab. Download-only listing of
+     context/workspace/generated/ deliverables. Mirrors .conv-sidebar tokens. */
+  .files-toggle {
+    flex-shrink: 0; width: 26px; height: 100%;
+    background: var(--panel); border: none; border-left: 1px solid var(--border);
+    color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600;
+    writing-mode: vertical-rl; text-orientation: mixed;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .files-toggle:hover { color: var(--fg); }
+  .files-rail {
+    width: 300px; flex-shrink: 0; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--border);
+  }
+  .files-rail.collapsed { display: none; }
+  .files-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: var(--muted); flex-shrink: 0;
+  }
+  .files-refresh {
+    background: transparent; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
+    padding: 2px 7px;
+  }
+  .files-refresh:hover { color: var(--fg); }
+  .files-filter {
+    margin: 8px 12px; padding: 5px 8px; flex-shrink: 0;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 12px;
+  }
+  .files-list { flex: 1; overflow-y: auto; }
+  .files-day {
+    padding: 6px 12px; font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.4px; color: var(--muted);
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+  }
+  .files-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 9px 12px; border-bottom: 1px solid var(--border);
+    cursor: pointer; text-decoration: none; color: var(--fg);
+  }
+  .files-row:hover { background: var(--bg); }
+  .files-badge {
+    flex-shrink: 0; font-size: 9px; font-weight: 600; letter-spacing: 0.3px;
+    padding: 1px 5px; border-radius: 4px; text-transform: uppercase;
+    background: rgba(139,148,158,.18); color: var(--muted);
+  }
+  .files-name {
+    flex: 1; min-width: 0; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .files-meta { flex-shrink: 0; font-size: 11px; color: var(--muted); }
+  .files-empty { padding: 14px; font-size: 12px; color: var(--muted); }
+
   /* Read panels */
   h2 { font-size: 16px; margin: 0 0 12px; }
   .controls { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
@@ -291,7 +349,7 @@
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
     <button data-tab="portfolio" data-module="portfolio">Balance Sheet</button>
-    <button data-tab="crm">CRM</button>
+    <button data-tab="crm" data-module="crm">CRM</button>
     <button data-tab="memory">Memory</button>
     <button data-tab="schedules">Schedules</button>
   </nav>
@@ -306,6 +364,15 @@
       <div class="conv-list" id="conversation-list"></div>
     </aside>
     <div id="chat-root"></div>
+    <button class="files-toggle" id="files-toggle" title="Show generated files">‹ Files</button>
+    <aside class="files-rail collapsed" id="files-rail">
+      <div class="files-head">
+        <span>Files</span>
+        <button class="files-refresh" id="files-refresh" title="Refresh">⟳</button>
+      </div>
+      <input class="files-filter" id="files-filter" type="text" placeholder="Filter by name…">
+      <div class="files-list" id="files-list"></div>
+    </aside>
   </div>
   <div class="tab" id="tab-usage"><h2>Token Usage</h2>
     <div class="controls">
@@ -324,7 +391,7 @@
     <div id="usage-body"></div>
   </div>
   <div class="tab" id="tab-portfolio" data-module="portfolio"><h2>Balance Sheet</h2><div id="portfolio-body"></div></div>
-  <div class="tab" id="tab-crm"><h2>CRM</h2><div id="crm-body"></div></div>
+  <div class="tab" id="tab-crm" data-module="crm"><h2>CRM</h2><div id="crm-body"></div></div>
   <div class="tab" id="tab-memory"><h2>Memory</h2>
     <div class="mem-layout">
       <div class="mem-tree" id="memory-tree"></div>
@@ -1088,7 +1155,7 @@ chat = createChat({
   container: document.getElementById("chat-root"),
   connection: conn,
   getSessionId: () => activeSessionId,
-  features: { attachments: true, skills: true, theme: true, emptyState: true },
+  features: { attachments: true, skills: true, theme: true, emptyState: true, eagerIngest: true },
   hooks: {
     // Socket just opened — pull the conversation list for the sidebar.
     onSocketOpen: () => requestConversations(),
@@ -1101,8 +1168,12 @@ chat = createChat({
       }
     },
     // A turn just finished — re-pull so a brand-new conversation joins the
-    // list (and titles/timestamps refresh) after its first reply.
-    onTurnFinal: () => requestConversations(),
+    // list (and titles/timestamps refresh) after its first reply. Also refresh
+    // the Files rail if it's open, so a deliverable the turn generated appears.
+    onTurnFinal: () => {
+      requestConversations();
+      if (filesRail && !filesRail.classList.contains("collapsed")) loadFiles();
+    },
   },
 });
 
@@ -1185,6 +1256,96 @@ function deleteConversation(id) {
 }
 
 document.getElementById("conv-new").addEventListener("click", startNew);
+
+// === Files rail (deliverables) ===
+// Read-only, download-only listing of context/workspace/generated/. Collapsed
+// by default; open/closed persisted in localStorage. Rows link straight to the
+// token-gated /api/files/download route (Content-Disposition: attachment), so
+// the browser downloads the bytes — no agent, no `attach`, no LLM in the path.
+const FILES_OPEN_KEY = "curunir.files.open";
+const filesRail = document.getElementById("files-rail");
+const filesToggle = document.getElementById("files-toggle");
+const filesListEl = document.getElementById("files-list");
+const filesFilterEl = document.getElementById("files-filter");
+let filesData = [];
+
+function fmtBytes(n) {
+  n = n || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+function fileBadge(name, mime) {
+  const ext = (name.split(".").pop() || "").toUpperCase();
+  return ext && ext !== name.toUpperCase() && ext.length <= 5 ? ext : "FILE";
+}
+function fileDay(mtimeSec) {
+  return new Date(mtimeSec * 1000).toLocaleDateString(undefined,
+    { year: "numeric", month: "short", day: "numeric" });
+}
+
+function setFilesOpen(open) {
+  filesRail.classList.toggle("collapsed", !open);
+  filesToggle.textContent = open ? "Files ›" : "‹ Files";
+  filesToggle.title = open ? "Hide generated files" : "Show generated files";
+  localStorage.setItem(FILES_OPEN_KEY, open ? "1" : "0");
+  if (open) loadFiles();
+}
+
+async function loadFiles() {
+  filesListEl.innerHTML = '<div class="files-empty">Loading…</div>';
+  try {
+    filesData = await apiGet("/api/files");
+    renderFiles();
+  } catch (e) {
+    filesListEl.innerHTML = `<div class="files-empty err">${esc(e.message)}</div>`;
+  }
+}
+
+function renderFiles() {
+  const q = (filesFilterEl.value || "").trim().toLowerCase();
+  const rows = q
+    ? filesData.filter((f) =>
+        f.name.toLowerCase().includes(q) || f.relpath.toLowerCase().includes(q))
+    : filesData;
+  filesListEl.innerHTML = "";
+  if (!rows.length) {
+    filesListEl.innerHTML =
+      `<div class="files-empty">${filesData.length ? "No matches." : "No files yet."}</div>`;
+    return;
+  }
+  let lastDay = null;
+  for (const f of rows) {
+    const day = fileDay(f.mtime);
+    if (day !== lastDay) {
+      lastDay = day;
+      const h = document.createElement("div");
+      h.className = "files-day";
+      h.textContent = day;
+      filesListEl.appendChild(h);
+    }
+    const row = document.createElement("a");
+    row.className = "files-row";
+    row.href = apiUrl("/api/files/download", { path: f.relpath }).toString();
+    row.title = f.relpath;
+    row.innerHTML =
+      '<span class="files-badge"></span>' +
+      '<span class="files-name"></span>' +
+      '<span class="files-meta"></span>';
+    row.querySelector(".files-badge").textContent = fileBadge(f.name, f.mime);
+    row.querySelector(".files-name").textContent = f.name;
+    row.querySelector(".files-meta").textContent =
+      fmtBytes(f.size) + " · " + relativeTime(new Date(f.mtime * 1000).toISOString());
+    filesListEl.appendChild(row);
+  }
+}
+
+filesToggle.addEventListener("click", () =>
+  setFilesOpen(filesRail.classList.contains("collapsed")));
+document.getElementById("files-refresh").addEventListener("click", loadFiles);
+filesFilterEl.addEventListener("input", renderFiles);
+// Restore the persisted open/closed preference (default collapsed).
+setFilesOpen(localStorage.getItem(FILES_OPEN_KEY) === "1");
 </script>
 </body>
 </html>

@@ -9,6 +9,13 @@ The portal is a separate service that runs on **render.com**. It has its
 own image (`ghcr.io/jalemieux/curunir-portal`) and is not part of the
 host-side SSH fan-out described below.
 
+This doc assumes a host that's already provisioned (Docker installed, a
+deploy user with docker-group access, GHCR credentials). For standing up a
+fresh/bare Ubuntu box from scratch — decommissioning prior services, SSH
+keys, the docker group, per-instance deploy-dir conventions, operational
+gotchas, and the auto-updater — see
+[`ubuntu-server-setup.md`](ubuntu-server-setup.md).
+
 ## Image tagging
 
 CI publishes both images on every push to `main` and on `v*` tags. Tags
@@ -136,6 +143,95 @@ up --build`:
 
 6. Once stable, delete the old `git clone` directory. Do one host first,
    confirm it works, then fan out with `scripts/deploy.sh`.
+
+## Log management
+
+A long-running host produces three logs, each bounded by a **different**
+mechanism. Don't stack a second rotator on a log that already self-rotates
+— two rotators fighting over one inode lose lines.
+
+| Log | Where | Bounded by | Cap |
+| --- | --- | --- | --- |
+| Container stdout/stderr | `/var/lib/docker/containers/<id>/*-json.log` (root) | `logging:` block in `docker-compose.yml` | `max-size 10m × max-file 5` ≈ 50MB |
+| `workspace/curunir.log` | the workspace bind-mount | the app's Python `RotatingFileHandler` (in `run.py`) | `10MB × 3 backups` ≈ 40MB |
+| `update-check.log` | the deploy dir (auto-updater hosts only) | host-side `logrotate` cron — see below | weekly × 4, compressed |
+
+### Container log (the easy one to forget)
+
+The default `json-file` driver is **unbounded** — it grows until it fills
+`/var`, and it's invisible because it lives under root-owned
+`/var/lib/docker`. This is the log that actually takes a long-running host
+down. It's capped by the `logging:` block on the `curunir` service in
+`docker-compose.yml`, so every host inherits the cap just by copying the
+compose file. Keeping it in compose (not a global `/etc/docker/daemon.json`)
+means it survives `docker compose up -d` recreates, including auto-updaters
+that recreate the container on a new image. Verify it's live on a host:
+
+```bash
+docker inspect --format '{{json .HostConfig.LogConfig}}' <container>
+# → {"Type":"json-file","Config":{"max-file":"5","max-size":"10m"}}
+```
+
+If you ever want the cap to apply to *every* container on a host (not just
+curunir), set it globally instead — needs root:
+
+```json
+// /etc/docker/daemon.json   (then: sudo systemctl restart docker)
+{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "5" } }
+```
+
+### `workspace/curunir.log` — leave it alone
+
+`run.py` already rotates this via `RotatingFileHandler` (10MB × 3 →
+`curunir.log.1/.2/.3`). **Do not** add a `logrotate` rule for it — the two
+rotators would race on the same file. The cap is configured in code, not env.
+
+### `update-check.log` (auto-updater hosts)
+
+Hosts that run the Watchtower-style auto-updater (`curunir-update-check.sh`
+on a `*/15` cron — a host-side addition, not part of the canonical deploy)
+produce `update-check.log`. The script appends to it on every run. Bound it
+with a **user-level** `logrotate` (the log is user-owned, so no root needed):
+
+1. Drop a config next to the script (`logrotate-curunir.conf`):
+
+   ```
+   /home/<user>/<deploy-dir>/update-check.log {
+       weekly
+       rotate 4
+       compress
+       delaycompress
+       missingok
+       notifempty
+       copytruncate
+   }
+   ```
+
+   `copytruncate` matters: the cron keeps the file open via `>>`, so
+   logrotate copies-then-truncates in place rather than renaming an inode
+   the writer still holds.
+
+2. Run it from the **user** crontab (state file makes the `weekly` cadence
+   work without root or `/etc/logrotate.d`):
+
+   ```cron
+   30 4 * * * /usr/sbin/logrotate --state <deploy-dir>/.logrotate.state \
+       <deploy-dir>/logrotate-curunir.conf 2>&1 | logger -t curunir-logrotate
+   ```
+
+   Piping to `logger` sends logrotate's own output to journald (already
+   rotated by systemd) instead of creating yet another growing file.
+
+3. If the updater script self-trims with `tail -n 1000`, **remove that** —
+   it keeps the file too small for logrotate to ever fire and loses history
+   instead of archiving it. Let logrotate own the bounding.
+
+Validate without waiting a week:
+
+```bash
+logrotate --debug --state <state> <conf>   # dry-run, no changes
+logrotate --force --state <state> <conf>   # prove it: creates update-check.log.1
+```
 
 ## portal (render.com)
 

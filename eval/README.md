@@ -8,11 +8,25 @@ Two eval systems live here, at different maturity:
 | **Graded harness** | `eval/harness/` + a persona suite | pure-function + LLM-judge graders, pass/fail/slow with a one-line reason, interactive HTML report | regression + failure-mode benchmarking of a persona |
 
 The rest of this file documents the **graded harness** — the engine, how to run a
-suite, the report, and the conventions every suite follows. Per-persona specifics
-(which tasks, which fixtures) live in each suite's own README:
+suite, the report, and the conventions every suite follows. Suites come in two
+kinds, split by what they own:
 
-- **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — ~34 tasks, market data + the owner's balance sheet.
-- **`eval/default/`** → the default persona; `default_tasks.py` is an empty `TASKS` placeholder to be populated from the capture-only prompts.
+- **Persona suites** (`eval/<persona>/`) own persona-level behavior: the
+  persona's system-prompt specifics (guardrails, domain rules) and **skill
+  routing across the persona's catalog** — given the full catalog, does a
+  trigger prompt reach the *right* skill with no collision/shadowing?
+- **Skill suites** (`eval/skills/<name>/`) own one skill's (or skill family's)
+  contract in depth: method adherence, failure modes, output rules. They run
+  against any persona whose allowlist carries the skill.
+
+Per-suite specifics (which tasks, which fixtures) live in each suite's own README:
+
+- **`eval/finance/`** → [`eval/finance/README.md`](finance/README.md) — 38 tasks: market data, the owner's balance sheet, and the live-data routing tripwires (FR1/PM1/PM2, migrated from the skill_routing suite; R1 is the yfinance routing contract).
+- **`eval/default/`** → [`eval/default/README.md`](default/README.md) — 34 tasks in five families: **G** (the no-general-knowledge guardrail, #338), **S** (skill discovery — `load_skill` by name, no filesystem hunting, #451/#457), **K** (framework-kernel tripwires: scheduling persisted to `schedules.db` via `anchor_equals`, memory recall + delegate handoff from a seeded fixture, attachments, slash dispatch, multi-turn retention), **RS** (a routing sweep — one canonical trigger prompt per visible catalog skill not covered by a dedicated task, graded on routing only), and **WS/RR** (richer routing tripwires migrated from the web_search / reddit_research suites). The K+RS+WS/RR families make this suite the **model/quant-swap smoke test** (see below).
+- **`eval/skills/`** → [`eval/skills/README.md`](skills/README.md) — the per-skill adherence suites:
+  - [`skill_routing/`](skills/skill_routing/README.md) — adherence for the `yfinance` / `fred` / `polymarket` live-data skills (freshness citations, smallest subcommand, the CPI trap, priced probabilities; routing lives in `eval/finance/`).
+  - [`reddit_research/`](skills/reddit_research/README.md) — curl-vs-web_fetch method adherence for the `reddit-research` skill (routing lives in `eval/default/`).
+  - [`web_search/`](skills/web_search/README.md) — no-rediscovery-loop method adherence for the `web-search` skill (consumer/local-business lookups start with Brave, not a Google/Yelp/Reddit scrape; routing lives in `eval/default/`).
 
 ## The graded engine (`eval/harness/`)
 
@@ -86,6 +100,64 @@ exact server frame sequence — run it after touching `eval/harness/runner.py`:
 ```bash
 python eval/harness/test_runner_sync.py
 ```
+
+## Swapping a model or quant? Run the smoke suite
+
+The default suite doubles as the regression signal for a model or quant change:
+the K family tripwires every framework capability (scheduling, memory,
+delegation, attachments, slash dispatch, context retention) and the RS family
+checks that natural phrasing still routes to each catalog skill — the two
+things a weaker model or a bad quant breaks first.
+
+```bash
+CURUNIR_PERSONA=default python run.py                       # SUT on the candidate model
+python eval/default/run_default_evals.py --fixture baseline # G + S + K + RS, graded
+```
+
+K2/K3 read the seeded fixture, so pass `--fixture baseline`. RS tasks are
+routing-only and tolerate truncated execution (`allow_error`), so the sweep is
+cheap; K1 writes a real schedule row, verifies it **in the store** with
+`anchor_equals`, and removes it via the task's `cleanup`. Compare candidates
+with `eval/model_sweep.sh` (below):
+`SUITE=eval/default/run_default_evals.py EVAL_ARGS="--fixture baseline" eval/model_sweep.sh`.
+
+## Model A/B sweep (`eval/model_sweep.sh`)
+
+To compare the *same* suite across models without hand-swapping `MODEL` and
+restarting the SUT each time, use the sweep. For each model it relaunches the
+server with `MODEL=<m>`, waits for `:8765`, runs the suite, kills the server,
+and moves on. The SUT reports its model in the welcome frame, so each run's
+report auto-labels by model and lands in its own file under the suite's
+`results/` — ready to diff.
+
+```bash
+# models from eval/model_sweep_models.txt:
+eval/model_sweep.sh
+
+# or name them explicitly (overrides the file):
+eval/model_sweep.sh openrouter/z-ai/glm-5.2 anthropic/claude-sonnet-4-20250514
+
+# a different suite, or a single task, via env:
+SUITE=eval/finance/run_finance_evals.py EVAL_ARGS="--id R6" eval/model_sweep.sh
+```
+
+Model list resolution (first match wins): positional args → `MODELS_FILE` →
+`eval/model_sweep_models.txt` → a built-in fallback. The file is one entry per
+line — `<model-id>  [provider]` — where the optional second column is an
+OpenRouter provider slug applied as `OPENROUTER_PROVIDER` for that run (same
+field as `.env`; a line with no provider column runs with **no** provider pin
+rather than inheriting `.env`'s). `#` comments and blank lines are ignored;
+positional args are model ids only (no provider column). Other env knobs:
+`SUITE` (default web-search), `EVAL_ARGS` (e.g. `--id WS3`), `WS_PORT`, `LOGDIR`
+(SUT boot logs, default `/tmp/curunir_model_sweep_logs`), `PYTHON`.
+
+The sweep passes `MODEL` **only** to each server subprocess — never to the shell
+running the grader — so the judge stays fixed (see below) across all models
+rather than each model grading its own output. It also holds the web-search
+backend (Brave vs Gemini `SKILL.md`) constant: it sweeps *models*, not backends.
+Each model needs its provider key in `.env`. The sweep restarts the SUT
+repeatedly and leaves none running when it finishes — relaunch your own dev
+instance afterward.
 
 ## The judge model
 
@@ -178,6 +250,7 @@ fields can reuse `eval/harness/graders.py` unchanged.
 | `set_match` | every item in `expected` appears (case-insensitive); `groups` = one-of-each |
 | `regex_present` | all `require` regexes match and no `forbid` regex matches |
 | `action_used` | routing contract: `require` / `require_any` actions ran, `forbid` didn't |
+| `anchor_equals` | the anchor-queried **store** value equals a frozen `equals` — text-blind persistence check (a readback from chat history can't fake it) |
 | `llm_judge` | a separate judge model rules PASS against a crisp `rubric` |
 | `reconciles` | a stated balance sheet adds up (`assets − liabilities == net worth`) and matches an anchored truth |
 | `composite` | ANDs a list of sub-graders; reports every sub-check |

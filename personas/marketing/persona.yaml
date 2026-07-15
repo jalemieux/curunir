@@ -6,6 +6,8 @@ skills:
   - identity
   - onboarding
   - introspect
+  # Front-door router: catches natural GTM phrasing and loads the right stage skill(s)
+  - gtm
   # GTM pipeline (onboard -> position -> plan)
   - gtm-onboard-ingest
   - gtm-position-segment

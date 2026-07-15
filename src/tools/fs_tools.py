@@ -102,14 +102,17 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    import pymupdf
-    doc = pymupdf.open(str(path))
+    # pypdf, not pymupdf: it's the PDF engine the attachment path
+    # (document_text.py) already depends on — one extractor repo-wide, and
+    # no native wheel. pymupdf was never in requirements.txt, so this
+    # reader was a latent ModuleNotFoundError in every environment.
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
     pages = []
-    for i, page in enumerate(doc, 1):
-        text = page.get_text()
+    for i, page in enumerate(reader.pages, 1):
+        text = page.extract_text() or ""
         if text.strip():
             pages.append(f"--- Page {i} ---\n{text}")
-    doc.close()
     return "\n".join(pages) if pages else "(no text content found in PDF)"
 
 
@@ -153,22 +156,79 @@ _BINARY_READERS: dict[str, callable] = {
 }
 
 
+# Head lines shown when a gated read has no document card to return.
+_READ_GATE_PREVIEW_LINES = 50
+
+
+def _sibling_card(path: Path) -> str | None:
+    """Content of the document card written by src.document_ingest, if any."""
+    try:
+        card = Path(str(path) + ".card.md").read_text()
+    except OSError:
+        return None
+    return card if card.strip() else None
+
+
+def _gated_preview(path: Path, lines: list[str], size: int) -> str:
+    """Structural preview for a gated read: numbered head + routing marker."""
+    shown = lines[:_READ_GATE_PREVIEW_LINES]
+    numbered = "\n".join(f"{i}\t{line}" for i, line in enumerate(shown, 1))
+    return (
+        f"{numbered}\n\n"
+        f"[read gated: {path.name} is {len(lines)} lines / {size} bytes — "
+        f"showing lines 1-{len(shown)}. Use offset/limit for a specific "
+        f"range, grep to locate content, or create a document card for "
+        f"navigation: python skills/document-ingest/ingest.py {path} "
+        f"(document-ingest skill).]"
+    )
+
+
 def exec_read(args: dict, config: AgentConfig) -> str:
-    """Read a file. Handles text, PDF, DOCX, XLSX, and CSV."""
+    """Read a file. Handles text, PDF, DOCX, XLSX, and CSV.
+
+    Output is line-numbered (``N<TAB>line``) for every format — binary
+    formats are numbered over their *extracted* text, the same numbering
+    document cards cite — and honors 1-based ``offset``/``limit``.
+
+    Large-document pre-gate (docs/document-ingestion.md): a read with no
+    explicit ``limit`` on a file larger than ``config.read_gate_bytes``
+    returns the sibling document card when one exists, else a structural
+    preview (numbered head + totals + routing marker) — never the full body.
+    An explicit ``limit`` always bypasses the gate: it is the model saying
+    how much it wants.
+    """
     try:
         path = Path(args["file_path"])
         if not path.exists():
             return f"Error: File not found: {path}"
 
         suffix = path.suffix.lower()
-        reader = _BINARY_READERS.get(suffix)
-        if reader:
-            return reader(path)
-
         if suffix in _IMAGE_EXTENSIONS:
             return f"This is an image file ({suffix}). Image content was already provided inline when the email was received. Use the information from the original message to respond."
 
-        lines = path.read_text().splitlines()
+        gate = getattr(config, "read_gate_bytes", 0) or 0
+        gated = (
+            gate > 0
+            and args.get("limit") is None
+            and path.stat().st_size > gate
+        )
+        if gated:
+            card = _sibling_card(path)
+            if card:
+                return (
+                    f"[Large document — returning its document card instead "
+                    f"of the full text. The raw file is at {path}; card line "
+                    f"references are line numbers in that file. Use read "
+                    f"with offset/limit (or grep) for exact wording.]\n{card}"
+                )
+
+        reader = _BINARY_READERS.get(suffix)
+        text = reader(path) if reader else path.read_text()
+        lines = text.splitlines()
+
+        if gated:
+            return _gated_preview(path, lines, path.stat().st_size)
+
         offset = args.get("offset", 1)
         limit = args.get("limit", len(lines))
 

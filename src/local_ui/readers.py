@@ -13,6 +13,7 @@ Every function returns JSON-serializable dicts/lists. None of them mutate.
 """
 from __future__ import annotations
 
+import mimetypes
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -306,3 +307,66 @@ def memory_file(config: AgentConfig, relpath: str) -> dict:
         "relpath": Path(relpath).as_posix(),
         "content": target.read_text(encoding="utf-8", errors="replace"),
     }
+
+
+def _generated_root(config: AgentConfig) -> Path:
+    return (Path(config.context_dir) / "workspace" / "generated").resolve()
+
+
+# Directories/files under the generated dir we never expose.
+_GEN_SKIP = {"__pycache__"}
+
+
+def generated_files(config: AgentConfig) -> list[dict]:
+    """Flat, newest-first listing of ``context/workspace/generated/``.
+
+    Each row is ``{"relpath", "name", "size", "mtime", "mime"}`` — a posix
+    relpath (subdirs reachable), the basename, byte size, mtime (epoch seconds),
+    and a best-effort MIME type via :func:`mimetypes.guess_type`. Dotfiles and
+    ``__pycache__`` are skipped. Returns ``[]`` if the dir is absent — nothing
+    has been generated yet. The rail groups by day client-side; this stays a
+    flat list sorted newest-first by mtime.
+    """
+    root = _generated_root(config)
+    if not root.is_dir():
+        return []
+
+    rows: list[dict] = []
+    for entry in root.rglob("*"):
+        if not entry.is_file():
+            continue
+        rel_parts = entry.relative_to(root).parts
+        if any(part in _GEN_SKIP or part.startswith(".") for part in rel_parts):
+            continue
+        stat = entry.stat()
+        mime, _ = mimetypes.guess_type(entry.name)
+        rows.append({
+            "relpath": entry.relative_to(root).as_posix(),
+            "name": entry.name,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "mime": mime,
+        })
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    return rows
+
+
+def generated_file_path(config: AgentConfig, relpath: str) -> Path:
+    """Resolve a file under ``context/workspace/generated/`` for download.
+
+    Path-traversal guarded (same shape as :func:`memory_file`): ``relpath``
+    must resolve to a real file *inside* the generated sandbox. Absolute paths
+    and any ``..`` (or symlink) that escapes the root raise ``ValueError``; a
+    non-existent target raises ``FileNotFoundError``. Returns the resolved
+    absolute :class:`Path` — the *route* builds the ``FileResponse``.
+    """
+    if os.path.isabs(relpath):
+        raise ValueError(f"absolute paths not allowed: {relpath!r}")
+    root = _generated_root(config)
+    target = (root / relpath).resolve()
+    # The resolved path must stay within the sandbox root (symlinks collapsed).
+    if root != target and root not in target.parents:
+        raise ValueError(f"path escapes generated sandbox: {relpath!r}")
+    if not target.is_file():
+        raise FileNotFoundError(f"no generated file at {relpath!r}")
+    return target

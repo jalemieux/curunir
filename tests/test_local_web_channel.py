@@ -163,7 +163,17 @@ def test_api_portfolio_token_takes_precedence_over_404(config):
     assert client.get("/api/portfolio").status_code == 401
 
 
-def test_api_crm(client):
+def _crm_client(config):
+    """A client whose persona owns the crm module (crm skill)."""
+    config.skill_allowlist = ["crm"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    return TestClient(ch.app)
+
+
+def test_api_crm(config):
+    client = _crm_client(config)
     r = client.get("/api/crm", headers={"X-Curunir-Token": TOKEN})
     assert r.status_code == 200
     body = r.json()
@@ -172,7 +182,42 @@ def test_api_crm(client):
     assert body["leads"][0]["name"] == "Jane"
 
 
-def test_api_crm_requires_token(client):
+def test_api_crm_404_when_module_disabled(config):
+    # Finance-style allowlist: no crm → module off → 404.
+    config.skill_allowlist = ["balance-sheet", "research"]
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/crm", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_crm_404_for_default_persona(config):
+    # default persona: None allowlist → no modules → 404.
+    config.skill_allowlist = None
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get(
+        "/api/crm", headers={"X-Curunir-Token": TOKEN}
+    ).status_code == 404
+
+
+def test_api_crm_token_takes_precedence_over_404(config):
+    # Unauthenticated probe gets 401, not 404 — can't enumerate modules.
+    config.skill_allowlist = ["balance-sheet"]  # module disabled
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN
+    )
+    client = TestClient(ch.app)
+    assert client.get("/api/crm").status_code == 401
+
+
+def test_api_crm_requires_token(config):
+    client = _crm_client(config)
     assert client.get("/api/crm").status_code == 401
 
 
@@ -344,6 +389,79 @@ def test_api_memory_file_traversal_rejected(client):
     assert r.status_code == 400
 
 
+# --- generated files (deliverables) ----------------------------------------
+
+
+@pytest.fixture
+def files_config(config):
+    gen = config.context_dir / "workspace" / "generated"
+    gen.mkdir(parents=True)
+    (gen / "memo.md").write_text("# Memo\nbody")
+    (gen / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    return config
+
+
+@pytest.fixture
+def files_client(files_config):
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=files_config, pairing_token=TOKEN
+    )
+    return TestClient(ch.app)
+
+
+def test_api_files_list(files_client):
+    r = files_client.get("/api/files", headers={"X-Curunir-Token": TOKEN})
+    assert r.status_code == 200
+    names = {f["name"] for f in r.json()}
+    assert names == {"memo.md", "report.pdf"}
+
+
+def test_api_files_list_requires_token(files_client):
+    assert files_client.get("/api/files").status_code == 401
+
+
+def test_api_files_download(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "memo.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 200
+    assert r.content == b"# Memo\nbody"
+    assert "attachment" in r.headers["content-disposition"]
+    assert "memo.md" in r.headers["content-disposition"]
+
+
+def test_api_files_download_requires_token(files_client):
+    r = files_client.get("/api/files/download", params={"path": "memo.md"})
+    assert r.status_code == 401
+
+
+def test_api_files_download_traversal_400(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "../../identity.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 400
+
+
+def test_api_files_download_missing_404(files_client):
+    r = files_client.get(
+        "/api/files/download", params={"path": "nope.md"},
+        headers={"X-Curunir-Token": TOKEN},
+    )
+    assert r.status_code == 404
+
+
+def test_api_files_download_token_precedes_error(files_client):
+    # Unauthenticated caller gets 401, not 400/404 — can't probe existence.
+    assert files_client.get(
+        "/api/files/download", params={"path": "../../identity.md"}
+    ).status_code == 401
+    assert files_client.get(
+        "/api/files/download", params={"path": "nope.md"}
+    ).status_code == 401
+
+
 def test_api_requires_token(client):
     assert client.get("/api/usage").status_code == 401
     assert client.get("/api/usage",
@@ -425,13 +543,22 @@ def test_ws_meta_frame_lists_enabled_modules_for_finance(config):
     assert _meta_frame(ch)["modules"] == ["portfolio"]
 
 
-def test_ws_meta_frame_no_modules_for_marketing(config):
+def test_ws_meta_frame_lists_crm_module_for_marketing(config):
     config.skill_allowlist = ["crm", "research"]  # no balance-sheet
     ch = LocalWebChannel(
         in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
         persona="marketing",
     )
-    assert _meta_frame(ch)["modules"] == []
+    assert _meta_frame(ch)["modules"] == ["crm"]
+
+
+def test_ws_meta_frame_finance_excludes_crm(config):
+    config.skill_allowlist = ["balance-sheet", "research"]  # no crm
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        persona="finance",
+    )
+    assert "crm" not in _meta_frame(ch)["modules"]
 
 
 def test_ws_meta_frame_no_modules_for_default(config):
@@ -606,6 +733,54 @@ async def test_skills_snapshot_echoes_requested_session_id(config):
     assert sent[0]["session_id"] == "abc-123"
 
 
+# --- client_msg_id idempotency (durable-frame replay dedup) ----------------
+
+
+@pytest.mark.asyncio
+async def test_duplicate_client_msg_id_enqueues_once(channel):
+    # The browser buffers durable frames and replays them on reconnect, so a
+    # frame can arrive twice. A repeated client_msg_id must enqueue only once.
+    frame = {"content": "hi", "client_msg_id": "abc"}
+    await channel._handle_inbound_frame(frame)
+    await channel._handle_inbound_frame(frame)
+    assert channel.in_queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_distinct_client_msg_ids_enqueue_twice(channel):
+    await channel._handle_inbound_frame({"content": "a", "client_msg_id": "id1"})
+    await channel._handle_inbound_frame({"content": "b", "client_msg_id": "id2"})
+    assert channel.in_queue.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_client_msg_id_always_enqueues(channel):
+    # Back-compat: a client that doesn't stamp ids is never deduped.
+    await channel._handle_inbound_frame({"content": "a"})
+    await channel._handle_inbound_frame({"content": "a"})
+    assert channel.in_queue.qsize() == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_slash_client_msg_id_enqueues_once(channel):
+    frame = {"command": "slash", "text": "/skills", "client_msg_id": "s1"}
+    await channel._handle_inbound_frame(frame)
+    await channel._handle_inbound_frame(frame)
+    assert channel.in_queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_msg_id_set_is_bounded(channel):
+    # The dedup ledger is bounded; old ids age out so it can't grow unbounded.
+    from src.channels.local_web import _RECENT_MSG_CAP
+
+    for i in range(_RECENT_MSG_CAP + 50):
+        await channel._handle_inbound_frame(
+            {"content": "x", "client_msg_id": f"id{i}"}
+        )
+    assert len(channel._recent_msg_ids) <= _RECENT_MSG_CAP
+
+
 # --- send() ----------------------------------------------------------------
 
 
@@ -634,3 +809,226 @@ async def test_send_without_socket_is_noop(channel):
     await channel.send(OutgoingMessage(
         content="x", channel="local_web", session_id="local", reply_address={},
     ))
+
+
+# --- upload frame + eager document ingestion --------------------------------
+
+
+def _b64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
+def _upload_channel(config, tmp_path, ingest=None, doc_card_min_bytes=10):
+    return LocalWebChannel(
+        in_queue=asyncio.Queue(),
+        config=config,
+        pairing_token=TOKEN,
+        uploads_dir=str(tmp_path / "uploads"),
+        ingest=ingest,
+        doc_card_min_bytes=doc_card_min_bytes,
+    )
+
+
+async def _drain_ingest(channel):
+    if channel._ingest_tasks:
+        await asyncio.gather(*list(channel._ingest_tasks))
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_stages_files_and_responds_with_manifest(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)  # no ingest callable
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u1",
+        "attachments": [
+            {"filename": "doc.txt", "mime_type": "text/plain", "data": _b64("x" * 50)},
+        ],
+    }, respond=respond)
+
+    assert ch.in_queue.empty()
+    assert sent[0]["type"] == "upload_result"
+    assert sent[0]["upload_id"] == "u1"
+    files = sent[0]["files"]
+    assert len(files) == 1
+    assert files[0]["filename"] == "doc.txt"
+    assert files[0]["ingest"] == "skipped"  # no ingest callable wired
+    from pathlib import Path
+    staged = Path(files[0]["path"])
+    assert staged.is_file()
+    assert staged.read_text() == "x" * 50
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_ingests_eligible_docs_and_sends_card_frames(config, tmp_path):
+    seen = []
+
+    async def fake_ingest(path):
+        seen.append(path)
+        return "# Document card"
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u2",
+        "attachments": [
+            {"filename": "big.txt", "mime_type": "text/plain", "data": _b64("y" * 100)},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    assert sent[0]["files"][0]["ingest"] == "pending"
+    cards = [f for f in sent if f.get("type") == "document_card"]
+    assert len(cards) == 1
+    assert cards[0]["upload_id"] == "u2"
+    assert cards[0]["filename"] == "big.txt"
+    assert cards[0]["status"] == "ok"
+    assert seen == [sent[0]["files"][0]["path"]]
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_skips_images_and_small_files(config, tmp_path):
+    async def fake_ingest(path):  # pragma: no cover - must not be called
+        raise AssertionError("ingest called for ineligible file")
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=50)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    png = "\x89PNG fake" + "p" * 100
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u3",
+        "attachments": [
+            {"filename": "img.png", "mime_type": "image/png", "data": _b64(png)},
+            {"filename": "tiny.txt", "mime_type": "text/plain", "data": _b64("hi")},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    statuses = {f["filename"]: f["ingest"] for f in sent[0]["files"]}
+    assert statuses == {"img.png": "skipped", "tiny.txt": "skipped"}
+    assert not [f for f in sent if f.get("type") == "document_card"]
+
+
+@pytest.mark.asyncio
+async def test_upload_ingest_failure_sends_error_card_frame(config, tmp_path):
+    async def fake_ingest(path):
+        raise RuntimeError("model unavailable")
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u4",
+        "attachments": [
+            {"filename": "bad.txt", "mime_type": "text/plain", "data": _b64("z" * 100)},
+        ],
+    }, respond=respond)
+    await _drain_ingest(ch)
+
+    cards = [f for f in sent if f.get("type") == "document_card"]
+    assert len(cards) == 1
+    assert cards[0]["status"] == "error"
+    assert "model unavailable" in cards[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_upload_frame_rejects_bad_attachments(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "command": "upload", "upload_id": "u5",
+        "attachments": [{"filename": "doc.txt", "mime_type": "text/plain", "data": "!!not-b64!!"}],
+    }, respond=respond)
+
+    assert sent[0]["type"] == "upload_result"
+    assert sent[0]["upload_id"] == "u5"
+    assert "base64" in sent[0]["error"]
+    assert ch.in_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_message_frame_with_staged_files_builds_manifest(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    staged_dir = tmp_path / "uploads" / "local" / "batch1"
+    staged_dir.mkdir(parents=True)
+    doc = staged_dir / "report.txt"
+    doc.write_text("q" * 30)
+
+    await ch._handle_inbound_frame({
+        "content": "what does this say?",
+        "staged_files": [{"path": str(doc), "filename": "report.txt"}],
+    })
+
+    msg = ch.in_queue.get_nowait()
+    assert msg.content == "what does this say?"
+    assert len(msg.attachments) == 1
+    att = msg.attachments[0]
+    assert att["filename"] == "report.txt"
+    assert att["path"] == str(doc)
+    assert att["size"] == 30
+    assert att["mime_type"] == "text/plain"
+
+
+@pytest.mark.asyncio
+async def test_message_frame_rejects_staged_path_outside_uploads(config, tmp_path):
+    ch = _upload_channel(config, tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private")
+    sent = []
+
+    async def respond(frame):
+        sent.append(frame)
+
+    await ch._handle_inbound_frame({
+        "content": "read it",
+        "staged_files": [{"path": str(secret), "filename": "secret.txt"}],
+    }, respond=respond)
+
+    assert ch.in_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_upload_flow_end_to_end_over_websocket(config, tmp_path):
+    """Full socket path: upload frame in → upload_result + document_card out."""
+    async def fake_ingest(path):
+        return "# card"
+
+    ch = _upload_channel(config, tmp_path, ingest=fake_ingest, doc_card_min_bytes=10)
+    with TestClient(ch.app) as c:
+        with c.websocket_connect(
+            f"/ws/browser?token={TOKEN}", headers=GOOD_ORIGIN
+        ) as ws:
+            assert json.loads(ws.receive_text())["type"] == "agent_status"
+            assert json.loads(ws.receive_text())["type"] == "meta"
+            ws.send_text(json.dumps({
+                "command": "upload", "upload_id": "e2e",
+                "attachments": [{
+                    "filename": "doc.txt", "mime_type": "text/plain",
+                    "data": _b64("d" * 100),
+                }],
+            }))
+            result = json.loads(ws.receive_text())
+            assert result["type"] == "upload_result"
+            assert result["files"][0]["ingest"] == "pending"
+            card = json.loads(ws.receive_text())
+            assert card["type"] == "document_card"
+            assert card["status"] == "ok"
+            assert card["upload_id"] == "e2e"

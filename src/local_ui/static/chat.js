@@ -14,6 +14,15 @@
 // Canonical home: src/local_ui/static/. See the design doc:
 // docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md
 
+import {
+  beginUpload,
+  markUploadUndeliverable,
+  applyUploadResult,
+  applyDocumentCard,
+  pendingIngest,
+  toWireAttachments,
+} from "./uploads.js";
+
 // === Attachment limits (mirror the portal + server allowlist) ===
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_PDF = 10 * 1024 * 1024;
@@ -50,6 +59,18 @@ const DL_ICON =
   '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" ' +
   'y2="3"/></svg>';
 
+// === Stick-to-bottom (pure helpers, node-tested in tests/js/test_chat_scroll.mjs) ===
+// The pane auto-follows a streaming response only while the reader is at (or
+// within `threshold` px of) the bottom; scrolling up detaches it until they
+// return. Forced scrolls (own send, history load) always win.
+export function computeScrollPinned(scrollTop, scrollHeight, clientHeight, threshold = 48) {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function shouldAutoScroll(pinned, force) {
+  return force || pinned;
+}
+
 export function createChat(config) {
   const {
     container,
@@ -59,7 +80,12 @@ export function createChat(config) {
     hooks = {},
   } = config;
   const feat = {
-    attachments: true, skills: true, theme: true, emptyState: true, ...features,
+    attachments: true, skills: true, theme: true, emptyState: true,
+    // Eager document ingestion (docs/document-ingestion.md): upload on
+    // attach, block send until each document's card frame lands. Off by
+    // default — only hosts whose server handles `upload` frames enable it.
+    eagerIngest: false,
+    ...features,
   };
 
   // marked is shared/global; configuring it is idempotent.
@@ -71,6 +97,15 @@ export function createChat(config) {
     });
   }
   const md = (text) => (window.marked ? window.marked.parse(text) : text);
+
+  // Stable per-send id so the connection layer can buffer+replay a durable
+  // frame across a reconnect without the server processing it twice (the
+  // server dedups on client_msg_id — mirrors the email channel's stable
+  // Message-ID dedup).
+  const newClientMsgId = () =>
+    window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : "cid-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 
   // === Per-instance state ===
   let agentOnline = false;
@@ -196,12 +231,28 @@ export function createChat(config) {
   function bootstrap() {
     connection.send({ content: "", command: "history_request", session_id: getSessionId() });
     if (feat.skills) connection.send({ command: "skills_request", session_id: getSessionId() });
+    if (feat.eagerIngest) {
+      // A reconnect may have eaten upload_result/document_card frames;
+      // re-upload anything still in flight so entries can't stay blocked.
+      for (const e of staged) {
+        if (e.status && e.status !== "ready") uploadEntry(e);
+      }
+      renderStaged();
+    }
     if (hooks.onSocketOpen) hooks.onSocketOpen();
   }
 
   // === Inbound frame routing ===
   function handleFrame(msg) {
     if (msg.type === "agent_status") { setStatus(msg.status); return; }
+    if (msg.type === "upload_result") {
+      if (applyUploadResult(staged, msg)) renderStaged();
+      return;
+    }
+    if (msg.type === "document_card") {
+      if (applyDocumentCard(staged, msg)) renderStaged();
+      return;
+    }
     if (msg.session_id && msg.session_id !== getSessionId()) {
       if (hooks.onUnhandledFrame) hooks.onUnhandledFrame(msg);
       return;
@@ -467,11 +518,24 @@ export function createChat(config) {
     el.innerHTML = `<div class="role">${role === "user" ? "you" : "curunir"}</div><div class="body"></div>`;
     if (thinking) ensureActivityIndicator(el, true);
     messagesEl.appendChild(el);
-    scrollToBottom();
+    // New bubbles (own send, history load) always scroll; only streaming
+    // deltas into an existing bubble respect the reader's position.
+    scrollToBottom(true);
     return el;
   }
 
-  function scrollToBottom() {
+  // Updated on user scrolls; content growth fires no scroll event, so a
+  // pinned reader stays pinned while the stream grows the pane. The
+  // programmatic scroll below lands at the bottom and re-confirms the flag.
+  let scrollPinned = true;
+  messagesEl.addEventListener("scroll", () => {
+    scrollPinned = computeScrollPinned(
+      messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight);
+  });
+
+  function scrollToBottom(force = false) {
+    if (!shouldAutoScroll(scrollPinned, force)) return;
+    scrollPinned = true;
     requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
   }
 
@@ -564,9 +628,13 @@ export function createChat(config) {
   function launchSkill(slashText) {
     closeSkills();
     if (!agentOnline) return;
+    const delivered = connection.send({
+      command: "slash", text: slashText, session_id: getSessionId(),
+      client_msg_id: newClientMsgId(), durable: true,
+    });
+    if (!delivered) return;
     const el = appendMessage("user");
     setUserBody(el.querySelector(".body"), slashText);
-    connection.send({ command: "slash", text: slashText, session_id: getSessionId() });
     if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
     updateComposerMode();
   }
@@ -577,23 +645,46 @@ export function createChat(config) {
     if (!content && staged.length === 0) return;
     if (!agentOnline) return;
     if (content.startsWith("/") && staged.length === 0) {
+      // Durable: buffered + replayed if the socket is mid-reconnect. Only
+      // paint the optimistic bubble once delivery is guaranteed — a dropped
+      // frame must not leave a phantom message + spinner (issue #474).
+      const delivered = connection.send({
+        command: "slash", text: content, session_id: getSessionId(),
+        client_msg_id: newClientMsgId(), durable: true,
+      });
+      if (!delivered) return;
       const el = appendMessage("user");
       setUserBody(el.querySelector(".body"), content);
-      connection.send({ command: "slash", text: content, session_id: getSessionId() });
       inputEl.value = "";
       if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
       updateComposerMode();
       return;
     }
+    if (feat.eagerIngest && pendingIngest(staged)) {
+      // A document is still being analyzed — pulse the chips instead of
+      // sending; the card frame will land shortly and unblock.
+      stagedEl.classList.add("cu-waiting");
+      setTimeout(() => stagedEl.classList.remove("cu-waiting"), 900);
+      return;
+    }
+    const wire = feat.eagerIngest
+      ? toWireAttachments(staged)
+      : {
+          stagedFiles: [],
+          inline: staged.map((a) => ({
+            filename: a.filename, mime_type: a.mime_type, data: a.data,
+          })),
+        };
+    const delivered = connection.send({
+      content, session_id: getSessionId(),
+      client_msg_id: newClientMsgId(), durable: true,
+      attachments: wire.inline.length ? wire.inline : null,
+      staged_files: wire.stagedFiles.length ? wire.stagedFiles : null,
+    });
+    if (!delivered) return;
     const el = appendMessage("user");
     el.querySelector(".body").textContent = content;
     renderAttachments(el, staged.map((a) => ({ filename: a.filename })));
-    connection.send({
-      content, session_id: getSessionId(),
-      attachments: staged.length ? staged.map((a) => ({
-        filename: a.filename, mime_type: a.mime_type, data: a.data,
-      })) : null,
-    });
     inputEl.value = "";
     staged = [];
     renderStaged();
@@ -640,21 +731,44 @@ export function createChat(config) {
     const totalAfter = staged.reduce((s, a) => s + a.size, 0) + file.size;
     if (totalAfter > MAX_TOTAL) { alert("Total > 20 MB"); return; }
     const buf = await file.arrayBuffer();
-    staged.push({
+    const entry = {
       filename: file.name,
       mime_type: file.type || "application/octet-stream",
       data: bytesToBase64(new Uint8Array(buf)),
       size: file.size,
-    });
+      status: "staging",
+    };
+    staged.push(entry);
+    if (feat.eagerIngest) uploadEntry(entry);
     renderStaged();
+  }
+
+  // Eager upload: bytes leave the browser at attach time so document
+  // ingestion runs while the user is still typing. An undeliverable upload
+  // degrades to the pre-ingestion inline path — never blocks composing.
+  function uploadEntry(entry) {
+    beginUpload(entry, newClientMsgId());
+    const delivered = connection.send({
+      command: "upload",
+      upload_id: entry.uploadId,
+      session_id: getSessionId(),
+      attachments: [{
+        filename: entry.filename, mime_type: entry.mime_type, data: entry.data,
+      }],
+    });
+    if (!delivered) markUploadUndeliverable(entry);
   }
 
   function renderStaged() {
     stagedEl.innerHTML = "";
     staged.forEach((a, i) => {
       const chip = document.createElement("span");
-      chip.className = "attachment";
-      chip.textContent = `📎 ${a.filename} ✕`;
+      const analyzing = feat.eagerIngest && a.status && a.status !== "ready";
+      chip.className = "attachment" + (analyzing ? " analyzing" : "");
+      const icon = analyzing ? "⏳" : a.error ? "⚠️" : "📎";
+      const note = analyzing ? " (analyzing…)" : "";
+      chip.textContent = `${icon} ${a.filename}${note} ✕`;
+      if (a.error) chip.title = a.error;
       chip.onclick = () => { staged.splice(i, 1); renderStaged(); };
       stagedEl.appendChild(chip);
     });
