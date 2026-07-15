@@ -118,3 +118,47 @@ async def test_router_dispatches_multiple_messages():
     cli_channel.send.assert_called_once_with(msg1)
     slack_channel.send.assert_called_once_with(msg2)
 
+
+@pytest.mark.asyncio
+async def test_router_survives_send_failure(caplog):
+    # A channel whose send() raises must not escape the coroutine and cancel
+    # the TaskGroup — the router logs, drops, and keeps serving other channels.
+    out_queue = asyncio.Queue()
+    failing_channel = AsyncMock()
+    failing_channel.send.side_effect = RuntimeError("client disconnected mid-write")
+    good_channel = AsyncMock()
+    channels = {"cli": failing_channel, "slack": good_channel}
+
+    bad_msg = OutgoingMessage(content="boom", channel="cli", session_id="cli", reply_address={})
+    good_msg = OutgoingMessage(content="ok", channel="slack", session_id="s1", reply_address={})
+    await out_queue.put(bad_msg)
+    await out_queue.put(good_msg)
+
+    task = asyncio.create_task(route_outbound(out_queue, channels))
+    await asyncio.sleep(0.05)
+
+    # The coroutine stayed alive despite the raise...
+    assert not task.done()
+    # ...logged the failure naming the channel + session...
+    assert "cli" in caplog.text
+    assert "client disconnected mid-write" in caplog.text
+    # ...and still delivered the subsequent good message.
+    good_channel.send.assert_called_once_with(good_msg)
+
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_router_cancellation_propagates():
+    # A bare `except Exception` must let CancelledError through so TaskGroup
+    # shutdown still cancels the router cleanly.
+    out_queue = asyncio.Queue()
+    channels = {}
+
+    task = asyncio.create_task(route_outbound(out_queue, channels))
+    await asyncio.sleep(0.05)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
