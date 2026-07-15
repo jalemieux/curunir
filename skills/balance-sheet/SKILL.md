@@ -54,6 +54,17 @@ stored lots — **never a silent overwrite**:
   Qty drift and missing-remote are **reported, never auto-written** — those are
   real trades the owner must confirm (record them with `buy`/`sell`).
 
+**Link accounts before the first sync (avoids double-counting).** Reconciliation
+keys on `(account, ticker)`, and a broker reports its own opaque account id
+(E*TRADE: a number like `83405188`). If the owner already tracks that account's
+lots under a human label (e.g. `account="brokerage"`), the first sync would see
+the ticker as *both* new-at-broker and not-at-broker — a `possible_account_mismatch`.
+The engine **refuses to insert** those (it would double net worth) and reports
+them. Resolve by relabeling the existing local lots' `account` to the broker id
+shown by `broker_accounts` (via `set`), then re-sync — or confirm it's genuinely
+a separate holding. Never let a mismatch stand: it means the diff can't line the
+two sides up.
+
 Trigger phrases: *"sync my brokerage"*, *"pull my E*TRADE positions"*,
 *"reconcile against my broker"*. Always show the diff before syncing, and after
 a sync surface the qty-drift/missing-remote items so the owner can decide.

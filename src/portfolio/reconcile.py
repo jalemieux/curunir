@@ -11,6 +11,13 @@ Positions bucket into:
 - **missing_local** — the broker holds a ticker we don't (a new position)
 - **missing_remote**— we hold a ticker the broker doesn't report
 
+A derived **possible_account_mismatch** flags any ticker that is *both*
+missing-local and missing-remote — almost always the same holding under a
+manual account label vs. the broker's opaque account id. ``broker_apply``
+refuses to insert those (they would double-count net worth) and reports them so
+the human relabels the local lot's ``account`` to the broker id (shown by
+``broker_accounts``) or confirms it's genuinely separate.
+
 ``broker_apply`` is conservative: it re-prices matched/stale lots (value =
 qty·price, value_asof = position as-of) and inserts brand-new tickers as one
 lot tagged ``extra.source=<adapter>``. Qty drift and missing-remote are only
@@ -92,12 +99,28 @@ def broker_diff(path: str, positions: list[BrokerPosition]) -> dict:
             "lot_ids": [a["id"] for a in lots],
         })
 
+    # Account-label mismatch guard. A broker account is an opaque id (e.g.
+    # E*TRADE's numeric accountId), which won't match a manually-labeled local
+    # `account`. When the SAME ticker is both missing-local (broker side) and
+    # missing-remote (local side), it is almost certainly the same position
+    # under two account labels — inserting it would double-count net worth. Flag
+    # it so apply skips the insert and the human links the accounts (relabel the
+    # local lot's `account` to the id shown by broker_accounts) or confirms it's
+    # genuinely a separate holding.
+    remote_tickers = {r["ticker"] for r in missing_remote}
+    possible_account_mismatch = [
+        {"ticker": r["ticker"], "broker_account": r["account"],
+         "broker_qty": r["broker_qty"], "market_value": r["market_value"]}
+        for r in missing_local if r["ticker"] in remote_tickers
+    ]
+
     return {
         "matched": matched,
         "price_stale": price_stale,
         "qty_drift": qty_drift,
         "missing_local": missing_local,
         "missing_remote": missing_remote,
+        "possible_account_mismatch": possible_account_mismatch,
     }
 
 
@@ -125,9 +148,14 @@ def broker_apply(path: str, positions: list[BrokerPosition],
         updated.append({"ticker": row["ticker"], "account": row["account"],
                         "lot_ids": row["lot_ids"], "market_value": p.market_value})
 
-    # Insert brand-new tickers as one aggregate, sourced lot.
+    # Insert brand-new tickers as one aggregate, sourced lot — but NOT when the
+    # same ticker also appears missing-remote (a likely account-label mismatch),
+    # which would double-count. Those are reported for the human to resolve.
+    mismatch_tickers = {r["ticker"] for r in diff["possible_account_mismatch"]}
     for row in diff["missing_local"]:
         p = pos_by_key[(row["account"] or "", row["ticker"])]
+        if p.ticker in mismatch_tickers:
+            continue
         value = (p.market_value if p.market_value is not None
                  else (float(p.qty) * float(p.price)) if p.price is not None
                  else 0.0)
@@ -140,7 +168,7 @@ def broker_apply(path: str, positions: list[BrokerPosition],
             "account": p.account_id, "extra": {"source": source},
         })
         inserted.append({"ticker": p.ticker, "account": p.account_id,
-                         "id": res["id"]})
+                         "id": res["id"], "warnings": res.get("warnings", [])})
 
     return {
         "source": source,
@@ -148,6 +176,7 @@ def broker_apply(path: str, positions: list[BrokerPosition],
         "skipped": {
             "qty_drift": diff["qty_drift"],
             "missing_remote": diff["missing_remote"],
+            "possible_account_mismatch": diff["possible_account_mismatch"],
         },
     }
 

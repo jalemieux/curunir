@@ -162,3 +162,42 @@ def test_apply_is_idempotent(tmp_path):
     lots = [a for a in engine.list_assets(path) if a["ticker"] == "TSLA"]
     assert len(lots) == 1  # not double-inserted
     assert lots[0]["value"] == 1000.0
+
+
+# --- account-label mismatch guard (review finding: opaque broker account_id
+#     must not silently double-insert against a manually-labeled local lot) ---
+
+def test_diff_flags_possible_account_mismatch(tmp_path):
+    path = _fresh(tmp_path)
+    # User's pre-existing manual lot uses a human label; broker uses its opaque id.
+    _seed_lot(path, "AAPL", 10, 1500.0, account="brokerage")
+    diff = reconcile.broker_diff(
+        path, [_pos("AAPL", 10, price=150.0, market_value=1500.0, account="83405188")])
+    # It lands in both missing buckets AND is flagged as a likely account mismatch.
+    assert [r["ticker"] for r in diff["missing_local"]] == ["AAPL"]
+    assert [r["ticker"] for r in diff["missing_remote"]] == ["AAPL"]
+    assert [r["ticker"] for r in diff["possible_account_mismatch"]] == ["AAPL"]
+
+
+def test_apply_does_not_double_insert_on_account_mismatch(tmp_path):
+    path = _fresh(tmp_path)
+    _seed_lot(path, "AAPL", 10, 1500.0, account="brokerage")
+    report = reconcile.broker_apply(
+        path, [_pos("AAPL", 10, price=150.0, market_value=1500.0, account="83405188")],
+        source="etrade")
+    # No new lot inserted; the mismatch is reported for the human to resolve.
+    assert report["applied"]["inserted"] == []
+    assert [r["ticker"] for r in report["skipped"]["possible_account_mismatch"]] == ["AAPL"]
+    aapl = [a for a in engine.list_assets(path) if a["ticker"] == "AAPL"]
+    assert len(aapl) == 1  # not duplicated
+
+
+def test_apply_inserted_carries_add_warnings(tmp_path):
+    path = _fresh(tmp_path)
+    # New ticker with no cost_basis → add_asset warns; that warning must surface.
+    report = reconcile.broker_apply(
+        path, [_pos("TSLA", 4, price=250.0, market_value=1000.0)],
+        source="etrade")
+    entry = report["applied"]["inserted"][0]
+    assert entry["ticker"] == "TSLA"
+    assert any("cost_basis" in w for w in entry.get("warnings", []))

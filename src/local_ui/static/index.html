@@ -845,6 +845,7 @@ async function loadPortfolio() {
 // OAuth verifier flow, the diff view (grouped buckets), and a confirm-gated
 // Sync all live here — auth can't be completed anywhere else (no CLI).
 const BRK_BUCKETS = [
+  { key: "possible_account_mismatch", label: "Account mismatch — same ticker under two account labels (NOT synced; relabel or confirm)" },
   { key: "price_stale", label: "Price-stale (will re-price)" },
   { key: "matched", label: "Matched" },
   { key: "qty_drift", label: "Qty drift (reported only)" },
@@ -856,14 +857,16 @@ function brkNum(n) { return n == null ? "" : (+n).toLocaleString(undefined, { ma
 
 function brkBucketTable(key, rows) {
   const cells = (r) => {
+    if (key === "possible_account_mismatch")
+      return `<td>${esc(r.ticker)}</td><td>${esc(r.broker_account || "")}</td><td class="num">${brkNum(r.broker_qty)}</td><td class="num">${PF_MONEY(r.market_value)}</td>`;
     if (key === "missing_local")
       return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.broker_qty)}</td><td class="num">${PF_MONEY(r.market_value)}</td>`;
     if (key === "missing_remote")
       return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.local_qty)}</td><td class="num">${PF_MONEY(r.local_value)}</td>`;
     return `<td>${esc(r.ticker)}</td><td>${esc(r.account || "")}</td><td class="num">${brkNum(r.local_qty)} → ${brkNum(r.broker_qty)}</td><td class="num">${PF_MONEY(r.local_value)} → ${PF_MONEY(r.market_value)}</td>`;
   };
-  const head = key === "missing_local"
-    ? `<th>Ticker</th><th>Account</th><th class="num">Broker qty</th><th class="num">Market value</th>`
+  const head = (key === "missing_local" || key === "possible_account_mismatch")
+    ? `<th>Ticker</th><th>Broker account</th><th class="num">Broker qty</th><th class="num">Market value</th>`
     : key === "missing_remote"
     ? `<th>Ticker</th><th>Account</th><th class="num">Local qty</th><th class="num">Local value</th>`
     : `<th>Ticker</th><th>Account</th><th class="num">Qty (local→broker)</th><th class="num">Value (local→broker)</th>`;
@@ -874,9 +877,10 @@ function brkDiffHtml(diff) {
   const parts = BRK_BUCKETS.map((b, i) => {
     const rows = diff[b.key] || [];
     if (!rows.length) return "";
+    const warn = b.key === "possible_account_mismatch";
     return `<div class="pf-grp brk-bucket${i === 0 ? " open" : ""}">
       <div class="pf-grp-head"><span class="pf-caret">▸</span>
-        <span class="pf-grp-name">${b.label}<span class="cnt">${rows.length}</span></span></div>
+        <span class="pf-grp-name">${warn ? "⚠ " : ""}${b.label}<span class="cnt">${rows.length}</span></span></div>
       <div class="pf-grp-body">${brkBucketTable(b.key, rows)}</div></div>`;
   }).join("");
   return parts || '<span class="muted">No differences — the broker and the local store agree.</span>';
@@ -983,7 +987,9 @@ async function brkSync(name) {
     const rep = entry.report;
     const upd = rep.applied.updated.length, ins = rep.applied.inserted.length;
     const drift = rep.skipped.qty_drift.length, gone = rep.skipped.missing_remote.length;
-    brkSetMsg(name, `Synced: re-priced ${upd}, inserted ${ins}. Reported (not written): ${drift} qty drift, ${gone} missing-remote.`);
+    const mism = (rep.skipped.possible_account_mismatch || []).length;
+    const mismMsg = mism ? `, ${mism} account-mismatch (relabel the local account to the broker id, then re-sync)` : "";
+    brkSetMsg(name, `Synced: re-priced ${upd}, inserted ${ins}. Reported (not written): ${drift} qty drift, ${gone} missing-remote${mismMsg}.`);
     loadPortfolio();  // refresh the whole balance sheet with the new values
   } catch (e) { brkSetMsg(name, e.message, true); }
 }
