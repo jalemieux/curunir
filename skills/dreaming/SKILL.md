@@ -33,12 +33,12 @@ The test for every edit: **"is this a fact, or is it wiring?"** Moving a file,
 renaming it, registering it, fixing a link to it — wiring. The sentences and
 facts *inside* a data file — frozen. You may not touch them.
 
-**The one allowed exception:** if a data file's prose contains a stale *path
-reference* (e.g. `projects.md` says "see `recipes.md`" after `recipes.md` was
+**The first allowed exception — stale path fixes:** if a data file's prose
+contains a stale *path reference* (e.g. `projects.md` says "see `recipes.md`" after `recipes.md` was
 renamed), you may fix that path. A path is wiring. You may fix the path and
 nothing else on that line.
 
-**The one sanctioned content move — idea-log aging.** If `idea-log.md` exists
+**The second allowed exception — the idea-log aging move.** If `idea-log.md` exists
 and holds an entry with status `Spark` or `Monitoring` whose `Last touched`
 date is more than 90 days old, move that entry — its pipeline-table row and
 its detail block, **verbatim** — to `archives/idea-log-archive.md` (create the
