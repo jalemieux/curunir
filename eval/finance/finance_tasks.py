@@ -898,6 +898,55 @@ TASKS: list[dict] = [
             )
         },
     },
+    {
+        "id": "W4",
+        "name": "idea-log-lightweight-capture",
+        "intent": "A fleeting idea must land in memory/idea-log.md — updated in place with a fresh Last touched — not escalate into a memo or evaporate as chat (#506).",
+        "expected": "Updates the seeded ADBE idea-log entry (one entry, no duplicate; $211 / LEAPS-over-$250 hypothesis; Last touched refreshed) and reads it back with a funnel status and promote/kill criteria, without loading a heavy orchestrator.",
+        "tags": ["failure-mode", "tracking", "idea-log"],
+        # The fixture seeds idea-log.md with an ADBE entry (Monitoring,
+        # Last touched 2026-04-20). "Log this" on the same idea is the revival
+        # path: update in place + refresh Last touched. The action check proves
+        # a write happened; the judge proves the entry stayed lightweight and
+        # single — a read-only run fails the judge (stale Last touched), a
+        # memo-escalation fails the forbid list.
+        "prompts": [
+            "Quick thought, just log it in my idea log: ADBE still looks "
+            "cheap — it's at $211 now, and if it breaks over $250 I'd look "
+            "at LEAPS. Don't run a full analysis.",
+            "Read me back my idea log entry for Adobe.",
+        ],
+        "max_loops": 10,
+        "grader": "composite",
+        "spec": {
+            "all": [
+                {"label": "wrote-the-log-no-escalation", "grader": "action_used",
+                 "spec": {"require": ["idea-log.md"],
+                          "forbid": ["load_skill: investment-memo",
+                                     "load_skill: catalyst-memo",
+                                     "load_skill: deep-research"]}},
+                {"label": "entry-updated-not-inflated", "grader": "llm_judge",
+                 "spec": {"rubric": (
+                     "The owner's idea log already held ONE ADBE entry (status "
+                     "Monitoring, Last touched 2026-04-20) before this exchange; the "
+                     "owner then asked to log the same idea again at $211 with a "
+                     "LEAPS-over-$250 trigger. The reply is a readback of the ADBE "
+                     "entry. PASS if it shows a SINGLE ADBE entry that (a) carries a "
+                     "funnel status (Spark or Monitoring), (b) states promote and/or "
+                     "kill criteria (the $250 reclaim trigger counts), (c) reflects "
+                     "the new mention — the ~$211 price and/or a Last touched date "
+                     "LATER than 2026-04-20 — and (d) remains a lightweight capture. "
+                     "FAIL if a second/duplicate ADBE entry was created, if Last "
+                     "touched still reads 2026-04-20 with no sign of the new mention "
+                     "(nothing was written), or if the entry ballooned into a full "
+                     "valuation/analysis memo."
+                 )}},
+            ]
+        },
+        # Capture is ~3 actions (read log, edit entry, readback); a
+        # correct-but-loopy run surfaces as PASS-SLOW.
+        "budget": {"max_actions": 6},
+    },
 ]
 
 
