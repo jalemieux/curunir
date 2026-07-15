@@ -10,8 +10,16 @@ import json
 from src.config import AgentConfig
 from src.portfolio import db as pdb
 from src.portfolio import engine
+from src.portfolio.brokers import service as broker_service
+from src.portfolio.brokers.registry import enabled_adapters
 
 _DEFAULT_DB = "context/memory/portfolio.db"
+
+
+def _adapters():
+    """Enabled brokerage adapters from the environment (config-only). Wrapped
+    so tests can patch a fake set without touching the registry/env."""
+    return enabled_adapters()
 
 _READ = {
     "networth": lambda db, a: engine.networth(db),
@@ -34,6 +42,11 @@ _READ = {
     "show_snapshot": lambda db, a: engine.show_snapshot(db, a.get("id") or "latest"),
     "diff_snapshots": lambda db, a: engine.diff_snapshots(db, a["a"], a["b"]),
     "snapshot_diff": lambda db, a: engine.diff_snapshots(db, a["a"], a["b"]),
+    # Brokerage sync (read): normalized positions reconciled against the store.
+    # A missing/unauthed adapter surfaces as available=False / needs_reauth in
+    # the payload, never a raise.
+    "broker_accounts": lambda db, a: broker_service.accounts(_adapters()),
+    "broker_diff": lambda db, a: broker_service.diff(db, _adapters()),
 }
 _WRITE = {
     "add": lambda db, a: engine.add_asset(db, a),
@@ -48,6 +61,10 @@ _WRITE = {
     "snapshot": lambda db, a: engine.snapshot(
         db, trigger=a.get("trigger", "manual"), note=a.get("note"),
         force=bool(a.get("force")), taken_at=a.get("taken_at")),
+    # Brokerage sync (write): apply the conservative reconcile subset (re-price
+    # matched holdings, insert new tickers; qty drift + missing-remote reported
+    # only). Auth lives in the local web console's Balance Sheet tab.
+    "broker_sync": lambda db, a: broker_service.sync(db, _adapters()),
 }
 
 

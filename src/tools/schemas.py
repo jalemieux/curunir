@@ -346,7 +346,15 @@ _OPT_IN_SCHEMAS = [
                 "list, show, re_equity, pnl, query (read-only SQL), render. "
                 "Writes: add, add_liability, set, rm, import_rows (bulk CSV "
                 "load with an account-total self-check), refresh (re-price "
-                "market holdings). Pass the operation in `action` and its "
+                "market holdings). Brokerage sync (E*TRADE etc., if a "
+                "BROKERAGE_ADAPTERS adapter is configured): broker_accounts / "
+                "broker_diff (read — compare live broker positions to the stored "
+                "lots), broker_sync (write — re-price matched holdings and insert "
+                "new tickers; qty drift and positions the broker no longer "
+                "reports are flagged, never auto-written). Broker auth is a "
+                "one-time interactive step in the local web console's Balance "
+                "Sheet tab; if a sync reports needs_reauth, tell the user to "
+                "reconnect there. Pass the operation in `action` and its "
                 "parameters in `args`."
             ),
             "parameters": {
@@ -356,7 +364,8 @@ _OPT_IN_SCHEMAS = [
                         "type": "string",
                         "enum": ["networth", "rollup", "list", "show", "re_equity",
                                  "pnl", "query", "render", "add", "add_liability",
-                                 "set", "rm", "import_rows", "refresh"],
+                                 "set", "rm", "import_rows", "refresh",
+                                 "broker_accounts", "broker_diff", "broker_sync"],
                         "description": "The operation to run.",
                     },
                     "args": {
