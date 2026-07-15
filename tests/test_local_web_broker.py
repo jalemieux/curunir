@@ -190,3 +190,23 @@ def test_broker_sync_applies_and_reports(config):
     assert entry["report"]["applied"]["updated"]
     lot = [a for a in engine.list_assets(config.portfolio_db) if a["ticker"] == "AAPL"][0]
     assert lot["value"] == 1500.0
+
+
+def test_broker_routes_handle_misconfigured_adapters_gracefully(config):
+    # A bad BROKERAGE_ADAPTERS makes enabled_adapters raise ValueError; the
+    # route must degrade to a friendly 400, not a 500 (service's never-raise
+    # contract). Mirrors the portfolio tool's broad-except handling.
+    def boom():
+        raise ValueError("unknown brokerage adapter 'bogus'")
+
+    ch = LocalWebChannel(
+        in_queue=asyncio.Queue(), config=config, pairing_token=TOKEN,
+        broker_adapters_provider=boom,
+    )
+    client = TestClient(ch.app, raise_server_exceptions=False)
+    r = client.get("/api/portfolio/broker/status", headers=_h())
+    assert r.status_code == 400
+    assert "bogus" in r.json()["error"]
+    # A write route degrades the same way.
+    r2 = client.post("/api/portfolio/broker/sync", headers=_h(), json={})
+    assert r2.status_code == 400

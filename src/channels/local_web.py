@@ -227,45 +227,51 @@ class LocalWebChannel:
         # The token check precedes the module 404 (established pattern) so an
         # unauthenticated probe gets 401 and can't enumerate modules/adapters.
 
-        def _broker_guard(request: Request) -> JSONResponse | None:
+        def _broker_guard(request: Request):
+            """Token + module gate, then build the adapters. Returns
+            ``(adapters, None)`` on success or ``(None, JSONResponse)`` to
+            short-circuit. A misconfigured ``BROKERAGE_ADAPTERS`` (registry
+            ``ValueError``) degrades to a 400 rather than a 500 — mirroring the
+            portfolio tool's never-raise contract."""
             if not self._token_ok(self._rest_token(request)):
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
+                return None, JSONResponse(
+                    {"error": "unauthorized"}, status_code=401)
             if not self._module_enabled("portfolio"):
-                return JSONResponse({"error": "not found"}, status_code=404)
-            return None
+                return None, JSONResponse(
+                    {"error": "not found"}, status_code=404)
+            try:
+                return self._broker_adapters(), None
+            except ValueError as e:
+                return None, JSONResponse({"error": str(e)}, status_code=400)
 
         @app.get("/api/portfolio/broker/status")
         async def api_broker_status(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
-            return JSONResponse(
-                readers.broker_status(self.config, self._broker_adapters()))
+            return JSONResponse(readers.broker_status(self.config, adapters))
 
         @app.get("/api/portfolio/broker/accounts")
         async def api_broker_accounts(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
-            return JSONResponse(
-                readers.broker_accounts(self.config, self._broker_adapters()))
+            return JSONResponse(readers.broker_accounts(self.config, adapters))
 
         @app.get("/api/portfolio/broker/diff")
         async def api_broker_diff(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
-            return JSONResponse(
-                readers.broker_diff(self.config, self._broker_adapters()))
+            return JSONResponse(readers.broker_diff(self.config, adapters))
 
         @app.post("/api/portfolio/broker/auth/start")
         async def api_broker_auth_start(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
             body = await _json_body(request)
-            adapter = broker_service.find(
-                self._broker_adapters(), body.get("adapter"))
+            adapter = broker_service.find(adapters, body.get("adapter"))
             if adapter is None:
                 return JSONResponse(
                     {"error": "no matching brokerage adapter configured"},
@@ -277,7 +283,7 @@ class LocalWebChannel:
 
         @app.post("/api/portfolio/broker/auth/verify")
         async def api_broker_auth_verify(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
             body = await _json_body(request)
@@ -285,8 +291,7 @@ class LocalWebChannel:
             if not verifier:
                 return JSONResponse(
                     {"error": "verifier code is required"}, status_code=400)
-            adapter = broker_service.find(
-                self._broker_adapters(), body.get("adapter"))
+            adapter = broker_service.find(adapters, body.get("adapter"))
             if adapter is None:
                 return JSONResponse(
                     {"error": "no matching brokerage adapter configured"},
@@ -298,11 +303,11 @@ class LocalWebChannel:
 
         @app.post("/api/portfolio/broker/sync")
         async def api_broker_sync(request: Request) -> JSONResponse:
-            blocked = _broker_guard(request)
+            adapters, blocked = _broker_guard(request)
             if blocked is not None:
                 return blocked
             return JSONResponse(broker_service.sync(
-                str(self.config.portfolio_db), self._broker_adapters()))
+                str(self.config.portfolio_db), adapters))
 
         @app.get("/api/crm")
         async def api_crm(request: Request) -> JSONResponse:
