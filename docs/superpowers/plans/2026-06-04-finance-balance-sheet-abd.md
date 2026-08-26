@@ -217,9 +217,9 @@ def test_add_asset_warns_on_missing_basis_and_date(tmp_path):
 
 def test_add_asset_warns_on_near_duplicate_label(tmp_path):
     path = _fresh(tmp_path)
-    engine.add_asset(path, {"class": "collectible", "label": "Blue solidbody",
+    engine.add_asset(path, {"class": "collectible", "label": "blue solidbody",
                             "value": 15839, "cost_basis": 12000, "acquired": "2022-01-01"})
-    res = engine.add_asset(path, {"class": "collectible", "label": "Blue solidbody v2",
+    res = engine.add_asset(path, {"class": "collectible", "label": "blue solidbody v2",
                                   "value": 16744, "cost_basis": 12500, "acquired": "2022-06-01"})
     assert any("similar" in w.lower() for w in res["warnings"])
 ```
@@ -610,11 +610,11 @@ git commit -m "feat(portfolio): liabilities, networth, finance-bucket rollup"
 # add to tests/test_portfolio_engine.py
 def test_re_equity(tmp_path):
     path = _fresh(tmp_path)
-    engine.add_asset(path, {"id": "paladin", "class": "real_estate",
+    engine.add_asset(path, {"id": "rental", "class": "real_estate",
                             "label": "Rental Property", "value": 1558400})
     engine.add_liability(path, {"class": "mortgage", "label": "Rental Property mtg",
-                                "balance": 395309, "linked_asset": "paladin"})
-    assert engine.re_equity(path, "paladin")["equity"] == 1163091
+                                "balance": 395309, "linked_asset": "rental"})
+    assert engine.re_equity(path, "rental")["equity"] == 1163091
 
 
 def test_pnl_collectibles_holding_period(tmp_path):
@@ -1456,7 +1456,7 @@ DB = "context/memory/portfolio.db"
 
 # Hand-curated from the current portfolios.md (unambiguous rows only).
 ASSETS = [
-    {"id": "paladin", "class": "real_estate", "label": "Rental Property",
+    {"id": "rental", "class": "real_estate", "label": "Rental Property",
      "value": 1558400, "cost_basis": 520000, "acquired": "2012"},
     {"id": "carol-ave", "class": "real_estate", "label": "Primary Residence (primary)",
      "value": 3396700, "cost_basis": 2015000, "acquired": "2019"},
@@ -1465,16 +1465,16 @@ ASSETS = [
     # Collectibles — values known, cost basis/dates MISSING (resolve with owner).
     {"class": "collectible", "label": "sunburst archtop guitar", "value": 28555},
     {"class": "collectible", "label": "parlor acoustic guitar", "value": 4735},
-    {"class": "collectible", "label": "Blue solidbody (1)", "value": 15839},
-    {"class": "collectible", "label": "Blue solidbody (2)", "value": 16744},
-    {"class": "collectible", "label": "Red solidbody", "value": 29506},
+    {"class": "collectible", "label": "blue solidbody (1)", "value": 15839},
+    {"class": "collectible", "label": "blue solidbody (2)", "value": 16744},
+    {"class": "collectible", "label": "red solidbody guitar", "value": 29506},
     {"class": "collectible", "label": "black hollowbody guitar", "value": 12569},
 ]
 LIABILITIES = [
     {"id": "carol-mtg", "class": "mortgage", "label": "Primary Residence mortgage",
      "balance": 1214570, "apr": 2.625, "linked_asset": "carol-ave"},
-    {"id": "paladin-mtg", "class": "mortgage", "label": "Rental mortgage",
-     "balance": 395309, "apr": 3.0, "linked_asset": "paladin"},
+    {"id": "rental-mtg", "class": "mortgage", "label": "Rental mortgage",
+     "balance": 395309, "apr": 3.0, "linked_asset": "rental"},
     {"id": "loc", "class": "loc", "label": "Line of credit", "balance": 116489, "apr": 7.43},
 ]
 

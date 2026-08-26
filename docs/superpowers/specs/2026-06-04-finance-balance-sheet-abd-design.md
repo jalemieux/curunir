@@ -96,7 +96,7 @@ CREATE VIEW v_collectibles_pnl AS
   and the 28% collectibles rate computable — the exact fields that were
   missing.
 - **`UNIQUE(class, label)`** kills exact-duplicate drift; near-duplicates
-  (a second "Batman" variant) are caught by an engine-side fuzzy warning on
+  (a second "blue solidbody" variant) are caught by an engine-side fuzzy warning on
   `add`.
 - A **ledger** (lots / transactions tables for realized-gain tracking) is a
   natural future extension; out of scope for v1 (YAGNI).

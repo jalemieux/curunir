@@ -5,7 +5,7 @@
 -- Numbers are invented so this can live in git without exposing real holdings,
 -- but the SHAPE mirrors the real portfolio: multiple brokerage + IRA + 401k + PE
 -- accounts, two properties with mortgages, a watch collection with per-piece
--- basis + dates, physical gold, cash, and a line of credit.
+-- basis + dates, physical bullion, cash, and a line of credit.
 --
 -- This is the single source of truth shared by two consumers (per the A/B/D
 -- coordination note): the agent's portfolio ENGINE (tables + views) and the eval
@@ -35,35 +35,35 @@ CREATE TABLE liabilities (
 );
 
 INSERT INTO assets (class, label, account, qty, cost_basis, acquired, value) VALUES
-  ('equity',      'VTI',                          'Brokerage-A',   800,  180000, '2021-03-15', 312000),
-  ('equity',      'NVDA',                         'Brokerage-A',   300,   36000, '2023-06-01',  54000),
-  ('cash',        'Cash',                         'Brokerage-A',  NULL,    NULL, NULL,          41000),
-  ('equity',      'GLD',                          'Brokerage-B',   400,  120000, '2022-01-10', 168000),
-  ('equity',      'AMZN',                         'Brokerage-B',   150,   24000, '2024-02-20',  31500),
-  ('cash',        'Cash',                         'Brokerage-B',  NULL,    NULL, NULL,            600),
-  ('equity',      'VTI',                          'IRA',       500,  150000, '2020-05-05', 195000),
-  ('equity',      'LLY',                          'IRA',        60,   66000, '2025-11-01',  72000),
-  ('cash',        'Cash',                         'IRA',      NULL,    NULL, NULL,            500),
-  ('equity',      'Vanguard 500 Index Trust',     'Employer-401k', NULL,  140000, '2018-01-01', 210000),
-  ('equity',      'Target Retirement 2045 Trust', 'Employer-401k', NULL,   50000, '2018-01-01',  62000),
-  ('equity',      'Blackstone Private Credit (BCRED)', 'Alt-Fund', NULL, 12000, '2024-09-01', 12000),
-  ('physical',    'Physical gold bullion',        'Home safe',        9,   31500, '2023-08-15',  40500),
-  ('collectible', 'sunburst archtop guitar',                'Watch collection', 1,   22000, '2021-05-01',  28500),
-  ('collectible', 'parlor acoustic guitar',   'Watch collection', 1,    4200, '2022-03-01',   4700),
-  ('collectible', 'blue solidbody guitar',   'Watch collection', 1,   11800, '2022-09-01',  15800),
-  ('collectible', 'red solidbody guitar',    'Watch collection', 1,   21000, '2020-11-01',  29500),
-  ('collectible', 'black hollowbody guitar',        'Watch collection', 1,    NULL, NULL,          12569),
-  ('real_estate', 'Primary Residence (primary residence)', 'Real estate', NULL, 1900000, '2019-07-01', 3000000),
-  ('real_estate', 'Rental Property (rental)',          'Real estate',   NULL,    NULL, NULL,        1400000);
+  ('equity',      'VOO',                          'Brokerage-A',    600,  132000, '2021-03-15', 231000),
+  ('equity',      'MSFT',                         'Brokerage-A',    200,   24000, '2023-06-01',  36000),
+  ('cash',        'Cash',                         'Brokerage-A',   NULL,    NULL, NULL,          28000),
+  ('equity',      'SLV',                          'Brokerage-B',    250,   75000, '2022-01-10', 105000),
+  ('equity',      'AAPL',                         'Brokerage-B',    100,   16000, '2024-02-20',  21000),
+  ('cash',        'Cash',                         'Brokerage-B',   NULL,    NULL, NULL,            400),
+  ('equity',      'VOO',                          'IRA',            300,   90000, '2020-05-05', 117000),
+  ('equity',      'JNJ',                          'IRA',             40,   44000, '2025-11-01',  48000),
+  ('cash',        'Cash',                         'IRA',           NULL,    NULL, NULL,            300),
+  ('equity',      'Broad Market Index Fund',      'Employer-401k', NULL,   84000, '2018-01-01', 126000),
+  ('equity',      'Target Date 2045 Fund',        'Employer-401k', NULL,   30000, '2018-01-01',  37000),
+  ('equity',      'Private Credit Fund',          'Alt-Fund',      NULL,    8000, '2024-09-01',   8000),
+  ('physical',    'Physical silver bullion',      'Home safe',      300,   7800, '2023-08-15',   10500),
+  ('collectible', 'Vintage guitar - sunburst archtop',  'Collection', 1,   9000, '2021-05-01',  11500),
+  ('collectible', 'Vintage guitar - parlor acoustic',   'Collection', 1,   1800, '2022-03-01',   2100),
+  ('collectible', 'Vintage guitar - blue solidbody',    'Collection', 1,   4800, '2022-09-01',   6400),
+  ('collectible', 'Vintage guitar - red solidbody',     'Collection', 1,   8500, '2020-11-01',  12000),
+  ('collectible', 'Vintage guitar - black hollowbody',  'Collection', 1,   NULL, NULL,           5100),
+  ('real_estate', 'Primary Residence (primary residence)', 'Real estate', NULL, 780000, '2019-07-01', 1250000),
+  ('real_estate', 'Rental Property (rental)',          'Real estate',   NULL,    NULL, NULL,         620000);
 
 INSERT INTO liabilities (label, balance, apr, type, property) VALUES
-  ('Primary Residence mortgage', 1100000, 2.625, 'mortgage',  'Primary Residence (primary residence)'),
-  ('Rental Property mortgage',    360000, 3.0,   'mortgage',  'Rental Property (rental)'),
-  ('Line of credit',    95000, 7.5,   'unsecured', NULL);
+  ('Primary Residence mortgage', 465000, 2.625, 'mortgage',  'Primary Residence (primary residence)'),
+  ('Rental Property mortgage',   158000, 3.0,   'mortgage',  'Rental Property (rental)'),
+  ('Line of credit',              38000, 7.5,   'unsecured', NULL);
 
 -- ── Views: the canonical decompositions (the shared agent⋈grader contract) ──
 -- Convention: the equities bucket folds in physical commodities for a coarse
--- net-worth split (T2 separately checks the agent distinguishes the GLD ETF from
+-- net-worth split (T2 separately checks the agent distinguishes the SLV ETF from
 -- physical bullion in prose). Mortgages are netted inside real-estate equity, so
 -- the debt bucket is NON-mortgage liabilities only. rollup.total == networth.net_worth.
 

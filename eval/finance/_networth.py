@@ -19,7 +19,7 @@ Subcommands (each prints one JSON object):
         -> {"equities", "real_estate_equity", "collectibles",
             "cash", "debt", "total"}                          # SELECT * FROM v_rollup_by_class
 
-    python eval/finance/_networth.py re-equity paladin
+    python eval/finance/_networth.py re-equity rental
         -> {"equity"}                       # property value − its mortgage balance
 
     python eval/finance/_networth.py collectibles

@@ -87,7 +87,7 @@ unrecorded field), so it is grouped with the fixture-seeded run.
 | `T1` `networth-reconciles` | "What's my total net worth right now?" | `composite`: `numeric_tolerance` on the net-worth figure (anchor `_networth.py total`) + new `reconciles` grader (stated total == Σ stated assets − stated liabilities, within $1) | the $5.13M≠$5.245M failure |
 | `T2` `no-double-count-gold` | "What's my total gold exposure, and what's my net worth?" | `composite`: `numeric_tolerance` on net worth (a double-count yields a specifically-wrong total the anchor rejects) + `llm_judge` it distinguishes GLD ETF from physical bullion | gold double-count |
 | `T3` `crossclass-rollup` | "Break my net worth into equities, real-estate equity, collectibles, cash, and debt, and give the total." | `composite` of per-bucket `numeric_tolerance`, each anchored to `_networth.py rollup` | the cross-class seam where math broke |
-| `T4` `real-estate-equity` | "What's my equity in the Rental Property, and does the mortgage math look right?" | `composite`: `numeric_tolerance` = estimated value − mortgage balance (anchor `_networth.py re-equity paladin`) + `llm_judge` it flags the amortization discrepancy instead of inventing a clean number | mortgage-balance confusion |
+| `T4` `real-estate-equity` | "What's my equity in the Rental Property, and does the mortgage math look right?" | `composite`: `numeric_tolerance` = estimated value − mortgage balance (anchor `_networth.py re-equity rental`) + `llm_judge` it flags the amortization discrepancy instead of inventing a clean number | mortgage-balance confusion |
 | `T5` `collectibles-pnl-tax` | "What's my watch collection worth, what's my unrealized gain, and what tax rate applies if I sell?" | `composite`: `numeric_tolerance` on value + gain (anchor `_networth.py collectibles`) + `llm_judge` on the 28% collectibles rate, framed as a consideration not a directive | missing cost basis → can't compute gain/tax |
 
 ### Family W — Write & structure (seeded fixture + multi-turn readback)
@@ -98,7 +98,7 @@ on the final reply.
 | id | prompts | grader | pins |
 |---|---|---|---|
 | `W1` `add-asset-records-basis` | 1) "Add a watch: black hollowbody guitar, paid $9,200 on 2023-04-10, now worth $12,569." 2) "What's the cost basis and holding period on that black hollowbody?" | `composite`: `numeric_tolerance` on $9,200 + `llm_judge` holding period correctly long-term (>1yr as of fixture date) | non-equity asset added without basis/date |
-| `W2` `add-no-duplicate` | 1) "Add my blue solidbody, worth $15,839." (fixture already has a Batman) 2) "How many watches do I have and what's the total value?" | `llm_judge`: PASS if the count/total stays correct OR it flags the likely duplicate and asks; FAIL if it silently creates a second Batman | the 2→6 watch, $15,486-vs-$15,839 drift |
+| `W2` `add-no-duplicate` | 1) "Add my solidbody blue solidbody, worth $15,839." (fixture already has a blue solidbody) 2) "How many watches do I have and what's the total value?" | `llm_judge`: PASS if the count/total stays correct OR it flags the likely duplicate and asks; FAIL if it silently creates a second blue solidbody | the 2→6 watch, $15,486-vs-$15,839 drift |
 | `W3` `file-in-right-class` | 1) "I just bought 300 oz of physical gold bullion, about $40k." 2) "Is that tracked with my equities or separately?" | `llm_judge`: physical gold tracked as a distinct physical holding, not folded into an equity account | where-to-file confusion (gold root cause) |
 
 ### Source coverage (eval-design four-source check)

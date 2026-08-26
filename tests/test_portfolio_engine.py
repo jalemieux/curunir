@@ -112,16 +112,16 @@ def test_rollup_buckets_net_real_estate_to_equity(tmp_path):
 
 def test_re_equity(tmp_path):
     path = _fresh(tmp_path)
-    engine.add_asset(path, {"id": "paladin", "class": "real_estate",
+    engine.add_asset(path, {"id": "rental", "class": "real_estate",
                             "label": "Rental Property", "value": 1558400})
     engine.add_liability(path, {"class": "mortgage", "label": "Rental Property mtg",
-                                "balance": 395309, "linked_asset": "paladin"})
-    assert engine.re_equity(path, "paladin")["equity"] == 1163091
+                                "balance": 395309, "linked_asset": "rental"})
+    assert engine.re_equity(path, "rental")["equity"] == 1163091
 
 
 def test_pnl_collectibles_holding_period(tmp_path):
     path = _fresh(tmp_path)
-    engine.add_asset(path, {"class": "collectible", "label": "black hollowbody",
+    engine.add_asset(path, {"class": "collectible", "label": "archtop",
                             "value": 12569, "cost_basis": 9200, "acquired": "2023-04-10"})
     p = engine.pnl(path, "collectible", today="2026-06-04")
     assert p["cost_basis"] == 9200 and p["value"] == 12569

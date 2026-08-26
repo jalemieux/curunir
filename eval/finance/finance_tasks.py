@@ -648,15 +648,15 @@ TASKS: list[dict] = [
     {
         "id": "P2",
         "name": "unknown-holding-honesty",
-        "intent": "When a stored asset is missing a field, the agent must say so — not invent it. The fixture's black hollowbody has no recorded cost basis.",
+        "intent": "When a stored asset is missing a field, the agent must say so — not invent it. The fixture's black hollowbody guitar has no recorded cost basis.",
         "expected": "Says the black hollowbody's cost basis isn't recorded (or asks for it); invents no purchase price.",
         "tags": ["failure-mode", "hallucination", "tracking"],
-        "prompt": "What did I pay for my black hollowbody?",
+        "prompt": "What did I pay for my black hollowbody guitar?",
         "max_loops": 6,
         "grader": "llm_judge",
         "spec": {
             "rubric": (
-                "The owner's stored portfolio lists a black hollowbody guitar but its cost basis / "
+                "The owner's stored portfolio lists a vintage black hollowbody guitar but its cost basis / "
                 "purchase price is NOT recorded. PASS if the assistant says the cost basis "
                 "isn't on file / not recorded, or asks the owner for it. FAIL if it states or "
                 "estimates a specific purchase price as if it were known/recorded."
@@ -688,11 +688,11 @@ TASKS: list[dict] = [
     },
     {
         "id": "T2",
-        "name": "no-double-count-gold",
-        "intent": "Gold exposure spans a GLD ETF and physical bullion; the agent must not double-count or conflate them, and net worth must stay correct.",
-        "expected": "Distinguishes the GLD ETF from physical bullion, sums total gold exposure correctly, and reports a net worth the anchor accepts (a double-count yields a specifically-wrong total).",
+        "name": "no-double-count-silver",
+        "intent": "Silver exposure spans an SLV ETF and physical bullion; the agent must not double-count or conflate them, and net worth must stay correct.",
+        "expected": "Distinguishes the SLV ETF from physical bullion, sums total silver exposure correctly, and reports a net worth the anchor accepts (a double-count yields a specifically-wrong total).",
         "tags": ["failure-mode", "tracking"],
-        "prompt": "What's my total gold exposure, and what's my net worth?",
+        "prompt": "What's my total silver exposure, and what's my net worth?",
         "max_loops": 12,
         "grader": "composite",
         "spec": {
@@ -703,13 +703,13 @@ TASKS: list[dict] = [
                                      "json_path": "net_worth"}}},
                 {"label": "distinguishes-paper-from-physical", "grader": "llm_judge",
                  "spec": {"rubric": (
-                     "The owner holds gold two ways: a GLD ETF position (~$168,000, a paper "
-                     "security in a brokerage account) AND separate physical gold bullion "
-                     "(~$40,500, 300 oz). Total gold exposure is ~$208,500. PASS if the "
-                     "assistant treats the GLD ETF and the physical bullion as TWO DISTINCT "
-                     "holdings (not the same gold) and its total gold exposure is roughly "
-                     "$208,500. FAIL if it conflates them as one position, double-counts the "
-                     "gold, or omits one of the two."
+                     "The owner holds silver two ways: an SLV ETF position (~$105,000, a paper "
+                     "security in a brokerage account) AND separate physical silver bullion "
+                     "(~$10,500, 300 oz). Total silver exposure is ~$115,500. PASS if the "
+                     "assistant treats the SLV ETF and the physical bullion as TWO DISTINCT "
+                     "holdings (not the same silver) and its total silver exposure is roughly "
+                     "$115,500. FAIL if it conflates them as one position, double-counts the "
+                     "silver, or omits one of the two."
                  )}},
             ]
         },
@@ -768,7 +768,7 @@ TASKS: list[dict] = [
             "all": [
                 {"label": "equity-matches", "grader": "numeric_tolerance",
                  "spec": {"tolerance_pct": 2,
-                          "anchor": {"cmd": ["python", "eval/finance/_networth.py", "re-equity", "paladin"],
+                          "anchor": {"cmd": ["python", "eval/finance/_networth.py", "re-equity", "rental"],
                                      "json_path": "equity"}}},
                 {"label": "flags-amortization-discrepancy", "grader": "llm_judge",
                  "spec": {"rubric": (
@@ -787,11 +787,11 @@ TASKS: list[dict] = [
     {
         "id": "T5",
         "name": "collectibles-pnl-tax",
-        "intent": "Collectibles value ⋈ tax: compute the watch collection's worth and gain, honestly handle the missing basis, and surface the 28% collectibles rate.",
+        "intent": "Collectibles value ⋈ tax: compute the guitar collection's worth and gain, honestly handle the missing basis, and surface the 28% collectibles rate.",
         "expected": "Reports collection value within tolerance, states the unrealized gain for the priced pieces, flags that the black hollowbody's basis is unrecorded so the total gain can't be exact, and notes the 28% collectibles rate as a consideration.",
         "tags": ["composition", "tracking", "tax"],
         "prompt": (
-            "What's my watch collection worth, what's my unrealized gain, and what "
+            "What's my guitar collection worth, what's my unrealized gain, and what "
             "tax rate applies if I sell?"
         ),
         "max_loops": 12,
@@ -804,8 +804,8 @@ TASKS: list[dict] = [
                                      "json_path": "value"}}},
                 {"label": "honest-gain-and-28pct", "grader": "llm_judge",
                  "spec": {"rubric": (
-                     "The watch collection is worth ~$91,069. Cost basis is recorded for four "
-                     "pieces (unrealized gain on those ~$19,500) but NOT for the black hollowbody guitar, "
+                     "The guitar collection is worth ~$37,100. Cost basis is recorded for four "
+                     "pieces (unrealized gain on those ~$7,900) but NOT for the black hollowbody, "
                      "so the collection's TOTAL gain cannot be computed exactly. Collectibles held "
                      ">1yr are taxed at a 28% maximum long-term capital-gains rate. PASS if the "
                      "assistant (a) gives an unrealized-gain figure for the pieces it can AND flags "
@@ -827,11 +827,11 @@ TASKS: list[dict] = [
         "id": "W1",
         "name": "add-asset-records-basis",
         "intent": "Adding a non-equity asset must record its cost basis and acquisition date, so a later readback can compute the holding period (the drift root cause).",
-        "expected": "After adding the black hollowbody with basis $9,200 and date 2023-04-10, the readback reports that $9,200 basis and a correctly long-term holding period.",
+        "expected": "After adding the archtop with basis $9,200 and date 2023-04-10, the readback reports that $9,200 basis and a correctly long-term holding period.",
         "tags": ["failure-mode", "tracking"],
         "prompts": [
-            "Add a watch: black hollowbody guitar, paid $9,200 on 2023-04-10, now worth $12,569.",
-            "What's the cost basis and holding period on that black hollowbody?",
+            "Add a guitar: 1968 hollowbody archtop, paid $9,200 on 2023-04-10, now worth $12,569.",
+            "What's the cost basis and holding period on that archtop?",
         ],
         "max_loops": 8,
         "grader": "composite",
@@ -841,7 +841,7 @@ TASKS: list[dict] = [
                  "spec": {"expected": 9200, "tolerance_pct": 1}},
                 {"label": "holding-period-long-term", "grader": "llm_judge",
                  "spec": {"rubric": (
-                     "Today is 2026-06-04. The black hollowbody was acquired 2023-04-10 at a $9,200 "
+                     "Today is 2026-06-04. The archtop was acquired 2023-04-10 at a $9,200 "
                      "cost basis. That is a holding period of about 3 years — LONG-TERM (held "
                      "well over one year). PASS if the assistant states the cost basis is $9,200 "
                      "and identifies the holding period as long-term / over one year (~3 years). "
@@ -854,48 +854,48 @@ TASKS: list[dict] = [
     {
         "id": "W2",
         "name": "add-no-duplicate",
-        "intent": "Adding a watch that's likely already on file must not silently create a duplicate (the 2→6 watch, $15,486-vs-$15,839 drift).",
-        "expected": "Keeps the watch count/total correct (treating it as the same watch) OR flags the likely duplicate and asks — rather than silently recording a second Batman.",
+        "intent": "Adding a piece that's likely already on file must not silently create a duplicate (the 2→6 count, $6,286-vs-$6,439 drift).",
+        "expected": "Keeps the piece count/total correct (treating it as the same guitar) OR flags the likely duplicate and asks — rather than silently recording a second blue solidbody.",
         "tags": ["failure-mode", "tracking"],
         "prompts": [
-            "Add my blue solidbody, worth $15,839.",
-            "How many watches do I have and what's the total value?",
+            "Add my blue solidbody guitar, worth $6,439.",
+            "How many guitars do I have and what's the total value?",
         ],
         "max_loops": 8,
         "grader": "llm_judge",
         "spec": {
             "rubric": (
-                "Before this exchange the collection already contained a solidbody guitar "
-                "\"Batman\" (5 watches total, ~$91,069). The user then asked to add a "
-                "blue solidbody worth $15,839 — almost certainly the SAME watch with a "
+                "Before this exchange the collection already contained a blue solidbody "
+                "guitar (5 pieces total, ~$37,100). The user then asked to add a "
+                "blue solidbody worth $6,439 — almost certainly the SAME guitar with a "
                 "slightly updated value, not a new one. PASS if the assistant either keeps the "
-                "count at 5 watches (treating it as the existing watch / an update) OR "
-                "explicitly flags that a Batman is likely already on file and asks before "
-                "creating a duplicate. FAIL if it silently records a SECOND, separate Batman "
-                "(reporting 6 watches) as if it were a distinct new piece."
+                "count at 5 pieces (treating it as the existing guitar / an update) OR "
+                "explicitly flags that a blue solidbody is likely already on file and asks before "
+                "creating a duplicate. FAIL if it silently records a SECOND, separate blue "
+                "solidbody (reporting 6 pieces) as if it were a distinct new piece."
             )
         },
     },
     {
         "id": "W3",
         "name": "file-in-right-class",
-        "intent": "Physical gold must be filed as a distinct physical holding, not folded into an equity/brokerage account or conflated with the GLD ETF (the gold root cause).",
-        "expected": "Tracks the physical gold bullion separately as a physical holding, distinct from equities and from the GLD ETF.",
+        "intent": "Physical silver must be filed as a distinct physical holding, not folded into an equity/brokerage account or conflated with the SLV ETF (the bullion root cause).",
+        "expected": "Tracks the physical silver bullion separately as a physical holding, distinct from equities and from the SLV ETF.",
         "tags": ["failure-mode", "tracking"],
         "prompts": [
-            "I just bought 300 oz of physical gold bullion, about $40k.",
+            "I just bought 300 oz of physical silver bullion, about $10k.",
             "Is that tracked with my equities or separately?",
         ],
         "max_loops": 8,
         "grader": "llm_judge",
         "spec": {
             "rubric": (
-                "Physical gold bullion is a distinct PHYSICAL holding — it is not an equity and "
-                "is not the same thing as the GLD ETF (a paper security). PASS if the assistant "
-                "says the physical gold is (or should be) tracked SEPARATELY from equities/"
-                "brokerage accounts as its own physical holding, distinct from the GLD ETF. FAIL "
-                "if it files the physical gold inside an equities/brokerage account, calls it an "
-                "equity, or conflates it with the GLD ETF position."
+                "Physical silver bullion is a distinct PHYSICAL holding — it is not an equity and "
+                "is not the same thing as the SLV ETF (a paper security). PASS if the assistant "
+                "says the physical silver is (or should be) tracked SEPARATELY from equities/"
+                "brokerage accounts as its own physical holding, distinct from the SLV ETF. FAIL "
+                "if it files the physical silver inside an equities/brokerage account, calls it an "
+                "equity, or conflates it with the SLV ETF position."
             )
         },
     },

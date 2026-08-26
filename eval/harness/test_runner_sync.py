@@ -127,22 +127,22 @@ async def test_multi_turn_readback() -> bool:
         reset_ack(),
         # turn 1: the write
         tool_frame("Edit context/memory/portfolios.md"),
-        final("Added the black hollowbody guitar ($9,200 basis, 2023-04-10)."),
+        final("Added the vintage archtop ($9,200 basis, 2023-04-10)."),
         # turn 2: the readback — this is what the grader scores
         tool_frame("Read context/memory/portfolios.md"),
         delta("Cost basis "), delta("is $9,200; "),
         final("Cost basis is $9,200; acquired 2023-04-10, so it's long-term (~3 years)."),
     )
     res = await R.run_one(ws, {"prompts": [
-        "Add a watch: black hollowbody guitar, paid $9,200 on 2023-04-10, now worth $12,569.",
-        "What's the cost basis and holding period on that black hollowbody?",
+        "Add a guitar: 1968 hollowbody archtop, paid $9,200 on 2023-04-10, now worth $12,569.",
+        "What's the cost basis and holding period on that archtop?",
     ], "max_loops": 8})
 
     ok = True
     ok &= check("graded final_text is the READBACK reply, not the write",
                 "long-term" in res.final_text and "$9,200" in res.final_text, res.final_text)
     ok &= check("the write turn's reply did NOT leak into final_text",
-                "Added the vintage guitar" not in res.final_text, res.final_text)
+                "Added the vintage" not in res.final_text, res.final_text)
     ok &= check("actions accumulate across BOTH turns",
                 any("edit" in a for a in res.actions) and any("read" in a for a in res.actions),
                 str(res.actions))
