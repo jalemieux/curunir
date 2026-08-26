@@ -35,7 +35,7 @@
 
 - [ ] **Step 1: Look at the existing test file to find a good place to add a test**
 
-Run: `grep -n "OutgoingMessage" /Users/jac/Dev/src/curunir/tests/test_channels.py | head -10`
+Run: `grep -n "OutgoingMessage" <repo-root>/tests/test_channels.py | head -10`
 
 If `tests/test_channels.py` doesn't already have an `OutgoingMessage` defaults test, append the test below. If it does, add the new assertion alongside it.
 

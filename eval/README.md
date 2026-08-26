@@ -65,10 +65,16 @@ source .venv/bin/activate
 #    .env needs ANTHROPIC_API_KEY (the Claude judge) plus whatever the persona's
 #    skills require (see the persona's README).
 
-# 1. Terminal A — start the system under test
+# 1. (one-time) stage the eval context baseline — see context.eval/README.md.
+#    A missing context/identity.md means "not onboarded", so without this the
+#    first eval turn is rewritten into an onboarding instruction. Use a
+#    throwaway ./context; cp -R writes into it.
+cp -R context.eval/. context/
+
+# 2. Terminal A — start the system under test
 CURUNIR_PERSONA=<persona> python run.py
 
-# 2. Terminal B — run the graded suite against it
+# 3. Terminal B — run the graded suite against it
 python eval/<persona>/run_<persona>_evals.py
 ```
 

@@ -3300,7 +3300,7 @@ cd portal && DATABASE_URL=postgresql://postgres:postgres@localhost:5432/portal \
 
 Copy the printed container token. In a third shell, run curunir with the token:
 ```bash
-cd /Users/jac/Dev/src/curunir
+cd <repo-root>
 CURUNIR_PORTAL_URL=ws://localhost:8000/ws/agent \
 CURUNIR_PORTAL_TOKEN=<token> \
 python run.py

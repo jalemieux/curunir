@@ -14,8 +14,9 @@ venv/
 !**/.env.*.example
 client_secret*.json
 
-# Logs
+# Logs (rotated copies like curunir.log.0618 dodge *.log)
 *.log
+curunir.log*
 
 # OS
 .DS_Store
@@ -39,6 +40,11 @@ secrets/
 # Context directory (instance-specific, synced via rsync)
 context/
 context.backup/
+# Local context snapshots and per-run backups (context.060626/, context.jac/, ...).
+# context.default/ and context.eval/ are committed templates, so re-include them.
+context.*/
+!context.default/
+!context.eval/
 workspace/
 landing_pages
 
