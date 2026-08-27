@@ -59,7 +59,7 @@ Two env files are in play, both with a tracked `.example` to copy from:
 | File | Copy from | Role |
 |------|-----------|------|
 | `.env` | `.env.example` | **required** — API keys, `MODEL`, `JUDGE_MODEL`. Read by *both* processes below |
-| `.env.eval` | `.env.eval.example` | **optional** — the eval profile for the instance under test (channels + background loops off, local-model knobs). Sourced into the SUT's shell as an overlay; see [below](#quieting-the-instance-under-test-enveval-optional) |
+| `.env.eval` | `.env.eval.example` | **optional** — the eval profile for the instance under test (channels + background loops off, local-model knobs). Sourced into the SUT's shell, where it **overrides** `.env` for that boot; see [below](#overriding-env-for-the-sut-enveval-optional) |
 
 Two processes run during an eval, and **both** read the repo-root `.env`:
 
@@ -123,7 +123,7 @@ re-runs the same CLI locally to recompute the expected answer):
 *attempted* — so a keyless run still gives a valid routing signal; only the
 grounded-answer and judged tasks degrade. Each suite's README lists its own keys.
 
-### Quieting the instance under test (`.env.eval`, optional)
+### Overriding `.env` for the SUT (`.env.eval`, optional)
 
 A normal boot runs the email / local-UI / portal channels and three background
 loops (`MEMORY_EXTRACTION_ENABLED`, `DREAMING_ENABLED`, `SCHEDULER_ENABLED` —
@@ -138,9 +138,30 @@ set -a; source .env.eval; set +a   # export, then boot from the same shell
 python run.py
 ```
 
-It is an **overlay, not a replacement**: the exported shell values win because
-python-dotenv's `load_dotenv()` defaults to `override=False`, so `.env` still
-supplies everything `.env.eval` leaves unset (API keys, `JUDGE_MODEL`, …).
+**`.env.eval` wins over `.env`.** Anything it sets overrides your normal
+value — `MODEL`, `MAX_HISTORY_CHARS`, `EMAIL_ENABLED`, whatever — for that boot
+only, and anything it *doesn't* set still comes from `.env` (API keys,
+`JUDGE_MODEL`, …). Nothing is edited and nothing is lost; `.env` stays your
+day-to-day config.
+
+The precedence comes from the `set -a; source` step, not from a loader change:
+sourcing exports the values into the shell, and `run.py`'s `load_dotenv()`
+defaults to `override=False`, so it will not clobber a var that is already set.
+Concretely, with `MODEL` in both files:
+
+```
+MODEL=from_eval        # .env.eval — used
+FRED_API_KEY=...       # .env only — still used
+```
+
+Two consequences worth knowing:
+
+- **Same shell, before `run.py`.** A new terminal has none of it — re-source
+  there. To undo, just open a fresh shell.
+- **Only what it sets.** A var commented out in `.env.eval` falls through to
+  `.env`; to *clear* one that `.env` pins, give it an empty value
+  (`OPENROUTER_PROVIDER=`), which counts as set and so still wins.
+
 Source it only in the SUT's shell — the runner loads `.env` in its own process,
 so the judge keeps your real model and keys no matter what the SUT is running.
 The same mechanism is what lets `eval/model_sweep.sh` pin `MODEL` per server
@@ -159,8 +180,9 @@ source .venv/bin/activate
 cp .env.example .env             # skip if you already have one — this overwrites it
 #    MODEL + its provider key for the SUT; ANTHROPIC_API_KEY for the judge; plus
 #    whatever the persona's skills require (see the table above / suite README).
-cp .env.eval.example .env.eval   # optional overlay: channels + background loops off
-#    edit if you're evaluating a local model (MODEL / API_BASE / context sizes).
+cp .env.eval.example .env.eval   # optional: eval-only overrides of the above
+#    channels + background loops off; edit MODEL / API_BASE / context sizes to
+#    point the SUT at a different (e.g. local) model without touching .env.
 
 # 1. (one-time) stage the eval context baseline — see context.eval/README.md.
 #    A missing context/identity.md means "not onboarded", so without this the
@@ -169,7 +191,7 @@ cp .env.eval.example .env.eval   # optional overlay: channels + background loops
 cp -R context.eval/. context/
 
 # 2. Terminal A — start the system under test
-set -a; source .env.eval; set +a   # if you staged the overlay above; skip otherwise
+set -a; source .env.eval; set +a   # if staged above — these override .env
 CURUNIR_PERSONA=<persona> python run.py
 
 # 3. Terminal B — run the graded suite against it
@@ -366,6 +388,6 @@ fields can reuse `eval/harness/graders.py` unchanged.
 | `received 1008 (policy violation) auth` | The WS pairing token wasn't sent. The runner reads `context/.ws-token` (or `$CURUNIR_WS_TOKEN`) — make sure the server wrote it and you're running from the repo root, or export `CURUNIR_WS_TOKEN`. |
 | `1001 (going away)` mid-run | The server stopped/restarted. Restart `run.py` and re-run. |
 | Judge tasks all `ERR … no JUDGE_MODEL/MODEL` | `ANTHROPIC_API_KEY` missing from `.env`, or set `JUDGE_MODEL` to a model whose key you have. |
-| Memory/context changed mid-run, or a turn the suite never sent | A background loop or another channel is live on the SUT. Boot it under `.env.eval` (see [Quieting the instance under test](#quieting-the-instance-under-test-enveval-optional)) so only the WS channel and no loops are running. |
+| Memory/context changed mid-run, or a turn the suite never sent | A background loop or another channel is live on the SUT. Boot it under `.env.eval` (see [Overriding `.env` for the SUT](#overriding-env-for-the-sut-enveval-optional)) so only the WS channel and no loops are running. |
 | A data task fails to fetch | The relevant skill's key is unset. Anchored graders also need the same CLIs to run locally. |
 | Connecting to wrong instance | Default is `localhost:8765`; pass `--host/--port` for a remote SUT. Make sure it was started with the right `CURUNIR_PERSONA`. |
