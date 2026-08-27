@@ -823,6 +823,18 @@ async def main():
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
 
+    # Background loops. All three default to on, so a normal boot is
+    # unchanged; an eval boot (`set -a; source .env.eval; set +a`) turns them
+    # off so the instance under test does nothing but answer the harness — no
+    # background LLM calls or context/memory/ writes racing the run.
+    extraction_enabled = os.environ.get("MEMORY_EXTRACTION_ENABLED", "true").lower() == "true"
+    dreaming_enabled = os.environ.get("DREAMING_ENABLED", "true").lower() == "true"
+    scheduler_enabled = os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true"
+    logger.info(
+        "Background loops: extraction=%s dreaming=%s scheduler=%s",
+        extraction_enabled, dreaming_enabled, scheduler_enabled,
+    )
+
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
     # Start all channels, the router, and the agent worker
@@ -831,9 +843,12 @@ async def main():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(agent_worker(agent, in_queue, out_queue))
-        tg.create_task(periodic_extraction(agent, extraction_interval))
-        tg.create_task(periodic_dreaming(agent, dreaming_interval))
-        tg.create_task(run_scheduler(agent))
+        if extraction_enabled:
+            tg.create_task(periodic_extraction(agent, extraction_interval))
+        if dreaming_enabled:
+            tg.create_task(periodic_dreaming(agent, dreaming_interval))
+        if scheduler_enabled:
+            tg.create_task(run_scheduler(agent))
 
 
 if __name__ == "__main__":
