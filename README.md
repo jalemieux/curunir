@@ -1,7 +1,5 @@
 # Curunir — *the man of skill*
 
-<img src="docs/curunir2.png" alt="Curunir" style="border-radius: 8px;" />
-
 A configurable agent framework for building specialized digital assistants. Define an identity, add skills, connect channels — get a capable assistant tailored to your domain.
 
 ## Philosophy
@@ -17,84 +15,122 @@ Curunir is built on lessons learned from building multiple agentic loop-based as
 ## Architecture
 
 ```
-  Channels              Core                    LLM
-  ────────          ──────────              ──────────
-  CLI ──────┐
-  Email ────┤
-  Portal ───┤       ┌──────────┐        ┌──────────────┐
-  Slack† ───┴──►  Queue  ──►  Agent Loop  ◄──►  LiteLLM  │
-                    └──────────┘        └──────────────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │     Tools     │
-                 │───────────────│
-                 │ glob    read  │
-                 │ grep    edit  │
-                 │ write   bash  │
-                 │ load_skill    │
-                 │ web_fetch     │
-                 │ delegate      │
-                 │ schedule      │
-                 │ attach*       │
-                 └───────────────┘
-                 * opt-in, loaded by skills
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │   Memory      │
-                 │  Extractor    │
-                 └───────────────┘
+   Channels                                     Core              LLM
+   ───────────────────                      ──────────────    ────────────
 
-  † planned
+   CLI / WebSocket    ┐     ┌──────────┐    ┌────────────┐    ┌──────────┐
+   Email (IMAP/SMTP)  ┼────►│ in_queue │───►│            │◄──►│ LiteLLM  │
+   Portal (hosted)    ┤     └──────────┘    │ Agent loop │    └──────────┘
+   Local web console  ┘                     │  max 200   │
+                                            │ iterations │    ┌────────────────┐
+   CLI / WebSocket   ◄┐    ┌───────────┐    │            │◄──►│   tool batch   │
+   Email (IMAP/SMTP) ◄┤    │ out_queue │    │            │    │ asyncio.gather │
+   Portal (hosted)   ◄┼────┤ + router  │◄───│            │    └────────────────┘
+   Local web console ◄┘    └───────────┘    └────────────┘
+
+     Tools   glob  grep  read  edit  write  bash  load_skill  web_fetch
+             delegate  schedule  attach
+     opt-in  portfolio  crm  to_audio      ← unlocked by a skill's `tools:`
 ```
 
-Messages arrive from any channel, enter a queue, and are processed by the agent loop. The agent calls an LLM (via LiteLLM) with conversation history and tool schemas, streaming text deltas back to the channel and iterating up to 75 tool-calling rounds per turn. Replies are routed back to the originating channel. A scheduler reads cron tasks from the SQLite store `context/schedules.db` (a legacy `context/schedules.json` is auto-migrated on first boot) and submits them as system-initiated turns. The memory extractor runs post-session (on `/clear` or `/new`, EOF, or a periodic timer) to extract durable facts into `context/memory/`. Per-call token usage and cost are persisted to a local SQLite ledger at `context/usage.db`.
+```
+   Background workers (run.py TaskGroup)      Persistent state (context/)
+   ─────────────────────────────────────      ───────────────────────────
+   channel listeners                          conversations/       transcripts
+   agent_worker                               memory/              markdown facts
+   route_outbound                             workspace/           deliverables + scratch
+   scheduler            cron → agent turn     schedules.db         cron tasks
+   periodic_extraction  transcripts → memory  memory/portfolio.db  balance sheet
+   periodic_dreaming    memory housekeeping   memory/crm.db        leads / pipeline
+                                              usage.db             token/cost ledger
+```
 
-Ctrl-C while the agent is working triggers a cooperative cancel: the in-flight LLM call and current tool run to completion, any remaining tools in the batch are stubbed with `(interrupted)`, and the turn returns cleanly. Channels deliver the cancel out-of-band (the agent queue is blocked inside `handle()`).
+Messages arrive from any channel, enter the in-queue, and are processed by
+the agent loop. The agent calls an LLM (via LiteLLM) with conversation
+history and tool schemas, streams text deltas back to the channel, and
+iterates up to 200 tool-calling rounds per turn. Each round dispatches its
+whole tool batch concurrently through `asyncio.gather()`. Replies leave via
+the out-queue and are routed back to the originating channel.
 
-When the main model is text-only, image attachments are routed through `VISION_MODEL` — a vision-capable sidecar that describes each image as text — before reaching the main model. Boot fails fast if `MODEL` lacks vision support and no `VISION_MODEL` is configured.
+Three background loops run alongside the channels. The **scheduler**
+evaluates cron tasks in the SQLite store `context/schedules.db` every ~60s
+and submits due ones as system-initiated turns. **Extraction** is
+disk-driven rather than session-driven: transcripts persist to
+`context/conversations/`, and a periodic pass summarizes every conversation
+that has settled (idle ~5 min) and grown since its last extraction, writing
+durable facts into `context/memory/` and an archive summary under
+`context/memory/archives/`. `/clear` forces the same extraction inline
+before deleting the transcript. A nightly **dreaming** pass runs the
+`dreaming` skill to keep the memory tree tidy. Per-call token usage and cost
+land in a local SQLite ledger at `context/usage.db`.
+
+Ctrl-C while the agent is working triggers a cooperative cancel: the
+in-flight LLM call and current tool run to completion, any remaining tools
+in the batch are stubbed with `(interrupted)`, and the turn returns cleanly.
+Channels deliver the cancel out-of-band (the agent queue is blocked inside
+`handle()`).
+
+When the main model is text-only, image attachments are routed through
+`VISION_MODEL` — a vision-capable sidecar that describes each image as text
+— before reaching the main model. Boot fails fast if `MODEL` lacks vision
+support and no `VISION_MODEL` is configured.
 
 ## Project Structure
 
 ```
 curunir/
-├── run.py                  # Entry point — wires channels, queues, agent
+├── run.py                  # Entry point — wires channels, queues, agent, workers
 ├── cli.py                  # Standalone WebSocket CLI client
 ├── src/
-│   ├── agent/              # Core agent loop and system prompt builder
+│   ├── agent/              # Agent loop, system prompt builder, conversation store
 │   ├── channels/           # CLI/WS, Email, Portal, Local Web UI channels and router
 │   ├── local_ui/           # Loopback web console: read adapters + static SPA
 │   ├── tools/              # Tool schemas, dispatch, and executors
+│   ├── portfolio/          # SQLite balance-sheet engine (db.py + engine.py)
+│   ├── crm/                # SQLite lead/pipeline engine (db.py + engine.py)
+│   ├── schedule_store/     # SQLite schedule store (db.py + engine.py)
 │   ├── config.py           # AgentConfig dataclass
-│   ├── llm.py              # LLM interface (LiteLLM)
-│   ├── memory_extractor.py # Post-session memory extraction
+│   ├── llm.py              # LLM interface (LiteLLM) with transient/mid-stream retry
+│   ├── persona.py          # Persona bundle loader (allowlist + prompt layers)
+│   ├── modules.py          # Module → gating skill → UI panel/endpoint mapping
+│   ├── skills.py           # Skill manifest and loader
+│   ├── slash_commands.py   # Slash dispatcher (intercepted + skill-forcing)
+│   ├── document_ingest.py  # One-shot document-card ingestion
+│   ├── memory_extractor.py # Conversation → durable memory facts
+│   ├── memory_indexer.py   # Timeline + per-topic memory indexes
 │   ├── scheduler.py        # Cron task runner (reads context/schedules.db)
-│   ├── schedule_store/      # SQLite schedule store (db.py + engine.py)
 │   ├── usage_store.py      # SQLite per-call token/cost ledger
-│   └── skills.py           # Skill manifest and loader
+│   └── usage.py            # `python -m src.usage` reporting CLI
 ├── skills/                 # Drop-in skills (each a dir with SKILL.md)
+├── personas/               # Deployment bundles (default, finance, marketing, companion)
 ├── portal/                 # Standalone FastAPI portal app (separate project)
-├── eval/                   # LLM-graded eval suites and harness
+├── eval/                   # Capture-only suites + graded harness and persona suites
 ├── onboarding/             # First-run identity scaffolding
-├── context/                # Inputs supplied to the agent (mounted/configured)
+├── tests/                  # Async pytest suite
+├── docs/                   # Deployment, local-LLM, document-ingestion, design notes
+├── context/                # Gitignored runtime volume (mounted/configured)
 │   ├── identity.md         # Assistant persona and instructions
-│   ├── memory/             # Persistent markdown memory store
+│   ├── memory/             # Persistent markdown memory store (+ portfolio.db, crm.db)
+│   ├── conversations/      # Per-session transcripts (source of truth)
 │   ├── input/              # Drop-zone for user-supplied input files
-│   └── schedules.db        # SQLite cron-task store evaluated by scheduler
-├── workspace/              # Gitignored runtime volume — outputs the agent produces
-│   ├── generated/          # Generated deliverables (research reports, memos, PDFs)
-│   └── scratch/            # Transient/intermediate files (safe to delete)
-└── Dockerfile              # Container with Python 3.12, ripgrep, git
+│   ├── workspace/          # Everything the agent produces
+│   │   ├── generated/      # Deliverables (research reports, memos, exported PDFs)
+│   │   └── scratch/        # Transient/intermediate files (safe to delete)
+│   ├── schedules.db        # SQLite cron-task store evaluated by scheduler
+│   └── usage.db            # SQLite per-call token/cost ledger
+├── workspace/              # Gitignored host volume for the rotating log (LOG_FILE)
+└── Dockerfile              # Container with Python 3.12, ripgrep, pandoc, LaTeX, git
 ```
 
-The directory split tracks file provenance: `context/` holds everything
-supplied **to** the agent (persona, memory, scheduled tasks, user-dropped
-input files), while `workspace/` is the gitignored runtime volume holding
-everything the agent **produces** — generated deliverables under
-`generated/` and transient working files under `scratch/`. Skills writing
-files to disk follow this convention; see `src/tools/README.md` for the
-full output-path rules.
+`context/` is the single gitignored runtime volume, and the split inside it
+tracks file provenance: `identity.md`, `memory/`, `input/`, and the SQLite
+stores hold everything supplied **to** the agent, while `context/workspace/`
+holds everything it **produces** — deliverables under `generated/` (what the
+local console's Files rail lists and what `attach` sends) and throwaway
+working files under `scratch/`. Skills writing files to disk follow this
+convention; see `src/tools/README.md` for the full output-path rules. The
+separate top-level `workspace/` is only a bind-mount target for the rotating
+log (`LOG_FILE`), not an agent output path.
 
 ## Quick Start
 
@@ -106,18 +142,35 @@ cd curunir
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # add your API key
-vim context/identity.md     # define your assistant's persona
-python run.py               # starts CLI channel
+python run.py               # starts the WebSocket channel on :8765
+python cli.py --host localhost   # in a second shell: connect the CLI client
 ```
+
+On a fresh checkout `context/identity.md` doesn't exist yet, so the agent
+auto-runs the `onboarding` skill on your first message — six prompts across
+profile, preferences, and personality, the last of which writes
+`context/identity.md`. Re-run any section later with `/profile`,
+`/preferences`, `/personality`, or the whole thing with `/onboarding`. To
+skip the conversation, pre-seed `context.default/identity.md` from
+`onboarding/questions.md` instead — see
+**[onboarding/README.md](onboarding/README.md)**.
 
 ### Docker (local dev)
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Agent only
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build curunir
+
+# Full stack (agent + portal + postgres)
+docker compose --profile portal \
+  -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-The dev override re-adds `build:` for both services, bind-mounts
-`./portal` into the portal container, and enables uvicorn `--reload`.
+The portal and postgres services sit behind a `portal` compose profile, so
+`--profile portal` is required whenever you want the hosted browser UI. The
+dev override re-adds `build:` for both services so you iterate locally
+instead of pulling from GHCR, bind-mounts `./portal` into the portal
+container, and enables uvicorn `--reload`.
 
 ### Deployment
 
@@ -151,13 +204,14 @@ wiring — see **[docs/local-llm.md](docs/local-llm.md)**.
 Slash commands have two layers: an explicit registry for utility ops
 (`/help`, `/skills`, `/clear`), and a fallback that turns any
 `/<skill-name>` into a skill-forcing prompt for the agent. They work
-identically over the CLI WebSocket and the portal browser UI. Channels
-forward slash text to `agent_worker` as `command="slash"` messages —
-dispatch happens there so channels stay ignorant of the skill registry.
-Cancellation is the only slash-adjacent action handled channel-side, as
-an out-of-band `{"command": "interrupt"}` frame (bound to Ctrl-C in the
-CLI), because the agent worker is blocked during a turn and can't drain
-the queue in time.
+identically over the CLI WebSocket, the portal, and the local web console.
+Channels forward slash text to `agent_worker` as `command="slash"` messages
+— dispatch happens there so channels stay ignorant of the skill registry.
+The persona allowlist is enforced at dispatch too, so `/<skill>` outside the
+active persona's allowlist is rejected. Cancellation is the only
+slash-adjacent action handled channel-side, as an out-of-band
+`{"command": "interrupt"}` frame (bound to Ctrl-C in the CLI), because the
+agent worker is blocked during a turn and can't drain the queue in time.
 
 #### Email Channel (Fastmail — IMAP/SMTP)
 
@@ -194,7 +248,28 @@ See **[portal/README.md](portal/README.md)** for portal deployment and the local
 
 #### Local Web UI (operator console served from the container)
 
-A lightweight, operator-only web console served directly from the curunir container — the co-located counterpart to the hosted portal. Where the portal relays chat through a remote service, this UI reads the container-local stores *directly*: token/cost usage (`context/usage.db`), the balance sheet (`context/memory/portfolio.db`), scheduled tasks (`context/schedules.db`), and the `context/memory/` tree. The **Balance Sheet** tab is a single-page dashboard: a net-worth hero with a *values-as-of* staleness caveat, an allocation bar (net-worth composition, debt called out separately), holdings grouped by class into collapsible sections with per-class columns and subtotals, and a year-to-date trades + realized-P&L view. The Schedules tab renders each task as a **collapsible card**: the collapsed header is scannable (id · human-readable cron · state · next fire), and expanding it reveals the prompt **rendered as Markdown** (in a fixed-height scrollable area, so large prompts don't stretch the page) plus the per-task actions. Cron is humanized with the vendored [`cronstrue`](https://github.com/bradymholt/cronstrue) library (served from `/static`, with a graceful fall back to the raw expression), and the Markdown reuses the same global `marked` the chat and Memory panels already load. The tab is also **editable** — create, edit, enable/disable, and delete cron tasks through token-gated REST routes that delegate to the same `schedule_store.engine` the `schedule` tool uses (a client-side cron preview shows the next runs as you type; the server stays authoritative for validation). Its chat tab is built on a **shared, reusable chat module** (`src/local_ui/static/{connection,chat}.js` + `chat.css`) that speaks the same wire protocol as the portal and bridges `/ws/browser` straight into the local agent queues. The module gives the local console full chat parity with the portal — light/dark theme toggle, the live tool ticker, attachments (drag/drop/paste), and the skills picker. It is the canonical source the portal frontend will adopt in a later phase (see `docs/superpowers/specs/2026-06-12-local-ui-shared-chat-module-design.md`).
+A lightweight, operator-only web console served directly from the curunir
+container — the co-located counterpart to the hosted portal. Where the
+portal relays chat through a remote service, this UI reads the
+container-local stores *directly*, through thin adapters
+(`src/local_ui/readers.py`) over the same read APIs the CLIs use, so the
+panels can't drift from `python -m src.usage` / `portfolio.py` / `crm.py`.
+
+| Tab | What it shows |
+|---|---|
+| **Chat** | Full chat parity with the portal — same wire protocol, theme toggle, live tool ticker, attachments, skills picker — bridged straight into the local agent queues. A left sidebar lists conversations (title · channel badge · relative time) for resume/new/delete; a right rail lists `context/workspace/generated/` for one-click download. |
+| **Usage** | Token dashboard over `context/usage.db`: in/out/cached cards, a daily stacked-bar trend (inline HTML bars — no chart CDN, works offline), and a breakdown toggled across conversation-or-job / model / day. Scheduled-job runs collapse `sched:<id>:<ts>` → `sched:<id>`. |
+| **Schedules** | Collapsible card per cron task — scannable header (id · humanized cron · state · next fire), Markdown-rendered prompt on expand. The one **write** surface: create / edit / enable-disable / delete through token-gated REST routes that delegate to the same `schedule_store.engine` the `schedule` tool uses. |
+| **Memory** | Sandboxed walk of the `context/memory/` tree, rendered as Markdown. |
+| **Balance Sheet** | *(finance persona)* Net-worth hero with a values-as-of staleness caveat, an allocation bar, holdings grouped by class into collapsible sections with per-class subtotals, and year-to-date trades + realized P&L. |
+| **CRM** | *(marketing persona)* Pipeline-by-stage cards, leads grouped by stage, and a recent-activity interaction ledger. |
+
+Balance Sheet and CRM are persona-gated **modules** (`src/modules.py`): a
+module renders only when the persona's allowlist names its gating skill
+(`balance-sheet`, `crm`), and its endpoints 404 otherwise — after the token
+check, so an unauthenticated probe still gets 401 and can't enumerate them.
+Apart from schedule editing, the console is read-only; all other writes stay
+with the existing tools and skills.
 
 Off by default. Enable it with:
 
@@ -204,7 +279,10 @@ LOCAL_UI_ENABLED=true
 # LOCAL_UI_PORT=8766
 ```
 
-It binds loopback and reuses the WS channel's `context/.ws-token` pairing token and Origin allowlist — no separate auth. Open it at `http://localhost:8766/?token=<token>` (the token is printed in the startup log and stored in `context/.ws-token`). The console is **read panels + chat + schedule editing**; all other writes stay with the existing tools/skills.
+It binds loopback and reuses the WS channel's `context/.ws-token` pairing
+token and Origin allowlist — no separate auth. Open it at
+`http://localhost:8766/?token=<token>` (the token is printed in the startup
+log and stored in `context/.ws-token`).
 
 ## Attachments
 
@@ -220,6 +298,17 @@ Supported formats:
 | Plain text — `.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.log`, `.xml`, `.toml`, `.ini`, etc. | Decoded as UTF-8, fenced text block | 256 KB |
 
 Total upload size per message is capped at 20 MB. Unsupported formats are filtered out by the portal file picker (`accept=` allowlist) and rejected client-side; if a binary somehow reaches the backend, it falls back to a notice block describing the file rather than crashing.
+
+**Large documents get a card, not a dump.** A one-shot, tool-free LLM call
+(`src/document_ingest.py`) turns a document into a ~1k-token **document
+card** — a navigation map with line references — written next to the staged
+file as `<file>.card.md`. The conversation carries the card; the raw text is
+consulted through targeted `read` calls the card points at. The local web
+console ingests eagerly on upload for files over `DOC_CARD_MIN_BYTES`
+(default 50 KB), and the `read` tool enforces the same discipline
+everywhere: a no-`limit` read of a file over `READ_GATE_BYTES` returns the
+card (or a numbered head preview) rather than the whole body. See
+**[docs/document-ingestion.md](docs/document-ingestion.md)**.
 
 To add a new inline format: branch in `build_multimodal_content` (`run.py`), add the parser to `requirements.txt`, extend the portal's `accept=` allowlist and `stageFile` validator (`portal/static/index.html`), and cover both with tests in `tests/test_build_content.py` (mock the parser to keep tests hermetic).
 
@@ -268,13 +357,17 @@ portal_starter: true     # Also surface as an empty-page starter (requires porta
 
 ### Skill-Requested Tools
 
-Skills can declare opt-in tools that are only available when the skill is loaded. Add a `tools` field to the frontmatter:
+Every session starts with the default tool set — `glob`, `grep`, `read`,
+`edit`, `write`, `bash`, `load_skill`, `web_fetch`, `delegate`, `schedule`,
+and `attach`. Skills can declare **additional** opt-in tools that only
+become available once the skill is loaded. Add a `tools` field to the
+frontmatter:
 
 ```yaml
 ---
-name: deep-research
-description: Research a topic in depth
-tools: attach
+name: balance-sheet
+description: Track and report on the owner's balance sheet
+tools: portfolio
 ---
 ```
 
@@ -282,9 +375,11 @@ When the agent loads this skill via `load_skill`, the listed tools are added to 
 
 **Available opt-in tools:**
 
-| Tool | Description |
-|------|-------------|
-| `attach` | Attach a file to the agent's response. Delivered as an email attachment, CLI file path, etc. depending on channel. |
+| Tool | Unlocked by | Description |
+|------|-------------|-------------|
+| `portfolio` | `balance-sheet` | `{action, args}` interface to the SQLite balance-sheet engine — holdings, trades, net worth, snapshots. |
+| `crm` | `crm` | `{action, args}` interface to the SQLite lead/pipeline engine — leads, stages, interactions. |
+| `to_audio` | `conversation-to-audio` | Rewrite text into a spoken-word script and synthesize an MP3 via OpenAI TTS, registered as a response attachment. |
 
 ## Personas
 
@@ -292,14 +387,30 @@ A persona is a deployment bundle: an optional absolute skill allowlist and a
 `prompts/` directory layered on top of `context/identity.md` in the system
 prompt. Select one with `CURUNIR_PERSONA=<name>`. Unset falls back to
 `personas/default/`, which ships the full skill catalog and the baseline
-behavior prompt — so unset is itself a persona, not a special case.
+behavior prompt — so unset is itself a persona, not a special case. Core
+tools are universal; personas curate skills, not tools.
 
-Shipped specialty examples include `finance` — a local, private
-personal-finance assistant that curates skills down to analysis/memo/data tools
-(see `personas/finance/README.md`) — and `companion`, a direct,
-accountability-focused life coach / confidant with memory-driven continuity
-(see `personas/companion/README.md`). Each adds its own domain + guardrails
-prompts on top of `context/identity.md`.
+Four bundles ship today:
+
+| Persona | What it is |
+|---------|------------|
+| `default` | Full skill catalog, no allowlist, baseline behavior prompt. |
+| `finance` | Local, private personal-finance assistant — capital allocation, position tracking, investment-thesis lifecycle, tax strategy. |
+| `marketing` | Go-to-market assistant — product onboarding, ICP & positioning, GTM planning, competitive intelligence. |
+| `companion` | Direct, accountability-focused life coach / confidant with memory-driven continuity. |
+
+Each specialty bundle adds its own domain + guardrails prompts on top of
+`context/identity.md`, declares the API key *names* it expects (values stay
+in `.env`), and ships a `README.md` plus a `.env.<name>.example`. Every
+bundle carries the same no-general-knowledge guardrail: external factual
+claims must be grounded in a tool or skill result, not recalled from
+training.
+
+Some persona bundles also enable **modules** — vertical UI surfaces gated on
+the allowlist (`src/modules.py`). The local console's Balance Sheet tab
+appears only when the persona allowlists `balance-sheet`; the CRM tab only
+when it allowlists `crm`. Gated REST endpoints 404 on personas that don't
+own them.
 
 ```bash
 cp personas/finance/.env.finance.example .env
@@ -308,13 +419,17 @@ CURUNIR_PERSONA=finance python run.py
 
 ## Evals
 
-LLM-graded eval harness in `eval/` that sends prompts to Curunir over WebSocket and records results.
+Two harnesses live in `eval/`, both driving a running instance over
+`ws://localhost:8765`.
+
+**Capture-only suites** send a list of prompts and record whatever comes
+back — no grading:
 
 ```bash
-# Run basic evals (tool use, planning, memory, instruction following)
+# Core capabilities (tool use, planning, memory, instruction following)
 python eval/run_evals.py
 
-# Run advanced evals (web search, deep research, delegation, cross-skill orchestration)
+# Advanced (web search, deep research, delegation, cross-skill orchestration)
 python eval/run_evals.py --file eval/advanced_evals.md
 
 # Cap iterations per prompt
@@ -324,10 +439,27 @@ python eval/run_evals.py --max-loops 20
 python eval/run_evals.py --host myserver.example.com --port 8765
 ```
 
-Results are saved to `eval/eval_results/` as timestamped JSON files including the model name, all prompts, responses, and tool calls.
+Results land in `eval/eval_results/` as timestamped JSON including the model
+name, all prompts, responses, and tool calls.
 
-- `eval/simple_evals.md` — prompts testing core capabilities (no API keys needed)
-- `eval/advanced_evals.md` — prompts testing skills like web-search, deep-research, and delegation (requires `BRAVE_API_KEY` and network access)
+- `eval/simple_evals.md` — core capabilities (no API keys needed)
+- `eval/advanced_evals.md` — skills like web-search, deep-research, and delegation (requires `BRAVE_API_KEY` and network access)
+
+**Graded suites** add pure-function graders plus an LLM judge (a separate
+model from the system under test) and emit a self-contained interactive HTML
+report. The persona-agnostic engine is `eval/harness/` (`graders.py` +
+`runner.py`); a suite is a thin shim that builds a `SuiteConfig` and calls
+`runner.main`:
+
+```bash
+python eval/finance/run_finance_evals.py     # ~34 graded finance tasks
+python eval/harness/test_runner_sync.py      # zero-cost frame-sync regression
+```
+
+Position-tracking tasks seed `eval/finance/fixtures/portfolio.sql` into
+`context/memory/` and restore on exit, and are anchored against the same
+portfolio CLI the agent uses so grader and agent can't drift. See
+`eval/finance/README.md`.
 
 ## Configuration
 
@@ -336,11 +468,15 @@ Configuration is handled via `src/config.py`:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `model` | `anthropic/claude-sonnet-4-20250514` | LLM model (any LiteLLM-supported model) |
-| `max_iterations` | `75` | Max tool-calling rounds per turn |
+| `max_iterations` | `200` | Max tool-calling rounds per turn |
 | `max_history_chars` | `250000` | Conversation history limit; lower for small-context models |
+| `max_tool_result_chars` | `100000` | Per-tool-result truncation cap (≈25k tokens) so one oversized `read`/`bash` can't poison the session |
+| `read_gate_bytes` | `50000` | No-`limit` reads above this return a document card or head preview instead of the full body (`0` disables) |
+| `persona` | `default` | Persona bundle under `personas/` (`CURUNIR_PERSONA`) |
 | `identity_file` | `./context/identity.md` | Path to persona file |
-| `context_dir` | `./context` | Path to context directory (memory, etc.) |
+| `context_dir` | `./context` | Path to context directory (memory, conversations, workspace, stores) |
 | `skill_dirs` | `[./skills, ./context/skills]` | Directories scanned for skills in priority order (first-seen wins on name collision) |
+| `vision_model` | unset | Vision-capable sidecar used when `model` is text-only (`VISION_MODEL`) |
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.). See `.env.example` for the full list.
 
