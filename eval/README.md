@@ -54,6 +54,13 @@ runner.main(SUITE)
 
 ## Configuring `.env`
 
+Two env files are in play, both with a tracked `.example` to copy from:
+
+| File | Copy from | Role |
+|------|-----------|------|
+| `.env` | `.env.example` | **required** — API keys, `MODEL`, `JUDGE_MODEL`. Read by *both* processes below |
+| `.env.eval` | `.env.eval.example` | **optional** — the eval profile for the instance under test (channels + background loops off, local-model knobs). Sourced into the SUT's shell as an overlay; see [below](#quieting-the-instance-under-test-enveval-optional) |
+
 Two processes run during an eval, and **both** read the repo-root `.env`:
 
 | Process | Loads | Needs |
@@ -147,11 +154,13 @@ server (with the persona you're evaluating), then run the suite from another
 shell.
 
 ```bash
-# 0. (one-time) activate the venv and configure .env — see "Configuring `.env`"
+# 0. (one-time) activate the venv and configure the env — see "Configuring `.env`"
 source .venv/bin/activate
-cp .env.example .env   # skip if you already have one — this overwrites it
+cp .env.example .env             # skip if you already have one — this overwrites it
 #    MODEL + its provider key for the SUT; ANTHROPIC_API_KEY for the judge; plus
 #    whatever the persona's skills require (see the table above / suite README).
+cp .env.eval.example .env.eval   # optional overlay: channels + background loops off
+#    edit if you're evaluating a local model (MODEL / API_BASE / context sizes).
 
 # 1. (one-time) stage the eval context baseline — see context.eval/README.md.
 #    A missing context/identity.md means "not onboarded", so without this the
@@ -160,7 +169,7 @@ cp .env.example .env   # skip if you already have one — this overwrites it
 cp -R context.eval/. context/
 
 # 2. Terminal A — start the system under test
-#    optional: set -a; source .env.eval; set +a   # channels + background loops off
+set -a; source .env.eval; set +a   # if you staged the overlay above; skip otherwise
 CURUNIR_PERSONA=<persona> python run.py
 
 # 3. Terminal B — run the graded suite against it
