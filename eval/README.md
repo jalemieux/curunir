@@ -52,6 +52,93 @@ SUITE = runner.SuiteConfig(
 runner.main(SUITE)
 ```
 
+## Configuring `.env`
+
+Two processes run during an eval, and **both** read the repo-root `.env`:
+
+| Process | Loads | Needs |
+|---------|-------|-------|
+| the **SUT** — `python run.py` | `.env` via `load_dotenv()` | `MODEL` + that provider's key, plus every key the persona's skills call |
+| the **runner** — `python eval/<suite>/run_<suite>_evals.py` | `.env` via `load_dotenv(REPO_ROOT / ".env")` | the **judge** key — and any skill key an `anchor` needs, since anchored graders shell out to the same CLI locally |
+
+Start from the template, then fill in the two halves below:
+
+```bash
+cp .env.example .env      # then edit
+```
+
+### 1. The model under test
+
+Whatever you'd normally run curunir with:
+
+```bash
+MODEL=anthropic/claude-sonnet-4-20250514
+ANTHROPIC_API_KEY=sk-ant-...
+# or: MODEL=openrouter/z-ai/glm-5.2   + OPENROUTER_API_KEY=sk-or-...
+# a local llama.cpp / ollama server also needs API_BASE — see .env.eval.example
+```
+
+### 2. The judge
+
+`llm_judge` tasks are graded by a model **separate from the SUT** (a model
+grading its own output is an eval anti-pattern). It resolves as `$JUDGE_MODEL`,
+else the default `anthropic/claude-sonnet-4-6` — never `$MODEL`. So the default
+path needs only:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Judging with another provider means setting both the model and its key:
+
+```bash
+JUDGE_MODEL=openai/gpt-4o
+OPENAI_API_KEY=sk-...
+```
+
+Without a usable judge key, `llm_judge` tasks report **`ERR`** (the grader
+couldn't run), not `FAIL` — every other grader still produces a real result.
+
+### Suite-specific skill keys
+
+Data-fetching tasks call the persona's skills, which need their own keys in the
+**SUT's** env (and in the runner's env too when a task carries an `anchor`, which
+re-runs the same CLI locally to recompute the expected answer):
+
+| Suite | Keys |
+|-------|------|
+| `eval/finance/` | `FRED_API_KEY`, `BRAVE_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY` (yfinance / polymarket need network but no key) |
+| `eval/default/` | `BRAVE_API_KEY` for the WS/RR tasks |
+| `eval/skills/web_search/`, `eval/skills/reddit_research/` | `BRAVE_API_KEY` |
+| `eval/skills/skill_routing/` | `FRED_API_KEY` |
+
+`action_used` legs pass **without** these — they only check that the call was
+*attempted* — so a keyless run still gives a valid routing signal; only the
+grounded-answer and judged tasks degrade. Each suite's README lists its own keys.
+
+### Quieting the instance under test (`.env.eval`, optional)
+
+A normal boot runs the email / local-UI / portal channels and three background
+loops (`MEMORY_EXTRACTION_ENABLED`, `DREAMING_ENABLED`, `SCHEDULER_ENABLED` —
+all default-on), any of which can inject a turn or write into `context/memory/`
+mid-suite. `.env.eval.example` is the eval profile for the SUT: every channel
+but WS off, the loops off, plus small-context sizing and the local-model knobs
+(`MODEL` / `API_BASE` / `VISION_MODEL`).
+
+```bash
+cp .env.eval.example .env.eval     # gitignored — safe to put real keys in
+set -a; source .env.eval; set +a   # export, then boot from the same shell
+python run.py
+```
+
+It is an **overlay, not a replacement**: the exported shell values win because
+python-dotenv's `load_dotenv()` defaults to `override=False`, so `.env` still
+supplies everything `.env.eval` leaves unset (API keys, `JUDGE_MODEL`, …).
+Source it only in the SUT's shell — the runner loads `.env` in its own process,
+so the judge keeps your real model and keys no matter what the SUT is running.
+The same mechanism is what lets `eval/model_sweep.sh` pin `MODEL` per server
+subprocess while the judge stays fixed.
+
 ## Quick start
 
 The runner is a **headless WebSocket client** — it talks to a running curunir
@@ -60,10 +147,11 @@ server (with the persona you're evaluating), then run the suite from another
 shell.
 
 ```bash
-# 0. (one-time) activate the venv and set keys in .env
+# 0. (one-time) activate the venv and configure .env — see "Configuring `.env`"
 source .venv/bin/activate
-#    .env needs ANTHROPIC_API_KEY (the Claude judge) plus whatever the persona's
-#    skills require (see the persona's README).
+cp .env.example .env   # skip if you already have one — this overwrites it
+#    MODEL + its provider key for the SUT; ANTHROPIC_API_KEY for the judge; plus
+#    whatever the persona's skills require (see the table above / suite README).
 
 # 1. (one-time) stage the eval context baseline — see context.eval/README.md.
 #    A missing context/identity.md means "not onboarded", so without this the
@@ -72,6 +160,7 @@ source .venv/bin/activate
 cp -R context.eval/. context/
 
 # 2. Terminal A — start the system under test
+#    optional: set -a; source .env.eval; set +a   # channels + background loops off
 CURUNIR_PERSONA=<persona> python run.py
 
 # 3. Terminal B — run the graded suite against it
@@ -268,5 +357,6 @@ fields can reuse `eval/harness/graders.py` unchanged.
 | `received 1008 (policy violation) auth` | The WS pairing token wasn't sent. The runner reads `context/.ws-token` (or `$CURUNIR_WS_TOKEN`) — make sure the server wrote it and you're running from the repo root, or export `CURUNIR_WS_TOKEN`. |
 | `1001 (going away)` mid-run | The server stopped/restarted. Restart `run.py` and re-run. |
 | Judge tasks all `ERR … no JUDGE_MODEL/MODEL` | `ANTHROPIC_API_KEY` missing from `.env`, or set `JUDGE_MODEL` to a model whose key you have. |
+| Memory/context changed mid-run, or a turn the suite never sent | A background loop or another channel is live on the SUT. Boot it under `.env.eval` (see [Quieting the instance under test](#quieting-the-instance-under-test-enveval-optional)) so only the WS channel and no loops are running. |
 | A data task fails to fetch | The relevant skill's key is unset. Anchored graders also need the same CLIs to run locally. |
 | Connecting to wrong instance | Default is `localhost:8765`; pass `--host/--port` for a remote SUT. Make sure it was started with the right `CURUNIR_PERSONA`. |
