@@ -7,9 +7,10 @@ Two eval systems live here, at different maturity:
 | **Capture-only** | `run_evals.py` + `simple_evals.md` / `advanced_evals.md` | none — streamed to `eval_results/`, human-eyeballed | quick side-by-side model comparison; supports `--max-loops` and resume |
 | **Graded harness** | `eval/harness/` + a persona suite | pure-function + LLM-judge graders, pass/fail/slow with a one-line reason, interactive HTML report | regression + failure-mode benchmarking of a persona |
 
-The rest of this file documents the **graded harness** — the engine, how to run a
-suite, the report, and the conventions every suite follows. Suites come in two
-kinds, split by what they own:
+The rest of this file documents the **graded harness**: [how to run a
+suite](#run-an-eval) end to end, [how to configure it](#configuring-the-environment),
+how to read the report, and the conventions every suite follows. Suites come in
+two kinds, split by what they own:
 
 - **Persona suites** (`eval/<persona>/`) own persona-level behavior: the
   persona's system-prompt specifics (guardrails, domain rules) and **skill
@@ -28,31 +29,157 @@ Per-suite specifics (which tasks, which fixtures) live in each suite's own READM
   - [`reddit_research/`](skills/reddit_research/README.md) — curl-vs-web_fetch method adherence for the `reddit-research` skill (routing lives in `eval/default/`).
   - [`web_search/`](skills/web_search/README.md) — no-rediscovery-loop method adherence for the `web-search` skill (consumer/local-business lookups start with Brave, not a Google/Yelp/Reddit scrape; routing lives in `eval/default/`).
 
-## The graded engine (`eval/harness/`)
+## Run an eval
 
-Persona-agnostic. A persona suite is a **thin shim** that builds a `SuiteConfig`
-and calls `runner.main`; everything else is shared.
+An eval is always **two processes**: the **system under test** (SUT) — an
+ordinary `python run.py` instance — and the **suite**, a headless WebSocket
+client that drives it over `ws://localhost:8765` exactly like the CLI does. So
+you need two shells, both at the repo root with the venv activated.
 
-| File | Role |
-|------|------|
-| `harness/graders.py` | Pure graders `(result, spec) -> (status, why)`; the `GRADERS` dispatch + `grade()` / `grade_detailed()`. Includes `reconciles` (a balance sheet must add up) |
-| `harness/runner.py` | `SuiteConfig` + the generic engine: drives the WS channel, builds a `Result`, grades, writes JSON/MD/HTML. Supports multi-turn `prompts` and `--fixture` seeding |
-| `harness/test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (multi-turn + `reconciles` included; no SUT needed) |
+**Which suite do I run?**
 
-A shim is ~40 lines — see `eval/finance/run_finance_evals.py`:
+| You changed… | Run |
+|--------------|-----|
+| the model, the quant, or the provider | `eval/default/` with `--fixture baseline` — the kernel + routing smoke test |
+| a persona's prompts or skill allowlist | that persona's suite — `eval/default/`, `eval/finance/` |
+| one skill's `SKILL.md` or its CLI | that skill's suite under `eval/skills/` |
+| the harness itself (`eval/harness/`) | `python eval/harness/test_runner_sync.py` — no server, no keys, no tokens |
 
-```python
-SUITE = runner.SuiteConfig(
-    name="finance",                 # report filename prefix: finance-<ts>-<model>.*
-    title="Finance Persona Evals",  # HTML header / <title>
-    tasks=TASKS,                    # from <persona>_tasks.py
-    results_dir=Path(__file__).parent / "results",
-    fixture_memory_dir=Path(__file__).parent / "fixtures" / "memory",  # for --fixture
-)
-runner.main(SUITE)
+### 1. Install, and configure `.env`
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # skip if you already have one — this overwrites it
 ```
 
-## Configuring `.env`
+Then edit `.env`. Three things matter, and the first two are non-negotiable:
+
+```bash
+MODEL=anthropic/claude-sonnet-4-20250514   # the model being evaluated (the SUT)
+ANTHROPIC_API_KEY=sk-ant-...               # its key — and, by default, the judge's too
+FRED_API_KEY=...                           # + whatever the suite's skills call
+```
+
+The judge (for `llm_judge` tasks) defaults to `anthropic/claude-sonnet-4-6`, so
+`ANTHROPIC_API_KEY` already covers it; to judge with another provider set
+`JUDGE_MODEL` **and** that provider's key. Which skill keys a given suite needs
+is in [Configuring the environment](#configuring-the-environment) below — a run
+with keys missing still works, it just downgrades the affected tasks.
+
+### 2. Point the SUT at a different config (optional)
+
+Skip this unless you are evaluating a **local/other model** or want the instance
+silent while it is graded. `.env.eval` overrides `.env` for one boot:
+
+```bash
+cp .env.eval.example .env.eval   # gitignored — real keys are fine here
+```
+
+It ships with every channel but WS off and the three background loops off, plus
+local-model (`MODEL` / `API_BASE`) and small-context knobs to edit. Full
+semantics: [Overriding `.env` for the SUT](#overriding-env-for-the-sut-enveval-optional).
+
+### 3. Stage a clean `context/`
+
+```bash
+cp -R context.eval/. context/
+```
+
+A missing `context/identity.md` reads as "not onboarded", and the first eval
+turn gets rewritten into an onboarding instruction — every task then fails for
+the wrong reason. `cp -R` **writes into** your `context/`, so use a throwaway or
+staging one. See [`context.eval/README.md`](../context.eval/README.md).
+
+### 4. Boot the SUT — shell A
+
+```bash
+set -a; source .env.eval; set +a          # only if you did step 2
+CURUNIR_PERSONA=default python run.py     # the persona the suite targets
+```
+
+Wait for the boot lines before moving on:
+
+```
+Background loops: extraction=false dreaming=false scheduler=false   # under .env.eval
+Starting 1 channel(s): ws                                           # ws is the one that matters
+```
+
+Without `.env.eval` those read `true` and more channels start; the suite still
+runs, it just isn't isolated. Leave the process up — the persona must match the
+suite, since `eval/finance/` against a `default` instance grades a persona that
+was never loaded.
+
+### 5. Smoke-test the wiring — shell B
+
+Two checks that cost nothing, before you spend tokens on 30+ tasks.
+
+```bash
+python eval/harness/test_runner_sync.py            # the harness itself; no server needed
+python eval/default/run_default_evals.py --list    # the suite loads; no server, no keys
+```
+
+`--list` prints `34 tasks` and the id/grader/tags/name table. Then run **one**
+cheap task end-to-end to prove the socket, the token, and the persona are right:
+
+```bash
+python eval/default/run_default_evals.py --id S1 -v
+```
+
+`-v` streams the agent's tool calls live, so a misconfiguration is obvious
+rather than showing up as a bare `FAIL`. If this connects and grades, the full
+suite will too. If it doesn't, go to [Troubleshooting](#troubleshooting).
+
+### 6. Run the suite — shell B
+
+```bash
+python eval/default/run_default_evals.py --fixture baseline
+```
+
+One status line per task while it runs, then a `SUMMARY` block and the path to
+the report. `--fixture baseline` seeds `fixtures/memory/baseline/` into
+`context/memory/` for the tasks that read seeded memory (K2/K3) and restores
+your real memory on exit — omit it and those tasks fail legitimately.
+
+Other suites, same shape:
+
+```bash
+python eval/finance/run_finance_evals.py               # persona suite
+python eval/skills/web_search/run_web_search_evals.py  # skill suite
+```
+
+### 7. Read the report
+
+```bash
+open eval/default/results/default-<ts>-<model>.html
+```
+
+The HTML report is the primary artifact — per-task cards with the full grader
+breakdown, prompt, every tool call, and the agent's complete final text. See
+[Reading the output](#reading-the-output) for what's in it and the `.json` /
+`.md` siblings.
+
+### Flags (run a subset — cheaper)
+
+All suites accept the same flags (`eval.harness.runner.build_parser`):
+
+```bash
+... --id R6,F9          # just these task ids
+... --tag regression    # only tasks whose tag matches this regex
+... --list              # print id/grader/tags/name and exit — no server needed
+... --no-grade          # capture only, skip grading (like the legacy harness)
+... -v / --verbose      # stream each task's tool calls + text live, then the grade
+... --fixture NAME      # seed fixtures/memory/NAME/ into context/memory/ (local SUT only)
+... --host h --port p   # remote SUT (default localhost:8765)
+```
+
+The full suite spends real model tokens on the SUT, so use `--id` / `--tag`
+while iterating and run everything only for a complete baseline.
+
+## Configuring the environment
+
+The reference layer behind step 1 of the runbook: what each variable is for, who
+reads it, and what breaks when it is missing.
 
 Two env files are in play, both with a tracked `.example` to copy from:
 
@@ -68,13 +195,7 @@ Two processes run during an eval, and **both** read the repo-root `.env`:
 | the **SUT** — `python run.py` | `.env` via `load_dotenv()` | `MODEL` + that provider's key, plus every key the persona's skills call |
 | the **runner** — `python eval/<suite>/run_<suite>_evals.py` | `.env` via `load_dotenv(REPO_ROOT / ".env")` | the **judge** key — and any skill key an `anchor` needs, since anchored graders shell out to the same CLI locally |
 
-Start from the template, then fill in the two halves below:
-
-```bash
-cp .env.example .env      # then edit
-```
-
-### 1. The model under test
+### The model under test
 
 Whatever you'd normally run curunir with:
 
@@ -85,7 +206,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # a local llama.cpp / ollama server also needs API_BASE — see .env.eval.example
 ```
 
-### 2. The judge
+### The judge
 
 `llm_judge` tasks are graded by a model **separate from the SUT** (a model
 grading its own output is an eval anti-pattern). It resolves as `$JUDGE_MODEL`,
@@ -167,66 +288,6 @@ so the judge keeps your real model and keys no matter what the SUT is running.
 The same mechanism is what lets `eval/model_sweep.sh` pin `MODEL` per server
 subprocess while the judge stays fixed.
 
-## Quick start
-
-The runner is a **headless WebSocket client** — it talks to a running curunir
-instance over `ws://localhost:8765`, the same channel the CLI uses. Start the
-server (with the persona you're evaluating), then run the suite from another
-shell.
-
-```bash
-# 0. (one-time) activate the venv and configure the env — see "Configuring `.env`"
-source .venv/bin/activate
-cp .env.example .env             # skip if you already have one — this overwrites it
-#    MODEL + its provider key for the SUT; ANTHROPIC_API_KEY for the judge; plus
-#    whatever the persona's skills require (see the table above / suite README).
-cp .env.eval.example .env.eval   # optional: eval-only overrides of the above
-#    channels + background loops off; edit MODEL / API_BASE / context sizes to
-#    point the SUT at a different (e.g. local) model without touching .env.
-
-# 1. (one-time) stage the eval context baseline — see context.eval/README.md.
-#    A missing context/identity.md means "not onboarded", so without this the
-#    first eval turn is rewritten into an onboarding instruction. Use a
-#    throwaway ./context; cp -R writes into it.
-cp -R context.eval/. context/
-
-# 2. Terminal A — start the system under test
-set -a; source .env.eval; set +a   # if staged above — these override .env
-CURUNIR_PERSONA=<persona> python run.py
-
-# 3. Terminal B — run the graded suite against it
-python eval/<persona>/run_<persona>_evals.py
-```
-
-That prints a live status line per task and, at the end, a summary plus the path
-to a saved report under `eval/<persona>/results/`.
-
-### Flags (run a subset — cheaper)
-
-All suites accept the same flags (`eval.harness.runner.build_parser`):
-
-```bash
-... --id R6,F9          # just these task ids
-... --tag regression    # only tasks whose tag matches this regex
-... --list              # print id/grader/tags/name and exit — no server needed
-... --no-grade          # capture only, skip grading (like the legacy harness)
-... -v / --verbose      # stream each task's tool calls + text live, then the grade
-... --fixture NAME      # seed fixtures/memory/NAME/ into context/memory/ (local SUT only)
-... --host h --port p   # remote SUT (default localhost:8765)
-```
-
-The full suite spends real model tokens on the SUT, so use `--id` / `--tag`
-while iterating and run everything only for a complete baseline.
-
-### Verify the runner itself (no server, no tokens)
-
-The runner's WS frame handling is covered by a fake-socket test that replays the
-exact server frame sequence — run it after touching `eval/harness/runner.py`:
-
-```bash
-python eval/harness/test_runner_sync.py
-```
-
 ## Swapping a model or quant? Run the smoke suite
 
 The default suite doubles as the regression signal for a model or quant change:
@@ -278,20 +339,12 @@ positional args are model ids only (no provider column). Other env knobs:
 (SUT boot logs, default `/tmp/curunir_model_sweep_logs`), `PYTHON`.
 
 The sweep passes `MODEL` **only** to each server subprocess — never to the shell
-running the grader — so the judge stays fixed (see below) across all models
+running the grader — so the judge stays fixed ([The judge](#the-judge)) across all models
 rather than each model grading its own output. It also holds the web-search
 backend (Brave vs Gemini `SKILL.md`) constant: it sweeps *models*, not backends.
 Each model needs its provider key in `.env`. The sweep restarts the SUT
 repeatedly and leaves none running when it finishes — relaunch your own dev
 instance afterward.
-
-## The judge model
-
-`llm_judge` tasks are graded by a **model separate from the system under test**
-(a model grading its own output is an eval anti-pattern). The shim loads `.env`,
-so the default `anthropic/claude-sonnet-4-6` works as long as `ANTHROPIC_API_KEY`
-is set. Override with `JUDGE_MODEL=<litellm-model-id>` (and that provider's key
-in the env).
 
 ## Reading the output
 
@@ -329,6 +382,30 @@ did.
   turns). A distinct signal, never folded into fail: it is the exact axis that
   decomposition and perf work move. A task opts in with a `budget`.
 - **error** — the grader itself could not run (e.g. judge model unreachable).
+
+## The graded engine (`eval/harness/`)
+
+Persona-agnostic. A persona suite is a **thin shim** that builds a `SuiteConfig`
+and calls `runner.main`; everything else is shared.
+
+| File | Role |
+|------|------|
+| `harness/graders.py` | Pure graders `(result, spec) -> (status, why)`; the `GRADERS` dispatch + `grade()` / `grade_detailed()`. Includes `reconciles` (a balance sheet must add up) |
+| `harness/runner.py` | `SuiteConfig` + the generic engine: drives the WS channel, builds a `Result`, grades, writes JSON/MD/HTML. Supports multi-turn `prompts` and `--fixture` seeding |
+| `harness/test_runner_sync.py` | Zero-token tests for the runner's WS frame handling (multi-turn + `reconciles` included; no SUT needed) |
+
+A shim is ~40 lines — see `eval/finance/run_finance_evals.py`:
+
+```python
+SUITE = runner.SuiteConfig(
+    name="finance",                 # report filename prefix: finance-<ts>-<model>.*
+    title="Finance Persona Evals",  # HTML header / <title>
+    tasks=TASKS,                    # from <persona>_tasks.py
+    results_dir=Path(__file__).parent / "results",
+    fixture_memory_dir=Path(__file__).parent / "fixtures" / "memory",  # for --fixture
+)
+runner.main(SUITE)
+```
 
 ## How a suite is built — the four sources
 
