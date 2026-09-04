@@ -146,6 +146,8 @@ appear in the portal regardless of these flags.
 
 Manifest auto-built at startup from all `SKILL.md` files and included in the system prompt. Agent loads full skill content on demand via `load_skill` tool.
 
+Because the manifest `description` is always in the system prompt (before any skill loads), it carries routing reflexes the agent must see *first*: e.g. `web-search` is flagged as the first stop for scraping-blocked consumer sites (Google/Yelp/Reddit return `403`/anti-bot pages), steering the agent to Brave instead of re-discovering the block via `web_fetch`/`curl` every session (#450). A `tests/test_skills.py` guard keeps that hint in the description.
+
 **Two directories named "skills".** `skills/` is the framework catalog — auto-built into the `## Available Skills` manifest and loaded **by name** via `load_skill`/`/<skill-name>`, never filesystem-located. `context/skills/` is the small user/runtime set where the agent saves its *own* authored skills (often absent entirely). The manifest carries a one-line preamble (in `build_skill_manifest`) telling the agent to load by name rather than `find`/`ls`/`grep` for `SKILL.md` files; `personas/default/prompts/behavior.md` distinguishes the two directories at the point of confusion.
 
 ### Slash Commands (`src/slash_commands.py`)

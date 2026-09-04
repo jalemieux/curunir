@@ -1,12 +1,34 @@
 ---
 name: web-search
-description: "Search the web using Brave Search API via bash — returns titles, URLs, descriptions"
+description: "Search the web using Brave Search API via bash — returns titles, URLs, descriptions. Use FIRST for consumer/local-business sites that block scraping (Google, Yelp, Reddit, local reviews); don't web_fetch or curl those — they return 403/anti-bot pages. Brave already indexes their snippets."
 ---
 
 # Web Search
 
 Use the Brave Search API via `curl` in the bash tool.
 The API key is in the `BRAVE_API_KEY` environment variable.
+
+## Sites that block scraping — search first, don't fetch
+
+Many high-value consumer and local-business sites actively block automated
+access. Raw `curl` or `web_fetch` against them returns a `403`, a CAPTCHA, or an
+anti-bot interstitial — not the content. **Don't fetch these; search Brave
+instead.** Brave already indexes the very snippets (ratings, hours, top reviews,
+thread answers) the request usually wants, so a single search answers most
+"find me a salon / restaurant / what-do-people-say" lookups.
+
+Known-blocked domains (treat as guidance, not an exhaustive denylist):
+
+- `google.com/search` — raw scraping of Google results is blocked; use the
+  Brave API for search instead of curling Google.
+- `yelp.com` — local-business listings/reviews return anti-bot pages.
+- `reddit.com` (including the `.json` endpoint) — blocks automated access.
+
+Pattern for local-business / consumer lookups (e.g. "find a hair salon near San
+Mateo"): **search Brave first**, read the titles/URLs/descriptions it returns,
+then `web_fetch` only specific result URLs that aren't on the blocklist (a
+salon's own site, a news article). Don't open with a `curl`/`web_fetch` of
+Google/Yelp/Reddit — that's the rediscovery loop this skill exists to skip.
 
 ## Basic Search
 
