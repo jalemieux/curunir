@@ -184,3 +184,27 @@ def test_main_prints_json_error_and_exits_1(tmp_path, capsys, monkeypatch):
     rc = cli.main(["--device", "http://cam/snap", "--out-dir", str(tmp_path)])
     out = json.loads(capsys.readouterr().out)
     assert rc == 1 and "ffmpeg not found" in out["error"] and "hint" in out
+
+
+# --- api_base resolution ------------------------------------------------------
+
+def test_api_base_explicit_vision_api_base_wins():
+    env = {"VISION_API_BASE": "http://cam-host:8083/v1", "API_BASE": "http://main:8080/v1",
+           "MODEL": "openai/local", "VISION_MODEL": "openai/qwen3-vl-2b"}
+    assert cli.resolve_vision_api_base("openai/qwen3-vl-2b", env) == "http://cam-host:8083/v1"
+
+
+def test_api_base_not_reused_for_separate_vision_model():
+    # MODEL is local (API_BASE set) but VISION_MODEL is a cloud model: sending it
+    # to API_BASE would hit the llama.cpp server with a foreign model name.
+    env = {"API_BASE": "http://main:8080/v1", "MODEL": "openai/local", "VISION_MODEL": "openai/gpt-4o-mini"}
+    assert cli.resolve_vision_api_base("openai/gpt-4o-mini", env) is None
+
+
+def test_api_base_reused_when_falling_back_to_main_model():
+    env = {"API_BASE": "http://main:8080/v1", "MODEL": "openai/qwen3-vl-2b"}
+    assert cli.resolve_vision_api_base("openai/qwen3-vl-2b", env) == "http://main:8080/v1"
+
+
+def test_api_base_none_when_nothing_set():
+    assert cli.resolve_vision_api_base("gemini/gemini-2.5-flash", {}) is None

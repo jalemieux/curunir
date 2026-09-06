@@ -310,6 +310,7 @@ async def _vision_prepass(
         try:
             description = await describe_image(
                 config.vision_model, att["path"], mime, text,
+                api_base=config.vision_api_base,
             )
             logger.info(
                 "Vision pre-pass: %s described in %d chars",
@@ -656,6 +657,7 @@ async def main():
     tts_model = os.environ.get("TTS_MODEL")
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
+    vision_api_base = os.environ.get("VISION_API_BASE")
 
     # Seed context/ from context.default/ on first run (non-overwriting).
     # Must run before building the system prompt so a fresh deployment boots
@@ -683,6 +685,7 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
+        **({"vision_api_base": vision_api_base} if vision_api_base else {}),
         persona=persona_name,
         **({"skill_allowlist": persona.skills} if persona.skills else {}),
     )
