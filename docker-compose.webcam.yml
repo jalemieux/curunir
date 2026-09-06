@@ -1,0 +1,28 @@
+# Webcam override — apply ONLY on the instance that has a camera attached.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.webcam.yml up -d
+#
+# Kept out of docker-compose.yml on purpose: compose refuses to start a service
+# whose `devices:` entry is missing on the host, so listing /dev/video0 in the
+# base file would break every camera-less instance.
+#
+# Host checks before first use:
+#   ls -l /dev/video*          # confirm the device node and its group (usually `video`)
+#   getent group video         # note the GID
+# If the host's video GID differs from the image's `video` group, replace the
+# group name below with the numeric GID (e.g. group_add: ["44"]) so the
+# container process can open the device.
+#
+# The `webcam` skill's snapshot.py reads WEBCAM_DEVICE; it also accepts an
+# http:// or rtsp:// stream URL for IP cameras, in which case no `devices:`
+# mapping is needed at all — just set WEBCAM_DEVICE in .env.
+services:
+  curunir:
+    devices:
+      - "${WEBCAM_DEVICE:-/dev/video0}:${WEBCAM_DEVICE:-/dev/video0}"
+    group_add:
+      - video
+    environment:
+      WEBCAM_DEVICE: ${WEBCAM_DEVICE:-/dev/video0}
+      # Optional: force a frame size, e.g. 1280x720. Unset = camera default.
+      WEBCAM_RESOLUTION: ${WEBCAM_RESOLUTION:-}
