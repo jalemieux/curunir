@@ -21,6 +21,8 @@ validation.
 - **Research stack the pipeline depends on** — `web-search`,
   `xai-search`, `gemini-search`, `reddit-research`, `linkedin-research`,
   `playwright`, plus `humanizer` (de-AI listing/outreach copy).
+- **Creative assets** — `gemini-image` (text-to-image for landing-page
+  heroes, ad creative, and social graphics; delivered via `attach`).
 - **Prompt** — `prompts/10-domain.md` (GTM focus areas, phase ordering) and
   `prompts/20-guardrails.md` (builder owns decisions, no fabricated signal,
   honest smoke tests, privacy), layered on top of `context/identity.md`.
@@ -33,7 +35,7 @@ The default tool set is unchanged; personas don't curate core tools.
 |-----|---------|-------|
 | `BRAVE_API_KEY` | `web-search`, `reddit-research`, `linkedin-research` | Brave Search API key |
 | `XAI_API_KEY` | `xai-search`, `reddit-research` | xAI (Grok) API key — X/Twitter social listening |
-| `GEMINI_API_KEY` | `gemini-search` | Google Gemini API key — grounded search + YouTube |
+| `GEMINI_API_KEY` | `gemini-search`, `gemini-image` | Google Gemini API key — grounded search + YouTube, image generation |
 
 Every GTM skill degrades gracefully when a research backend's key is missing
 (it falls back or skips that layer and warns the builder), but for full
