@@ -11,6 +11,7 @@ def test_default_config():
     assert config.identity_file == Path("./context/identity.md")
     assert config.skill_dirs == [Path("./skills"), Path("./context/skills")]
     assert config.vision_model is None
+    assert config.vision_api_base is None
     assert config.main_model_supports_vision is False
 
 
@@ -23,9 +24,11 @@ def test_custom_config():
 def test_vision_config():
     config = AgentConfig(
         vision_model="openai/gpt-4o-mini",
+        vision_api_base="http://host.docker.internal:8083/v1",
         main_model_supports_vision=True,
     )
     assert config.vision_model == "openai/gpt-4o-mini"
+    assert config.vision_api_base == "http://host.docker.internal:8083/v1"
     assert config.main_model_supports_vision is True
 
 

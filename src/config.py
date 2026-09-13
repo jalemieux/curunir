@@ -34,6 +34,9 @@ class AgentConfig:
     tts_model: str = "tts-1"
     tts_voice: str = "alloy"
     vision_model: str | None = None
+    # Endpoint for vision_model when it is served separately from the main
+    # model (e.g. a local llama.cpp VL model). None = the provider default.
+    vision_api_base: str | None = None
     main_model_supports_vision: bool = False
     portfolio_db: str = "context/memory/portfolio.db"
     crm_db: str = "context/memory/crm.db"

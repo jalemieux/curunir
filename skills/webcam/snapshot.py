@@ -13,6 +13,9 @@ Two steps in one command so the agent never has to "look" at a file itself
 2. **Describe** — ``src.llm.describe_image`` sends the frame to ``VISION_MODEL``
    (falling back to ``MODEL`` only when litellm says it accepts images) with
    the user's question as the prompt, and the text comes back on stdout.
+   ``VISION_API_BASE`` points the call at a separately-served vision model
+   (e.g. a local llama.cpp VL model); ``API_BASE`` is only reused when the
+   fallback to ``MODEL`` is taken.
 
 Prints JSON on stdout: ``{"path", "device", "model", "description"}`` on
 success; ``{"error", "hint"}`` and exit 1 on failure. ``--no-describe`` skips
@@ -140,10 +143,27 @@ def resolve_vision_model(env: dict | None = None, supports_vision=None) -> str:
     raise RuntimeError("no vision-capable model configured: set VISION_MODEL in .env")
 
 
+def resolve_vision_api_base(model: str, env: dict | None = None) -> str | None:
+    """Endpoint for the vision call.
+
+    ``VISION_API_BASE`` always wins. Otherwise ``API_BASE`` applies only when
+    the vision call is going to the *main* model (the fallback case) — it is
+    the main model's endpoint, so forwarding it to a separate VISION_MODEL
+    would send e.g. ``openai/gpt-4o-mini`` to a local llama.cpp server.
+    """
+    env = os.environ if env is None else env
+    explicit = (env.get("VISION_API_BASE") or "").strip()
+    if explicit:
+        return explicit
+    if model == (env.get("MODEL") or "").strip():
+        return (env.get("API_BASE") or "").strip() or None
+    return None
+
+
 async def _describe(model: str, path: Path, prompt: str) -> str:
     from src.llm import describe_image  # noqa: PLC0415
     return await describe_image(model, str(path), "image/jpeg", prompt,
-                                api_base=os.environ.get("API_BASE") or None)
+                                api_base=resolve_vision_api_base(model))
 
 
 def cmd_snapshot(args: argparse.Namespace, *, runner=_default_runner, describer=None) -> dict:
