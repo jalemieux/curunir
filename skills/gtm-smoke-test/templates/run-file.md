@@ -5,6 +5,10 @@ This is a smoke-test run file produced by the gtm-smoke-test skill.
 Phase A (setup) filled in metadata, variants, and posting checklists.
 Phase B (monitor) appends stat snapshots and analysis over time.
 Do not rewrite prior sections — append-only.
+
+The per-variant block and stats table below are Marketplace-shaped. For
+landing-page runs, use the blocks in references/landing-page.md § Run File
+Blocks instead.
 -->
 
 ## Metadata
@@ -16,7 +20,7 @@ Do not rewrite prior sections — append-only.
 | Posted date | {{YYYY-MM-DD}} |
 | Price | {{price}} |
 | Location(s) | {{city}} |
-| Venue(s) | Facebook Marketplace |
+| Venue(s) | {{venues}} |
 | Variant count | {{n}} |
 | Builder | {{builder_name}} |
 

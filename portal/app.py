@@ -99,6 +99,7 @@ _STATIC_DIR = Path(__file__).parent / "static"
 _LANDING_DIR = _STATIC_DIR / "landing"
 _LAUNCH_DIR = _STATIC_DIR / "launch"
 _FINANCE_DIR = _STATIC_DIR / "finance"
+_VARIANTS_DIR = _STATIC_DIR / "v"
 
 # Phones get the dedicated mobile UI (#304). The match is deliberately narrow —
 # "Mobile" plus the major phone platforms — so tablets and desktops fall
@@ -191,3 +192,12 @@ if _LAUNCH_DIR.exists():
 # with source="finance" so admin can segment.
 if _FINANCE_DIR.exists():
     app.mount("/finance", StaticFiles(directory=_FINANCE_DIR, html=True), name="finance")
+
+# Positioning-test variants (#544). Each variant is a self-contained page at
+# static/v/<slug>/index.html, served at /v/<slug>/, whose beta form posts
+# source="<slug>" so admin can compare sign-ups per variant. The marketing
+# persona adds variants via PRs that touch only static/v/ (see the
+# gtm-smoke-test skill's landing-page playbook), so a new variant needs no
+# portal code change.
+if _VARIANTS_DIR.exists():
+    app.mount("/v", StaticFiles(directory=_VARIANTS_DIR, html=True), name="variants")

@@ -1,6 +1,6 @@
 ---
 name: gtm-smoke-test
-description: "Use when a builder wants to validate demand for a product idea by running a fake-door / smoke-test listing where real buyers can attempt to transact. Generates angle-variant listings per venue, collects stats across runs, and issues a demand verdict. Trigger: builder has an idea (not a finished product) and wants real purchase-intent signal before investing in full onboard-ingest / position-segment work. v1 supports Facebook Marketplace; Craigslist / eBay / landing-page planned."
+description: "Use when a builder wants to validate demand for a product idea by running a fake-door / smoke-test listing where real buyers can attempt to transact. Generates angle-variant listings per venue, collects stats across runs, and issues a demand verdict. Trigger: builder has an idea (not a finished product) and wants real purchase-intent signal before investing in full onboard-ingest / position-segment work. Supports Facebook Marketplace and own-domain landing-page positioning tests on curunir.ai; Craigslist / eBay planned."
 ---
 
 # Smoke Test
@@ -11,7 +11,7 @@ Goal: after one or more runs, the builder knows whether the idea has real buyer 
 
 **What this is NOT:** community discovery (Reddit / Hacker News / Product Hunt posts). Those measure reaction to an idea; smoke tests measure willingness to transact. If the builder wants community sentiment, point them at `gtm-onboard-ingest` or `gtm-competitive-landscape` instead.
 
-**Requires:** `humanizer` skill to de-AI listing copy. No API keys needed for v1 — Marketplace posting and stats collection are manual by design (avoids bot detection and Meta ToS issues).
+**Requires:** `humanizer` skill to de-AI listing copy. Marketplace needs no API keys — posting and stats collection are manual by design (avoids bot detection and Meta ToS issues). The landing-page venue needs the `github` skill (`GH_TOKEN`) to open the variant PR; deploy, ad launch, and stats stay with the builder.
 
 ## Supported Venues
 
@@ -20,9 +20,9 @@ Goal: after one or more runs, the builder knows whether the idea has real buyer 
 | Facebook Marketplace | ✅ v1 | Physical-goods bias, local audience, visual listing, manual posting |
 | Craigslist | planned | Text-heavy, older/pro-sumer audience, email contact flow |
 | eBay | planned | Auction format = direct willingness-to-pay signal via bids |
-| Landing page + checkout | planned | Own-domain fake-door with "Buy" / "Pre-order" → "sold out" flow |
+| Landing page (curunir.ai) | ✅ | Positioning test: variant pages at `/v/<slug>/`, paid traffic per variant, beta sign-ups tagged per variant. You open a PR; the builder merges + runs ads. |
 
-v1 ships Marketplace only. Adding a venue means dropping a new `references/{venue}.md` playbook and wiring it into Phase A venue selection.
+Adding a venue means dropping a new `references/{venue}.md` playbook and wiring it into Phase A venue selection.
 
 ## Workflow
 
@@ -50,6 +50,8 @@ Collect the minimum required inputs. Do not ask for things you can infer.
 | Venue(s) | yes | Facebook Marketplace |
 | Variant count | no | 4 |
 | Location (city) | yes for Marketplace | ask builder |
+| Base page | yes for landing page | ask builder (usually `/`) |
+| Ad budget + network | yes for landing page | ask builder (Reddit Ads) |
 | Photos available | no | skill will output image prompts if none |
 | Output path | no | `./smoke-test-{idea-slug}-{YYYYMMDD}.md` |
 
@@ -57,7 +59,12 @@ Collect the minimum required inputs. Do not ask for things you can infer.
 
 #### A2: Venue Selection & Playbook Load
 
-For each selected venue, load the corresponding playbook from `references/{venue}.md`. For v1 that's `references/marketplace.md` — read it before generating any content.
+For each selected venue, load the corresponding playbook and read it before generating any content:
+
+| Venue | Playbook |
+|-------|----------|
+| Facebook Marketplace | `references/marketplace.md` |
+| Landing page (curunir.ai) | `references/landing-page.md` |
 
 Each playbook defines: listing format, title/description conventions, photo expectations, category selection, stat types the venue exposes, and benchmarks for interpretation.
 
@@ -84,6 +91,12 @@ For each (variant × venue) combination, draft the listing per that venue's play
 - Category selection
 - Photo prompts (if no photos provided) — 3–5 per variant, consistent visual style
 
+For a landing page (see `references/landing-page.md` § Building a Variant):
+- A copy of the base page per variant (control included) at `portal/static/v/<slug>/index.html`
+- Only title / H1 / subhead / one CTA line change; form retagged `source: '<slug>'`
+- One ad block per variant (headline echoing the page, same image across variants)
+- Price is optional — the CTA is a beta sign-up, not a purchase
+
 #### A5: De-AI the Copy
 
 **Mandatory.** Invoke the `humanizer` skill on every listing title and description. Marketplace buyers pattern-match AI-generated copy and skip past it. The humanizer removes the tells.
@@ -99,6 +112,8 @@ Use `templates/run-file.md` as the structure. Write the run file to the output p
 - Empty analysis & verdict sections
 
 Tell the builder: "Run file written to `{path}`. Post each variant on {venue(s)} following the checklist, then come back and invoke this skill again to log stats."
+
+For a landing page, first open the variant PR per `references/landing-page.md` § Deploy Handoff, record its URL in the run file, and hand the builder the ad spec plus the budget reality check. The builder merges, launches ads once every variant URL loads, then returns for Phase B.
 
 Cross-run log (optional, v1): if `smoke-test-log.md` exists in the project root, append a one-line entry — date, idea, price, venues, run file path. Create it if missing. This lets the builder compare across runs (different prices, different locations).
 
@@ -119,7 +134,9 @@ For each variant, prompt for current totals. For Marketplace:
 - Shares (if shown)
 - Days live
 
-Stat types come from the venue playbook (`references/marketplace.md` § Stats).
+For a landing page: per-variant impressions, clicks, spend (ad dashboard) and sign-ups by `source` (portal admin).
+
+Stat types come from the venue playbook (§ Stats Exposed).
 
 **Also collect qualitative:** the builder's gut read, any patterns they've noticed (e.g. "all 4 messages on variant 2 asked the same question"). Qualitative often matters more than the counts.
 
@@ -139,7 +156,7 @@ If multiple prior stat snapshots exist (run has been checked before), compute gr
 
 #### B4: Verdict (if threshold met)
 
-Verdict thresholds (all must hold):
+Verdict thresholds (all must hold). A venue playbook's own § Verdict Threshold overrides these — landing pages use clicks per variant, not views:
 - At least 72 hours since posting, OR 100+ total views across variants, whichever first
 - At least 2 stat snapshots (so growth is visible)
 

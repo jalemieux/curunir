@@ -44,3 +44,25 @@ async def test_root_serves_chat_when_authed(client):
     assert resp.status_code == 200
     assert b"<title>Curunir</title>" in resp.content
     assert b"/ws/browser" in resp.content
+
+
+@pytest.mark.asyncio
+async def test_variant_pages_served_under_v(client):
+    # Issue #544: positioning-test variants live at static/v/<slug>/ and are
+    # served at /v/<slug>/ with no per-variant portal code.
+    from portal.app import _VARIANTS_DIR
+
+    slug = "_test-variant"
+    page = _VARIANTS_DIR / slug / "index.html"
+    page.parent.mkdir()
+    try:
+        page.write_text("<h1>variant under test</h1>")
+        resp = await client.get(f"/v/{slug}/", follow_redirects=False)
+        assert resp.status_code == 200
+        assert b"variant under test" in resp.content
+    finally:
+        page.unlink()
+        page.parent.rmdir()
+
+    resp = await client.get(f"/v/{slug}/", follow_redirects=False)
+    assert resp.status_code == 404
