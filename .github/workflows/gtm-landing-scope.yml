@@ -1,0 +1,33 @@
+name: GTM landing PR scope
+
+# Landing-page PRs from the marketing persona (#544) carry the `gtm:landing`
+# label and may only touch positioning-test variants under portal/static/v/.
+# Merging to main deploys the portal, so this keeps a marketing PR from
+# reaching harness or portal code.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  scope:
+    if: contains(github.event.pull_request.labels.*.name, 'gtm:landing')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check changed paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          outside=$(gh pr diff "$PR" --repo "$REPO" --name-only | grep -v '^portal/static/v/' || true)
+          if [ -n "$outside" ]; then
+            echo "::error::gtm:landing PRs may only change portal/static/v/. Out-of-scope files:"
+            echo "$outside"
+            exit 1
+          fi
+          echo "All changed files are under portal/static/v/."

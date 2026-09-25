@@ -30,6 +30,8 @@ skills:
   - humanizer        # gtm-smoke-test: de-AI listing copy
   # Creative assets: hero images, ad creative, social graphics for landing pages + smoke tests
   - gemini-image
+  # Landing-page handoff: open variant PRs against portal/static/v/ (#544)
+  - github
 
 # Key NAMES only — documentation + soft startup warning. The operator
 # supplies the values via the container environment / .env. See
@@ -38,3 +40,4 @@ keys:
   - BRAVE_API_KEY   # web-search, reddit-research, linkedin-research
   - XAI_API_KEY     # xai-search, reddit-research
   - GEMINI_API_KEY  # gemini-search, gemini-image
+  - GH_TOKEN        # github: landing-page variant PRs (gtm-smoke-test)
