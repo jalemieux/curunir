@@ -1,6 +1,6 @@
 ---
 name: introspect
-description: "Use to review curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows — and to review past conversation transcripts (context/conversations/) for how the agent actually behaved: memory slips, cut-off replies, loops, or botched answers. Trigger on a schedule (e.g. hourly via the `schedule` tool) — files GitHub issues for novel findings, deduping against open ones — or on demand when the user asks to scan logs / check on recent behavior / investigate how a past conversation went ('check the logs', 'how has the agent been behaving', 'any errors lately', 'you seemed to lose track in that thread yesterday', 'were you cutting off replies?'), in which case it just reports findings back in chat instead of filing issues."
+description: "Use to review curunir's own logs (the rotating $LOG_FILE, or docker logs) for regressions, errors, loops, tool-misuse, or context overflows — and to review past conversation transcripts (the agent's conversations directory) for how the agent actually behaved: memory slips, cut-off replies, loops, or botched answers. Trigger on a schedule (e.g. hourly via the `schedule` tool) — files GitHub issues for novel findings, deduping against open ones — or on demand when the user asks to scan logs / check on recent behavior / investigate how a past conversation went ('check the logs', 'how has the agent been behaving', 'any errors lately', 'you seemed to lose track in that thread yesterday', 'were you cutting off replies?'), in which case it just reports findings back in chat instead of filing issues."
 tools: bash
 ---
 
@@ -28,7 +28,7 @@ botched answer — read the conversation transcripts directly. Reach for these
 when the user points at a past conversation rather than the logs ("you seemed to
 lose track in the META thread yesterday", "were you cutting off replies?").
 
-- **Where:** one JSON file per session at `context/conversations/<session_id>.json`.
+- **Where:** one JSON file per session at `{{context}}/conversations/<session_id>.json`.
 - **What's in each:** `{ session_id, channel, title, preview, created_at,
   updated_at, history: [...] }`. `history` is the complete message list
   (role + content) for that session; `title`/`preview` are derived from the
@@ -38,7 +38,7 @@ lose track in the META thread yesterday", "were you cutting off replies?").
 - **What to skip:** `email`, scratch, and `sched:*` sessions are
   system/ephemeral — focus on real interactive conversations.
 - **Short version:** summarized past conversations also live at
-  `context/memory/archives/conversations/<date>-<slug>.md` if you want the gist
+  `{{context}}/memory/archives/conversations/<date>-<slug>.md` if you want the gist
   without the full transcript.
 
 **Match the effort to the request:**
@@ -71,7 +71,7 @@ reports findings in chat and never touches GitHub.
 When running inside the curunir container, `$LOG_FILE` is the normal path —
 `docker logs` is not reachable without the socket mounted. If neither source
 is available: in scheduled mode, log a one-line failure to
-`context/memory/introspection.md` and exit cleanly; in ad-hoc mode, tell the
+`{{context}}/memory/introspection.md` and exit cleanly; in ad-hoc mode, tell the
 user the log source is unreachable. Do not invent findings either way.
 
 ## Inputs
@@ -294,7 +294,7 @@ gh label create "introspect:{category}" --description "Introspect finding: {cate
 ### Step 6: Ledger
 
 After processing every finding (filed, commented, or skipped), append one line
-per finding to `context/memory/introspection.md`. Create the file with a header
+per finding to `{{context}}/memory/introspection.md`. Create the file with a header
 if it doesn't exist.
 
 ```
@@ -336,7 +336,7 @@ Never crash the scheduler tick. Always exit with a ledger entry.
 ## Scheduling
 
 This skill is built to run on a cron. Register it with the `schedule` tool
-(entries persist in `context/schedules.db`). Add it, then keep it disabled
+(entries persist in `{{context}}/schedules.db`). Add it, then keep it disabled
 via `toggle` until you've confirmed `GH_TOKEN` and `INTROSPECT_REPO` are set
 and `$LOG_FILE` is readable — docker compose points it at
 `/app/workspace/curunir.log`; `toggle` again to enable:

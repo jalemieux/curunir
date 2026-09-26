@@ -110,6 +110,7 @@ class PortalChannel:
         conversations_provider: "callable[[], list[dict]] | None" = None,
         uploads_dir: str | None = None,
         cancel_session: "callable[[str], bool] | None" = None,
+        project_root: str | None = None,
     ):
         self.in_queue = in_queue
         self.url = url
@@ -117,9 +118,12 @@ class PortalChannel:
         self.history_provider = history_provider or (lambda _sid: [])
         self.skills_provider = skills_provider or (lambda: [])
         self.conversations_provider = conversations_provider or (lambda: [])
+        # run.py passes the container's shared uploads dir and the repo root;
+        # the cwd fallbacks only serve direct construction (tests).
         self.uploads_dir = uploads_dir or os.path.join(
             os.getcwd(), "context", "uploads"
         )
+        self.project_root = project_root or os.getcwd()
         self.cancel_session = cancel_session
         self._connection: Any = None
         self._terminate = False
@@ -354,7 +358,7 @@ class PortalChannel:
         # path applies in send().
         for m in messages:
             if m.get("attachments"):
-                _enrich_attachments(m["attachments"], os.getcwd())
+                _enrich_attachments(m["attachments"], self.project_root)
         try:
             await self._connection.send(json.dumps({
                 "type": "history_snapshot",
@@ -411,7 +415,7 @@ class PortalChannel:
         # content inlined, paths normalized) — don't want to re-read disk
         # on flush, the file may be gone by then.
         if msg.attachments:
-            _enrich_attachments(msg.attachments, os.getcwd())
+            _enrich_attachments(msg.attachments, self.project_root)
 
         wrapped = {
             "type": "agent_message",

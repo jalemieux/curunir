@@ -69,13 +69,17 @@ class WebSocketChannel:
         cancel_session: Callable[[str], bool] | None = None,
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
         pairing_token: str | None = None,
+        project_root: str | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
         self.port = port
         self.model = model
         self.persona = persona
+        # run.py passes the container's shared uploads dir and the repo root;
+        # the cwd fallbacks only serve direct construction (tests).
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
+        self.project_root = project_root or os.getcwd()
         self._connections: dict[str, websockets.ServerConnection] = {}
         self.cancel_session = cancel_session
         self._connection: websockets.ServerConnection | None = None
@@ -341,7 +345,7 @@ class WebSocketChannel:
             return
 
         if msg.attachments:
-            _enrich_attachments(msg.attachments, os.getcwd())
+            _enrich_attachments(msg.attachments, self.project_root)
 
         payload: dict = {
             "content": msg.content,

@@ -1,6 +1,6 @@
 ---
 name: personality
-description: "Use to onboard or refresh the agent's own personality — name plus a derived voice/stance prose block. Triggered by `/personality` or by the `onboarding` orchestrator. Edits the opening line, `## Identity`, and `## Personality` of `context/identity.md`."
+description: "Use to onboard or refresh the agent's own personality — name plus a derived voice/stance prose block. Triggered by `/personality` or by the `onboarding` orchestrator. Edits the opening line, `## Identity`, and `## Personality` of the identity file."
 ---
 
 # Personality
@@ -22,7 +22,7 @@ Accept a short answer. No follow-ups.
 
 ## Derive (no new questions)
 
-Pull the profile + preferences answers. Default source is the conversation history above (when the `onboarding` orchestrator invoked you, those two steps ran first in this same conversation). If those answers aren't present — e.g. you were invoked standalone via `/personality` — `read` `context/memory/profile.md` and `context/memory/preferences.md` instead. Both files have a stable shape: profile has `## Name` and `## Role / Focus` sections; preferences has `## Communication style` and `## Response length` sections. The `**Fact:**` line under each section holds the value.
+Pull the profile + preferences answers. Default source is the conversation history above (when the `onboarding` orchestrator invoked you, those two steps ran first in this same conversation). If those answers aren't present — e.g. you were invoked standalone via `/personality` — `read` `{{context}}/memory/profile.md` and `{{context}}/memory/preferences.md` instead. Both files have a stable shape: profile has `## Name` and `## Role / Focus` sections; preferences has `## Communication style` and `## Response length` sections. The `**Fact:**` line under each section holds the value.
 
 - **Owner's name + role/focus** (from profile) → seeds the opening sentence and informs stance.
 - **Communication style** (from preferences) → register and warmth for the `## Personality` prose.
@@ -33,7 +33,7 @@ The `## Personality` block is **one prose block, 2–5 sentences, second person,
 
 ## Write
 
-`context/identity.md` is persona-only (operating defaults live in `context/behavior.md` and are out of scope). The skeleton has just two empty headings — `## Identity` and `## Personality` — so this skill owns the whole file. Use `write` to produce the filled file in one shot. Shape:
+`{{context}}/identity.md` is persona-only (operating defaults live in the persona bundle's prompts and are out of scope). The skeleton has just two empty headings — `## Identity` and `## Personality` — so this skill owns the whole file. Use `write` to produce the filled file in one shot. Shape:
 
 ```
 You are <agent name>, <one-clause disposition> for <owner name> — <owner role/focus>.
@@ -47,7 +47,7 @@ You are <agent name>, <one-clause disposition> for <owner name> — <owner role/
 <derived 2–5 sentence prose block>
 ```
 
-That's the only structure. Do not add extra `##` sections. Do not touch `context/behavior.md`.
+That's the only structure. Do not add extra `##` sections. Do not touch the persona prompts.
 
 ## Return
 

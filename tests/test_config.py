@@ -72,3 +72,61 @@ def test_persona_defaults():
     c = AgentConfig()
     assert c.persona == "default"
     assert c.skill_allowlist is None
+
+
+# --- agent/container path layout (agents-and-containers phase 1) ----------
+
+def test_bare_config_is_legacy_layout():
+    """A bare AgentConfig keeps every historical literal and shared==context."""
+    c = AgentConfig()
+    assert c.shared_dir == c.context_dir == Path("./context")
+    assert c.agent_name == "default"
+    assert c.is_default is True
+    assert c.portfolio_db == Path("./context/memory/portfolio.db")
+    assert c.crm_db == Path("./context/memory/crm.db")
+    assert c.usage_db == Path("./context/usage.db")
+    assert c.path_vars == {"context": "context", "shared": "context"}
+
+
+def test_for_agent_legacy_equals_bare_field_for_field():
+    import dataclasses
+
+    bare = AgentConfig()
+    derived = AgentConfig.for_agent("default", "./context")
+    for f in dataclasses.fields(AgentConfig):
+        assert getattr(bare, f.name) == getattr(derived, f.name), f.name
+
+
+def test_for_agent_derives_private_and_shared_paths(tmp_path):
+    ctx = tmp_path / "agents" / "finance"
+    c = AgentConfig.for_agent("finance", ctx, tmp_path, is_default=False)
+    assert c.agent_name == "finance"
+    assert c.is_default is False
+    assert c.context_dir == ctx
+    assert c.shared_dir == tmp_path
+    # private, from context_dir
+    assert c.identity_file == ctx / "identity.md"
+    assert c.schedules_db == ctx / "schedules.db"
+    assert c.portfolio_db == ctx / "memory" / "portfolio.db"
+    assert c.crm_db == ctx / "memory" / "crm.db"
+    assert c.skill_dirs == [Path("./skills"), ctx / "skills"]
+    # shared, from shared_dir
+    assert c.usage_db == tmp_path / "usage.db"
+    assert c.path_vars == {"context": str(ctx), "shared": str(tmp_path)}
+
+
+def test_for_agent_shared_dir_defaults_to_context_dir(tmp_path):
+    c = AgentConfig.for_agent("solo", tmp_path)
+    assert c.shared_dir == tmp_path
+    assert c.usage_db == tmp_path / "usage.db"
+
+
+def test_for_agent_overrides_win(tmp_path):
+    c = AgentConfig.for_agent(
+        "finance", tmp_path, model="openai/gpt-4o",
+        portfolio_db=tmp_path / "elsewhere.db",
+    )
+    assert c.model == "openai/gpt-4o"
+    assert c.portfolio_db == tmp_path / "elsewhere.db"
+    # untouched derivations still hold
+    assert c.crm_db == tmp_path / "memory" / "crm.db"

@@ -1,11 +1,11 @@
 ---
 name: profile
-description: "Use to onboard or refresh the owner's profile facts — name and role/focus. Triggered by `/profile` or by the `onboarding` orchestrator. Writes `context/memory/profile.md`."
+description: "Use to onboard or refresh the owner's profile facts — name and role/focus. Triggered by `/profile` or by the `onboarding` orchestrator. Writes the owner's memory/profile.md."
 ---
 
 # Profile
 
-Capture two facts about the owner: how to address them, and what they want help with. These end up in `context/memory/profile.md` and are read by future turns.
+Capture two facts about the owner: how to address them, and what they want help with. These end up in `{{context}}/memory/profile.md` and are read by future turns.
 
 ## When to use
 
@@ -23,7 +23,7 @@ Don't add follow-ups. If the user gives a short or terse answer, accept it — t
 
 ## Write
 
-After the second answer, write `context/memory/profile.md` with the `write` tool (overwriting whatever is there — the bootstrap default is a placeholder).
+After the second answer, write `{{context}}/memory/profile.md` with the `write` tool (overwriting whatever is there — the bootstrap default is a placeholder).
 
 The file must contain two H2 sections in this exact shape:
 

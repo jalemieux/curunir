@@ -13,7 +13,7 @@ you never hand-sum a total or hand-edit the data.
 
 ## Data model
 
-The store (`context/memory/portfolio.db`, SQLite) holds `assets` and
+The store (`{{context}}/memory/portfolio.db`, SQLite) holds `assets` and
 `liabilities`. Each asset has a `class` (equity, real_estate, collectible,
 physical, cash, private, retirement), a `label`, a current `value`, and —
 critically — `cost_basis` and `acquired` (acquisition date). Liabilities

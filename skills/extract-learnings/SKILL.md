@@ -9,7 +9,7 @@ Extract stable, reusable knowledge from transient communications.
 
 ## What to Extract
 
-Read `context/memory/README.md` for the current memory taxonomy — it defines which categories exist and what belongs in each. Place extracted facts in the appropriate category file.
+Read `{{context}}/memory/README.md` for the current memory taxonomy — it defines which categories exist and what belongs in each. Place extracted facts in the appropriate category file.
 
 ## Quick Filter
 

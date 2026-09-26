@@ -1,6 +1,6 @@
 # SKILL.md Template
 
-Copy this file to `context/skills/<your-skill-name>/SKILL.md` and fill in
+Copy this file to `{{context}}/skills/<your-skill-name>/SKILL.md` and fill in
 the placeholders. Delete sections you don't need. Keep the whole file under
 ~200 lines; move long content into `references/` files that SKILL.md links
 to.

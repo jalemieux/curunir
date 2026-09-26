@@ -1,12 +1,12 @@
 ---
 name: dreaming
-description: "Use when the scheduler or user asks to tidy, organize, or reconcile the memory directory (\"dreaming\", memory housekeeping). Audits context/memory/ against its README and fixes organization — registers new files, corrects naming and placement, repairs references — without ever editing the content of memory files."
+description: "Use when the scheduler or user asks to tidy, organize, or reconcile the memory directory (\"dreaming\", memory housekeeping). Audits the agent's memory directory against its README and fixes organization — registers new files, corrects naming and placement, repairs references — without ever editing the content of memory files."
 hidden: true
 ---
 
 # Dreaming
 
-The periodic housekeeping pass for `context/memory/`. Dreaming keeps the memory
+The periodic housekeeping pass for `{{context}}/memory/`. Dreaming keeps the memory
 directory **organized**: every file registered, named, and placed according to
 the conventions written in that directory's own `README.md`.
 
@@ -43,36 +43,36 @@ record it in the report (Step 4) as something a human should decide.
 ## Why this is a skill and not a script
 
 "Expected organization" is not a schema — it is the prose conventions in
-`context/memory/README.md`. Deciding *where* a new file's row belongs in the
+`{{context}}/memory/README.md`. Deciding *where* a new file's row belongs in the
 Taxonomy table, *what* its purpose is, and *whether* it answers a recurring
 owner question all require reading and understanding. That is the job.
 
 ## Inputs
 
 - **Date** — today, `YYYY-MM-DD`. Use `date -u +%F`.
-- **Memory directory** — `context/memory/`. If it does not exist, there is
+- **Memory directory** — `{{context}}/memory/`. If it does not exist, there is
   nothing to do: write nothing, exit, and report "memory directory not present."
 
 ---
 
 ## Step 1 — Snapshot (git, local-only)
 
-`context/memory/` is protected by a **local-only** git repository. It exists
+`{{context}}/memory/` is protected by a **local-only** git repository. It exists
 solely as an undo mechanism for dreaming. The memory directory is private.
 
 > **Never** run `git remote add`, `git push`, or any command that sends this
 > repository anywhere. It has no remote and must never get one.
 
-1. If `context/memory/.git` does not exist, initialize it:
+1. If `{{context}}/memory/.git` does not exist, initialize it:
    ```bash
-   git -C context/memory init
+   git -C {{context}}/memory init
    ```
 2. Commit everything currently on disk as the restore point. This captures any
    content the memory extractor wrote since the last dreaming run — so it is
    *not* mixed into dreaming's own commit:
    ```bash
-   git -C context/memory add -A
-   git -C context/memory -c user.name=dreaming -c user.email=dreaming@localhost \
+   git -C {{context}}/memory add -A
+   git -C {{context}}/memory -c user.name=dreaming -c user.email=dreaming@localhost \
      commit -m "pre-dream snapshot $(date -u +%F)" || true
    ```
    `|| true` because a clean tree (nothing to snapshot) is fine. The `-c` flags
@@ -83,13 +83,13 @@ attributable to dreaming alone.
 
 ## Step 2 — Survey
 
-1. **Read `context/memory/README.md` in full.** It is the source of truth for
+1. **Read `{{context}}/memory/README.md` in full.** It is the source of truth for
    expected organization: the Taxonomy table (the canonical file list), the
    "Where to look first" routing list, and the naming/placement conventions
    (e.g. "`people/` — one file per person, lowercase-hyphenated").
 2. **List what is actually on disk:**
    ```bash
-   git -C context/memory ls-files
+   git -C {{context}}/memory ls-files
    ```
    (Use `ls-files` so the `.git` directory is excluded automatically.)
 3. Hold the two side by side. The discrepancies drive Step 3.
@@ -120,10 +120,10 @@ individually.)
 A file whose name breaks a convention (e.g. `people/Anna Smith.md` should be
 `people/anna-smith.md`).
 
-- Rename with `git -C context/memory mv "<old>" "<new>"` so history follows.
+- Rename with `git -C {{context}}/memory mv "<old>" "<new>"` so history follows.
 - **Immediately** re-point every inbound reference. Find them:
   ```bash
-  grep -rn "<old-filename>" context/memory --exclude-dir=.git
+  grep -rn "<old-filename>" {{context}}/memory --exclude-dir=.git
   ```
   Update the Taxonomy table, the routing list, index files under `summaries/`,
   and any stale path reference in prose (path only — see the boundary rule).
@@ -133,7 +133,7 @@ A file whose name breaks a convention (e.g. `people/Anna Smith.md` should be
 A file in the wrong location (e.g. a person record sitting at the memory root
 instead of in `people/`).
 
-- Move it with `git -C context/memory mv`.
+- Move it with `git -C {{context}}/memory mv`.
 - Re-point references exactly as in 3b.
 
 ### 3d. Dangling reference
@@ -152,7 +152,7 @@ dreaming exists to eliminate. Rename-and-re-point is **one** step, not two.
 
 ## Step 4 — Report
 
-Overwrite `context/memory/summaries/dreaming.md` with a fresh report each run:
+Overwrite `{{context}}/memory/summaries/dreaming.md` with a fresh report each run:
 
 ```markdown
 # Dreaming — <YYYY-MM-DD>
@@ -177,13 +177,13 @@ section and `Result: clean — no drift found`.
 Commit dreaming's structural changes as a single, separate commit:
 
 ```bash
-git -C context/memory add -A
-git -C context/memory -c user.name=dreaming -c user.email=dreaming@localhost \
+git -C {{context}}/memory add -A
+git -C {{context}}/memory -c user.name=dreaming -c user.email=dreaming@localhost \
   commit -m "dreaming: <one-line summary of what changed>" || true
 ```
 
 Because Step 1 already committed everything prior, this commit's diff is
-**only** dreaming's work — so `git -C context/memory revert <this commit>`
+**only** dreaming's work — so `git -C {{context}}/memory revert <this commit>`
 cleanly undoes a bad pass without losing any extracted facts.
 
 ---
@@ -192,7 +192,7 @@ cleanly undoes a bad pass without losing any extracted facts.
 
 Before finishing, confirm in your reasoning:
 
-- [ ] Step 1 ran — `context/memory/` is a git repo and the pre-dream snapshot
+- [ ] Step 1 ran — `{{context}}/memory/` is a git repo and the pre-dream snapshot
       commit was made (or the tree was already clean).
 - [ ] `README.md` was read before any reconcile decision.
 - [ ] Every rename/move had its references re-pointed in the same pass

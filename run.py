@@ -541,7 +541,8 @@ async def periodic_dreaming(agent: Agent, interval_sec: int):
     while True:
         await asyncio.sleep(interval_sec)
         try:
-            skill_content = load_skill("dreaming", agent.config.skill_dirs)
+            skill_content = load_skill("dreaming", agent.config.skill_dirs,
+                                       paths=agent.config.path_vars)
             if skill_content.startswith("Skill not found"):
                 logger.warning("Dreaming skill not found; skipping")
                 continue
@@ -657,11 +658,6 @@ async def main():
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
 
-    # Seed context/ from context.default/ on first run (non-overwriting).
-    # Must run before building the system prompt so a fresh deployment boots
-    # with the baseline identity.md instead of failing.
-    bootstrap_context(Path("./context"))
-
     persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or DEFAULT_PERSONA
     persona = load_persona(persona_name)
     logger.info(
@@ -686,6 +682,11 @@ async def main():
         persona=persona_name,
         **({"skill_allowlist": persona.skills} if persona.skills else {}),
     )
+    # Seed the agent's context dir from context.default/ on first run
+    # (non-overwriting). Must run before building the system prompt so a
+    # fresh deployment boots with the baseline identity.md instead of failing.
+    bootstrap_context(Path(config.context_dir))
+
     config.main_model_supports_vision = _detect_vision_support(config.model)
     if not config.main_model_supports_vision:
         if not config.vision_model:
@@ -715,7 +716,13 @@ async def main():
     channels = {}
     ws_host = os.environ.get("WS_HOST", "127.0.0.1")
     ws_port = int(os.environ.get("WS_PORT", "8765"))
-    ws_token_path = Path(config.context_dir) / ".ws-token"
+    # Container-shared paths (the pairing token, uploads, email state) live
+    # under config.shared_dir; for the legacy layout that is context/ itself.
+    shared_dir = Path(config.shared_dir)
+    # Absolute, like the channels' historical os.getcwd()-based default, so
+    # staged attachment paths keep their shape.
+    uploads_dir = str((Path(config.repo_root) / shared_dir / "uploads").resolve())
+    ws_token_path = shared_dir / ".ws-token"
     ws_pairing_token = _ensure_ws_token(ws_token_path)
     ws_allowed_origins_env = os.environ.get("WS_ALLOWED_ORIGINS", "").strip()
     if ws_allowed_origins_env:
@@ -730,6 +737,8 @@ async def main():
         cancel_session=agent.request_cancel,
         allowed_origins=ws_allowed_origins,
         pairing_token=ws_pairing_token,
+        uploads_dir=uploads_dir,
+        project_root=str(config.repo_root),
     )
     channels["cli"] = ws
 
@@ -745,7 +754,7 @@ async def main():
         allowed_senders=[s.strip() for s in os.environ.get("EMAIL_ALLOWED_SENDERS", "").split(",") if s.strip()],
         restrict_outbound=os.environ.get("EMAIL_RESTRICT_OUTBOUND", "true").lower() == "true",
         attachment_dir=os.environ.get("EMAIL_ATTACHMENT_DIR", "/tmp/attachments"),
-        state_file=Path(os.environ.get("EMAIL_STATE_FILE", "./context/email_state.json")),
+        state_file=Path(os.environ.get("EMAIL_STATE_FILE") or shared_dir / "email_state.json"),
         spam_score_threshold=float(os.environ.get("EMAIL_SPAM_SCORE_THRESHOLD", "5.0")),
         send_max_retries=int(os.environ.get("EMAIL_SEND_MAX_RETRIES", "5")),
         send_retry_backoff_sec=float(os.environ.get("EMAIL_SEND_RETRY_BACKOFF", "30")),
@@ -775,6 +784,8 @@ async def main():
             ),
             conversations_provider=lambda: agent.conversations_snapshot(),
             cancel_session=agent.request_cancel,
+            uploads_dir=uploads_dir,
+            project_root=str(config.repo_root),
         )
         channels["portal"] = portal_channel
         logger.info("Portal channel enabled for %s", portal_url)
@@ -794,6 +805,7 @@ async def main():
             port=local_web_config.port,
             model=config.model,
             persona=persona.name,
+            uploads_dir=uploads_dir,
             cancel_session=agent.request_cancel,
             allowed_origins=ws_allowed_origins,
             pairing_token=ws_pairing_token,

@@ -55,3 +55,28 @@ class TestExecBash:
         monkeypatch.chdir(tmp_path)
         result = exec_bash({"command": "pwd"}, agent_config)
         assert str(agent_config.repo_root) in result
+
+
+class TestScriptEnv:
+    """The bash tool exports the agent's dirs so skill scripts default to them."""
+
+    def test_exports_context_and_shared_dirs(self, tmp_path):
+        from src.config import AgentConfig
+
+        ctx = tmp_path / "agents" / "fin"
+        cfg = AgentConfig.for_agent("fin", ctx, tmp_path)
+        out = exec_bash({"command": 'echo "$CURUNIR_CONTEXT_DIR|$CURUNIR_SHARED_DIR"'}, cfg)
+        assert out.strip() == f"{ctx.resolve()}|{tmp_path.resolve()}"
+
+    def test_legacy_config_exports_repo_context_dir(self, agent_config):
+        from src.config import AgentConfig
+
+        cfg = AgentConfig()  # legacy layout: both are ./context under repo_root
+        out = exec_bash({"command": 'echo "$CURUNIR_CONTEXT_DIR|$CURUNIR_SHARED_DIR"'}, cfg)
+        expected = str((cfg.repo_root / "context").resolve())
+        assert out.strip() == f"{expected}|{expected}"
+
+    def test_process_env_is_inherited(self, agent_config, monkeypatch):
+        monkeypatch.setenv("CURUNIR_TEST_MARKER", "present")
+        out = exec_bash({"command": "echo $CURUNIR_TEST_MARKER"}, agent_config)
+        assert out.strip() == "present"

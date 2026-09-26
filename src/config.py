@@ -5,6 +5,17 @@ from pathlib import Path
 
 @dataclass
 class AgentConfig:
+    """Per-agent settings.
+
+    Path layout (docs/superpowers/specs/2026-09-26-agents-and-containers-design.md):
+    ``context_dir`` is the agent's private area (identity, memory,
+    conversations, schedules, user skills) and ``shared_dir`` is the
+    container's shared area (workspace deliverables, uploads, usage db,
+    pairing token, email state). A bare ``AgentConfig()`` is the legacy
+    single-agent layout where both are ``./context`` and every path field
+    below keeps its historical literal default. ``for_agent`` derives the
+    same fields from a chosen ``context_dir`` / ``shared_dir`` pair.
+    """
     model: str = "anthropic/claude-sonnet-4-20250514"
     api_base: str | None = None
     openrouter_provider: str | None = None
@@ -35,8 +46,66 @@ class AgentConfig:
     tts_voice: str = "alloy"
     vision_model: str | None = None
     main_model_supports_vision: bool = False
-    portfolio_db: str = "context/memory/portfolio.db"
-    crm_db: str = "context/memory/crm.db"
+    portfolio_db: Path = Path("./context/memory/portfolio.db")
+    crm_db: Path = Path("./context/memory/crm.db")
+    # Container-level fields. ``shared_dir`` defaults to ``context_dir`` so a
+    # bare config is the legacy layout; ``agent_name`` / ``is_default`` name
+    # this agent inside its container (the single legacy agent is the default).
+    shared_dir: Path | None = None
+    agent_name: str = "default"
+    is_default: bool = True
+
+    def __post_init__(self) -> None:
+        if self.shared_dir is None:
+            self.shared_dir = self.context_dir
+
+    @property
+    def path_vars(self) -> dict[str, str]:
+        """Values for the ``{{context}}`` / ``{{shared}}`` placeholders.
+
+        Rendered into skill and persona markdown by ``src.skills.render_paths``
+        and exported to skill scripts by the bash tool as
+        ``CURUNIR_CONTEXT_DIR`` / ``CURUNIR_SHARED_DIR``. For the legacy
+        layout both are ``context``, so rendered text is byte-identical to
+        the literals the markdown used to carry.
+        """
+        return {"context": str(self.context_dir), "shared": str(self.shared_dir)}
+
+    @classmethod
+    def for_agent(
+        cls,
+        name: str,
+        context_dir: Path | str,
+        shared_dir: Path | str | None = None,
+        *,
+        is_default: bool = True,
+        **overrides,
+    ) -> "AgentConfig":
+        """Build a config whose per-agent paths derive from ``context_dir``.
+
+        Derived from ``context_dir``: ``identity_file``, ``schedules_db``,
+        ``portfolio_db``, ``crm_db`` and the user skills dir
+        (``skill_dirs[1]``). Derived from ``shared_dir`` (default:
+        ``context_dir``): ``usage_db``. ``overrides`` are applied last, so an
+        explicit path or model setting still wins. ``for_agent("default",
+        "./context")`` equals a bare ``AgentConfig()`` field for field.
+        """
+        context_dir = Path(context_dir)
+        shared_dir = Path(shared_dir) if shared_dir is not None else context_dir
+        derived = dict(
+            agent_name=name,
+            is_default=is_default,
+            context_dir=context_dir,
+            shared_dir=shared_dir,
+            identity_file=context_dir / "identity.md",
+            schedules_db=context_dir / "schedules.db",
+            portfolio_db=context_dir / "memory" / "portfolio.db",
+            crm_db=context_dir / "memory" / "crm.db",
+            skill_dirs=[Path("./skills"), context_dir / "skills"],
+            usage_db=shared_dir / "usage.db",
+        )
+        derived.update(overrides)
+        return cls(**derived)
 
 
 @dataclass

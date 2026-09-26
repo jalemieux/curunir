@@ -1,11 +1,11 @@
 ---
 name: identity
-description: "Use when the user wants to view, change, or shape this agent's identity / persona. Triggered by `/identity` in the CLI or web UI. Always shows the current `context/identity.md` first and confirms any proposed edit before writing."
+description: "Use when the user wants to view, change, or shape this agent's identity / persona. Triggered by `/identity` in the CLI or web UI. Always shows the current identity file first and confirms any proposed edit before writing."
 ---
 
 # Identity
 
-The agent's persona is the contents of `context/identity.md` — just the
+The agent's persona is the contents of `{{context}}/identity.md` — just the
 `## Identity` (name) and `## Personality` (voice / stance) sections. It is
 read verbatim into every system prompt, so edits take effect on the next
 turn — no restart needed. This skill helps the user inspect and edit it
@@ -14,12 +14,12 @@ safely.
 ## Scope: persona only
 
 Operating defaults — Capabilities, Guidelines, Deliverables, Memory,
-Scheduling, Creating Skills — live in `context/behavior.md`, **not** in
-`identity.md`. This skill **does not** touch `behavior.md`. If the user
-asks to change something that belongs in behavior (e.g. "be more concise
-by default", "always attach as PDF", "change the schedule rules"), say so
-and point them at `context/behavior.md` — they can edit it directly, or
-ask in a regular turn (not via `/identity`) for help editing it.
+Scheduling, Creating Skills — live in the persona bundle's prompts
+(`personas/<name>/prompts/*.md`), **not** in `identity.md`. This skill
+**does not** touch them. If the user asks to change something that belongs
+there (e.g. "be more concise by default", "always attach as PDF", "change
+the schedule rules"), say so and point them at the persona prompts — an
+operator edits those in the repo, not through `/identity`.
 
 ## When to use
 
@@ -31,23 +31,23 @@ edit, **confirm** with the user, then **apply** with `edit`.
 
 ## Resolving the file
 
-`context/identity.md` is the only canonical location. If it does NOT
+`{{context}}/identity.md` is the only canonical location. If it does NOT
 exist, the user is on a fresh install — point them at the onboarding flow:
 
 ```
 onboarding/README.md walks through filling out onboarding/questions.md
 and generating context.default/identity.md from those answers. `bootstrap.py`
-copies that into context/identity.md on the next launch.
+copies that into {{context}}/identity.md on the next launch.
 ```
 
-Do not silently create a stub `context/identity.md`. The onboarding flow
+Do not silently create a stub `{{context}}/identity.md`. The onboarding flow
 exists because a thoughtful persona matters more than a placeholder.
 
 ## Workflow
 
 ### 1. Show
 
-Read `context/identity.md`. If it's missing, surface the onboarding pointer
+Read `{{context}}/identity.md`. If it's missing, surface the onboarding pointer
 above and stop. Otherwise, emit the current contents to the user using
 this exact shape, then **end the turn**:
 
@@ -55,7 +55,7 @@ this exact shape, then **end the turn**:
 Here's your current identity file:
 
 ```markdown
-<full contents of context/identity.md>
+<full contents of {{context}}/identity.md>
 ```
 
 What would you like to change? I can also suggest tweaks if you tell me
@@ -100,7 +100,7 @@ positive answer to the apply prompt.
 
 ### 4. Apply
 
-Once confirmed, call `edit` against `context/identity.md` with the
+Once confirmed, call `edit` against `{{context}}/identity.md` with the
 narrow change you proposed. Prefer narrow edits over wholesale rewrites
 — keep the user's voice. Echo the final before/after snippet (or the
 applied hunk for larger diffs) so the user sees what landed.
@@ -135,7 +135,7 @@ large.
   than guessing.
 - Do not modify `context.default/identity.md` — that's the shipped default,
   not the user's persona.
-- Do not modify `context/behavior.md` from inside this skill — operating
+- Do not modify the persona prompts from inside this skill — operating
   defaults are out of scope here (see *Scope: persona only* above).
-- Never write a stub `context/identity.md` from inside this skill — the
+- Never write a stub `{{context}}/identity.md` from inside this skill — the
   onboarding flow is the only legitimate way to create it.
