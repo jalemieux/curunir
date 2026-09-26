@@ -43,7 +43,39 @@ Everything below is shaped so those hand-offs are a checklist, not a conversatio
 4. **Retag the form.** Change the `/beta/signup` body from its existing `source` (e.g. `source: 'finance'`) to `source: '<slug>'`. Grep the file afterwards; exactly one `source:` in the fetch body must remain, and it must be the slug.
 5. **Add `<meta name="robots" content="noindex">`** in `<head>`. Variants are near-duplicates of the live page and shouldn't compete with it in search.
 6. **Links:** the base pages use absolute paths (`/r/...` for reports, `/beta/signup`), so they work unchanged under `/v/<slug>/`. Don't rewrite them to relative paths.
-7. **No new assets** unless all variants share them. If you add an image, it goes in `portal/static/v/<slug>/` for each variant (not a shared folder), so the PR stays inside `portal/static/v/`.
+7. **Add the tracking snippet** (below) just before `</body>`, byte-for-byte in every variant. It reads the slug from the URL, so don't edit it per variant.
+8. **No new assets** unless all variants share them. If you add an image, it goes in `portal/static/v/<slug>/` for each variant (not a shared folder), so the PR stays inside `portal/static/v/`.
+
+### Tracking Snippet
+
+This snippet records page views and CTA clicks per variant, which gives the top of the funnel (#547). It's first-party only: no cookies, no third-party scripts, and the server stores a keyed hash of the IP, never the IP itself. It posts to `/track` with the slug taken from `/v/<slug>/`, so on any other path (including the base page) it does nothing. It counts `cta_click` at most once per page load, when the visitor clicks a `#beta` link or the sign-up form's button.
+
+```html
+<script>
+(function () {
+  var m = location.pathname.match(/^\/v\/([a-z0-9-]{1,40})(?:\/|$)/);
+  if (!m) return;
+  var variant = m[1], clicked = false;
+  function track(eventType) {
+    try {
+      fetch('/track', {
+        method: 'POST', keepalive: true,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({variant: variant, event_type: eventType}),
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  track('page_view');
+  document.addEventListener('click', function (e) {
+    if (clicked || !e.target.closest || !e.target.closest('a[href="#beta"], #betaForm button')) return;
+    clicked = true;
+    track('cta_click');
+  });
+})();
+</script>
+```
+
+If the base page's CTA uses different markup, adjust the selector the same way in every variant, and note the change in the PR body.
 
 ## Copy Conventions
 
@@ -88,7 +120,7 @@ gh pr create --label gtm:landing \
 - Run ID + link to the run file (or paste its Variants section)
 - One row per variant: slug, angle axis, final headline, final subhead
 - The base page each variant was copied from
-- "After merge: open each `https://curunir.ai/v/<slug>/`, submit a test email on one of them, and confirm it appears in admin with `source=<slug>`." Then remind the builder to exclude that test sign-up when counting.
+- "After merge: open each `https://curunir.ai/v/<slug>/`, submit a test email on one of them, and confirm it appears in admin with `source=<slug>`." Then remind the builder to exclude that test sign-up when counting. The same visits also leave test rows in `variant_events` (one `page_view` per variant, plus a `cta_click` where they submitted). These are small, but subtract them when counting.
 
 Once the PR is open, record its URL in the run file and tell the builder it's ready for review. Don't write the ad spec's URLs as live until the builder confirms the merge.
 
@@ -129,17 +161,34 @@ Collect per variant in Phase B. The builder pastes both sources:
 | Clicks | Ad dashboard | Traffic delivered to the page |
 | CTR | Ad dashboard (clicks ÷ impressions) | How well the **angle** pulls in the feed, before the page is seen |
 | Spend | Ad dashboard | For cost per sign-up |
+| Page views | `variant_events`, `event_type='page_view'` (readout query below) | Visits that actually loaded the page. Ad clicks minus views is roughly the bounce before load. |
+| CTA clicks | `variant_events`, `event_type='cta_click'` | Visitors who reached for the sign-up |
 | Sign-ups | Portal admin, count of distinct emails with `source=<slug>` | Conversions (exclude the post-merge test sign-up) |
 | Sign-up messages | Portal admin (optional `message` field) | Qualitative — what people said they want |
 
 Derived:
 
-- **Conversion** = sign-ups ÷ clicks. Does the page deliver on the angle?
+- **Conversion** = sign-ups ÷ page views. Does the page deliver on the angle? (If a variant has no view data, fall back to sign-ups ÷ ad clicks.)
+- **CTA rate** = CTA clicks ÷ page views. Does the copy get people to reach for the sign-up at all?
 - **Cost per sign-up** = spend ÷ sign-ups.
 
 **Gotcha:** sign-ups are idempotent per email. Someone who signs up on two variants is counted only under the first `source`. This is rare with separate ad groups, but it means totals across all sources are exact while per-variant counts slightly favor whichever variant a repeat visitor saw first.
 
-**Not available:** page views, bounce rate, scroll depth, and time on page. There is no analytics on curunir.ai. Clicks from the ad dashboard stand in for visits. If the builder later adds analytics, extend this table.
+**Readout query.** The builder runs this against the portal Postgres, or `docker compose exec postgres psql -U postgres -d portal` locally, and pastes the result:
+
+```sql
+SELECT v.variant,
+       count(*) FILTER (WHERE v.event_type = 'page_view') AS views,
+       count(*) FILTER (WHERE v.event_type = 'cta_click') AS cta_clicks,
+       (SELECT count(*) FROM beta_signups b WHERE b.source = v.variant) AS signups
+FROM variant_events v
+GROUP BY v.variant
+ORDER BY v.variant;
+```
+
+**Views are raw loads, not unique visitors.** A reload counts twice. For a rough unique count, use `count(DISTINCT ip_hash)`; visitors sharing an IP (offices, carrier NAT) then collapse into one. Bots that run JS inflate views too. Filter `user_agent ILIKE '%bot%'` if the numbers look off.
+
+**Not available:** bounce rate, scroll depth, time on page, and traffic source. Ad-dashboard clicks and `/v/` path attribution cover the traffic source.
 
 ## Benchmarks
 
@@ -188,8 +237,8 @@ For landing-page runs, use these blocks in place of the Marketplace-specific per
 **Stats snapshot:**
 
 ```markdown
-| Variant | Impr. | Clicks | CTR | Spend | Sign-ups | Conv. | $/sign-up |
-|---------|-------|--------|-----|-------|----------|-------|-----------|
+| Variant | Impr. | Clicks | CTR | Spend | Views | CTA clicks | Sign-ups | Conv. | $/sign-up |
+|---------|-------|--------|-----|-------|-------|------------|----------|-------|-----------|
 ```
 
 ## Known Gotchas
