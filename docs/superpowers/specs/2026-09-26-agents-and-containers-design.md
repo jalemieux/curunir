@@ -1,8 +1,8 @@
 # Agents and Containers — Design
 
 **Date:** 2026-09-26
-**Status:** Draft, revision 2 (owner review). Questions 1 and 2 decided
-2026-09-26; question 3 open.
+**Status:** Revision 2. All three open questions decided 2026-09-26; ready
+for phase 1.
 **Related:** PR #546 (concept: `docs/agents-and-containers.md`),
 `2026-05-29-persona-deployment-design.md`
 
@@ -124,13 +124,13 @@ manifest. Validation rules:
 context/                         # container root = shared area
   workspace/generated/           # deliverables (shared)
   uploads/  cards/               # staged inputs (shared)
-  profile.md                     # shared user profile (new, optional)
+  profile.md                     # the user profile: one per container (moved from memory/)
   usage.db  email_state.json  .ws-token
   identity.md memory/ conversations/ schedules.db   # ← legacy agent (context: .)
   agents/
     finance/
       identity.md
-      memory/            (incl. portfolio.db, crm.db, profile.md)
+      memory/            (incl. portfolio.db, crm.db; no profile.md)
       conversations/
       schedules.db
 ```
@@ -180,10 +180,29 @@ The remaining standalone literals go:
 It is repo content, not context, and the bash tool already pins cwd to
 `repo_root`.
 
-`build_memory_block(context_dir)` (`src/agent/system_prompt.py:66`) also
-includes `<shared>/profile.md` when it exists. That is the "shared area holds
-the user's profile" from the concept doc. The per-agent `memory/profile.md`
-keeps working.
+**The user profile is one file per container.** `<shared>/profile.md` is
+the only copy; no agent has a `memory/profile.md`. Two copies would diverge
+(agent A believes one name, agent B another), so shared *state* files have a
+single writer, the container, while shared *artifact* directories
+(`workspace/`, `uploads/`) stay writable by any agent as today. Concretely:
+
+- `build_memory_block` (`src/agent/system_prompt.py:66`) takes the config and
+  reads `<shared>/profile.md` into every agent's prompt, in the slot where
+  `memory/profile.md` sits today.
+- The container's extraction loop (see Runtime) is the only automated writer.
+  A fact the LLM files under `profile.md` is written to `<shared>/profile.md`
+  through the existing upsert-by-heading (`_write_fact`); every other file
+  goes to the agent's own `memory/`. `_safe_path` allows exactly that one
+  target outside the agent's memory dir. The `onboarding/profile` skill and
+  hand edits target the same file.
+- Dreaming tidies `<shared>/profile.md` once per container pass, not once per
+  agent.
+- Migration, the one exception to decision 3: on first boot of a manifest
+  container, a legacy `context/memory/profile.md` is moved to
+  `context/profile.md` if the target does not exist. A synthesized
+  single-agent container does the same move, so there is one code path; that
+  move lands in phase 2 with the shared profile, keeping phase 1 free of
+  behavior change.
 
 The usage store gains a nullable `agent` column. `UsageStore.__init__`
 applies the schema with `executescript(_SCHEMA)` (`src/usage_store.py:66`)
@@ -287,10 +306,15 @@ The rest of `main` changes shape only where it assumed one agent:
   `agent` on its outgoing messages; persistence, slash commands and clear
   already key on `agent.config`. As a side benefit, a long turn in one agent
   no longer blocks the others.
-- **Background loops.** `periodic_extraction` (`run.py:526`),
-  `periodic_dreaming` (`run.py:536`) and `run_scheduler`
-  (`src/scheduler.py:112`) run once per agent. They already take an `Agent`.
-  Their env-var switches stay container-wide.
+- **Background loops.** `periodic_extraction` (`run.py:526`) and
+  `periodic_dreaming` (`run.py:536`) run **once per container** and visit
+  each agent in turn: one pass walks every agent's `conversations/` for
+  settled transcripts and writes to that agent's `memory/`, routing
+  profile facts to the shared file as above. One loop serializes the LLM
+  calls instead of N passes waking together, and gives shared files a single
+  writer. `run_scheduler` (`src/scheduler.py:112`) runs once per agent, since
+  each agent has its own `schedules.db` and the runs must land in that
+  agent's session store. Their env-var switches stay container-wide.
 - **Channels.** WS and Local Web read an optional `agent` from inbound frames
   and echo it on outbound frames. Their existing hello/meta frames
   (`ws.py:121` `_send_hello`, `local_web.py:368` `meta`) advertise
@@ -472,6 +496,8 @@ Each phase is its own PR and is shippable alone:
    - `ask_agent`
    - the local UI agent picker and per-agent module gating
    - the `agent` column in usage
+   - the shared profile: single-writer extraction, the `build_memory_block`
+     read, and the one-time move
 3. **Lists and handoff.**
    - `inbound`/`outbound`/`peers`/`user_delivery`
    - `PeerChannel`
@@ -500,6 +526,9 @@ Each phase is its own PR and is shippable alone:
   - manifest validation table (each rule above, plus the missing peer secret)
   - `route_inbound` (default, named and unknown agent)
   - two agents keep separate conversations/memory on disk
+  - a profile fact extracted from either agent's conversation lands in
+    `<shared>/profile.md`, and neither agent has a `memory/profile.md`
+  - a legacy `memory/profile.md` is moved once and never overwritten
   - `ask_agent` returns the sibling's answer, is not persisted, and cannot
     recurse
   - the channels echo the `agent` field
@@ -528,13 +557,8 @@ Each phase is its own PR and is shippable alone:
    carried channel would make the payload a routing instruction that the
    receiver is supposed to treat as background.
 
-## Open questions
-
-3. **Shared profile.** Should `context/profile.md` be written by the memory
-   extractor, or only by hand?
-
-   *Recommendation:* by hand (and by the `onboarding/profile` skill) in v1.
-   The extractor writes one agent's `memory/` from one agent's
-   conversations; letting N agents write one shared file needs merge rules
-   that do not exist yet. Reading it into every agent's prompt is the value;
-   writing it can come later.
+3. **The user profile is one file per container, with one writer.** Decided
+   2026-09-26. `<shared>/profile.md` is the only copy; per-agent
+   `memory/profile.md` goes away (moved on first boot). The container's
+   single extraction loop writes it; hand edits and the `onboarding/profile`
+   skill target the same file. See Context layout for the mechanics.
