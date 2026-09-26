@@ -1,8 +1,8 @@
 # Agents and Containers — Design
 
 **Date:** 2026-09-26
-**Status:** Draft, revision 2 (owner review). Open questions carry a
-recommendation each; decisions pending.
+**Status:** Draft, revision 2 (owner review). Questions 1 and 2 decided
+2026-09-26; question 3 open.
 **Related:** PR #546 (concept: `docs/agents-and-containers.md`),
 `2026-05-29-persona-deployment-design.md`
 
@@ -511,25 +511,25 @@ Each phase is its own PR and is shippable alone:
   - boot refuses a private container with unrestricted or empty-allowlist
     email
 
+## Decided
+
+1. **Placeholder syntax: `{{context}}` / `{{shared}}` in SKILL.md.** Decided
+   2026-09-26. The automatic rewrite was rejected because a single skill mixes
+   both kinds of path (`digest/SKILL.md` writes its sent-ledger to
+   `context/memory/` and its output to `context/workspace/generated/`), and
+   nothing in the string says which is private. The rewrite would need the
+   same knowledge as a hidden prefix table, and it would also rewrite prose.
+   The placeholders record the distinction once, in the file that depends on
+   it, and the lint keeps it there.
+2. **Handoff answers land on one `user_delivery` channel per container.**
+   Decided 2026-09-26. Simpler and less error-prone than carrying the
+   sender's channel with the handoff. The receiver owns its relationship
+   with the user and may not have the sender's channel enabled, and a
+   carried channel would make the payload a routing instruction that the
+   receiver is supposed to treat as background.
+
 ## Open questions
 
-1. **Placeholder syntax.** Is `{{context}}` / `{{shared}}` acceptable in
-   SKILL.md, or would you rather keep the literals and accept the automatic
-   rewrite?
-
-   *Recommendation:* keep the placeholders. The rewrite is a one-time edit of
-   27 files, the lint keeps it that way, and the automatic alternative cannot
-   tell `context/workspace` (shared) from `context/memory` (private) without
-   a table that is the same knowledge in a worse place.
-2. **Where handoff answers land.** Is one `user_delivery` channel per
-   container right, or should the sender's user channel travel with the
-   handoff? The latter leaks less structure but couples the containers.
-
-   *Recommendation:* one `user_delivery` per container. The receiver owns
-   its relationship with the user and may not even have the sender's channel
-   enabled. Carrying the channel would also make the handoff payload a
-   routing instruction, which the receiver is supposed to treat as
-   background.
 3. **Shared profile.** Should `context/profile.md` be written by the memory
    extractor, or only by hand?
 
