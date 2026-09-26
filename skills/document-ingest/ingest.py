@@ -25,9 +25,14 @@ from src.usage_store import UsageStore                            # noqa: E402
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Produce a document card for a file.")
     parser.add_argument("path", help="Document to ingest (text, PDF, DOCX, XLSX, CSV).")
+    # The bash tool exports CURUNIR_CONTEXT_DIR / CURUNIR_SHARED_DIR for the
+    # agent running the skill; without them (a human at a shell) the legacy
+    # ./context layout applies.
+    context_dir = os.environ.get("CURUNIR_CONTEXT_DIR") or "./context"
+    shared_dir = os.environ.get("CURUNIR_SHARED_DIR") or context_dir
     parser.add_argument(
-        "--usage-db", default="./context/usage.db",
-        help="Usage-tracking SQLite db (default: ./context/usage.db).",
+        "--usage-db", default=os.path.join(shared_dir, "usage.db"),
+        help="Usage-tracking SQLite db (default: <shared dir>/usage.db).",
     )
     args = parser.parse_args(argv)
 
@@ -35,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     model = os.environ.get("MODEL")
     api_base = os.environ.get("API_BASE")
     openrouter_provider = os.environ.get("OPENROUTER_PROVIDER")
-    config = AgentConfig(
+    config = AgentConfig.for_agent(
+        "default", context_dir, shared_dir,
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),

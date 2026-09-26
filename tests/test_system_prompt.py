@@ -225,3 +225,53 @@ def test_persona_prompts_appended_after_identity(tmp_context, tmp_skills, agent_
     agent_config.persona = "demo"
     result = build_static_prompt(agent_config)
     assert result.index("You are a test assistant.") < result.index("BEHAVIOR LAYER")
+
+
+# --- {{context}} / {{shared}} rendering over the static prefix --------------
+
+def test_static_prompt_renders_placeholders_in_identity(tmp_path, tmp_skills):
+    ctx = tmp_path / "agents" / "fin"
+    ctx.mkdir(parents=True)
+    (ctx / "identity.md").write_text(
+        "Notes live in {{context}}/memory/, deliverables in {{shared}}/workspace/."
+    )
+    config = AgentConfig.for_agent("fin", ctx, tmp_path, skill_dirs=[tmp_skills])
+    prompt = build_static_prompt(config)
+    assert f"{ctx}/memory/" in prompt
+    assert f"{tmp_path}/workspace/" in prompt
+    assert "{{" not in prompt
+
+
+def test_static_prompt_renders_placeholders_in_persona_prompts_and_manifest(
+    tmp_path, tmp_skills, monkeypatch,
+):
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+    (ctx / "identity.md").write_text("id")
+    personas = tmp_path / "personas" / "p" / "prompts"
+    personas.mkdir(parents=True)
+    (personas / "10-x.md").write_text("Save skills under {{context}}/skills/.")
+    monkeypatch.setattr("src.persona.PERSONAS_DIR", tmp_path / "personas")
+    skill = tmp_skills / "s"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: s\ndescription: writes to {{shared}}/workspace/generated\n---\nbody\n"
+    )
+    config = AgentConfig.for_agent(
+        "a", ctx, tmp_path / "shared", persona="p", skill_dirs=[tmp_skills],
+    )
+    prompt = build_static_prompt(config)
+    assert f"{ctx}/skills/" in prompt
+    assert f"{tmp_path / 'shared'}/workspace/generated" in prompt
+    assert "{{" not in prompt
+
+
+def test_legacy_static_prompt_renders_placeholders_to_context(tmp_context, tmp_skills):
+    """The legacy layout renders both placeholders to the historical literal."""
+    (tmp_context / "identity.md").write_text("{{context}}/memory and {{shared}}/workspace")
+    config = AgentConfig(
+        identity_file=tmp_context / "identity.md",
+        context_dir=Path("./context"),
+        skill_dirs=[tmp_skills],
+    )
+    assert "context/memory and context/workspace" in build_static_prompt(config)

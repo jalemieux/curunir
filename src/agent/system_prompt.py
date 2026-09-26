@@ -4,7 +4,7 @@ from pathlib import Path
 
 from src.config import AgentConfig
 from src.persona import prompts_dir
-from src.skills import build_skill_manifest
+from src.skills import build_skill_manifest, render_paths
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,10 @@ def build_static_prompt(config: AgentConfig) -> str:
     )
     if manifest:
         parts.append(manifest)
-    return "\n\n".join(parts)
+    # Render {{context}} / {{shared}} once over the assembled prefix so the
+    # identity, persona prompts and skill descriptions in the manifest all
+    # name this agent's real directories.
+    return render_paths("\n\n".join(parts), config.path_vars)
 
 
 def build_memory_block(context_dir: Path) -> str:

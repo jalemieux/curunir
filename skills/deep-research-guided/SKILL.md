@@ -131,7 +131,7 @@ Compile findings into a structured report. The first page sets the frame — rea
 
 **Title guidance.** The H1 should read like a magazine cover, not a filename: `"Retatrutide: Blockbuster or Bust? Investment Analysis for Eli Lilly (LLY)"` beats `"Retatrutide Research"`. The filename slug is separate (see Step 5).
 
-**Prepared for.** Pull the user's name from `context/identity.md` or memory. If you don't know it, omit the line rather than guess.
+**Prepared for.** Pull the user's name from `{{context}}/identity.md` or memory. If you don't know it, omit the line rather than guess.
 
 **Subject vs. title.** Title is the headline; Subject is the one-sentence framing of what's being investigated (e.g., "Eli Lilly's investigational triple-agonist drug retatrutide — bull case, bear case, and potential impact on LLY stock"). They are not the same.
 
@@ -160,7 +160,7 @@ Rules: number sources in first-appearance order; reuse the same number (and anch
 
 ### Step 5 — Fact-check the draft (default, not optional)
 
-Write the draft to `context/workspace/generated/{topic-slug}-{YYYY-MM-DD}.md`, then **run an independent fact-check before delivering**. Research without verification is just plausible-sounding prose. The whole point of the structured header is that "Status: Fact-checked" actually means something — which requires actually doing it.
+Write the draft to `{{shared}}/workspace/generated/{topic-slug}-{YYYY-MM-DD}.md`, then **run an independent fact-check before delivering**. Research without verification is just plausible-sounding prose. The whole point of the structured header is that "Status: Fact-checked" actually means something — which requires actually doing it.
 
 Load `fact-checker` and follow its delegation pattern (the fact-checker skill explains why a fresh context window is the entire mechanism — you can't check yourself):
 
@@ -175,7 +175,7 @@ CONTENT_TO_FACT_CHECK>>>
 """)
 ```
 
-For very large drafts (>50KB), write the content to `context/workspace/scratch/` first and tell the sub-agent the path.
+For very large drafts (>50KB), write the content to `{{shared}}/workspace/scratch/` first and tell the sub-agent the path.
 
 When the sub-agent returns the verdicts report:
 

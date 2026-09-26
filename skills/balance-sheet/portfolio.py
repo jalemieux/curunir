@@ -15,7 +15,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from src.portfolio import db as pdb       # noqa: E402
 from src.portfolio import engine          # noqa: E402
 
-DEFAULT_DB = "context/memory/portfolio.db"
+def _default_db() -> str:
+    """This agent's store: ``$CURUNIR_CONTEXT_DIR/memory/portfolio.db``.
+
+    The bash tool exports ``CURUNIR_CONTEXT_DIR`` for the agent running the
+    skill; without it (a human at a shell) the legacy ``context/`` applies.
+    """
+    return os.path.join(os.environ.get("CURUNIR_CONTEXT_DIR") or "context",
+                        "memory", "portfolio.db")
+
+
+DEFAULT_DB = _default_db()
 
 
 def _kv(pairs: list[str]) -> dict:
@@ -29,7 +39,7 @@ def _kv(pairs: list[str]) -> dict:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="portfolio.py", description="Balance-sheet store.")
-    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--db", default=_default_db())
     sub = p.add_subparsers(dest="cmd", required=True)
 
     for name in ("networth", "rollup"):

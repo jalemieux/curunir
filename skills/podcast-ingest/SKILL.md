@@ -1,12 +1,12 @@
 ---
 name: podcast-ingest
-description: "Pull, transcribe, summarize, store, and index podcast episodes (YouTube-sourced) into context/workspace/podcasts/. Modes: pull (weekly cron), add/list/remove/edit (config management), backfill (first-time catch-up for one show), rebuild-indexes (recovery). Hidden — invoked only via /podcast-ingest, the scheduler, or by explicit name."
+description: "Pull, transcribe, summarize, store, and index podcast episodes (YouTube-sourced) into the shared workspace's podcasts directory. Modes: pull (weekly cron), add/list/remove/edit (config management), backfill (first-time catch-up for one show), rebuild-indexes (recovery). Hidden — invoked only via /podcast-ingest, the scheduler, or by explicit name."
 hidden: true
 ---
 
 # Podcast Ingest
 
-Ingest YouTube-sourced podcast episodes into `context/workspace/podcasts/`
+Ingest YouTube-sourced podcast episodes into `{{shared}}/workspace/podcasts/`
 as a searchable corpus: per-episode markdown (frontmatter + plain-text
 transcript), plus progressive-discovery indexes (`timeline.md`,
 `by-podcast/<slug>.md`, `topics/<slug>.md`).
@@ -34,7 +34,7 @@ The invoking message tells you which mode to run. If it's ambiguous, ask.
 ## Corpus layout (locked — do not deviate)
 
 ```
-context/workspace/podcasts/
+{{shared}}/workspace/podcasts/
   README.md                              # routing entry: what's here, how to navigate
   podcasts.yaml                          # per-show config
   .seen-ids.txt                          # append-only ledger of processed YouTube IDs
@@ -119,7 +119,7 @@ and an explanatory comment.
 
 Invoked by the scheduler with: *"Run the podcast-ingest skill in pull mode."*
 
-1. Read `context/workspace/podcasts/podcasts.yaml`. If missing or empty,
+1. Read `{{shared}}/workspace/podcasts/podcasts.yaml`. If missing or empty,
    report "no podcasts configured" and exit.
 2. For each show:
    1. List recent uploads:
@@ -132,7 +132,7 @@ Invoked by the scheduler with: *"Run the podcast-ingest skill in pull mode."*
       ```
       8 days (not 7) gives a one-day overlap on either side of the
       weekly cron; the `.seen-ids.txt` ledger handles deduping.
-   2. Drop rows whose ID is already in `context/workspace/podcasts/.seen-ids.txt`.
+   2. Drop rows whose ID is already in `{{shared}}/workspace/podcasts/.seen-ids.txt`.
    3. Apply `include_pattern` / `exclude_pattern` to the title (Python
       regex semantics — use `python3 -c` or grep -E with care if
       anchoring matters).
@@ -316,7 +316,7 @@ path:
 
 ### 5. Write the per-episode file
 
-Path: `context/workspace/podcasts/<slug>/<YYYY-MM-DD>-<episode-slug>.md`.
+Path: `{{shared}}/workspace/podcasts/<slug>/<YYYY-MM-DD>-<episode-slug>.md`.
 
 - `<YYYY-MM-DD>` = upload date as ISO.
 - `<episode-slug>` = title lowercased, non-alphanumerics replaced with
@@ -352,7 +352,7 @@ reintroduce the exact overflow the step-4 gate avoids. Assemble the file
 frontmatter, then append the transcript file-to-file with bash:
 
 ```bash
-EP="context/workspace/podcasts/<slug>/<YYYY-MM-DD>-<episode-slug>.md"
+EP="{{shared}}/workspace/podcasts/<slug>/<YYYY-MM-DD>-<episode-slug>.md"
 cat > "$EP" <<'EOF'
 ---
 podcast: <show.name>
@@ -418,10 +418,10 @@ new files.
 ### 7. Mark the episode seen
 
 **Only after step 5 succeeds** (the raw file is on disk), append the
-YouTube ID to `context/workspace/podcasts/.seen-ids.txt`:
+YouTube ID to `{{shared}}/workspace/podcasts/.seen-ids.txt`:
 
 ```bash
-echo "<id>" >> context/workspace/podcasts/.seen-ids.txt
+echo "<id>" >> {{shared}}/workspace/podcasts/.seen-ids.txt
 ```
 
 If step 6 fails after step 5 succeeded, the episode is still marked
@@ -472,7 +472,7 @@ User says *"add the All-In podcast"*. Run this dialogue:
 - **`list`** — read `podcasts.yaml` and print: name, slug, source,
   include/exclude patterns. If the file is missing, say so.
 - **`remove <slug>`** — read `podcasts.yaml`, find the entry, delete
-  it (use `edit`). Then ask: "Also remove `context/workspace/podcasts/<slug>/`
+  it (use `edit`). Then ask: "Also remove `{{shared}}/workspace/podcasts/<slug>/`
   and its index entries?" Default is **no** — leave them in place
   unless the user confirms. If confirmed: `rm -rf` the show dir, and
   edit `summaries/timeline.md` / `summaries/by-podcast/<slug>.md` /
@@ -500,7 +500,7 @@ added show.
 Recovery path when the summary indexes drift out of sync with the raw
 transcript files on disk.
 
-1. Find every per-episode file: `find context/workspace/podcasts -mindepth 2 -maxdepth 2 -name '*.md' | grep -v '^context/workspace/podcasts/summaries/'`
+1. Find every per-episode file: `find {{shared}}/workspace/podcasts -mindepth 2 -maxdepth 2 -name '*.md' | grep -v '^{{shared}}/workspace/podcasts/summaries/'`
 2. **Truncate** the index files (or move them aside as `.bak`):
    - `summaries/timeline.md`
    - everything under `summaries/by-podcast/`
@@ -529,7 +529,7 @@ video. It works purely from what's on disk.
 
 ## README at the corpus root
 
-If `context/workspace/podcasts/README.md` does not exist, create it on
+If `{{shared}}/workspace/podcasts/README.md` does not exist, create it on
 first ingest. It is the routing entry point — the agent reads it
 before drilling into the indexes:
 
@@ -562,7 +562,7 @@ via `/podcast-ingest`.
 ## Scheduler entry
 
 The weekly pull is wired up via the `schedule` tool (entries persist in
-`context/schedules.db`):
+`{{context}}/schedules.db`):
 
 ```
 schedule(action="add", id="podcast-ingest-weekly", cron="0 8 * * 1",
@@ -571,7 +571,7 @@ schedule(action="add", id="podcast-ingest-weekly", cron="0 8 * * 1",
 ```
 
 Monday 8am local. A disabled template is seeded in
-`context.default/schedules.json` (migrated into `context/schedules.db` on
+`context.default/schedules.json` (migrated into `{{context}}/schedules.db` on
 first boot) — the user enables it via
 `schedule(action="toggle", id="podcast-ingest-weekly")` after configuring at
 least one show with Mode B.

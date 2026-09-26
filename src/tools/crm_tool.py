@@ -11,8 +11,6 @@ from src.config import AgentConfig
 from src.crm import db as cdb
 from src.crm import engine
 
-_DEFAULT_DB = "context/memory/crm.db"
-
 _READ = {
     "list": lambda db, a: engine.list_leads(
         db, stage=a.get("stage"), source=a.get("source"), owner=a.get("owner")),
@@ -36,7 +34,7 @@ _WRITE = {
 
 
 def exec_crm(args: dict, config: AgentConfig) -> str:
-    db = getattr(config, "crm_db", None) or _DEFAULT_DB
+    db = str(config.crm_db)
     action = args.get("action")
     payload = args.get("args") or {}
     handler = _READ.get(action) or _WRITE.get(action)

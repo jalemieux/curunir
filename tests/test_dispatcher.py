@@ -32,6 +32,7 @@ class TestExecuteToolCall:
 
     async def test_dispatches_schedule(self, tmp_path, agent_config):
         agent_config.context_dir = tmp_path
+        agent_config.schedules_db = tmp_path / "schedules.db"
         result = await execute_tool_call(
             "schedule", {"action": "list"}, agent_config,
         )

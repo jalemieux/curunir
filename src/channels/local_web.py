@@ -100,9 +100,12 @@ class LocalWebChannel:
         self.port = port
         self.model = model
         self.persona = persona
-        self.uploads_dir = uploads_dir or os.path.join(
-            os.getcwd(), "context", "uploads"
+        # Uploads are container-shared (config.shared_dir/uploads); the
+        # explicit kwarg exists for tests.
+        self.uploads_dir = uploads_dir or str(
+            (Path(config.repo_root) / config.shared_dir / "uploads").resolve()
         )
+        self.project_root = str(config.repo_root)
         self.cancel_session = cancel_session
         self.allowed_origins: frozenset[str] = (
             frozenset(allowed_origins) if allowed_origins is not None
@@ -431,7 +434,7 @@ class LocalWebChannel:
                 messages = self.history_provider(sid)
                 for m in messages:
                     if m.get("attachments"):
-                        _enrich_attachments(m["attachments"], os.getcwd())
+                        _enrich_attachments(m["attachments"], self.project_root)
                 await respond({
                     "type": "history_snapshot",
                     "session_id": sid,
@@ -640,7 +643,7 @@ class LocalWebChannel:
         if ws is None:
             return
         if msg.attachments:
-            _enrich_attachments(msg.attachments, os.getcwd())
+            _enrich_attachments(msg.attachments, self.project_root)
         frame = {
             "session_id": msg.session_id,
             "content": msg.content,

@@ -1,11 +1,11 @@
 ---
 name: preferences
-description: "Use to onboard or refresh the owner's working preferences — communication style and response length. Triggered by `/preferences` or by the `onboarding` orchestrator. Writes `context/memory/preferences.md`."
+description: "Use to onboard or refresh the owner's working preferences — communication style and response length. Triggered by `/preferences` or by the `onboarding` orchestrator. Writes the owner's memory/preferences.md."
 ---
 
 # Preferences
 
-Capture two facts about how the owner wants to be communicated with. These end up in `context/memory/preferences.md` and shape every response.
+Capture two facts about how the owner wants to be communicated with. These end up in `{{context}}/memory/preferences.md` and shape every response.
 
 ## When to use
 
@@ -23,7 +23,7 @@ Accept short answers. No follow-ups unless the user gave an unparseable response
 
 ## Write
 
-After the second answer, write `context/memory/preferences.md` with `write` (overwriting any existing default).
+After the second answer, write `{{context}}/memory/preferences.md` with `write` (overwriting any existing default).
 
 ```
 <!--

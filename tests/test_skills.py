@@ -468,3 +468,65 @@ def test_memo_skill_documents_current_delegate_timeout(skill):
             f"skills/{skill}/SKILL.md still references the stale 300s delegate "
             f"timeout; the real limit is {timeout}s"
         )
+
+
+class TestRenderPaths:
+    """{{context}} / {{shared}} placeholders in skill and persona markdown."""
+
+    def test_substitutes_both_placeholders(self):
+        from src.skills import render_paths
+
+        out = render_paths(
+            "ledger: {{context}}/memory/x.md; out: {{shared}}/workspace/generated/",
+            {"context": "context/agents/finance", "shared": "context"},
+        )
+        assert out == (
+            "ledger: context/agents/finance/memory/x.md; "
+            "out: context/workspace/generated/"
+        )
+
+    def test_none_renders_legacy_layout(self):
+        from src.skills import render_paths
+
+        text = "{{context}}/memory/a.md and {{shared}}/workspace/b.md"
+        assert render_paths(text) == "context/memory/a.md and context/workspace/b.md"
+
+    def test_tolerates_inner_whitespace(self):
+        from src.skills import render_paths
+
+        assert render_paths("{{ context }}/x", {"context": "C", "shared": "S"}) == "C/x"
+
+    def test_leaves_other_braces_alone(self):
+        from src.skills import render_paths
+
+        text = 'docker --format "{{.Names}}" and {{idea_name}} and {{ctx}}'
+        assert render_paths(text, {"context": "C", "shared": "S"}) == text
+
+    def test_text_without_braces_is_returned_unchanged(self):
+        from src.skills import render_paths
+
+        text = "plain context/memory/x.md prose"
+        assert render_paths(text, {"context": "C", "shared": "S"}) is text
+
+    def test_load_skill_renders_with_paths(self, tmp_path):
+        from src.skills import load_skill
+
+        d = tmp_path / "ledger"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            "---\nname: ledger\ndescription: d\n---\n"
+            "Write to {{context}}/memory/l.md and {{shared}}/workspace/o.md\n"
+        )
+        out = load_skill("ledger", [tmp_path], paths={"context": "A", "shared": "B"})
+        assert "A/memory/l.md" in out and "B/workspace/o.md" in out
+        assert "{{" not in out
+
+    def test_load_skill_without_paths_renders_legacy(self, tmp_path):
+        from src.skills import load_skill
+
+        d = tmp_path / "ledger"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            "---\nname: ledger\ndescription: d\n---\n{{context}}/memory/l.md\n"
+        )
+        assert "context/memory/l.md" in load_skill("ledger", [tmp_path])

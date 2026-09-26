@@ -1,9 +1,31 @@
+import os
 import subprocess
+from pathlib import Path
 
 from src.config import AgentConfig
 
 DEFAULT_TIMEOUT = 30
 MAX_OUTPUT_CHARS = 30_000  # ~8k tokens — prevents a single curl from blowing the context
+
+
+def _script_env(config: AgentConfig) -> dict[str, str]:
+    """Process env plus the agent's directories for skill scripts.
+
+    ``CURUNIR_CONTEXT_DIR`` / ``CURUNIR_SHARED_DIR`` are the absolute
+    counterparts of ``AgentConfig.path_vars``, so a script run from any cwd
+    (``skills/balance-sheet/portfolio.py``, ``skills/crm/crm.py``,
+    ``skills/webcam/snapshot.py``, ``skills/document-ingest/ingest.py``)
+    defaults its store paths to this agent rather than to a literal
+    ``context/``.
+    """
+    root = Path(config.repo_root)
+    context_dir = Path(config.context_dir)
+    shared_dir = Path(config.shared_dir)
+    return {
+        **os.environ,
+        "CURUNIR_CONTEXT_DIR": str((root / context_dir).resolve()),
+        "CURUNIR_SHARED_DIR": str((root / shared_dir).resolve()),
+    }
 
 
 def exec_bash(args: dict, config: AgentConfig) -> str:
@@ -17,6 +39,7 @@ def exec_bash(args: dict, config: AgentConfig) -> str:
             text=True,
             timeout=timeout,
             cwd=config.repo_root,
+            env=_script_env(config),
         )
         output = result.stdout
         if result.stderr:

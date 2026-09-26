@@ -94,7 +94,7 @@ async def _extract(
     memory_dir = config.context_dir / "memory"
     taxonomy_path = memory_dir / "README.md"
 
-    skill_content = load_skill("extract-learnings", config.skill_dirs)
+    skill_content = load_skill("extract-learnings", config.skill_dirs, paths=config.path_vars)
     if skill_content.startswith("Skill not found"):
         skill_content = ""
     memory_taxonomy = taxonomy_path.read_text() if taxonomy_path.exists() else ""

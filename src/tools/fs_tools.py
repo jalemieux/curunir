@@ -6,11 +6,23 @@ from pathlib import Path
 from src.config import AgentConfig
 
 
+def _resolve(path: str | Path, config: AgentConfig) -> Path:
+    """Anchor a relative tool path at ``config.repo_root``.
+
+    Every config path (``./context``, ``./skills``) is relative to the repo
+    root, and the bash tool already pins its cwd there; the fs tools do the
+    same so a relative ``file_path`` means the same thing regardless of the
+    host process's cwd. Absolute paths pass through untouched.
+    """
+    p = Path(path)
+    return p if p.is_absolute() else Path(config.repo_root) / p
+
+
 def exec_glob(args: dict, config: AgentConfig) -> str:
     """Find files matching a glob pattern."""
     try:
         pattern = args["pattern"]
-        root = args.get("path", ".")
+        root = _resolve(args.get("path", "."), config)
         # Strip leading slashes so patterns are always relative to root_dir.
         # An absolute pattern like "/**/*.py" would bypass root_dir and scan
         # the entire filesystem, hanging the process.
@@ -51,7 +63,13 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
             if context_lines:
                 cmd.extend(["-C", str(context_lines)])
             cmd.extend([pattern, path])
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # cwd pins relative ``path`` at the repo root while keeping rg's
+            # output paths relative (an absolute path arg would make them
+            # absolute), so the model sees the same shape as before.
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+                cwd=config.repo_root,
+            )
             return result.stdout if result.stdout else ""
         except Exception as e:
             return f"Error: {e}"
@@ -59,7 +77,7 @@ def exec_grep(args: dict, config: AgentConfig) -> str:
     # Pure Python fallback
     try:
         regex = re.compile(pattern)
-        root = Path(path)
+        root = _resolve(path, config)
 
         # Collect files to search
         if root.is_file():
@@ -198,9 +216,9 @@ def exec_read(args: dict, config: AgentConfig) -> str:
     how much it wants.
     """
     try:
-        path = Path(args["file_path"])
+        path = _resolve(args["file_path"], config)
         if not path.exists():
-            return f"Error: File not found: {path}"
+            return f"Error: File not found: {args['file_path']}"
 
         suffix = path.suffix.lower()
         if suffix in _IMAGE_EXTENSIONS:
@@ -248,9 +266,10 @@ def exec_read(args: dict, config: AgentConfig) -> str:
 def exec_edit(args: dict, config: AgentConfig) -> str:
     """Replace exact string in a file."""
     try:
-        path = Path(args["file_path"])
+        shown = args["file_path"]  # echo the path as the model gave it
+        path = _resolve(shown, config)
         if not path.exists():
-            return f"Error: File not found: {path}"
+            return f"Error: File not found: {shown}"
 
         content = path.read_text()
         old = args["old_string"]
@@ -259,9 +278,9 @@ def exec_edit(args: dict, config: AgentConfig) -> str:
 
         count = content.count(old)
         if count == 0:
-            return f"Error: old_string not found in {path}"
+            return f"Error: old_string not found in {shown}"
         if count > 1 and not replace_all:
-            return f"Error: old_string not unique in {path} (found {count} occurrences). Use replace_all=true to replace all."
+            return f"Error: old_string not unique in {shown} (found {count} occurrences). Use replace_all=true to replace all."
 
         if replace_all:
             new_content = content.replace(old, new)
@@ -269,7 +288,7 @@ def exec_edit(args: dict, config: AgentConfig) -> str:
             new_content = content.replace(old, new, 1)
 
         path.write_text(new_content)
-        return f"Replaced {count if replace_all else 1} occurrence(s) in {path}"
+        return f"Replaced {count if replace_all else 1} occurrence(s) in {shown}"
     except Exception as e:
         return f"Error: {e}"
 
@@ -277,9 +296,9 @@ def exec_edit(args: dict, config: AgentConfig) -> str:
 def exec_write(args: dict, config: AgentConfig) -> str:
     """Write content to a file, creating parent dirs if needed."""
     try:
-        path = Path(args["file_path"])
+        path = _resolve(args["file_path"], config)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args["content"])
-        return f"Wrote {len(args['content'])} bytes to {path}"
+        return f"Wrote {len(args['content'])} bytes to {args['file_path']}"
     except Exception as e:
         return f"Error: {e}"
