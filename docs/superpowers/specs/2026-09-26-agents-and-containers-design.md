@@ -182,19 +182,30 @@ It is repo content, not context, and the bash tool already pins cwd to
 
 **The user profile is one file per container.** `<shared>/profile.md` is
 the only copy; no agent has a `memory/profile.md`. Two copies would diverge
-(agent A believes one name, agent B another), so shared *state* files have a
-single writer, the container, while shared *artifact* directories
-(`workspace/`, `uploads/`) stay writable by any agent as today. Concretely:
+(agent A believes one name, agent B another), so shared *state* files have
+exactly two writers: the container's consolidation loop and the **default
+agent**. Every other agent reads them, and the `write` / `edit` tools refuse
+its writes (they receive the agent's config, so the check is
+`config.is_default` against a `<shared>` state-file set; the error names the
+default agent). Bash stays convention, like everything inside a container.
+Shared *artifact* directories (`workspace/`, `uploads/`) stay writable by
+any agent as today. Concretely:
 
 - `build_memory_block` (`src/agent/system_prompt.py:66`) takes the config and
   reads `<shared>/profile.md` into every agent's prompt, in the slot where
   `memory/profile.md` sits today.
-- The container's extraction loop (see Runtime) is the only automated writer.
-  A fact the LLM files under `profile.md` is written to `<shared>/profile.md`
-  through the existing upsert-by-heading (`_write_fact`); every other file
-  goes to the agent's own `memory/`. `_safe_path` allows exactly that one
-  target outside the agent's memory dir. The `onboarding/profile` skill and
-  hand edits target the same file.
+- The container's consolidation loop (see Runtime) is the only automated
+  writer, and it writes from **any** agent's conversations: a fact the LLM
+  files under `profile.md` goes to `<shared>/profile.md` through the existing
+  upsert-by-heading (`_write_fact`), so something the user tells finance
+  about themselves still reaches the profile. Every other file goes to that
+  agent's own `memory/`. `_safe_path` allows exactly that one target outside
+  the agent's memory dir.
+- Interactive edits (the `onboarding/profile` skill, `/identity`-style
+  edits, hand edits through the agent) are the default agent's. `finance` and
+  `marketing` allowlist `onboarding` and `identity` today, so on a
+  non-default agent those skills tell the user to make the change from the
+  default agent; the tool gate is the backstop.
 - Dreaming tidies `<shared>/profile.md` once per container pass, not once per
   agent.
 - Migration, the one exception to decision 3: on first boot of a manifest
@@ -528,6 +539,8 @@ Each phase is its own PR and is shippable alone:
   - two agents keep separate conversations/memory on disk
   - a profile fact extracted from either agent's conversation lands in
     `<shared>/profile.md`, and neither agent has a `memory/profile.md`
+  - `write`/`edit` to `<shared>/profile.md` succeeds for the default agent
+    and returns an error for a sibling
   - a legacy `memory/profile.md` is moved once and never overwritten
   - `ask_agent` returns the sibling's answer, is not persisted, and cannot
     recurse
@@ -557,8 +570,10 @@ Each phase is its own PR and is shippable alone:
    carried channel would make the payload a routing instruction that the
    receiver is supposed to treat as background.
 
-3. **The user profile is one file per container, with one writer.** Decided
+3. **The user profile is one file per container, with two writers.** Decided
    2026-09-26. `<shared>/profile.md` is the only copy; per-agent
-   `memory/profile.md` goes away (moved on first boot). The container's
-   single extraction loop writes it; hand edits and the `onboarding/profile`
-   skill target the same file. See Context layout for the mechanics.
+   `memory/profile.md` goes away (moved on first boot). It is written by the
+   container's single consolidation loop (from any agent's conversations)
+   and by the default agent; other agents read it, and their `write`/`edit`
+   calls to it are refused. There is exactly one consolidation process per
+   container. See Context layout for the mechanics.
