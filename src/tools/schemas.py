@@ -463,3 +463,50 @@ _OPT_IN_SCHEMAS = [
 
 for _s in _OPT_IN_SCHEMAS:
     _register(_s, opt_in=True)
+
+
+def ask_agent_schema(siblings: list[dict]) -> dict:
+    """Schema for the ``ask_agent`` tool, generated per container.
+
+    Not registered in ``ALL_TOOL_SCHEMAS``: the ``agent`` enum is exactly the
+    calling agent's *siblings* and the description carries each sibling's
+    persona description, so the model gets the routing hints the manifest
+    already holds. ``Agent._get_tool_schemas`` appends it only inside a
+    multi-agent container.
+    """
+    names = [s["name"] for s in siblings]
+    lines = [
+        "Ask a sibling agent in this container a question and get its answer "
+        "back in your own conversation. The sibling answers with its own "
+        "persona, skills and memory; you see only its final reply. Use it "
+        "when a question belongs to a sibling's specialty.",
+        "Siblings:",
+    ]
+    for s in siblings:
+        desc = s.get("description") or "(no description)"
+        lines.append(f"- {s['name']}: {desc}")
+    return {
+        "type": "function",
+        "function": {
+            "name": "ask_agent",
+            "description": "\n".join(lines),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "enum": names,
+                        "description": "Which sibling agent to ask.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": (
+                            "The question, self-contained: the sibling has "
+                            "none of your conversation."
+                        ),
+                    },
+                },
+                "required": ["agent", "question"],
+            },
+        },
+    }

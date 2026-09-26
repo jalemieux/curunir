@@ -460,7 +460,7 @@ class TestAgentHandle:
 
         execute_call_count = 0
 
-        async def fake_execute(name, args, config, attachments=None, on_tool_call=None):
+        async def fake_execute(name, args, config, attachments=None, on_tool_call=None, **kwargs):
             nonlocal execute_call_count
             execute_call_count += 1
             if execute_call_count == 1:

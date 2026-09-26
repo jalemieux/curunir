@@ -206,6 +206,7 @@ wiring — see **[docs/local-llm.md](docs/local-llm.md)**.
 | `/clear`, `/new`, `/reset` | Reset the session (and trigger memory extraction) |
 | `/<skill-name> [args]` | Force the agent to use a specific skill (e.g. `/identity update my voice`) |
 | `/verbose` | Toggle live tool-call output (CLI-local) |
+| `python cli.py --agent <name>` | Talk to one agent of a multi-agent container (see Containers) |
 | `/attach <path>` / `/detach <i>` | Stage or remove a file for the next message (CLI-local) |
 | **Ctrl-C while the agent is working** | Send an interrupt — the agent finishes the in-flight tool, skips any remaining tools in the batch, and replies `(interrupted)` |
 | Ctrl-C at the prompt | Exit the CLI |
@@ -459,6 +460,45 @@ own them.
 cp personas/finance/.env.finance.example .env
 CURUNIR_PERSONA=finance python run.py
 ```
+
+## Containers: several agents in one process
+
+A process is a **container**; it can host several agents, each a persona
+with its own private context (identity, memory, conversations, schedules)
+under `context/agents/<name>/`, sharing `context/` for deliverables,
+uploads and the usage ledger. Describe the set in a manifest and point
+`CURUNIR_CONTAINER` at it (`container.example.yaml` is a commented copy):
+
+```yaml
+name: home
+agents:
+  - name: everyday
+    persona: default
+    context: .          # the legacy agent keeps context/ itself: nothing moves
+    default: true       # gets every message that names no agent, and email
+  - name: finance       # persona finance, context/agents/finance/
+inbound: [user]
+outbound: [user]
+```
+
+Without `CURUNIR_CONTAINER`, the process is a one-agent container built from
+`CURUNIR_PERSONA`, exactly as before. Inside a multi-agent container:
+
+- Every channel frame may carry `agent: <name>`; a missing field means the
+  default agent, so existing clients keep working. `python cli.py --agent
+  finance` stamps it on every frame, and the local console shows an agent
+  picker in its header (per-agent chat, memory, schedules and module tabs).
+- A long turn in one agent no longer blocks the others: each agent has its
+  own worker and queue.
+- Agents can **ask** each other. `ask_agent` appears as a tool only in a
+  multi-agent container; the sibling answers with its own persona, skills
+  and memory in a throwaway session that is never persisted, and the answer
+  comes back as the tool result. Sibling answers cannot recurse.
+- `python -m src.usage --by agent` breaks the token ledger down per agent.
+
+The inbound/outbound lists and `peers` describe messaging *between*
+containers (`docs/agents-and-containers.md`); the manifest validates them
+now, and the handoff transport is the next phase.
 
 ## Evals
 

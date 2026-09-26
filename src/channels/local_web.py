@@ -48,6 +48,7 @@ from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.channels._agent_field import agent_of, call_provider, request_cancel
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -93,9 +94,17 @@ class LocalWebChannel:
         conversations_provider: Callable[[], list[dict]] | None = None,
         ingest: Callable[[str], "asyncio.Future | object"] | None = None,
         doc_card_min_bytes: int = 50_000,
+        agents: list[dict] | None = None,
+        agent_configs: dict[str, AgentConfig] | None = None,
     ):
         self.in_queue = in_queue
         self.config = config
+        # Multi-agent container: the advertised agent list (meta frame) and
+        # each agent's config, so read panels and module gating can follow
+        # the agent the browser selects (`?agent=` / frame `agent`). Empty
+        # for a single-agent container — `config` is then the only agent.
+        self.agents = list(agents or [])
+        self.agent_configs: dict[str, AgentConfig] = dict(agent_configs or {})
         self.host = host
         self.port = port
         self.model = model
@@ -151,9 +160,37 @@ class LocalWebChannel:
             "token"
         )
 
-    def _module_enabled(self, panel_id: str) -> bool:
-        """True if the named UI module is owned by the active persona."""
-        return panel_id in self._module_panels
+    def _module_enabled(self, panel_id: str, config: AgentConfig | None = None) -> bool:
+        """True if the named UI module is owned by the agent's persona."""
+        if config is None or config is self.config:
+            return panel_id in self._module_panels
+        return panel_id in {m.panel_id for m in enabled_modules(config.skill_allowlist)}
+
+    def _config_for(self, agent: str | None) -> AgentConfig | None:
+        """The config a request addresses: the default agent's, or a named one.
+
+        Returns None for an agent this container does not host.
+        """
+        if not agent:
+            return self.config
+        return self.agent_configs.get(agent)
+
+    def _agent_config(self, request: Request) -> tuple[AgentConfig | None, JSONResponse | None]:
+        """Resolve ``?agent=`` for a REST route: (config, error-response)."""
+        agent = (request.query_params.get("agent") or "").strip() or None
+        cfg = self._config_for(agent)
+        if cfg is None:
+            return None, JSONResponse({"error": f"unknown agent {agent!r}"}, status_code=404)
+        return cfg, None
+
+    def _agents_meta(self) -> list[dict]:
+        """The agent list for the meta frame, each with its enabled modules."""
+        out = []
+        for a in self.agents:
+            cfg = self.agent_configs.get(a.get("name", "")) or self.config
+            mods = [m.panel_id for m in enabled_modules(cfg.skill_allowlist)]
+            out.append({**a, "modules": mods})
+        return out
 
     def _seen_msg(self, client_msg_id: str | None) -> bool:
         """Record a ``client_msg_id`` and report whether it was already seen.
@@ -174,13 +211,13 @@ class LocalWebChannel:
             self._recent_msg_ids.discard(self._recent_msg_order.popleft())
         return False
 
-    def _schedules_db(self) -> str:
-        """Initialize (if needed) and return the schedule store path.
+    def _schedules_db(self, config: AgentConfig | None = None) -> str:
+        """Initialize (if needed) and return an agent's schedule store path.
 
         Mirrors ``schedule_tool._db`` so writes go through the same engine the
         ``schedule`` tool and scheduler use — no separate query/validation path.
         """
-        path = str(self.config.schedules_db)
+        path = str((config or self.config).schedules_db)
         sdb.init_db(path)
         return path
 
@@ -215,23 +252,32 @@ class LocalWebChannel:
         async def api_portfolio(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            if not self._module_enabled("portfolio"):
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
+            if not self._module_enabled("portfolio", cfg):
                 return JSONResponse({"error": "not found"}, status_code=404)
-            return JSONResponse(readers.portfolio_overview(self.config))
+            return JSONResponse(readers.portfolio_overview(cfg))
 
         @app.get("/api/crm")
         async def api_crm(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            if not self._module_enabled("crm"):
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
+            if not self._module_enabled("crm", cfg):
                 return JSONResponse({"error": "not found"}, status_code=404)
-            return JSONResponse(readers.crm_overview(self.config))
+            return JSONResponse(readers.crm_overview(cfg))
 
         @app.get("/api/schedules")
         async def api_schedules(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return JSONResponse(readers.schedules(self.config))
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
+            return JSONResponse(readers.schedules(cfg))
 
         @app.post("/api/schedules")
         async def api_schedule_create(request: Request) -> JSONResponse:
@@ -242,10 +288,13 @@ class LocalWebChannel:
                 k: body.get(k) for k in ("id", "cron", "prompt", "skill")
             }
             fields["enabled"] = bool(body.get("enabled", True))
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
             try:
                 row = sengine.create(
-                    self._schedules_db(), fields,
-                    skill_allowlist=self.config.skill_allowlist,
+                    self._schedules_db(cfg), fields,
+                    skill_allowlist=cfg.skill_allowlist,
                 )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
@@ -264,10 +313,13 @@ class LocalWebChannel:
             }
             if "enabled" in fields:
                 fields["enabled"] = bool(fields["enabled"])
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
             try:
                 row = sengine.update(
-                    self._schedules_db(), task_id, fields,
-                    skill_allowlist=self.config.skill_allowlist,
+                    self._schedules_db(cfg), task_id, fields,
+                    skill_allowlist=cfg.skill_allowlist,
                 )
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
@@ -279,8 +331,11 @@ class LocalWebChannel:
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
             try:
-                row = sengine.toggle(self._schedules_db(), task_id)
+                row = sengine.toggle(self._schedules_db(cfg), task_id)
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse(row)
@@ -291,8 +346,11 @@ class LocalWebChannel:
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
             try:
-                sengine.delete(self._schedules_db(), task_id)
+                sengine.delete(self._schedules_db(cfg), task_id)
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return JSONResponse({"ok": True, "id": task_id})
@@ -301,7 +359,10 @@ class LocalWebChannel:
         async def api_memory(request: Request) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return JSONResponse(readers.memory_tree(self.config))
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
+            return JSONResponse(readers.memory_tree(cfg))
 
         @app.get("/api/memory/file")
         async def api_memory_file(
@@ -309,8 +370,11 @@ class LocalWebChannel:
         ) -> JSONResponse:
             if not self._token_ok(self._rest_token(request)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            cfg, err = self._agent_config(request)
+            if err is not None:
+                return err
             try:
-                return JSONResponse(readers.memory_file(self.config, path))
+                return JSONResponse(readers.memory_file(cfg, path))
             except ValueError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             except FileNotFoundError as e:
@@ -372,6 +436,9 @@ class LocalWebChannel:
                 "model": self.model,
                 "persona": self.persona,
                 "modules": [m.panel_id for m in self._modules],
+                # Multi-agent container: each agent with its own modules so
+                # the SPA can re-gate tabs when the picker changes.
+                **({"agents": self._agents_meta()} if self.agents else {}),
             }
         ))
 
@@ -420,9 +487,11 @@ class LocalWebChannel:
         """
         command = payload.get("command")
         sid = payload.get("session_id") or LOCAL_SESSION_ID
+        agent = agent_of(payload)
+        echo = {"agent": agent} if agent else {}
 
         if command == "interrupt":
-            delivered = bool(self.cancel_session and self.cancel_session(sid))
+            delivered = request_cancel(self.cancel_session, sid, agent)
             logger.info(
                 "Interrupt requested for local session %s (delivered=%s)",
                 sid, delivered,
@@ -431,7 +500,7 @@ class LocalWebChannel:
 
         if command == "history_request":
             if respond is not None:
-                messages = self.history_provider(sid)
+                messages = call_provider(self.history_provider, sid, agent=agent)
                 for m in messages:
                     if m.get("attachments"):
                         _enrich_attachments(m["attachments"], self.project_root)
@@ -439,6 +508,7 @@ class LocalWebChannel:
                     "type": "history_snapshot",
                     "session_id": sid,
                     "messages": messages,
+                    **echo,
                 })
             return
 
@@ -447,7 +517,8 @@ class LocalWebChannel:
                 await respond({
                     "type": "skills_snapshot",
                     "session_id": sid,
-                    "skills": self.skills_provider(),
+                    "skills": call_provider(self.skills_provider, agent=agent),
+                    **echo,
                 })
             return
 
@@ -456,7 +527,8 @@ class LocalWebChannel:
                 await respond({
                     "type": "conversations_snapshot",
                     "session_id": sid,
-                    "conversations": self.conversations_provider(),
+                    "conversations": call_provider(self.conversations_provider, agent=agent),
+                    **echo,
                 })
             return
 
@@ -473,6 +545,7 @@ class LocalWebChannel:
                 session_id=sid,
                 reply_address={},
                 command="slash",
+                agent=agent,
             ))
             return
 
@@ -515,6 +588,7 @@ class LocalWebChannel:
             reply_address={},
             command=command or None,
             attachments=manifest or None,
+            agent=agent,
         ))
 
     # --- document upload + eager ingestion ----------------------------------
@@ -654,6 +728,8 @@ class LocalWebChannel:
             "workflow": msg.workflow,
             "stats": msg.stats,
         }
+        if msg.agent:
+            frame["agent"] = msg.agent
         try:
             await ws.send_text(json.dumps(frame))
         except (WebSocketDisconnect, RuntimeError):

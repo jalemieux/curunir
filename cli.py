@@ -274,8 +274,13 @@ async def _connect_with_retry(uri: str, console: Console) -> websockets.ClientCo
 
 
 async def run(host: str, port: int, console: Console | None = None,
-              download_dir: str = _DEFAULT_DOWNLOAD_DIR) -> None:
+              download_dir: str = _DEFAULT_DOWNLOAD_DIR,
+              agent: str | None = None) -> None:
     console = console or Console()
+    # Multi-agent container: stamp every frame with the chosen agent so the
+    # server routes it there. None (the default) is what single-agent servers
+    # and older builds expect — the field is simply absent.
+    agent_field: dict = {"agent": agent} if agent else {}
     uri = f"ws://{host}:{port}"
     pairing_token = _load_pairing_token()
 
@@ -377,6 +382,14 @@ async def run(host: str, port: int, console: Console | None = None,
                     info_parts = []
                     if data.get("model"):
                         info_parts.append(f"[dim]model: {data['model']}[/dim]")
+                    if data.get("agents"):
+                        names = ", ".join(
+                            a["name"] + (" (default)" if a.get("default") else "")
+                            for a in data["agents"] if isinstance(a, dict) and a.get("name")
+                        )
+                        info_parts.append(f"[dim]agents: {names}[/dim]")
+                    if agent:
+                        info_parts.append(f"[#c4923a]agent: {agent}[/#c4923a]")
                     if data.get("persona"):
                         # Amber tag mirrors the web UI's persona label.
                         info_parts.append(f"[#c4923a]persona: {data['persona']}[/#c4923a]")
@@ -514,7 +527,7 @@ async def run(host: str, port: int, console: Console | None = None,
 
     async def _send_interrupt() -> None:
         try:
-            await ws.send(json.dumps({"command": "interrupt"}))
+            await ws.send(json.dumps({"command": "interrupt", **agent_field}))
         except websockets.exceptions.ConnectionClosed:
             pass
 
@@ -562,7 +575,7 @@ async def run(host: str, port: int, console: Console | None = None,
         # token is configured server-side; sending it unconditionally also
         # covers the reconnect-resume case. Old servers without hello support
         # ignored the resume hello and will simply ignore this one too.
-        hello: dict = {"type": "hello"}
+        hello: dict = {"type": "hello", **agent_field}
         if pairing_token is not None:
             hello["token"] = pairing_token
         if session_id is not None:
@@ -670,7 +683,7 @@ async def run(host: str, port: int, console: Console | None = None,
                         # — they manipulate CLI-local state. Cancellation is
                         # Ctrl-C, which sends `{"command": "interrupt"}`.)
                         staging.clear()
-                        payload = {"command": "slash", "text": text}
+                        payload = {"command": "slash", "text": text, **agent_field}
                     else:
                         # Auto-stage any absolute file paths in the message
                         # (e.g. from drag-drop onto the terminal).
@@ -679,6 +692,7 @@ async def run(host: str, port: int, console: Console | None = None,
                             "content": text,
                             "command": None,
                             "attachments": staging.to_payload() or None,
+                            **agent_field,
                         }
                         staging.clear()
 
@@ -720,10 +734,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Curunir WebSocket CLI client")
     parser.add_argument("--host", default="localhost", help="Server host (default: localhost)")
     parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
+    parser.add_argument(
+        "--agent", default=None,
+        help="Agent to talk to in a multi-agent container (default: the container's default agent)",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(run(args.host, args.port))
+        asyncio.run(run(args.host, args.port, agent=args.agent))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

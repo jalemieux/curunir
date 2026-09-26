@@ -177,3 +177,59 @@ def test_summary_rejects_unknown_group_by(tmp_path):
     store.record(_record())
     with pytest.raises(ValueError):
         store.summary(timedelta(days=1), group_by="banana")
+
+
+# --- agent column (agents-and-containers phase 2) ---------------------------
+
+def test_agent_column_is_recorded_and_groupable(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = UsageStore(tmp_path / "u.db")
+    now = datetime.now(timezone.utc)
+    store.record(UsageRecord(ts=now, session_id="a", model="m", prompt_tokens=10, completion_tokens=1, agent="finance"))
+    store.record(UsageRecord(ts=now, session_id="b", model="m", prompt_tokens=20, completion_tokens=2, agent="finance"))
+    store.record(UsageRecord(ts=now, session_id="c", model="m", prompt_tokens=5, completion_tokens=1))
+    rows = {r["agent"]: r for r in store.summary(timedelta(days=1), group_by="agent")}
+    assert rows["finance"]["prompt_tokens"] == 30 and rows["finance"]["calls"] == 2
+    assert rows[""]["prompt_tokens"] == 5  # unstamped rows group under ""
+    store.close()
+
+
+def test_agent_column_is_added_to_a_pre_existing_database(tmp_path):
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        CREATE TABLE usage (
+          id INTEGER PRIMARY KEY, ts TEXT NOT NULL, session_id TEXT NOT NULL,
+          model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
+          completion_tokens INTEGER NOT NULL,
+          cached_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+          reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+          image_tokens INTEGER NOT NULL DEFAULT 0,
+          audio_tokens INTEGER NOT NULL DEFAULT 0,
+          cost_usd REAL, elapsed_sec REAL NOT NULL
+        );
+    """)
+    ts = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO usage (ts, session_id, model, prompt_tokens, completion_tokens, elapsed_sec) "
+        "VALUES (?, 'old', 'm', 7, 1, 0.5)", (ts,),
+    )
+    conn.commit()
+    conn.close()
+
+    store = UsageStore(db)  # opens + migrates
+    cols = {r[1] for r in store._conn.execute("PRAGMA table_info(usage)")}
+    assert "agent" in cols
+    # the old row survived and reads back with a NULL agent
+    rows = store.summary(timedelta(days=1), group_by="agent")
+    assert rows == [dict(rows[0])] and rows[0]["agent"] == "" and rows[0]["prompt_tokens"] == 7
+    store.record(UsageRecord(ts=datetime.now(timezone.utc), session_id="n", model="m",
+                             prompt_tokens=1, completion_tokens=1, agent="everyday"))
+    assert {r["agent"] for r in store.summary(timedelta(days=1), group_by="agent")} == {"", "everyday"}
+    # reopening is idempotent (no duplicate-column error)
+    store.close()
+    UsageStore(db).close()

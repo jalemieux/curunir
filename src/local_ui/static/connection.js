@@ -36,7 +36,20 @@ export function drainOutbox(outbox, isOpen, rawSend) {
   while (outbox.length && isOpen()) rawSend(outbox.shift());
 }
 
-// createConnection({ url, onFrame, onStatus, onOpen }) -> { send, close, isOpen }
+// decorateFrame(frame, decorate) -> frame
+//   Merges the caller-supplied `decorate()` fields (e.g. the multi-agent
+//   `agent` address) into an outbound frame. The frame's own explicit fields
+//   win over the decoration so a caller can still override per-frame. Returns
+//   the same object untouched when there is nothing to merge, so the common
+//   single-agent path allocates nothing.
+export function decorateFrame(frame, decorate) {
+  if (typeof decorate !== "function" || !frame) return frame;
+  const extra = decorate();
+  if (!extra || Object.keys(extra).length === 0) return frame;
+  return { ...extra, ...frame };
+}
+
+// createConnection({ url, onFrame, onStatus, onOpen, decorate }) -> { send, close, isOpen }
 //   url:      () => string   builds the ws URL (local injects ?token=…)
 //   onFrame:  (msg)   => {}  every parsed inbound frame
 //   onStatus: (state) => {}  socket transition: "reconnecting" | "offline"
@@ -44,7 +57,10 @@ export function drainOutbox(outbox, isOpen, rawSend) {
 //                            via onFrame — the socket being open does not mean
 //                            the agent is online.)
 //   onOpen:   ()      => {}  fired each time the socket opens (after handshake)
-export function createConnection({ url, onFrame, onStatus, onOpen }) {
+//   decorate: ()      => {}  optional; extra fields merged into EVERY outbound
+//                            frame before routing, so buffered frames carry
+//                            them too (see decorateFrame)
+export function createConnection({ url, onFrame, onStatus, onOpen, decorate }) {
   let ws = null;
   let backoff = 1000;
   let closedByCaller = false;
@@ -84,6 +100,7 @@ export function createConnection({ url, onFrame, onStatus, onOpen }) {
   //   buffered for replay on reconnect; false only if it was dropped (a
   //   non-durable frame sent while the socket was closed).
   function send(frame) {
+    frame = decorateFrame(frame, decorate);
     const { action } = routeOutbound(frame, isOpen(), outbox);
     if (action === "send") { ws.send(JSON.stringify(frame)); return true; }
     return action === "buffer";

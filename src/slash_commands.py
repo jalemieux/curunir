@@ -40,6 +40,7 @@ class SlashContext:
     reply_address: dict
     skill_dirs: list[Path]
     skill_allowlist: list[str] | None = None
+    agent: str | None = None  # the agent that received the command
 
     def allowlist_set(self) -> set[str] | None:
         return set(self.skill_allowlist) if self.skill_allowlist else None
@@ -76,6 +77,7 @@ def _out(ctx: SlashContext, content: str) -> OutgoingMessage:
         session_id=ctx.session_id,
         reply_address=ctx.reply_address,
         final=True,
+        agent=ctx.agent,
     )
 
 
@@ -86,6 +88,7 @@ def _inc(ctx: SlashContext, content: str, command: str | None = None) -> Incomin
         session_id=ctx.session_id,
         reply_address=ctx.reply_address,
         command=command,
+        agent=ctx.agent,
     )
 
 

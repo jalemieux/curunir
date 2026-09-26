@@ -17,7 +17,7 @@ from src.config import AgentConfig
 from src.llm import call_llm, classify_provider_error
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
-from src.tools.schemas import get_tool_schemas
+from src.tools.schemas import ask_agent_schema, get_tool_schemas
 from src.usage_store import UsageRecord, UsageStore
 
 
@@ -310,6 +310,10 @@ class Agent:
         self.usage_store = usage_store
         self._cancel_events: dict[str, asyncio.Event] = {}
         self._running_sessions: set[str] = set()
+        # Set by src.container.Container when this agent is hosted with
+        # siblings; None for a standalone agent and for transient sub-agents
+        # (delegate / ask_agent), which therefore never see ask_agent.
+        self.container = None
 
     def request_cancel(self, session_id: str) -> bool:
         """Signal an in-flight handle() to stop after the current iteration.
@@ -374,6 +378,16 @@ class Agent:
         if session_id and session_id in self._session_tools:
             extra = get_tool_schemas(list(self._session_tools[session_id]))
             base = base + extra
+        # ask_agent is a default tool only inside a multi-agent container and
+        # only for the container's own agents (self.tools is None): a
+        # restricted tool list (sub-agents) never gets it, so asks can't recurse.
+        container = self.container
+        if container is not None and container.multi_agent and self.tools is None:
+            siblings = [
+                s for s in container.describe() if s["name"] != self.config.agent_name
+            ]
+            if siblings:
+                base = base + [ask_agent_schema(siblings)]
         return base
 
     def _load_history(self, session_id: str) -> list[dict]:
@@ -671,6 +685,7 @@ class Agent:
                     audio_tokens=resp.usage.audio_tokens,
                     cost_usd=resp.usage.cost_usd,
                     elapsed_sec=resp.usage.elapsed_sec,
+                    agent=self.config.agent_name,
                 )
                 try:
                     await asyncio.to_thread(self.usage_store.record, record)
@@ -788,6 +803,7 @@ class Agent:
                                 self.config,
                                 attachments=attachments,
                                 on_tool_call=on_tool_call,
+                                agent=self,
                             )
                         except Exception as exc:
                             # Systemic backstop: no single tool's unanticipated

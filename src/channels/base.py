@@ -12,6 +12,10 @@ class IncomingMessage:
     reply_address: dict
     command: str | None = None
     attachments: list[dict] | None = None
+    # Which agent in the container should handle this (None = the default
+    # agent, which is every pre-multi-agent client). route_inbound resolves
+    # it and stamps the canonical name before the worker sees the message.
+    agent: str | None = None
 
 
 @dataclass
@@ -26,6 +30,8 @@ class OutgoingMessage:
     attachments: list[dict] | None = None
     workflow: dict | None = None
     stats: dict | None = None
+    # The agent that produced this reply; channels echo it on outbound frames.
+    agent: str | None = None
 
 
 class Channel(Protocol):

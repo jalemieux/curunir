@@ -32,6 +32,9 @@ class UsageRecord:
     audio_tokens: int = 0
     cost_usd: float | None = None
     elapsed_sec: float = 0.0
+    # Which agent in the container made the call (None on rows written
+    # before the column existed, and by tools that don't know).
+    agent: str | None = None
 
 
 _SCHEMA = """
@@ -47,10 +50,26 @@ CREATE TABLE IF NOT EXISTS usage (
   image_tokens INTEGER NOT NULL DEFAULT 0,
   audio_tokens INTEGER NOT NULL DEFAULT 0,
   cost_usd REAL,
-  elapsed_sec REAL NOT NULL
+  elapsed_sec REAL NOT NULL,
+  agent TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage(ts);
 """
+
+# Additive migrations for databases created before a column existed. The
+# schema above is applied with CREATE TABLE IF NOT EXISTS, which never alters
+# an existing table, so each new nullable column is added here on open.
+_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("agent", "TEXT"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(usage)")}
+    for column, decl in _ADDED_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE usage ADD COLUMN {column} {decl}")
+            log.info("usage db: added column %s", column)
 
 
 class UsageStore:
@@ -64,6 +83,7 @@ class UsageStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        _migrate(self._conn)
 
     def record(self, row: UsageRecord) -> None:
         ts = row.ts
@@ -77,8 +97,8 @@ class UsageStore:
                     prompt_tokens, completion_tokens,
                     cached_prompt_tokens, reasoning_tokens,
                     image_tokens, audio_tokens,
-                    cost_usd, elapsed_sec
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_usd, elapsed_sec, agent
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts.astimezone(timezone.utc).isoformat(),
@@ -92,18 +112,24 @@ class UsageStore:
                     int(row.audio_tokens),
                     row.cost_usd,
                     float(row.elapsed_sec),
+                    row.agent,
                 ),
             )
 
     def summary(
         self,
         window: timedelta,
-        group_by: Literal["model", "day", "session", "day_session"] = "model",
+        group_by: Literal["model", "day", "session", "day_session", "agent"] = "model",
     ) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - window).isoformat()
         if group_by == "model":
             group_expr = "model"
             select_expr = "model"
+        elif group_by == "agent":
+            # Rows from before the column existed (or from tools that don't
+            # stamp it) group under the empty string.
+            group_expr = "COALESCE(agent, '')"
+            select_expr = f"{group_expr} AS agent"
         elif group_by == "day":
             group_expr = "substr(ts, 1, 10)"
             select_expr = f"{group_expr} AS day"

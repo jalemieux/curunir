@@ -1,0 +1,34 @@
+# Example container manifest (agents-and-containers, phase 2).
+#
+# Select it with CURUNIR_CONTAINER=container.yaml. Without that variable the
+# process runs today's one-agent container synthesized from CURUNIR_PERSONA.
+#
+# One process hosts every agent listed here. Each agent is a persona bundle
+# (personas/<persona>/) plus its own private context dir under context/;
+# context/ itself is the shared area (workspace deliverables, uploads, the
+# usage ledger, the pairing token, email state).
+name: home
+
+agents:
+  # The legacy agent keeps context/ as its context (`context: .`), so an
+  # existing deployment gains siblings without moving a single file. It is
+  # the default: it receives every message that names no agent, and email.
+  - name: everyday
+    persona: default
+    context: .
+    default: true
+
+  # persona defaults to the agent name; context defaults to agents/<name>,
+  # i.e. context/agents/finance/{identity.md,memory/,conversations/,schedules.db}.
+  - name: finance
+
+# Who may send to this container and where its messages may go. `user` must
+# be in both. Naming another container requires a `peers` entry whose
+# token_env is set; cross-container messaging itself lands in phase 3.
+inbound: [user]
+outbound: [user]
+# peers:
+#   vault:
+#     url: http://vault:8767
+#     token_env: PEER_VAULT_TOKEN
+# user_delivery: portal

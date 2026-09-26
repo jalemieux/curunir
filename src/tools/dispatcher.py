@@ -35,19 +35,31 @@ def _get_native_async_executor(name: str):
     if name == "to_audio":
         from src.tools.to_audio import exec_to_audio
         return exec_to_audio
+    if name == "ask_agent":
+        from src.tools.ask_agent import exec_ask_agent
+        return exec_ask_agent
     return None
 
 
 # Async executors that need the mutable attachments list.
 _ASYNC_EXECUTORS_WITH_ATTACHMENTS = {"to_audio"}
 
+# Async executors that need the calling Agent (to reach its container).
+_ASYNC_EXECUTORS_WITH_AGENT = {"ask_agent"}
+
 
 async def execute_tool_call(
     name: str, args: dict, config: AgentConfig,
     attachments: list[dict] | None = None,
     on_tool_call=None,
+    agent=None,
 ) -> str:
-    """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly."""
+    """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly.
+
+    ``agent`` is the calling ``Agent`` (only ``ask_agent`` uses it, to find
+    its siblings through ``agent.container``); it is optional so existing
+    callers and tests need no change.
+    """
     key = name.lower()
 
     # Check native async executors first (e.g. delegate)
@@ -56,6 +68,10 @@ async def execute_tool_call(
         if key in _ASYNC_EXECUTORS_WITH_ATTACHMENTS:
             return await async_executor(
                 args, config, attachments=attachments, on_tool_call=on_tool_call,
+            )
+        if key in _ASYNC_EXECUTORS_WITH_AGENT:
+            return await async_executor(
+                args, config, agent=agent, on_tool_call=on_tool_call,
             )
         return await async_executor(args, config, on_tool_call=on_tool_call)
 
