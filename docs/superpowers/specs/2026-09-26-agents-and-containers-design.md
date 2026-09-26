@@ -1,8 +1,19 @@
 # Agents and Containers — Design
 
 **Date:** 2026-09-26
-**Status:** Draft, awaiting review
-**Related:** PR #546 (concept: `docs/agents-and-containers.md`), `2026-05-29-persona-deployment-design.md`
+**Status:** Draft, revision 2 (owner review). Open questions carry a
+recommendation each; decisions pending.
+**Related:** PR #546 (concept: `docs/agents-and-containers.md`),
+`2026-05-29-persona-deployment-design.md`
+
+Revision 2 checks every code reference against `main` at `34fa7a1` and
+corrects the first draft where it was wrong: `build_static_prompt` lives in
+`src/agent/system_prompt.py`, not `skills.py`; `load_skill` takes no config
+today; 27 markdown files carry `context/` literals, not ~31; several path
+literals were missed (email state, `.ws-token`, `_enrich_attachments`,
+`readers.py`); the portal drops unknown frame types, so it is not fully
+"no change"; and transcripts are persisted by `agent_worker`, not by
+`Agent.handle`, which is what makes `ask_agent` unpersisted for free.
 
 ## Problem
 
@@ -29,13 +40,18 @@ deployment, and that is the backward-compatibility path.
 The existing seams already carry most of the load:
 
 - `Agent` state is per instance (`sessions`, prompts, cancel events).
-- Every tool receives `config`.
+- Every tool receives `config` (`execute_tool_call`, `src/tools/dispatcher.py:45`).
 - The memory extractor, conversation store, scheduler and skill allowlist all
   take `config` / `context_dir`.
+- Transcripts are persisted by `agent_worker` (`run.py:426`, `run.py:498`),
+  not by `Agent.handle`. A per-agent worker therefore persists per agent
+  with no change to the store.
 
-What is hard-wired to one agent is `run.py` wiring, a handful of path
-literals, and ~31 skill/persona markdown files that spell `context/memory`,
-`context/identity.md` and `context/workspace` literally.
+What is hard-wired to one agent is `run.py` wiring, about a dozen path
+literals (listed under Context layout), and 27 markdown files under
+`skills/` and `personas/` that spell `context/memory`,
+`context/identity.md`, `context/workspace` and similar literally. 22 of the
+27 enter prompts; the other five are persona READMEs and a template.
 
 ## Decisions
 
@@ -87,14 +103,19 @@ user_delivery: portal       # where handoff answers go: portal | local_web | ema
 
 `src/container.py` holds a frozen `ContainerManifest` dataclass plus
 `load_container(path)` and `synthesize_container(persona_name)`. It mirrors
-`src/persona.py`: it validates at boot and raises on a malformed manifest.
-Validation rules:
+`src/persona.py` (`Persona` frozen dataclass; `load_persona` raises
+`FileNotFoundError` on a missing file and `ValueError` on malformed YAML,
+`src/persona.py:48-70`): it validates at boot and raises on a malformed
+manifest. Validation rules:
 
-- Agent names are unique.
+- `name` is present. Agent names are unique.
 - Exactly one agent is the default (implied when there is one agent).
-- Every persona exists.
+- Every persona exists (`load_persona` is called for each; its errors
+  propagate).
 - `user` appears in both lists.
-- Every container named in a list has a `peers` entry.
+- Every container named in a list has a `peers` entry, and the env var its
+  `token_env` names is set. A missing secret fails boot, not the first
+  handoff.
 - `user_delivery` names an enabled channel.
 
 ## Context layout
@@ -114,64 +135,126 @@ context/                         # container root = shared area
       schedules.db
 ```
 
-`AgentConfig` gains `agent_name` and `shared_dir`. A single factory,
+`AgentConfig` (`src/config.py:6-39`) gains `agent_name` and `shared_dir`.
+Today every path field is an independent literal (`identity_file`,
+`usage_db`, `schedules_db`, `skill_dirs`, `portfolio_db`, `crm_db`); none is
+derived from `context_dir`. A single factory,
 `AgentConfig.for_agent(container, entry, **env_overrides)`, derives every
 per-agent path from `context_dir`:
 
 - `identity_file`
 - `schedules_db`
-- `portfolio_db`
-- `crm_db`
+- `portfolio_db` and `crm_db` (they become `Path`, like the rest)
 - `skill_dirs[1]` (`<context>/skills`)
 
-`usage_db` derives from `shared_dir`. The standalone path literals go:
+These derive from `shared_dir`:
 
-- `portfolio_tool` / `crm_tool` `_DEFAULT_DB`
-- the channel `os.getcwd()/context/uploads` constructors, which take
-  `shared_dir` instead
-- `bootstrap_context(Path("./context"))`, which bootstraps each agent's
-  `context_dir`
+- `usage_db`
+- the `.ws-token` pairing token (today `config.context_dir / ".ws-token"`,
+  `run.py:718`)
+- the email state file (today a literal in both `EmailChannelConfig.state_file`,
+  `src/config.py:70`, and `run.py:748`; `EMAIL_STATE_FILE` still overrides)
+- the channels' `uploads_dir` (today an `os.getcwd()/context/uploads`
+  fallback in `ws.py:78`, `portal.py:120`, `local_web.py:103` that `run.py`
+  never overrides; `run.py` passes `shared_dir / "uploads"` and the fallbacks go)
+- `readers._generated_root` (`src/local_ui/readers.py:312`), which today
+  builds `context_dir/workspace/generated`. Left alone it would point a
+  non-legacy agent's Files rail at its private dir.
 
-`build_memory_block` also includes `<shared>/profile.md` when it exists. That
-is the "shared area holds the user's profile" from the concept doc. The
-per-agent `memory/profile.md` keeps working.
+A bare `AgentConfig()` keeps the legacy layout: `shared_dir` defaults to
+`context_dir`, and every derived default equals today's literal. This
+matters because `skills/document-ingest/ingest.py:38` constructs one directly.
 
-The usage store gains a nullable `agent` column (additive migration). The
-local UI Usage tab can then group by agent. Schedules need no schema change,
-because each agent has its own `schedules.db`.
+The remaining standalone literals go:
+
+- `_DEFAULT_DB` in `src/tools/portfolio_tool.py:14` and
+  `src/tools/crm_tool.py:14` (the tools read `config.portfolio_db` /
+  `config.crm_db` unconditionally)
+- `bootstrap_context(Path("./context"))` at `run.py:663`, which bootstraps
+  each agent's `context_dir` instead
+- `_enrich_attachments(..., os.getcwd())` in `ws.py:344`, `portal.py:357`,
+  `portal.py:414`, `local_web.py:434`, `local_web.py:643`, which take
+  `config.repo_root`
+
+`PERSONAS_DIR = Path("personas")` (`src/persona.py:27`) stays cwd-relative.
+It is repo content, not context, and the bash tool already pins cwd to
+`repo_root`.
+
+`build_memory_block(context_dir)` (`src/agent/system_prompt.py:66`) also
+includes `<shared>/profile.md` when it exists. That is the "shared area holds
+the user's profile" from the concept doc. The per-agent `memory/profile.md`
+keeps working.
+
+The usage store gains a nullable `agent` column. `UsageStore.__init__`
+applies the schema with `executescript(_SCHEMA)` (`src/usage_store.py:66`)
+and has no migration path, so the column is added with a guarded
+`ALTER TABLE usage ADD COLUMN agent TEXT` after checking `PRAGMA table_info`.
+The local UI Usage tab can then group by agent. Schedules need no schema
+change, because each agent has its own `schedules.db`.
+
+**Accepted consequence of `context: .`.** The legacy agent's private files
+share a directory with the shared area, and `context/agents/` sits inside
+the legacy agent's tree. A `glob` or `grep` over `context/` from the legacy
+agent can see a sibling's memory. That is the concept doc's "convention, not
+enforcement" and is accepted so that existing deployments do not move files.
+The alternative (a one-time move of the legacy agent into
+`context/agents/<name>/`) is rejected by decision 3.
 
 ## Path scoping in skills and prompts
 
-The ~31 markdown files under `skills/` and `personas/` that hardcode
+The 27 markdown files under `skills/` and `personas/` that hardcode
 `context/…` are rewritten once:
 
 | Before | After | Why |
 |---|---|---|
 | `context/memory/…`, `context/identity.md`, `context/conversations/…`, `context/schedules.db`, `context/skills/…` | `{{context}}/…` | private to the agent |
 | `context/workspace/…`, `context/uploads/…` | `{{shared}}/…` | shared |
+| `context/behavior.md` (5 hits in `skills/identity/SKILL.md` and `skills/onboarding/personality/SKILL.md`) | deleted | stale: behavior moved to persona prompts and this file is no longer read |
 
-`src/skills.py::render_paths(text, config)` performs the substitution. It is
-called at the three places markdown enters a prompt:
+Occurrence counts today: `context/workspace` 51, `context/memory` 44,
+`context/identity.md` 30, `context/skills` 7, `context/schedules.db` 3,
+`context/conversations` 2, `context/uploads` 0.
 
-- `load_skill`
-- `build_static_prompt` (persona prompts)
-- the scheduler's skill prepend
+The four persona READMEs are human documentation and describe the layout in
+prose instead of placeholders. `skills/skill-factory/references/template.md`
+is a template for generated `SKILL.md` files, so it carries the placeholders.
 
-A test lints `skills/` and `personas/` so a raw `context/memory`,
-`context/identity.md` and similar cannot creep back in.
+`src/skills.py::render_paths(text, paths)` performs the substitution, where
+`paths` is `AgentConfig.path_vars` (`{"context": ..., "shared": ...}`). It is
+called at the two places markdown enters a prompt:
 
-Scripts get the same values through the environment. The bash tool exports
-`CURUNIR_CONTEXT_DIR` and `CURUNIR_SHARED_DIR` into its subprocess env. The
-following default from those variables instead of literals:
+- `load_skill(name, skill_dirs, allowlist=None, paths=None)`
+  (`src/skills.py:156`). The new `paths=None` renders the legacy values
+  (`context` for both), so the five existing callers keep working, and each
+  is migrated to pass `config.path_vars` in the same PR: `skill_tool.py:8`,
+  `scheduler.py:89` (the scheduler's prepend therefore needs no separate
+  render), `run.py:544` (dreaming), `memory_extractor.py:97` and
+  `document_ingest.py:170`. Slash commands do not call `load_skill`; they
+  rewrite to a prompt that the model answers with the tool.
+- `build_static_prompt(config)` in `src/agent/system_prompt.py:12`, for the
+  persona prompts and `identity.md`.
 
-- `skills/balance-sheet/portfolio.py`
-- `skills/crm/crm.py`
-- `skills/webcam/snapshot.py`
-- `skills/document-ingest/ingest.py`
+A test lints `skills/**/*.md` and `personas/*/prompts/*.md` so a raw
+`context/memory`, `context/identity.md` and similar cannot creep back in.
+Reference files that the model opens with `read` are not rendered, so they
+must not name a concrete context path; they refer to the path the `SKILL.md`
+gives.
 
-The fs tools (`read`/`write`/`edit`/`glob`/`grep`) resolve relative paths
-against `config.repo_root`, like bash already does. They currently use the
-process cwd, which happens to be the same directory today.
+Scripts get the same values through the environment. `bash_tool.py:13-20`
+passes no `env=` today (the child inherits the process env), so it gains
+`env={**os.environ, "CURUNIR_CONTEXT_DIR": ..., "CURUNIR_SHARED_DIR": ...}`.
+The following default from those variables instead of literals:
+
+- `skills/balance-sheet/portfolio.py:18` (`DEFAULT_DB`; `--db` still wins)
+- `skills/crm/crm.py:19` (same)
+- `skills/webcam/snapshot.py:44` (`DEFAULT_OUT_DIR` → `$CURUNIR_SHARED_DIR/workspace/generated`)
+- `skills/document-ingest/ingest.py:29,38` (`--usage-db` and the bare
+  `AgentConfig()` take `context_dir`/`shared_dir` from the env)
+
+The fs tools (`src/tools/fs_tools.py`: glob `:13`, grep `:35`/`:62`, read
+`:201`, edit `:251`, write `:280`) resolve relative paths against
+`config.repo_root`, like bash already does. They currently use the process
+cwd, which happens to be the same directory today.
 
 This is scoping by convention, not a sandbox. That matches the concept doc:
 inside a container there is nothing to protect from a sibling.
@@ -193,33 +276,50 @@ per-agent cwd with symlinked `skills/` and `src/`. It is fragile with
 
 The rest of `main` changes shape only where it assumed one agent:
 
-- **Inbound routing.** `IncomingMessage` and `OutgoingMessage` gain
-  `agent: str | None = None`. A new `route_inbound(in_queue, container,
-  out_queue)` is the mirror of `route_outbound`. It resolves `msg.agent or
+- **Inbound routing.** `IncomingMessage` and `OutgoingMessage`
+  (`src/channels/base.py:8-28`) gain `agent: str | None = None`. A new
+  `route_inbound(in_queue, container, out_queue)` is the mirror of
+  `route_outbound` (`src/channels/router.py:9`). It resolves `msg.agent or
   default` and puts the message on that agent's queue. An unknown agent gets
   an error reply and is not enqueued.
-- **Workers.** There is one `agent_worker(agent, queue, out_queue)` per agent.
-  The function is unchanged except that it stamps `agent` on its outgoing
-  messages. As a side benefit, a long turn in one agent no longer blocks the
-  others.
-- **Background loops.** `periodic_extraction`, `periodic_dreaming` and
-  `run_scheduler` run once per agent. They already take an `Agent`. Their
-  env-var switches stay container-wide.
-- **Channels.** WS, Portal and Local Web read an optional `agent` from inbound
-  frames and echo it on outbound frames. The hello/meta frame advertises
+- **Workers.** There is one `agent_worker(agent, queue, out_queue)`
+  (`run.py:339`) per agent. The function is unchanged except that it stamps
+  `agent` on its outgoing messages; persistence, slash commands and clear
+  already key on `agent.config`. As a side benefit, a long turn in one agent
+  no longer blocks the others.
+- **Background loops.** `periodic_extraction` (`run.py:526`),
+  `periodic_dreaming` (`run.py:536`) and `run_scheduler`
+  (`src/scheduler.py:112`) run once per agent. They already take an `Agent`.
+  Their env-var switches stay container-wide.
+- **Channels.** WS and Local Web read an optional `agent` from inbound frames
+  and echo it on outbound frames. Their existing hello/meta frames
+  (`ws.py:121` `_send_hello`, `local_web.py:368` `meta`) advertise
   `agents: [{name, description, default}]` so a UI can offer a picker. The
   per-agent providers take the agent name:
   - `history_provider`
   - `skills_provider`
   - `conversations_provider`
   - slash-command `SlashContext`
-  - the local UI's module gating (`enabled_modules` becomes per-agent)
+  - the local UI's module gating: `enabled_modules(skill_allowlist)`
+    (`src/modules.py:47`) is evaluated once at construction today
+    (`local_web.py:114`). It becomes per-agent: the `meta` frame carries the
+    selected agent's modules, and the read endpoints accept `?agent=`
+    (default agent when absent) so `readers.py` runs against that agent's
+    config.
 
-  `cancel_session` becomes `container.request_cancel`. The portal service
-  needs **no change**. It forwards browser payloads verbatim
-  (`ws_browser.py:90`) and routes agent frames by `session_id` only.
+  `cancel_session` becomes `container.request_cancel`.
+- **Portal.** `PortalChannel` reads `agent` from the browser payload and
+  stamps it on outbound frames. The portal service forwards browser payloads
+  verbatim inside `user_message` (`portal/ws_browser.py:79-91`) and routes
+  agent frames by `session_id` only (`portal/ws_agent.py:111-149`), so a
+  browser that sets `payload.agent` is routed today with **no service
+  change**. But `PortalChannel` has no hello frame, and the service drops
+  unknown agent-to-portal frame types with a warning (`ws_agent.py:151`), so
+  advertising the agent list to the portal browser needs a service change.
+  That is why the portal picker is phase 4.
 - **Email** routes to the default agent. Per-address routing (e.g.
-  `finance@`) is out of scope.
+  `finance@`) is out of scope. Email state is shared (one mailbox per
+  container).
 - **Session ids** are unique per agent store, since each agent has its own
   `conversations/`. The fixed ids (`portal`, `local`, `scratch`) are reserved
   for the default agent. UIs mint UUIDs for every other agent's
@@ -235,7 +335,7 @@ container: `agent` is an enum of *sibling* names, and the description lists
 each sibling's persona `description`. That gives the model the routing hints
 the manifest already carries.
 
-The executor follows `delegate` exactly:
+The executor follows `delegate` (`src/tools/delegate.py:39-60`) exactly:
 
 1. Construct a transient `Agent(sibling.config, tools=<defaults minus
    ask_agent, handoff, delegate>)`. The sibling's persona, skills and context
@@ -243,12 +343,19 @@ The executor follows `delegate` exactly:
 2. Run it in session `ask:<asker>:<uuid>` with the question framed as
    `[Question from sibling agent '<asker>']`.
 3. Apply the same timeout and error classification as delegate.
-4. Do not persist the transcript.
+4. The transcript is not persisted and never reaches memory extraction. This
+   needs no code: `conversation_store.save` is called only from
+   `agent_worker`, and extraction is disk-driven
+   (`conversation_store.due_for_extraction`, `run.py:516`), so a transcript
+   that was never saved is never extracted.
 
-The dispatcher reaches the container through an `agent=` kwarg. It uses the
-existing special-case pattern (`_ASYNC_EXECUTORS_WITH_AGENT`, next to
-`_ASYNC_EXECUTORS_WITH_ATTACHMENTS`), and `Agent` holds an optional
-`container` reference. No module-level registry.
+The dispatcher reaches the container through an `agent=` kwarg on
+`execute_tool_call` (`dispatcher.py:45`), whose single caller is
+`src/agent/agent.py:785`. It uses the existing special-case pattern
+(`_ASYNC_EXECUTORS_WITH_AGENT`, next to `_ASYNC_EXECUTORS_WITH_ATTACHMENTS`
+at `dispatcher.py:42`), and `Agent` holds an optional `container` reference.
+`handoff` uses the same kwarg for the manifest and the sender's agent name.
+No module-level registry.
 
 ## Handoff: collaboration between containers
 
@@ -263,7 +370,9 @@ and its `container` enum is exactly those names.
 3. It returns only `delivered` or `refused: <reason>`.
 
 The sender's transcript records that it handed off, and nothing more. There is
-no response body to read an answer from.
+no response body to read an answer from. The `context` is model-authored: the
+sender chooses what to include. The concept doc's "hands the conversation" is
+read as this, not as a transcript copy (see the concept-doc amendments below).
 
 **Receiver.** A new `src/channels/peer.py` (`PeerChannel`), built on FastAPI +
 uvicorn like `local_web`. It starts **only if** `inbound` names at least one
@@ -272,8 +381,9 @@ container. Per request it:
 1. Maps the bearer token to a sender container. Each peer entry's token is the
    shared secret for that pair. An unknown token gets 401.
 2. Checks the sender against the inbound list. Not listed gets 403.
-3. Caps the payload size.
-4. Dedups on `handoff_id`.
+3. Caps the payload at 256 KB (413 above that).
+4. Dedups on `handoff_id` with a bounded recent-id ledger, like
+   `LocalWebChannel._seen_msg`.
 5. Enqueues an `IncomingMessage`.
 
 The `IncomingMessage` has these fields:
@@ -293,9 +403,11 @@ the sender even by mistake.
 
 Delivery per `user_delivery`:
 
-- **`portal` / `local_web`.** The conversation is persisted with channel
-  badge `handoff` and appears in the sidebar. It is pushed live if a browser
-  is bound.
+- **`portal` / `local_web`.** The conversation is persisted under the
+  delivery channel and appears in the sidebar. The `handoff` badge is derived
+  from the `handoff:` session-id prefix, the same way `sched:` is filtered
+  today, since the stored `channel` is the delivery channel. It is pushed
+  live if a browser is bound.
 - **`email`.** A new thread goes to the first allowed address.
 
 ## What makes a container airtight: enforcement
@@ -312,7 +424,8 @@ The lists are checked at boot, not only per call:
   - `EMAIL_ALLOWED_SENDERS` is empty
 
   An empty list currently makes `_check_recipients_allowed` a no-op
-  (`fastmail.py:406`), which is a silent open door.
+  (`fastmail.py:406`) and also makes inbound accept every sender
+  (`email.py:213`). Both are a silent open door.
 - **Filesystem and credentials** ("nothing reads in") are separate Docker
   containers with separate volumes and env files. The spec ships a
   `docker-compose.fleet.example.yml` that shows two containers on one network
@@ -325,17 +438,29 @@ container. Airtight at the OS level means Docker network policy (e.g. an
 egress allowlist that permits only the model API and the user channels). That
 is the operator's job, and the fleet compose example documents it.
 
+## Concept-doc amendments
+
+Phase 3 amends `docs/agents-and-containers.md` in three places:
+
+1. Add the egress limit above. The doc currently calls the lists "the whole
+   permissioning model", which overstates.
+2. "Hands the conversation" becomes "sends a note and the context it chooses".
+3. State that `user` is always in both lists. The doc does not say it, and
+   the manifest requires it.
+
 ## Phasing
 
 Each phase is its own PR and is shippable alone:
 
 1. **Path consolidation (no behavior change).**
-   - the `AgentConfig.for_agent` factory
-   - derived per-agent paths
-   - `shared_dir`
+   - the `AgentConfig.for_agent` factory, `shared_dir`, `path_vars`
+   - derived per-agent and shared paths, including `.ws-token`, email state,
+     `uploads_dir`, `_enrich_attachments`, `readers._generated_root`
    - fs tools resolve against `repo_root`
-   - `render_paths` and the skill/persona markdown rewrite, with the lint test
-   - env vars exported to skill scripts
+   - `render_paths`, the `paths=` parameter on `load_skill`, the persona
+     render in `build_static_prompt`, the markdown rewrite, the stale
+     `behavior.md` deletions, and the lint test
+   - env vars exported to skill scripts, and the four scripts reading them
 
    Existing tests pass unchanged. One new test checks that the rendered
    prompt is byte-identical for a legacy single agent.
@@ -345,7 +470,7 @@ Each phase is its own PR and is shippable alone:
    - per-agent workers and loops
    - the `agent` field through WS/Portal/Local Web and `cli.py --agent`
    - `ask_agent`
-   - the local UI agent picker
+   - the local UI agent picker and per-agent module gating
    - the `agent` column in usage
 3. **Lists and handoff.**
    - `inbound`/`outbound`/`peers`/`user_delivery`
@@ -353,9 +478,10 @@ Each phase is its own PR and is shippable alone:
    - `handoff`
    - boot-time airtight checks
    - the fleet compose example
-   - the concept-doc amendment on egress
+   - the concept-doc amendments
 4. **Later, out of scope here.**
-   - a portal UI agent picker (the service already passes the field through)
+   - a portal UI agent picker (needs the service to forward an `agents`
+     frame; payload routing already passes the field through)
    - per-address email routing
    - reply-to-handoff threads
 
@@ -363,12 +489,15 @@ Each phase is its own PR and is shippable alone:
 
 - **Phase 1.**
   - golden test: the legacy single-agent prompt is byte-identical before and
-    after
-  - lint test for raw `context/` in markdown
-  - `for_agent` path derivation
-  - bash env export
+    after, and `load_skill` without `paths=` returns what it returns today
+  - lint test for raw `context/` in `skills/**/*.md` and
+    `personas/*/prompts/*.md`
+  - `for_agent` path derivation, and a bare `AgentConfig()` equals the
+    legacy layout
+  - bash env export reaches a child process
+  - the usage `agent` column is added to an existing database without loss
 - **Phase 2.**
-  - manifest validation table
+  - manifest validation table (each rule above, plus the missing peer secret)
   - `route_inbound` (default, named and unknown agent)
   - two agents keep separate conversations/memory on disk
   - `ask_agent` returns the sibling's answer, is not persisted, and cannot
@@ -376,8 +505,8 @@ Each phase is its own PR and is shippable alone:
   - the channels echo the `agent` field
 - **Phase 3.**
   - PeerChannel: 401 on an unknown token, 403 when the sender is not in the
-    inbound list, dedup on `handoff_id`, and the message lands on the
-    `user_delivery` channel
+    inbound list, 413 over the cap, dedup on `handoff_id`, and the message
+    lands on the `user_delivery` channel
   - the handoff tool is absent for private containers and returns no answer
   - boot refuses a private container with unrestricted or empty-allowlist
     email
@@ -387,8 +516,25 @@ Each phase is its own PR and is shippable alone:
 1. **Placeholder syntax.** Is `{{context}}` / `{{shared}}` acceptable in
    SKILL.md, or would you rather keep the literals and accept the automatic
    rewrite?
+
+   *Recommendation:* keep the placeholders. The rewrite is a one-time edit of
+   27 files, the lint keeps it that way, and the automatic alternative cannot
+   tell `context/workspace` (shared) from `context/memory` (private) without
+   a table that is the same knowledge in a worse place.
 2. **Where handoff answers land.** Is one `user_delivery` channel per
    container right, or should the sender's user channel travel with the
    handoff? The latter leaks less structure but couples the containers.
+
+   *Recommendation:* one `user_delivery` per container. The receiver owns
+   its relationship with the user and may not even have the sender's channel
+   enabled. Carrying the channel would also make the handoff payload a
+   routing instruction, which the receiver is supposed to treat as
+   background.
 3. **Shared profile.** Should `context/profile.md` be written by the memory
    extractor, or only by hand?
+
+   *Recommendation:* by hand (and by the `onboarding/profile` skill) in v1.
+   The extractor writes one agent's `memory/` from one agent's
+   conversations; letting N agents write one shared file needs merge rules
+   that do not exist yet. Reading it into every agent's prompt is the value;
+   writing it can come later.
