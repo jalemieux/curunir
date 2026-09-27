@@ -220,7 +220,7 @@ container cannot see which subnet the host is on. So:
 | Setup | Multicast finders (ONVIF, mDNS, SSDP) | Subnet sweep |
 |---|---|---|
 | Docker, bridge network (default) | do not work | works, using `WEBCAM_SCAN_SUBNETS` |
-| Docker, `network_mode: host` (Linux) | work | works, subnets read from interfaces |
+| Docker, `network_mode: host` (Linux; not used, see Decisions) | work | works, subnets read from interfaces |
 | Run on the host (`python run.py`) | work | works |
 | Docker Desktop on macOS | do not work | works; USB cameras are not available at all |
 
@@ -489,15 +489,25 @@ device is present.
 4. Should `notify()` be scoped to this work or planned as its own
    cross-cutting feature? (The plan treats it as a dependency issue of its
    own.)
-5. **Where may a camera be approved?** The plan allows approval in chat and
-   in the local console. Console-only is stricter: no model is involved, at
-   the cost of making the user open the console once per camera.
-6. **Host networking for camera boxes?** `network_mode: host` gives the best
-   discovery (names and models from ONVIF/mDNS) but removes Docker's network
-   isolation for that instance. The plan keeps the bridge network and relies
-   on the subnet sweep by default.
-7. **Class-wide device grant.** Discovery of USB cameras needs the container
-   to see every video device on the host. Is that acceptable on the camera
-   box, given that use still requires approval per camera?
-8. Should the **setup preview frame** be allowed before approval? Without it
-   the user has to identify cameras by address and model alone.
+5. **Class-wide device grant.** Discovery of USB cameras needs the container
+   to be able to open every camera plugged into the box, where today it can
+   open only the one the operator named. It covers video devices only (not
+   disks, microphones or other USB devices), applies only on a box where the
+   operator applied the webcam override, and curunir still uses a camera
+   only after the user approves it. The alternative is a host-side script
+   that lists cameras and maps the chosen ones, with a container restart for
+   every change. The plan keeps the class-wide grant as the default and
+   documents the script as the stricter option. Undecided; revisit when
+   Phase 1a is turned into issues.
+
+## Decisions (owner, 2026-09-27)
+
+- **Approval works in chat and in the local console.** Both paths go through
+  the same guarded engine call (§1.2).
+- **Camera boxes stay on Docker's bridge network.** No `network_mode: host`.
+  Network discovery relies on the subnet sweep and `WEBCAM_SCAN_SUBNETS`; the
+  multicast finders are used only when curunir runs on the host. Camera names
+  and models may therefore be missing for some cameras, and the preview frame
+  is how the user tells them apart.
+- **The setup preview frame is allowed before approval**, one frame per
+  candidate, shown to the user only and recorded in the ledger (§1.2).
