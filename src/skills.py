@@ -1,11 +1,36 @@
 # src/skills.py
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _TRUTHY = {"true", "1", "yes", "on"}
+
+# Path placeholders in skill/persona markdown. ``{{context}}`` is the agent's
+# private context dir and ``{{shared}}`` the container's shared area (see
+# AgentConfig.path_vars). Only these two names are substituted; any other
+# ``{{...}}`` (docker --format templates, run-file templates) is left alone.
+_PATH_PLACEHOLDER = re.compile(r"\{\{\s*(context|shared)\s*\}\}")
+
+# Rendering with no explicit values yields the legacy single-agent layout,
+# which is byte-identical to the literals the markdown carried before the
+# placeholders existed.
+_LEGACY_PATH_VARS = {"context": "context", "shared": "context"}
+
+
+def render_paths(text: str, paths: dict[str, str] | None = None) -> str:
+    """Substitute ``{{context}}`` / ``{{shared}}`` in prompt markdown.
+
+    ``paths`` is ``AgentConfig.path_vars``; ``None`` renders the legacy
+    layout (both ``context``). Called wherever markdown enters a prompt:
+    ``load_skill`` and ``build_static_prompt``.
+    """
+    if "{{" not in text:
+        return text
+    values = paths if paths is not None else _LEGACY_PATH_VARS
+    return _PATH_PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), text)
 
 
 @dataclass(frozen=True)
@@ -154,7 +179,10 @@ def portal_skill_list(
 
 
 def load_skill(
-    name: str, skill_dirs: list[Path], allowlist: set[str] | None = None
+    name: str,
+    skill_dirs: list[Path],
+    allowlist: set[str] | None = None,
+    paths: dict[str, str] | None = None,
 ) -> str:
     """Load full SKILL.md content by name, honoring registry shadowing rules.
 
@@ -163,12 +191,15 @@ def load_skill(
     is what backs the agent's `load_skill` tool and the `/<skill>` slash
     command. Without this, the persona only hides skills from the catalog
     while still letting the agent reach for them.
+
+    `paths` (``AgentConfig.path_vars``) renders the ``{{context}}`` /
+    ``{{shared}}`` placeholders; ``None`` renders the legacy layout.
     """
     registry = load_registry(skill_dirs, allowlist)
     skill = registry.get(name)
     if skill is None:
         return f"Skill not found: {name}"
-    return skill.path.read_text()
+    return render_paths(skill.path.read_text(), paths)
 
 
 def parse_frontmatter(text: str) -> dict:

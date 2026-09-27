@@ -167,7 +167,7 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def _card_spec(config: AgentConfig) -> str:
-    content = load_skill("document-ingest", config.skill_dirs)
+    content = load_skill("document-ingest", config.skill_dirs, paths=config.path_vars)
     if content.startswith("Skill not found"):
         return _DEFAULT_CARD_SPEC
     return _strip_frontmatter(content)

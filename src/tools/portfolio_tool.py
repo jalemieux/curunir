@@ -11,8 +11,6 @@ from src.config import AgentConfig
 from src.portfolio import db as pdb
 from src.portfolio import engine
 
-_DEFAULT_DB = "context/memory/portfolio.db"
-
 _READ = {
     "networth": lambda db, a: engine.networth(db),
     "rollup": lambda db, a: engine.rollup(db),
@@ -52,7 +50,7 @@ _WRITE = {
 
 
 def exec_portfolio(args: dict, config: AgentConfig) -> str:
-    db = getattr(config, "portfolio_db", None) or _DEFAULT_DB
+    db = str(config.portfolio_db)
     action = args.get("action")
     payload = args.get("args") or {}
     handler = _READ.get(action) or _WRITE.get(action)

@@ -42,14 +42,14 @@ way *Digest date* and *Cadence* are supplied below.
   `freshness=pd` in step 1 and an `AGE_DAYS` cap of 1 in step 2. Weekly uses
   `freshness=pw` and a cap of 7.
 - **Ledger path** *(optional)* — the dedup ledger file. Default
-  `context/memory/digest-<topic-slug>-sent.md`. The **topic-slug** is derived
+  `{{context}}/memory/digest-<topic-slug>-sent.md`. The **topic-slug** is derived
   deterministically: lowercase the Topic, replace every run of non-alphanumeric
   characters with a single `-`, and strip leading/trailing `-`. So `AI/ML` →
   `ai-ml`, `personal finance` → `personal-finance`. Pass an explicit Ledger path
   to pin a file independent of the Topic text (e.g. the bundled AI/ML schedule
-  entry pins `context/memory/digest-ai-sent.md`). First-run note: if you are
+  entry pins `{{context}}/memory/digest-ai-sent.md`). First-run note: if you are
   migrating from the retired `ai-digest` skill, copy any existing
-  `context/memory/ai-digest-sent.md` to the new Ledger path so recent-send
+  `{{context}}/memory/ai-digest-sent.md` to the new Ledger path so recent-send
   history is not lost.
 - **Digest date** — today, in `YYYY-MM-DD`. Use `date -u +%F`.
 
@@ -126,11 +126,11 @@ the date from training data. If it isn't on the page, it doesn't ship.
 
 For each URL still marked `KEEP`, check whether it (or a near-equivalent) was
 shipped in the past 7 days. `LEDGER` is the **Ledger path** input (default
-`context/memory/digest-<slug>-sent.md`):
+`{{context}}/memory/digest-<slug>-sent.md`):
 
 ```bash
 # Reject anything sent in the past 7 days
-LEDGER=context/memory/digest-<slug>-sent.md
+LEDGER={{context}}/memory/digest-<slug>-sent.md
 SEVEN_DAYS_AGO=$(date -u -v-7d +%F 2>/dev/null || date -u -d '7 days ago' +%F)
 while read url; do
   # Lines look like: 2026-05-04 https://example.com/article
@@ -203,7 +203,7 @@ Append every URL that made it into the digest to the **Ledger path**, one per
 line, ISO-date prefixed:
 
 ```bash
-LEDGER=context/memory/digest-<slug>-sent.md
+LEDGER={{context}}/memory/digest-<slug>-sent.md
 for url in <shipped_urls>; do
   echo "$DIGEST_DATE $url" >> "$LEDGER"
 done
@@ -226,7 +226,7 @@ The markdown produced in step 4 is the deliverable.
   email by stripping markdown, and do not attach a PDF or any other file.
 
 If a run is ever asked to save the digest to disk, write it to
-`context/workspace/generated/` — but disk output is in addition to inline delivery,
+`{{shared}}/workspace/generated/` — but disk output is in addition to inline delivery,
 not a replacement for it, and it is still markdown (not PDF).
 
 ## Output checklist

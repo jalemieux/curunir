@@ -7,7 +7,7 @@ description: "Use when the user asks what the camera / webcam sees, to take a sn
 
 Take a snapshot from the webcam attached to this instance and describe what it
 shows. One command does both: `snapshot.py` in this skill directory captures a
-frame with ffmpeg, saves it under `context/workspace/generated/`, and sends it
+frame with ffmpeg, saves it under `{{shared}}/workspace/generated/`, and sends it
 to the vision model (`VISION_MODEL`) with your question as the prompt. You never
 look at the image yourself — you read the description it prints.
 
@@ -25,7 +25,7 @@ python skills/webcam/snapshot.py --prompt "Is anyone sitting at the desk?"
 Output on success:
 
 ```json
-{"path": "context/workspace/generated/webcam-2026-09-06_141502.jpg",
+{"path": "{{shared}}/workspace/generated/webcam-2026-09-06_141502.jpg",
  "device": "/dev/video0",
  "model": "gemini/gemini-2.5-flash",
  "description": "A home office with an empty chair ..."}
@@ -41,7 +41,7 @@ successful capture, call `attach` with the printed `path` so they receive the
 actual image alongside your summary of the description:
 
 ```
-attach(path="context/workspace/generated/webcam-2026-09-06_141502.jpg", name="webcam-2026-09-06_141502.jpg")
+attach(path="{{shared}}/workspace/generated/webcam-2026-09-06_141502.jpg", name="webcam-2026-09-06_141502.jpg")
 ```
 
 Then answer the user's question in your own words from the `description`. Say

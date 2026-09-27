@@ -310,7 +310,9 @@ def memory_file(config: AgentConfig, relpath: str) -> dict:
 
 
 def _generated_root(config: AgentConfig) -> Path:
-    return (Path(config.context_dir) / "workspace" / "generated").resolve()
+    # Deliverables are container-shared, not per-agent (config.shared_dir
+    # equals context_dir in the legacy single-agent layout).
+    return (Path(config.shared_dir) / "workspace" / "generated").resolve()
 
 
 # Directories/files under the generated dir we never expose.

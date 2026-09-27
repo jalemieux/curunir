@@ -454,3 +454,18 @@ def test_generated_file_path_rejects_symlink_escape(config):
         pytest.skip("symlinks not supported on this platform")
     with pytest.raises(ValueError):
         readers.generated_file_path(config, "link")
+
+
+def test_generated_root_is_the_shared_area(tmp_path):
+    """Deliverables are container-shared; a non-default agent's rail must not
+    point at its private context dir."""
+    ctx = tmp_path / "agents" / "fin"
+    shared = tmp_path / "shared"
+    for base in (ctx, shared):
+        (base / "workspace" / "generated").mkdir(parents=True)
+    (ctx / "workspace" / "generated" / "private.md").write_text("no")
+    (shared / "workspace" / "generated" / "memo.md").write_text("yes")
+    cfg = AgentConfig.for_agent("fin", ctx, shared)
+    names = [f["relpath"] for f in readers.generated_files(cfg)]
+    assert names == ["memo.md"]
+    assert readers.generated_file_path(cfg, "memo.md") == (shared / "workspace" / "generated" / "memo.md").resolve()

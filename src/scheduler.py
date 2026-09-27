@@ -87,7 +87,7 @@ async def _check_and_fire(agent) -> list[str]:
         if task.get("skill"):
             allowlist = set(config.skill_allowlist) if config.skill_allowlist else None
             skill_content = load_skill(task["skill"], config.skill_dirs,
-                                       allowlist=allowlist)
+                                       allowlist=allowlist, paths=config.path_vars)
             if not skill_content.startswith("Skill not found"):
                 prompt = skill_content + "\n\n" + prompt
 

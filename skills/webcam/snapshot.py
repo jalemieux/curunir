@@ -41,7 +41,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 DEFAULT_DEVICE = "/dev/video0"
-DEFAULT_OUT_DIR = ROOT / "context" / "workspace" / "generated"
+# Deliverables go to the container's shared area. The bash tool exports
+# CURUNIR_SHARED_DIR for the agent running the skill; without it (a human at
+# a shell) the legacy context/ applies.
+DEFAULT_OUT_DIR = (
+    Path(os.environ.get("CURUNIR_SHARED_DIR") or ROOT / "context")
+    / "workspace" / "generated"
+)
 DEFAULT_WARMUP = 10  # frames captured before the one we keep
 CAPTURE_TIMEOUT = 30  # seconds before we give up on ffmpeg
 

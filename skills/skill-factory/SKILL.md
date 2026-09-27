@@ -1,16 +1,16 @@
 ---
 name: skill-factory
-description: "Use when the user asks to create, write, or build a new user-defined skill — produces a SKILL.md in context/skills/ matching Curunir conventions"
+description: "Use when the user asks to create, write, or build a new user-defined skill — produces a SKILL.md in the user skills directory matching Curunir conventions"
 ---
 
 # Skill Factory
 
 ## What you're creating
 
-User-defined skills live in `context/skills/<kebab-name>/SKILL.md` and are
+User-defined skills live in `{{context}}/skills/<kebab-name>/SKILL.md` and are
 loaded alongside system skills at startup. System skills in `skills/` are
 maintainer-authored and committed with the repo — **do not write there**. On
-a name collision between `skills/` and `context/skills/`, the system version
+a name collision between `skills/` and `{{context}}/skills/`, the system version
 wins and a warning is logged.
 
 ## Workflow
@@ -21,7 +21,7 @@ wins and a warning is logged.
    - The trigger condition: what should the user say or what state should the
      agent be in for this skill to load?
    - Any opt-in tools it needs (see §5).
-2. **Conflict check.** `context/skills/<name>/` must not already exist. If
+2. **Conflict check.** `{{context}}/skills/<name>/` must not already exist. If
    `skills/<name>/` exists, pick a different name — system wins on collision.
 3. **Generate.** Copy `references/template.md`, fill in the frontmatter and
    body. Add `references/`, `scripts/`, or `templates/` subdirectories only
@@ -99,7 +99,7 @@ a restart.
 
 - **Describing contents instead of triggers** in `description`. If it reads
   like a summary, rewrite it.
-- **Writing to `skills/` instead of `context/skills/`.** System skills are
+- **Writing to `skills/` instead of `{{context}}/skills/`.** System skills are
   maintainer-authored.
 - **Directory name doesn't match frontmatter `name`.** The loader keys on
   `name`, but humans browse by directory — mismatches cause confusion.

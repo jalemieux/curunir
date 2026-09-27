@@ -1,3 +1,5 @@
+import pytest
+
 from src.tools.fs_tools import exec_glob, exec_grep, exec_read, exec_edit, exec_write
 
 
@@ -227,3 +229,44 @@ class TestReadGate:
         assert "error" not in result.lower()
         assert "Ingestion smoke line" in result
         assert "\t" in result  # line-numbered like every other format
+
+
+class TestRelativePathsResolveAgainstRepoRoot:
+    """A relative tool path means repo_root/<path>, matching the bash tool."""
+
+    @pytest.fixture
+    def rooted(self, tmp_path):
+        from src.config import AgentConfig
+
+        return AgentConfig(repo_root=tmp_path)
+
+    def test_write_then_read_relative(self, tmp_path, rooted):
+        out = exec_write({"file_path": "notes/a.txt", "content": "hi"}, rooted)
+        assert "Wrote 2 bytes to notes/a.txt" in out
+        assert (tmp_path / "notes" / "a.txt").read_text() == "hi"
+        assert exec_read({"file_path": "notes/a.txt"}, rooted) == "1\thi"
+
+    def test_edit_relative(self, tmp_path, rooted):
+        (tmp_path / "e.txt").write_text("old")
+        out = exec_edit({"file_path": "e.txt", "old_string": "old", "new_string": "new"}, rooted)
+        assert "Replaced 1" in out
+        assert (tmp_path / "e.txt").read_text() == "new"
+
+    def test_missing_relative_reports_the_given_path(self, rooted):
+        assert exec_read({"file_path": "nope.txt"}, rooted) == "Error: File not found: nope.txt"
+
+    def test_glob_default_root_is_repo_root(self, tmp_path, rooted):
+        (tmp_path / "x.py").write_text("")
+        assert exec_glob({"pattern": "*.py"}, rooted).split() == ["x.py"]
+
+    def test_grep_relative_path(self, tmp_path, rooted):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "f.txt").write_text("needle here\n")
+        out = exec_grep({"pattern": "needle", "path": "sub"}, rooted)
+        assert "needle here" in out
+        assert str(tmp_path) not in out  # output paths stay relative
+
+    def test_absolute_paths_pass_through(self, tmp_path, rooted):
+        target = tmp_path / "abs.txt"
+        exec_write({"file_path": str(target), "content": "x"}, rooted)
+        assert target.read_text() == "x"

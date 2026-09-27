@@ -13,7 +13,7 @@ lead's stage in prose or hand-count the pipeline.
 
 ## Data model
 
-The store (`context/memory/crm.db`, SQLite) holds `leads` and an append-only
+The store (`{{context}}/memory/crm.db`, SQLite) holds `leads` and an append-only
 `interactions` ledger. Each lead has a `name` (required), and optional `email`,
 `company`, `source` (e.g. `beta-signup`, `referral`, `manual`), `stage`,
 `owner`, and `note`. A JSON `extra` overflow column holds anything off-schema

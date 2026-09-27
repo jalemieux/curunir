@@ -48,7 +48,7 @@ this skill:
 - `fact-checker` — never loaded inline; always invoked via `delegate` with
   a fresh context window (Step 7)
 - Podcast corpus — searched directly with grep over
-  `context/workspace/podcasts/**/*.md`. See Step 6.
+  `{{shared}}/workspace/podcasts/**/*.md`. See Step 6.
 
 ## Delegation model
 
@@ -272,7 +272,7 @@ summaries with topic tags → raw transcript files are loaded on demand
 only when verbatim content is needed.
 
 ```
-context/workspace/podcasts/
+{{shared}}/workspace/podcasts/
   README.md                          # routing entry — read first
   podcasts.yaml                      # per-show config (ingest-side; informational)
   summaries/
@@ -299,18 +299,18 @@ The bullets are the searchable layer — they tell you whether an episode
 is worth loading before you pull 100k chars of transcript into context.
 
 **The corpus may be empty or sparse** — the ingest skill (spec'd in
-PR #266) lands separately. If `context/workspace/podcasts/` does not
+PR #266) lands separately. If `{{shared}}/workspace/podcasts/` does not
 exist or `summaries/` is empty, say so explicitly in the memo ("no
 podcast coverage found in the local corpus as of {date}") and skip the
 rest of this step. Do not fabricate quotes.
 
 **Search workflow:**
 
-1. **Route.** `read("context/workspace/podcasts/README.md")` to confirm
+1. **Route.** `read("{{shared}}/workspace/podcasts/README.md")` to confirm
    the structure and skim the known topic taxonomy. If the file is
    missing, the corpus is empty — say so and move on.
 
-2. **Topic-first browse.** `ls context/workspace/podcasts/summaries/topics/`
+2. **Topic-first browse.** `ls {{shared}}/workspace/podcasts/summaries/topics/`
    for a topic slug that fits the catalyst (e.g., `obesity-drugs.md`,
    `glp-1.md`, `biotech.md`, `m-and-a.md`, `fed-policy.md`). If a topic
    matches, read it — entries are newest-first and the bullet summaries
@@ -321,8 +321,8 @@ rest of this step. Do not fabricate quotes.
 
    ```bash
    grep -inE "retatrutide|tirzepatide|\\bLLY\\b|\\bNVO\\b|GLP-1" \
-     context/workspace/podcasts/summaries/timeline.md \
-     context/workspace/podcasts/summaries/by-podcast/*.md \
+     {{shared}}/workspace/podcasts/summaries/timeline.md \
+     {{shared}}/workspace/podcasts/summaries/by-podcast/*.md \
      2>/dev/null | head -40
    ```
 
@@ -369,7 +369,7 @@ Delegate this phase if the search surface is wide.
 
 Same shared header convention as `investment-memo` and
 `deep-research-guided`. Write the markdown to
-`context/workspace/generated/{catalyst-slug}-{YYYY-MM-DD}.md`.
+`{{shared}}/workspace/generated/{catalyst-slug}-{YYYY-MM-DD}.md`.
 
 ```markdown
 # {Long-form descriptive title — magazine-cover style, names the catalyst and the primary ticker(s)}
@@ -377,9 +377,9 @@ Same shared header convention as `investment-memo` and
 
 **Date:** {Month DD, YYYY}
 
-**Prepared for:** {user's name from context/identity.md — omit line if unknown}
+**Prepared for:** {user's name from {{context}}/identity.md — omit line if unknown}
 
-**Prepared by:** {agent's name from context/identity.md — omit line if unknown}
+**Prepared by:** {agent's name from {{context}}/identity.md — omit line if unknown}
 
 **Subject:** {One- to two-sentence framing — what catalyst, what instruments, what hypothesis}
 
@@ -465,7 +465,7 @@ CONTENT_TO_FACT_CHECK>>>
 """)
 ```
 
-For drafts >50KB, write to `context/workspace/scratch/memo-{slug}-{date}.md`
+For drafts >50KB, write to `{{shared}}/workspace/scratch/memo-{slug}-{date}.md`
 first and pass the path.
 
 When the sub-agent returns:
@@ -497,8 +497,8 @@ Convert the fact-checked markdown to PDF with plain pandoc — same path as
 `investment-memo` and `deep-research-guided`:
 
 ```bash
-pandoc context/workspace/generated/{slug}-{date}.md \
-  -o context/workspace/generated/{slug}-{date}.pdf
+pandoc {{shared}}/workspace/generated/{slug}-{date}.md \
+  -o {{shared}}/workspace/generated/{slug}-{date}.pdf
 ```
 
 Do **not** use HTML / headless Chromium / weasyprint — the LaTeX route
@@ -507,7 +507,7 @@ produces a typeset document; the HTML route looks like a printed webpage.
 Attach:
 
 ```
-attach(path="context/workspace/generated/{slug}-{date}.pdf")
+attach(path="{{shared}}/workspace/generated/{slug}-{date}.pdf")
 ```
 
 If pandoc fails, attach the `.md` as fallback.

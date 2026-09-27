@@ -132,6 +132,16 @@ convention; see `src/tools/README.md` for the full output-path rules. The
 separate top-level `workspace/` is only a bind-mount target for the rotating
 log (`LOG_FILE`), not an agent output path.
 
+The same tree also splits by **owner**. `identity.md`, `memory/`,
+`conversations/`, `schedules.db` and `skills/` are the agent's *private*
+context (`AgentConfig.context_dir`); `workspace/`, `uploads/`, `usage.db`,
+`.ws-token` and `email_state.json` are the *shared* area of the container
+(`AgentConfig.shared_dir`). With one agent, as today, both are `context/`
+and nothing moves. The split exists so a container can later host several
+agents, each with its own private context under `context/agents/<name>/`
+and one shared area — see
+`docs/superpowers/specs/2026-09-26-agents-and-containers-design.md`.
+
 ## Quick Start
 
 ### Local
@@ -337,6 +347,39 @@ Instructions the agent follows when it loads this skill...
 
 Skills appear in the agent's system prompt as a manifest table. The agent calls `load_skill` to fetch full instructions on demand.
 
+### Paths inside a skill
+
+Never write `context/...` literally in a `SKILL.md`. Use two placeholders,
+which are substituted when the skill is loaded:
+
+| Placeholder | Renders to | Use for |
+|---|---|---|
+| `{{context}}` | the agent's private context dir | `memory/`, `identity.md`, `conversations/`, `schedules.db`, `skills/` |
+| `{{shared}}` | the container's shared area | `workspace/generated/`, `workspace/scratch/`, `uploads/` |
+
+```markdown
+Append the ledger entry to `{{context}}/memory/digest-sent.md` and write the
+report to `{{shared}}/workspace/generated/digest-{date}.md`.
+```
+
+With a single agent both render to `context`, so the instructions read
+exactly as before. A test (`tests/test_path_placeholders.py`) fails the
+build if a raw `context/memory`, `context/workspace` or similar creeps back
+into `skills/` or the persona prompts. Two exceptions: keep the frontmatter
+`description` and `portal_summary` as prose (they are shown unrendered in
+`/help` and the portal), and reference files the agent opens with `read`
+are not rendered, so describe paths in words there.
+
+Scripts shipped with a skill get the same values from the environment. The
+`bash` tool exports `CURUNIR_CONTEXT_DIR` and `CURUNIR_SHARED_DIR` (absolute
+paths) into every command it runs; a script defaults its store paths from
+them and falls back to `context/` when run by hand:
+
+```python
+DEFAULT_DB = os.path.join(os.environ.get("CURUNIR_CONTEXT_DIR") or "context",
+                          "memory", "my-skill.db")
+```
+
 ### Skill Visibility
 
 Three optional frontmatter flags control where a skill shows up:
@@ -474,9 +517,16 @@ Configuration is handled via `src/config.py`:
 | `read_gate_bytes` | `50000` | No-`limit` reads above this return a document card or head preview instead of the full body (`0` disables) |
 | `persona` | `default` | Persona bundle under `personas/` (`CURUNIR_PERSONA`) |
 | `identity_file` | `./context/identity.md` | Path to persona file |
-| `context_dir` | `./context` | Path to context directory (memory, conversations, workspace, stores) |
+| `context_dir` | `./context` | The agent's private context (identity, memory, conversations, schedules, user skills) |
+| `shared_dir` | `context_dir` | The container's shared area (workspace, uploads, usage db, pairing token, email state) |
 | `skill_dirs` | `[./skills, ./context/skills]` | Directories scanned for skills in priority order (first-seen wins on name collision) |
 | `vision_model` | unset | Vision-capable sidecar used when `model` is text-only (`VISION_MODEL`) |
+
+`identity_file`, `schedules_db`, `portfolio_db`, `crm_db` and the user
+skills dir derive from `context_dir`, and `usage_db` from `shared_dir`, via
+`AgentConfig.for_agent(name, context_dir, shared_dir)`; a bare
+`AgentConfig()` is the same single-agent layout with every historical
+default.
 
 API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.). See `.env.example` for the full list.
 

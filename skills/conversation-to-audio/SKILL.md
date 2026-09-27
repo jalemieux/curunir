@@ -11,7 +11,7 @@ Turn the current conversation into a single MP3 attachment.
 
 ## Steps
 
-1. **Assemble the transcript.** Walk the visible conversation turn-by-turn and format it as plain prose, one turn per paragraph, prefixed with the speaker label. Use the user's name from `context/identity.md` if available; otherwise use `User` and `Assistant`.
+1. **Assemble the transcript.** Walk the visible conversation turn-by-turn and format it as plain prose, one turn per paragraph, prefixed with the speaker label. Use the user's name from `{{context}}/identity.md` if available; otherwise use `User` and `Assistant`.
 
    ```
    User: <message>
