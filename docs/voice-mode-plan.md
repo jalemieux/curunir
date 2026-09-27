@@ -313,7 +313,7 @@ with a spoken ack ≤ 1.5 s on tool turns, both measured by #1.
       `camera(describe)` tool, like any other tool. No voice-specific path.
       An image-capable realtime front end may additionally push frames
       straight from that plan's `latest_frame(camera) -> (bytes, ts)`
-      buffer, gated by the same camera opt-in and privacy rules.
+      buffer, gated by the same off-limits list (`memory/cameras.md`) and privacy rules.
 18. A/B against Phase 2 on TTFA, cost per minute, and grounding (reuse the
     `eval/harness` LLM judge on a voice task set). Decide whether it's worth
     keeping.
