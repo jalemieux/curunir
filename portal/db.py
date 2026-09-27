@@ -237,3 +237,35 @@ async def list_beta_signups() -> list[BetaSignup]:
             """
         )
     return [_row_to_beta_signup(r) for r in rows]
+
+
+# ---------- Variant events (#547) ----------
+
+async def create_variant_event(
+    variant: str,
+    event_type: str,
+    ip_hash: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> None:
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO variant_events (variant, event_type, ip_hash, user_agent)
+            VALUES ($1, $2, $3, $4)
+            """,
+            variant, event_type, ip_hash, user_agent,
+        )
+
+
+async def variant_event_counts() -> list[tuple[str, str, int]]:
+    """Per-variant, per-event-type counts — the test readout query."""
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT variant, event_type, count(*) AS n
+            FROM variant_events
+            GROUP BY variant, event_type
+            ORDER BY variant, event_type
+            """
+        )
+    return [(r["variant"], r["event_type"], r["n"]) for r in rows]
