@@ -249,6 +249,8 @@ last-snapshot only, explicitly opt-in (see §5).
 
 ## 6. Relation to voice mode (#551)
 
+The voice plan is [`docs/voice-mode-plan.md`](voice-mode-plan.md) (PR #554). Its design fits this one: curunir stays the only brain, and voice reaches the camera through the `camera` tool with no voice-specific path.
+
 The voice plan owns the audio pipeline. The webcam integration point is small
 if the `camera` tool exists:
 - During a voice turn, "what am I holding up?" is just a `camera(describe)`
