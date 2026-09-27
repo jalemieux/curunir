@@ -21,7 +21,7 @@
 <body>
   <h1>Admin — users</h1>
 
-  {% if new_container_token or new_signin_link %}
+  {% if new_container_token or new_signin_link or new_client_token %}
   <div class="new-token">
     <strong>{{ new_user_email }}</strong>
     {% if new_signin_link %}
@@ -32,6 +32,11 @@
     {% if new_container_token %}
     <div style="margin-top:8px;">Container token (set as <code>CURUNIR_PORTAL_TOKEN</code> on their curunir):<br>
       <code>{{ new_container_token }}</code>
+    </div>
+    {% endif %}
+    {% if new_client_token %}
+    <div style="margin-top:8px;">Client token (paste into the voice app):<br>
+      <code>{{ new_client_token }}</code>
     </div>
     {% endif %}
   </div>
@@ -77,6 +82,14 @@
         <form class="inline" method="post" action="/admin/users/{{ u.id }}/regenerate-container">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
           <button>rotate container</button>
+        </form>
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}/show-client-token">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <button>show client token</button>
+        </form>
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}/regenerate-client">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <button>rotate client</button>
         </form>
         {% if u.is_active %}
         <form class="inline" method="post" action="/admin/users/{{ u.id }}/deactivate">

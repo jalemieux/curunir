@@ -1,11 +1,13 @@
-"""Browser-facing WebSocket endpoint.
+"""Browser-facing and native-client WebSocket endpoint.
 
-Browser opens wss://portal/ws/browser; the session cookie rides on the
-upgrade request. Cookie + `Origin` header must both be valid:
-  - Cookie absent / invalid / user inactive → close 4003.
-  - Origin header missing or != PORTAL_BASE_URL → close 4003 (CSWSH).
+Browser or native client opens wss://portal/ws/browser. Two auth paths:
+  - Native client (e.g., iOS voice app): `Authorization: Bearer <client_token>`.
+    The token is the sole credential; no Origin check (native apps don't send Origin).
+  - Browser: session cookie + `Origin` header; both must be valid:
+      - Cookie absent / invalid / user inactive → close 4003.
+      - Origin header missing or != PORTAL_BASE_URL → close 4003 (CSWSH).
 
-Browser sends `IncomingMessage`-shaped JSON. Each frame is expected to
+Both paths send `IncomingMessage`-shaped JSON. Each frame is expected to
 carry a `session_id` (per-tab UUID). The first frame's `session_id` is
 recorded against this socket so that agent-emitted traffic for that
 session can be routed back here without bleeding into other tabs.
@@ -25,6 +27,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from portal import auth, db
 from portal.config import settings
 from portal.routing import routing
+from portal.ws_common import bearer_from_headers
 
 
 logger = logging.getLogger(__name__)
@@ -42,22 +45,32 @@ def _origin_allowed(ws: WebSocket) -> bool:
 
 @router.websocket("/ws/browser")
 async def ws_browser(ws: WebSocket) -> None:
-    if not _origin_allowed(ws):
-        await ws.close(code=4003, reason="origin")
-        return
-
-    cookie = ws.cookies.get(auth.SESSION_COOKIE)
-    if not cookie:
-        await ws.close(code=4003, reason="no cookie")
-        return
-    user_id = auth.verify_session(cookie)
-    if user_id is None:
-        await ws.close(code=4003, reason="bad cookie")
-        return
-    user = await db.get_user_by_id(user_id)
-    if user is None or not user.is_active:
-        await ws.close(code=4003, reason="inactive")
-        return
+    token = bearer_from_headers(ws)
+    if token is not None:
+        # Native client (e.g. the iOS voice app): the client_token is the
+        # credential. No cookie, and no Origin check — native apps send no
+        # Origin header, and CSWSH is a browser-only attack. An invalid
+        # bearer never falls back to the cookie path.
+        user = await db.get_active_user_by_client_token(token)
+        if user is None:
+            await ws.close(code=4003, reason="forbidden")
+            return
+    else:
+        if not _origin_allowed(ws):
+            await ws.close(code=4003, reason="origin")
+            return
+        cookie = ws.cookies.get(auth.SESSION_COOKIE)
+        if not cookie:
+            await ws.close(code=4003, reason="no cookie")
+            return
+        user_id = auth.verify_session(cookie)
+        if user_id is None:
+            await ws.close(code=4003, reason="bad cookie")
+            return
+        user = await db.get_user_by_id(user_id)
+        if user is None or not user.is_active:
+            await ws.close(code=4003, reason="inactive")
+            return
 
     await ws.accept()
     await routing.add_browser(user.id, ws)

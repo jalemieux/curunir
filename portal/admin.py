@@ -53,6 +53,7 @@ async def _render_admin(request: Request, user: User, **extra):
         "new_container_token": None,
         "new_signin_link": None,
         "new_user_email": None,
+        "new_client_token": None,
     }
     ctx.update(extra)
     return templates.TemplateResponse(request, "admin.html", ctx)
@@ -157,6 +158,36 @@ async def admin_regenerate_container(
     return RedirectResponse("/admin", status_code=303)
 
 
+@router.post("/users/{user_id}/show-client-token", response_class=HTMLResponse)
+async def admin_show_client_token(
+    request: Request,
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    target = await db.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(404)
+    client_token = target.client_token or await db.regenerate_client_token(user_id)
+    return await _render_admin(
+        request, user,
+        new_client_token=client_token,
+        new_user_email=target.email,
+    )
+
+
+@router.post("/users/{user_id}/regenerate-client")
+async def admin_regenerate_client(
+    user_id: int,
+    csrf_token: str = Form(..., alias="csrf"),
+    user: User = Depends(admin_user),
+):
+    _verify_csrf_form(user, csrf_token)
+    await db.regenerate_client_token(user_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
 @router.get("/beta", response_class=HTMLResponse)
 async def admin_beta_signups(request: Request, user: User = Depends(admin_user)):
     signups = await db.list_beta_signups()
@@ -185,8 +216,27 @@ async def _cli_create_user(email: str) -> None:
         print(f"Created user {user.id} <{user.email}>")
         print(f"Container token (set in container env as CURUNIR_PORTAL_TOKEN):")
         print(f"  {user.container_token}")
+        print(f"Client token (paste into the voice app):")
+        print(f"  {user.client_token}")
         print(f"Sign-in link (send this to the user):")
         print(f"  {_signin_link(user.sign_in_token)}")
+    finally:
+        await db.close_pool()
+
+
+async def _cli_show_client_token(email: str) -> None:
+    await db.init_pool()
+    await db.run_migrations()
+    try:
+        normalized = email.strip().lower()
+        match = [u for u in await db.list_users() if u.email == normalized]
+        if not match:
+            print(f"No user with email {email}")
+            return
+        user = match[0]
+        token = user.client_token or await db.regenerate_client_token(user.id)
+        print(f"Client token for {user.email} (paste into the voice app):")
+        print(f"  {token}")
     finally:
         await db.close_pool()
 
@@ -196,9 +246,13 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     create = sub.add_parser("create-user")
     create.add_argument("--email", required=True)
+    show_ct = sub.add_parser("show-client-token")
+    show_ct.add_argument("--email", required=True)
     args = parser.parse_args()
     if args.cmd == "create-user":
         asyncio.run(_cli_create_user(args.email))
+    elif args.cmd == "show-client-token":
+        asyncio.run(_cli_show_client_token(args.email))
 
 
 if __name__ == "__main__":

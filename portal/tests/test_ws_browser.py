@@ -140,3 +140,71 @@ def test_browser_frame_binds_session_on_routing_table(sync_client):
         assert routing.browsers_for_session(user.id, "tab-XYZ"), (
             "browser ws should be bound to session tab-XYZ"
         )
+
+
+def test_native_client_accepted_with_client_token(sync_client):
+    user = _create_user(sync_client, "native1@example.com")
+    with sync_client.websocket_connect(
+        "/ws/browser",
+        headers={"Authorization": f"Bearer {user.client_token}"},
+    ) as ws:
+        msg = json.loads(ws.receive_text())
+        assert msg == {"type": "agent_status", "status": "offline"}
+
+
+def test_native_client_rejected_with_bad_token(sync_client):
+    _create_user(sync_client, "native2@example.com")
+    with pytest.raises(Exception):
+        with sync_client.websocket_connect(
+            "/ws/browser",
+            headers={"Authorization": "Bearer not-a-real-token"},
+        ):
+            pass
+
+
+def test_container_token_rejected_on_browser_endpoint(sync_client):
+    user = _create_user(sync_client, "native3@example.com")
+    with pytest.raises(Exception):
+        with sync_client.websocket_connect(
+            "/ws/browser",
+            headers={"Authorization": f"Bearer {user.container_token}"},
+        ):
+            pass
+
+
+def test_bearer_auth_ignores_origin(sync_client):
+    """Token is the credential for native clients — a foreign Origin
+    must not matter (and native clients usually send none at all)."""
+    user = _create_user(sync_client, "native4@example.com")
+    with sync_client.websocket_connect(
+        "/ws/browser",
+        headers={
+            "Authorization": f"Bearer {user.client_token}",
+            "Origin": "https://elsewhere.example.com",
+        },
+    ) as ws:
+        msg = json.loads(ws.receive_text())
+        assert msg["type"] == "agent_status"
+
+
+def test_invalid_bearer_does_not_fall_back_to_cookie(sync_client):
+    user = _create_user(sync_client, "native5@example.com")
+    cookie = auth.sign_session(user.id)
+    with pytest.raises(Exception):
+        with sync_client.websocket_connect(
+            "/ws/browser",
+            cookies={auth.SESSION_COOKIE: cookie},
+            headers={"Authorization": "Bearer wrong", **GOOD_ORIGIN},
+        ):
+            pass
+
+
+def test_inactive_user_client_token_rejected(sync_client):
+    user = _create_user(sync_client, "native6@example.com")
+    sync_client.portal.call(db.deactivate_user, user.id)
+    with pytest.raises(Exception):
+        with sync_client.websocket_connect(
+            "/ws/browser",
+            headers={"Authorization": f"Bearer {user.client_token}"},
+        ):
+            pass

@@ -1,4 +1,5 @@
 """Tests for attachment enrichment in agent_worker."""
+import base64
 import os
 import tempfile
 
@@ -225,6 +226,23 @@ def test_enrich_is_idempotent_for_data():
         attachments[0]["path"] = path
         _enrich_attachments(attachments, project_root="/tmp")
         assert attachments[0]["data"] == first
+    finally:
+        os.unlink(path)
+
+
+def test_enrich_inlines_audio_data():
+    """audio/mpeg attachments get base64 `data` inlined (voice replies must
+    survive the portal relay, which has no file server)."""
+    payload = b"ID3\x03fake-mp3-bytes"
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir="/tmp") as f:
+        f.write(payload)
+        path = f.name
+    try:
+        attachments = [{"filename": "reply.mp3", "path": path,
+                        "mime_type": "audio/mpeg", "size": len(payload)}]
+        _enrich_attachments(attachments, project_root="/tmp")
+        assert base64.b64decode(attachments[0]["data"]) == payload
+        assert attachments[0]["content"] is None  # not a text mime
     finally:
         os.unlink(path)
 

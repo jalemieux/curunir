@@ -12,6 +12,9 @@ class IncomingMessage:
     reply_address: dict
     command: str | None = None
     attachments: list[dict] | None = None
+    # True when the originating client is voice-only (e.g. the iOS PTT app);
+    # agent_worker synthesizes the final reply as speech for these turns.
+    voice: bool = False
 
 
 @dataclass

@@ -52,6 +52,80 @@ SPEECH_REWRITE_PROMPT = (
 )
 
 
+async def synthesize_speech(
+    content: str,
+    config: AgentConfig,
+    *,
+    voice: str | None = None,
+    model: str | None = None,
+    filename: str | None = None,
+    rewrite: bool = True,
+    instructions: str | None = None,
+) -> tuple[dict | None, str | None]:
+    """Rewrite ``content`` for spoken delivery and synthesize an MP3.
+
+    When ``rewrite`` is False, uses content directly without LLM processing.
+    When ``instructions`` is provided, passes it to the TTS model's
+    instructions parameter (tts-1/tts-1-hd only; ignored by other models).
+
+    Returns (attachment, None) on success or (None, error) on failure.
+    """
+    voice = voice or config.tts_voice
+    model = model or config.tts_model
+    filename = filename or f"digest-{date.today().isoformat()}.mp3"
+
+    if rewrite:
+        try:
+            rewrite_response = await call_llm(
+                model=config.model,
+                messages=[
+                    {"role": "system", "content": SPEECH_REWRITE_PROMPT},
+                    {"role": "user", "content": content},
+                ],
+                tools=[],
+                api_base=config.api_base,
+                openrouter_provider=config.openrouter_provider,
+            )
+            script = (rewrite_response.text or "").strip()
+            if not script:
+                return None, "speech rewrite produced empty output"
+        except Exception as exc:
+            logger.warning("speech rewrite failed: %s", exc)
+            return None, f"speech rewrite failed: {exc}"
+    else:
+        script = content.strip()
+        if not script:
+            return None, "empty content"
+
+    try:
+        client = AsyncOpenAI()
+        tts_kwargs: dict = {"model": model, "voice": voice, "input": script}
+        if instructions:
+            tts_kwargs["instructions"] = instructions
+        response = await client.audio.speech.create(**tts_kwargs)
+        audio_bytes = _extract_audio_bytes(response)
+    except Exception as exc:
+        logger.warning("text-to-speech failed: %s", exc)
+        return None, f"text-to-speech failed: {exc}"
+
+    try:
+        out_dir = os.path.join(os.path.abspath(config.attachment_dir), "audio")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+        with open(out_path, "wb") as f:
+            f.write(audio_bytes)
+    except OSError as exc:
+        logger.warning("audio write failed: %s", exc)
+        return None, f"audio write failed: {exc}"
+
+    return {
+        "filename": filename,
+        "path": out_path,
+        "mime_type": "audio/mpeg",
+        "size": len(audio_bytes),
+    }, None
+
+
 async def exec_to_audio(
     args: dict,
     config: AgentConfig,
@@ -63,57 +137,22 @@ async def exec_to_audio(
     if not content:
         return "Error: 'content' is required"
 
-    voice = args.get("voice") or config.tts_voice
-    model = args.get("model") or config.tts_model
-    filename = args.get("filename") or f"digest-{date.today().isoformat()}.mp3"
+    attachment, err = await synthesize_speech(
+        content,
+        config,
+        voice=args.get("voice"),
+        model=args.get("model"),
+        filename=args.get("filename"),
+    )
+    if err is not None:
+        return f"Error: {err}"
 
-    try:
-        rewrite = await call_llm(
-            model=config.model,
-            messages=[
-                {"role": "system", "content": SPEECH_REWRITE_PROMPT},
-                {"role": "user", "content": content},
-            ],
-            tools=[],
-            api_base=config.api_base,
-            openrouter_provider=config.openrouter_provider,
-        )
-        script = (rewrite.text or "").strip()
-        if not script:
-            return "Error: speech rewrite produced empty output"
-    except Exception as exc:
-        logger.warning("to_audio rewrite failed: %s", exc)
-        return f"Error: speech rewrite failed: {exc}"
-
-    try:
-        client = AsyncOpenAI()
-        response = await client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=script,
-        )
-        audio_bytes = _extract_audio_bytes(response)
-    except Exception as exc:
-        logger.warning("to_audio TTS failed: %s", exc)
-        return f"Error: text-to-speech failed: {exc}"
-
-    out_dir = os.path.join(os.path.abspath(config.attachment_dir), "audio")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, filename)
-    with open(out_path, "wb") as f:
-        f.write(audio_bytes)
-
-    size = len(audio_bytes)
-    attachment = {
-        "filename": filename,
-        "path": out_path,
-        "mime_type": "audio/mpeg",
-        "size": size,
-    }
     if attachments is not None:
         attachments.append(attachment)
-
-    return f"Audio attached: {filename} ({_format_size(size)})"
+    return (
+        f"Audio attached: {attachment['filename']} "
+        f"({_format_size(attachment['size'])})"
+    )
 
 
 def _extract_audio_bytes(response) -> bytes:
