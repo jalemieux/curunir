@@ -308,6 +308,12 @@ with a spoken ack ≤ 1.5 s on tool turns, both measured by #1.
     - Required rule: factual or personal questions are delegated, never
       answered from the model's own knowledge (the grounding guardrail).
     - Fast read paths can call #524's read-only MCP tools directly.
+    - Camera (cross-link #552 / PR #553, `docs/webcam-plan.md` §6): in the
+      cascade, voice reaches the camera only through the opt-in
+      `camera(describe)` tool, like any other tool. No voice-specific path.
+      An image-capable realtime front end may additionally push frames
+      straight from that plan's `latest_frame(camera) -> (bytes, ts)`
+      buffer, gated by the same camera opt-in and privacy rules.
 18. A/B against Phase 2 on TTFA, cost per minute, and grounding (reuse the
     `eval/harness` LLM judge on a voice task set). Decide whether it's worth
     keeping.
