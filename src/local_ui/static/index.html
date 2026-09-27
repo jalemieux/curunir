@@ -38,6 +38,16 @@
     border: 1px solid var(--warn); color: var(--warn); font-size: 11px;
     font-weight: 600; letter-spacing: 0.3px; vertical-align: middle;
   }
+  /* Agent picker — only rendered on a multi-agent container (2+ agents). */
+  header .agent-picker {
+    margin-left: 4px; padding: 3px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  header .agent-picker:hover { border-color: var(--muted); }
+  /* Persona-gated modules are hidden (not removed) so an agent switch can
+     re-show them; the attribute must beat .tab.active's display rule. */
+  [data-module][hidden] { display: none !important; }
   nav { display: flex; gap: 4px; margin-left: auto; }
   nav button {
     background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -345,6 +355,7 @@
 <body>
 <header>
   <h1>Curunir<span id="persona-tag" class="persona-tag"></span></h1>
+  <select id="agent-picker" class="agent-picker" title="Agent" aria-label="Agent" hidden></select>
   <nav>
     <button data-tab="chat" class="active">Chat</button>
     <button data-tab="usage">Usage</button>
@@ -453,6 +464,41 @@ if (!activeSessionId) {
 let conversations = [];  // latest conversations_snapshot, drives the sidebar
 const conversationListEl = document.getElementById("conversation-list");
 
+// === Agents (multi-agent container) ===
+// The `meta` frame may carry `agents` (absent on a single-agent container).
+// `activeAgent === null` means the default agent: no `agent` field goes on the
+// wire and the session id keeps using SESSION_KEY exactly as before, so nothing
+// changes for single-agent users. A non-default agent gets its own session id
+// (never the reserved "local" slot) tracked in a per-agent map.
+const AGENT_KEY = "curunir-local-agent";
+const AGENT_SESSIONS_KEY = "curunir-local-session-by-agent";
+let agentsMeta = [];    // [{name, persona, description, default, modules}]
+let activeAgent = null; // name of the selected non-default agent, else null
+let defaultModules = []; // meta.modules — the default agent's module list
+let defaultPersona = null;
+const agentPickerEl = document.getElementById("agent-picker");
+
+function agentSessions() {
+  try { return JSON.parse(localStorage.getItem(AGENT_SESSIONS_KEY)) || {}; } catch { return {}; }
+}
+// Session id for a non-default agent: the stored one, else mint + persist.
+function agentSessionId(name) {
+  const map = agentSessions();
+  if (!map[name]) { map[name] = uuid(); localStorage.setItem(AGENT_SESSIONS_KEY, JSON.stringify(map)); }
+  return map[name];
+}
+// Persist the active session id under the active agent (SESSION_KEY for the
+// default agent, the per-agent map otherwise).
+function rememberSession(id) {
+  if (!activeAgent) { localStorage.setItem(SESSION_KEY, id); return; }
+  const map = agentSessions();
+  map[activeAgent] = id;
+  localStorage.setItem(AGENT_SESSIONS_KEY, JSON.stringify(map));
+}
+// Query params for the per-agent REST panels (portfolio/crm/schedules/memory).
+// /api/usage and /api/files are container-wide and never take `agent`.
+const agentParams = (p = {}) => (activeAgent ? { ...p, agent: activeAgent } : p);
+
 function apiUrl(path, params = {}) {
   const u = new URL(path, location.origin);
   if (TOKEN) u.searchParams.set("token", TOKEN);
@@ -464,8 +510,8 @@ async function apiGet(path, params) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
-async function apiSend(method, path, body) {
-  const r = await fetch(apiUrl(path), {
+async function apiSend(method, path, body, params) {
+  const r = await fetch(apiUrl(path, params), {
     method,
     headers: { "Content-Type": "application/json" },
     body: body == null ? undefined : JSON.stringify(body),
@@ -480,14 +526,13 @@ const fmtMoney = (n) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigi
 // === Tabs ===
 const tabs = document.querySelectorAll("nav button");
 const loaders = { usage: loadUsage, portfolio: loadPortfolio, crm: loadCrm, memory: loadMemory, schedules: loadSchedules };
-tabs.forEach((b) => b.addEventListener("click", () => {
-  tabs.forEach((x) => x.classList.remove("active"));
-  b.classList.add("active");
+function activateTab(name) {
+  tabs.forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-  const name = b.dataset.tab;
   document.getElementById("tab-" + name).classList.add("active");
   if (loaders[name]) loaders[name]();
-}));
+}
+tabs.forEach((b) => b.addEventListener("click", () => activateTab(b.dataset.tab)));
 
 // === Usage dashboard ===
 // Tokens, not dollars: in/out/cache summary cards, a daily stacked-bar trend,
@@ -754,7 +799,7 @@ async function loadPortfolio() {
   const el = document.getElementById("portfolio-body");
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const d = await apiGet("/api/portfolio");
+    const d = await apiGet("/api/portfolio", agentParams());
     if (!d.available) { el.innerHTML = '<span class="muted">No portfolio store yet.</span>'; return; }
     const nw = d.networth, roll = d.rollup, un = d.unrealized;
 
@@ -847,7 +892,7 @@ async function loadCrm() {
   const el = document.getElementById("crm-body");
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const d = await apiGet("/api/crm");
+    const d = await apiGet("/api/crm", agentParams());
     if (!d.available) { el.innerHTML = '<span class="muted">No CRM store yet — add a lead to get started.</span>'; return; }
     const pipe = d.pipeline || { total: 0, by_stage: {} };
 
@@ -890,7 +935,7 @@ async function loadMemory() {
   const treeEl = document.getElementById("memory-tree");
   treeEl.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const tree = await apiGet("/api/memory");
+    const tree = await apiGet("/api/memory", agentParams());
     treeEl.innerHTML = "";
     treeEl.appendChild(renderTree(tree));
   } catch (e) { treeEl.innerHTML = `<span class="err">${e.message}</span>`; }
@@ -918,7 +963,7 @@ async function openMemoryFile(relpath) {
   const view = document.getElementById("memory-view");
   view.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const d = await apiGet("/api/memory/file", { path: relpath });
+    const d = await apiGet("/api/memory/file", agentParams({ path: relpath }));
     view.innerHTML = marked.parse(d.content || "");
   } catch (e) { view.innerHTML = `<span class="err">${e.message}</span>`; }
 }
@@ -996,7 +1041,7 @@ async function loadSchedules() {
   const el = document.getElementById("schedules-body");
   el.innerHTML = '<span class="muted">Loading…</span>';
   try {
-    const tasks = await apiGet("/api/schedules");
+    const tasks = await apiGet("/api/schedules", agentParams());
     if (!tasks.length) { el.innerHTML = '<span class="muted">No scheduled tasks.</span>'; return; }
     el.innerHTML = `<div class="sched-list">${tasks.map((t) => schedCard(t)).join("")}</div>`;
     // Header toggles expand/collapse. Action buttons live in the body (a
@@ -1059,10 +1104,10 @@ async function onSchedAction(act, id) {
   try {
     if (act === "edit") { _schedEdit = id; await loadSchedules(); return; }  // loadSchedules wires the preview
     if (act === "cancel") { _schedEdit = null; await loadSchedules(); return; }
-    if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`); await loadSchedules(); return; }
+    if (act === "toggle") { await apiSend("POST", `/api/schedules/${encodeURIComponent(id)}/toggle`, null, agentParams()); await loadSchedules(); return; }
     if (act === "delete") {
       if (!confirm(`Delete schedule '${id}'?`)) return;
-      await apiSend("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
+      await apiSend("DELETE", `/api/schedules/${encodeURIComponent(id)}`, null, agentParams());
       await loadSchedules(); return;
     }
     if (act === "save") {
@@ -1071,7 +1116,7 @@ async function onSchedAction(act, id) {
         skill: document.getElementById("esched-skill").value.trim() || null,
         prompt: document.getElementById("esched-prompt").value,
       };
-      await apiSend("PUT", `/api/schedules/${encodeURIComponent(id)}`, body);
+      await apiSend("PUT", `/api/schedules/${encodeURIComponent(id)}`, body, agentParams());
       _schedEdit = null; await loadSchedules(); return;
     }
   } catch (e) { errAt(e.message); }
@@ -1102,7 +1147,7 @@ document.getElementById("nsched-create").addEventListener("click", async () => {
     prompt: document.getElementById("nsched-prompt").value,
   };
   try {
-    await apiSend("POST", "/api/schedules", body);
+    await apiSend("POST", "/api/schedules", body, agentParams());
     document.getElementById("nsched-id").value = "";
     nschedCron.value = ""; nschedPreview.textContent = "";
     document.getElementById("nsched-skill").value = "";
@@ -1130,26 +1175,93 @@ function setPersonaTag(persona) {
   }
 }
 
-// Persona-gated modules: remove every [data-module] tab + panel whose module
-// isn't enabled for the active persona. Universal tabs carry no data-module
-// and always render; Chat is default-active so removing a module never orphans
-// the view.
+// Persona-gated modules: hide every [data-module] tab + panel whose module
+// isn't enabled for the active agent's persona (hidden, not removed, so the
+// agent picker can re-show them at runtime). Universal tabs carry no
+// data-module and always render. If the tab you're on just vanished, fall
+// back to Chat so the view is never orphaned.
 function applyModules(modules) {
   const enabled = new Set(modules || []);
   document.querySelectorAll("[data-module]").forEach((el) => {
-    if (!enabled.has(el.dataset.module)) el.remove();
+    el.hidden = !enabled.has(el.dataset.module);
   });
+  const current = document.querySelector("nav button.active");
+  if (current && current.hidden) activateTab("chat");
 }
+
+// Agent picker: shown only when the container runs 2+ agents.
+function renderAgentPicker() {
+  agentPickerEl.innerHTML = "";
+  for (const a of agentsMeta) {
+    const opt = document.createElement("option");
+    opt.value = a.name;
+    opt.textContent = a.default ? `${a.name} (default)` : a.name;
+    if (a.description) opt.title = a.description;
+    agentPickerEl.appendChild(opt);
+  }
+  agentPickerEl.hidden = agentsMeta.length <= 1;
+  const current = agentsMeta.find((a) => (activeAgent ? a.name === activeAgent : a.default));
+  if (current) agentPickerEl.value = current.name;
+}
+
+// Make `name` the active agent (the default agent — by name or null — maps to
+// activeAgent === null). Swaps the active session id to that agent's own,
+// rebinds the chat pane, re-pulls the sidebar, and re-applies persona tag +
+// modules. Idempotent: re-selecting the current agent only refreshes the
+// header, which is what a reconnect's meta frame needs.
+function selectAgent(name) {
+  const agent = name ? agentsMeta.find((a) => a.name === name) : null;
+  const next = agent && !agent.default ? agent.name : null;
+  const changed = next !== activeAgent;
+  activeAgent = next;
+  if (next) localStorage.setItem(AGENT_KEY, next); else localStorage.removeItem(AGENT_KEY);
+  if (changed) {
+    if (next) {
+      activeSessionId = agentSessionId(next);
+    } else {
+      activeSessionId = localStorage.getItem(SESSION_KEY) || uuid();
+      localStorage.setItem(SESSION_KEY, activeSessionId);
+    }
+    chat && chat.rebind();
+    requestConversations();
+    document.getElementById("memory-view").innerHTML = '<span class="muted">Select a file.</span>';
+  }
+  applyModules(agent ? agent.modules : defaultModules);
+  setPersonaTag(agent ? agent.persona : defaultPersona);
+  renderAgentPicker();
+  if (changed) {
+    // Read panels are per agent — reload whichever one is showing.
+    const current = document.querySelector("nav button.active");
+    const tab = current && current.dataset.tab;
+    if (loaders[tab]) loaders[tab]();
+  }
+}
+
+// `meta` frame: single-agent containers omit `agents`; `persona`/`modules`
+// always describe the default agent. The stored agent choice is applied only
+// once meta confirms the name still exists, else we fall back to the default.
+function onMeta(msg) {
+  agentsMeta = Array.isArray(msg.agents) ? msg.agents : [];
+  defaultModules = msg.modules || [];
+  defaultPersona = msg.persona || null;
+  const wanted = activeAgent || localStorage.getItem(AGENT_KEY);
+  const exists = wanted && agentsMeta.some((a) => a.name === wanted);
+  selectAgent(exists ? wanted : null);
+}
+agentPickerEl.addEventListener("change", () => selectAgent(agentPickerEl.value));
 
 const conn = createConnection({
   url: wsUrl,
   onFrame: (msg) => {
-    // The header (persona/model) is the page's concern, not the chat pane's.
-    if (msg && msg.type === "meta") { setPersonaTag(msg.persona); applyModules(msg.modules); return; }
+    // The header (persona/agents/modules) is the page's concern, not the chat pane's.
+    if (msg && msg.type === "meta") { onMeta(msg); return; }
     chat && chat.handleFrame(msg);
   },
   onStatus: (state) => chat && chat.setStatus(state),
   onOpen: () => chat && chat.bootstrap(),
+  // Address every outbound frame to the selected agent; the default agent
+  // gets no field at all (older servers and the default path expect none).
+  decorate: () => (activeAgent ? { agent: activeAgent } : {}),
 });
 chat = createChat({
   container: document.getElementById("chat-root"),
@@ -1228,7 +1340,7 @@ function renderConversations() {
 function switchConversation(id) {
   if (id === activeSessionId) return;
   activeSessionId = id;
-  localStorage.setItem(SESSION_KEY, activeSessionId);
+  rememberSession(activeSessionId);
   // rebind() clears the pane and re-bootstraps (history + skills) for the
   // session getSessionId() now returns.
   chat.rebind();
@@ -1239,7 +1351,7 @@ function startNew() {
   // Mint a fresh id — no `clear`, so the prior conversation is kept and stays
   // in the sidebar. It joins the list once its first turn completes.
   activeSessionId = uuid();
-  localStorage.setItem(SESSION_KEY, activeSessionId);
+  rememberSession(activeSessionId);
   chat.rebind();
   renderConversations();
 }

@@ -159,7 +159,7 @@ async def test_periodic_extraction_survives_pass_error(agent_config, caplog):
 
     with patch("run._run_extraction_pass", side_effect=boom):
         with caplog.at_level(logging.ERROR, logger="run"):
-            task = asyncio.create_task(periodic_extraction(agent, interval_sec=0))
+            task = asyncio.create_task(periodic_extraction([agent], interval_sec=0))
             try:
                 await asyncio.wait_for(raised.wait(), timeout=2.0)
                 # Let the loop spin a few more ticks; a bare raise would have

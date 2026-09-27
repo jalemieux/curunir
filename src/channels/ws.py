@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import websockets
 import websockets.exceptions
 
+from src.channels._agent_field import agent_of, request_cancel
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -70,12 +71,17 @@ class WebSocketChannel:
         allowed_origins: frozenset[str] | set[str] | list[str] | None = None,
         pairing_token: str | None = None,
         project_root: str | None = None,
+        agents: list[dict] | None = None,
     ):
         self.in_queue = in_queue
         self.host = host
         self.port = port
         self.model = model
         self.persona = persona
+        # Advertised in the hello frame so a client can offer an agent
+        # picker; frames then carry `agent` to address one. Empty for a
+        # single-agent container.
+        self.agents = list(agents or [])
         # run.py passes the container's shared uploads dir and the repo root;
         # the cwd fallbacks only serve direct construction (tests).
         self.uploads_dir = uploads_dir or os.path.join(os.getcwd(), "context", "uploads")
@@ -132,6 +138,8 @@ class WebSocketChannel:
             payload["model"] = self.model
         if self.persona:
             payload["persona"] = self.persona
+        if self.agents:
+            payload["agents"] = self.agents
         try:
             await websocket.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
@@ -239,6 +247,9 @@ class WebSocketChannel:
             session_id = new_sid
 
         await self._send_hello(websocket, session_id)
+        # The agent this connection last addressed, so the disconnect-time
+        # extract lands on the same agent's transcript.
+        last_agent: str | None = None
 
         try:
             async for raw in websocket:
@@ -255,10 +266,11 @@ class WebSocketChannel:
                     if new_sid != session_id:
                         session_id = new_sid
                         await self._send_hello(websocket, session_id)
+                agent = agent_of(data)
+                if agent is not None:
+                    last_agent = agent
                 if data.get("command") == "interrupt":
-                    delivered = bool(
-                        self.cancel_session and self.cancel_session(session_id)
-                    )
+                    delivered = request_cancel(self.cancel_session, session_id, agent)
                     logger.info(
                         "Interrupt requested for cli session %s (delivered=%s)",
                         session_id, delivered,
@@ -274,6 +286,7 @@ class WebSocketChannel:
                         session_id=session_id,
                         reply_address={},
                         command="slash",
+                        agent=agent,
                     ))
                     continue
 
@@ -304,6 +317,7 @@ class WebSocketChannel:
                 session_id=session_id,
                 reply_address={},
                 command="extract",
+                agent=last_agent,
             )
             await self.in_queue.put(extract_msg)
 
@@ -332,6 +346,7 @@ class WebSocketChannel:
             reply_address={},
             command=data.get("command") or None,
             attachments=manifest,
+            agent=agent_of(data),
         )
         await self.in_queue.put(msg)
 
@@ -356,6 +371,8 @@ class WebSocketChannel:
             "workflow": msg.workflow,
             "stats": msg.stats,
         }
+        if msg.agent:
+            payload["agent"] = msg.agent
         try:
             await connection.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:

@@ -25,7 +25,8 @@ from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
-from src.persona import DEFAULT_PERSONA, load_persona, warn_missing_keys
+from src.container import Container, build_agent_config, resolve_manifest, route_inbound
+from src.persona import load_persona, warn_missing_keys
 from onboarding.bootstrap import bootstrap_context
 from src.document_ingest import ingest_document
 from src.document_text import docx_to_text_block, pdf_to_text_block
@@ -344,9 +345,13 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
     out_queue. Streaming deltas and tool-call notifications go out mid-turn
     via the on_text_delta / on_tool_call hooks.
     """
+    agent_name = agent.config.agent_name
     while True:
         msg = await in_queue.get()
-        logger.info("Processing message from %s (session %s)", msg.channel, msg.session_id)
+        logger.info(
+            "Processing message from %s (session %s, agent %s)",
+            msg.channel, msg.session_id, agent_name,
+        )
         if msg.attachments:
             logger.info(
                 "Inbound attachments: %s",
@@ -365,6 +370,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 reply_address=msg.reply_address,
                 skill_dirs=agent.config.skill_dirs,
                 skill_allowlist=agent.config.skill_allowlist,
+                agent=agent_name,
             )
             result = await maybe_handle_slash(msg.content, None, ctx)
             if result is None:
@@ -392,7 +398,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             agent.sessions.pop(msg.session_id, None)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
-                reply_address=msg.reply_address,
+                reply_address=msg.reply_address, agent=agent_name,
             ))
             continue
 
@@ -414,7 +420,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             conversation_store.delete(agent.config.context_dir, msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
-                reply_address=msg.reply_address,
+                reply_address=msg.reply_address, agent=agent_name,
             ))
             continue
 
@@ -430,7 +436,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             await _extract_conversation(agent, msg.session_id)
             await out_queue.put(OutgoingMessage(
                 content="", channel=msg.channel, session_id=msg.session_id,
-                reply_address=msg.reply_address,
+                reply_address=msg.reply_address, agent=agent_name,
             ))
             continue
 
@@ -445,6 +451,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 reply_address=msg.reply_address,
                 tool_calls=[_summarize_tool_call(name, args_str)],
                 final=False,
+                agent=agent_name,
             ))
 
         async def on_text_delta(chunk: str):
@@ -455,6 +462,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 reply_address=msg.reply_address,
                 delta=True,
                 final=False,
+                agent=agent_name,
             ))
 
         # Outbound sinks the agent fills during the turn: any files it wants
@@ -510,6 +518,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             attachments=attachments or None,
             workflow=metadata.get("workflow"),
             stats=metadata.get("stats"),
+            agent=agent_name,
         ))
 
 
@@ -523,38 +532,59 @@ async def _run_extraction_pass(agent: Agent) -> None:
         await _extract_conversation(agent, session_id)
 
 
-async def periodic_extraction(agent: Agent, interval_sec: int):
-    """Periodically extract learnings from settled conversations on disk."""
-    while True:
-        await asyncio.sleep(interval_sec)
-        try:
-            await _run_extraction_pass(agent)
-        except Exception as e:
-            logger.exception("extraction pass failed: %s", e)
+async def periodic_extraction(agents: list[Agent], interval_sec: int):
+    """Periodically extract learnings from settled conversations on disk.
 
-
-async def periodic_dreaming(agent: Agent, interval_sec: int):
-    """Periodically run the dreaming skill to keep memory tidy.
-
-    Sleep-first so a container restart doesn't trigger a dreaming pass.
+    One loop per container: each tick visits every agent in turn (its own
+    conversations/ → its own memory/), so the LLM calls are serialized
+    instead of N loops waking together, and shared files have one writer.
     """
     while True:
         await asyncio.sleep(interval_sec)
-        try:
-            skill_content = load_skill("dreaming", agent.config.skill_dirs,
-                                       paths=agent.config.path_vars)
-            if skill_content.startswith("Skill not found"):
-                logger.warning("Dreaming skill not found; skipping")
-                continue
-            session_id = f"system:dreaming:{int(time.time())}"
-            logger.info("Firing dreaming pass (session %s)", session_id)
-            await agent.handle(
-                message="",
-                session_id=session_id,
-                system_task_prompt=skill_content,
-            )
-        except Exception as e:
-            logger.exception("Dreaming task failed: %s", e)
+        for agent in agents:
+            try:
+                await _run_extraction_pass(agent)
+            except Exception as e:
+                logger.exception(
+                    "extraction pass failed for agent %s: %s",
+                    agent.config.agent_name, e,
+                )
+
+
+async def _dreaming_pass(agent: Agent) -> None:
+    skill_content = load_skill("dreaming", agent.config.skill_dirs,
+                               paths=agent.config.path_vars)
+    if skill_content.startswith("Skill not found"):
+        logger.warning("Dreaming skill not found; skipping")
+        return
+    session_id = f"system:dreaming:{int(time.time())}"
+    logger.info(
+        "Firing dreaming pass for agent %s (session %s)",
+        agent.config.agent_name, session_id,
+    )
+    await agent.handle(
+        message="",
+        session_id=session_id,
+        system_task_prompt=skill_content,
+    )
+
+
+async def periodic_dreaming(agents: list[Agent], interval_sec: int):
+    """Periodically run the dreaming skill to keep each agent's memory tidy.
+
+    One loop per container, visiting each agent in turn. Sleep-first so a
+    container restart doesn't trigger a dreaming pass.
+    """
+    while True:
+        await asyncio.sleep(interval_sec)
+        for agent in agents:
+            try:
+                await _dreaming_pass(agent)
+            except Exception as e:
+                logger.exception(
+                    "Dreaming task failed for agent %s: %s",
+                    agent.config.agent_name, e,
+                )
 
 
 logger = logging.getLogger(__name__)
@@ -658,16 +688,12 @@ async def main():
     tts_voice = os.environ.get("TTS_VOICE")
     vision_model = os.environ.get("VISION_MODEL")
 
-    persona_name = os.environ.get("CURUNIR_PERSONA", "").strip() or DEFAULT_PERSONA
-    persona = load_persona(persona_name)
-    logger.info(
-        "Persona '%s' active: skills=%s",
-        persona.name,
-        f"{len(persona.skills)} allowlisted" if persona.skills else "all on disk",
-    )
-    warn_missing_keys(persona, os.environ)
-
-    config = AgentConfig(
+    # The container manifest: CURUNIR_CONTAINER=<path> for a multi-agent
+    # container, else a one-agent container synthesized from CURUNIR_PERSONA
+    # with its context at the root — today's deployment, unchanged.
+    manifest = resolve_manifest(os.environ)
+    container_root = Path("./context")
+    env_overrides = dict(
         **({"model": model} if model else {}),
         **({"api_base": api_base} if api_base else {}),
         **({"openrouter_provider": openrouter_provider} if openrouter_provider else {}),
@@ -679,16 +705,30 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
-        persona=persona_name,
-        **({"skill_allowlist": persona.skills} if persona.skills else {}),
     )
-    # Seed the agent's context dir from context.default/ on first run
-    # (non-overwriting). Must run before building the system prompt so a
-    # fresh deployment boots with the baseline identity.md instead of failing.
-    bootstrap_context(Path(config.context_dir))
+    configs: dict[str, AgentConfig] = {}
+    for entry in manifest.agents:
+        persona = load_persona(entry.persona)
+        logger.info(
+            "Agent '%s'%s: persona '%s', skills=%s, context=%s",
+            entry.name, " (default)" if entry.default else "", persona.name,
+            f"{len(persona.skills)} allowlisted" if persona.skills else "all on disk",
+            entry.context_dir(container_root),
+        )
+        warn_missing_keys(persona, os.environ)
+        cfg = build_agent_config(entry, container_root, **env_overrides)
+        # Seed the agent's context dir from context.default/ on first run
+        # (non-overwriting). Must run before building the system prompt so a
+        # fresh deployment boots with the baseline identity.md instead of
+        # failing.
+        bootstrap_context(Path(cfg.context_dir))
+        configs[entry.name] = cfg
+    # The default agent's config also carries the container-wide settings
+    # (model, shared paths) the rest of boot reads.
+    config = configs[manifest.default_agent.name]
 
-    config.main_model_supports_vision = _detect_vision_support(config.model)
-    if not config.main_model_supports_vision:
+    supports_vision = _detect_vision_support(config.model)
+    if not supports_vision:
         if not config.vision_model:
             raise RuntimeError(
                 f"Main model {config.model} lacks vision support and no "
@@ -702,15 +742,48 @@ async def main():
             "through VISION_MODEL=%s.",
             config.model, config.vision_model,
         )
+    for cfg in configs.values():
+        cfg.main_model_supports_vision = supports_vision
 
+    # One usage ledger per container (shared area); one schedule store per agent.
     usage_store = UsageStore(config.usage_db)
-
-    # Initialize the SQLite schedule store (the sole schedule source of truth).
-    schedule_db.init_db(str(config.schedules_db))
-
-    agent = Agent(config, usage_store=usage_store)
+    agents: dict[str, Agent] = {}
+    for name, cfg in configs.items():
+        schedule_db.init_db(str(cfg.schedules_db))
+        agents[name] = Agent(cfg, usage_store=usage_store)
+    container = Container(manifest, agents)
+    agent = container.default_agent
+    logger.info(
+        "Container '%s' hosts %d agent(s): %s",
+        manifest.name, len(agents), ", ".join(manifest.agent_names),
+    )
     in_queue = asyncio.Queue()
     out_queue = asyncio.Queue()
+
+    # Per-agent providers for the channels. A frame without an `agent`
+    # field (every pre-multi-agent client) resolves to the default agent.
+    def history_provider(sid: str, agent: str | None = None) -> list[dict]:
+        a = container.resolve(agent)
+        return a.history_snapshot(sid) if a else []
+
+    def skills_provider(agent: str | None = None) -> list[dict]:
+        a = container.resolve(agent) or container.default_agent
+        return portal_skill_list(
+            a.config.skill_dirs,
+            set(a.config.skill_allowlist) if a.config.skill_allowlist else None,
+        )
+
+    def conversations_provider(agent: str | None = None) -> list[dict]:
+        a = container.resolve(agent)
+        return a.conversations_snapshot() if a else []
+
+    def interactive_conversations_provider(agent: str | None = None) -> list[dict]:
+        # conversations_snapshot() already drops email + scratch; the extra
+        # filter drops scheduled-task transcripts (interactive only).
+        return [
+            c for c in conversations_provider(agent)
+            if not str(c.get("session_id", "")).startswith("sched:")
+        ]
 
     # Register channels
     channels = {}
@@ -733,12 +806,13 @@ async def main():
         ws_allowed_origins = None  # channel default (localhost set)
     ws = WebSocketChannel(
         in_queue, host=ws_host, port=ws_port, model=config.model,
-        persona=persona.name,
-        cancel_session=agent.request_cancel,
+        persona=manifest.default_agent.persona,
+        cancel_session=container.request_cancel,
         allowed_origins=ws_allowed_origins,
         pairing_token=ws_pairing_token,
         uploads_dir=uploads_dir,
         project_root=str(config.repo_root),
+        agents=container.describe(),
     )
     channels["cli"] = ws
 
@@ -777,13 +851,10 @@ async def main():
             in_queue=in_queue,
             url=portal_url,
             token=portal_token,
-            history_provider=lambda sid: agent.history_snapshot(sid),
-            skills_provider=lambda: portal_skill_list(
-                agent.config.skill_dirs,
-                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
-            ),
-            conversations_provider=lambda: agent.conversations_snapshot(),
-            cancel_session=agent.request_cancel,
+            history_provider=history_provider,
+            skills_provider=skills_provider,
+            conversations_provider=conversations_provider,
+            cancel_session=container.request_cancel,
             uploads_dir=uploads_dir,
             project_root=str(config.repo_root),
         )
@@ -804,22 +875,16 @@ async def main():
             host=local_web_config.host,
             port=local_web_config.port,
             model=config.model,
-            persona=persona.name,
+            persona=manifest.default_agent.persona,
             uploads_dir=uploads_dir,
-            cancel_session=agent.request_cancel,
+            cancel_session=container.request_cancel,
             allowed_origins=ws_allowed_origins,
             pairing_token=ws_pairing_token,
-            history_provider=lambda sid: agent.history_snapshot(sid),
-            skills_provider=lambda: portal_skill_list(
-                agent.config.skill_dirs,
-                set(agent.config.skill_allowlist) if agent.config.skill_allowlist else None,
-            ),
-            # conversations_snapshot() already drops email + scratch; the extra
-            # filter drops scheduled-task transcripts (interactive only).
-            conversations_provider=lambda: [
-                c for c in agent.conversations_snapshot()
-                if not str(c.get("session_id", "")).startswith("sched:")
-            ],
+            history_provider=history_provider,
+            skills_provider=skills_provider,
+            conversations_provider=interactive_conversations_provider,
+            agents=container.describe(),
+            agent_configs=configs,
             # Eager document ingestion on upload (docs/document-ingestion.md):
             # one tool-less LLM pass writes <path>.card.md; the SPA blocks
             # submit until the card frame lands.
@@ -849,18 +914,24 @@ async def main():
 
     logger.info("Starting %d channel(s): %s", len(channels), ", ".join(channels.keys()))
 
-    # Start all channels, the router, and the agent worker
+    # Start all channels, the routers, one worker per agent, and the loops.
+    # Inbound: channels → in_queue → route_inbound → per-agent queue →
+    # agent_worker. A long turn in one agent no longer blocks the others.
+    all_agents = list(container.agents.values())
     async with asyncio.TaskGroup() as tg:
         for channel in channels.values():
             tg.create_task(channel.start())
         tg.create_task(route_outbound(out_queue, channels))
-        tg.create_task(agent_worker(agent, in_queue, out_queue))
+        tg.create_task(route_inbound(in_queue, container, out_queue))
+        for name, a in container.agents.items():
+            tg.create_task(agent_worker(a, container.queues[name], out_queue))
         if extraction_enabled:
-            tg.create_task(periodic_extraction(agent, extraction_interval))
+            tg.create_task(periodic_extraction(all_agents, extraction_interval))
         if dreaming_enabled:
-            tg.create_task(periodic_dreaming(agent, dreaming_interval))
+            tg.create_task(periodic_dreaming(all_agents, dreaming_interval))
         if scheduler_enabled:
-            tg.create_task(run_scheduler(agent))
+            for a in all_agents:
+                tg.create_task(run_scheduler(a))
 
 
 if __name__ == "__main__":

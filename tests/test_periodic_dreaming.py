@@ -31,7 +31,7 @@ async def test_periodic_dreaming_fires_skill_through_agent_handle(
 
     mock_agent.handle.side_effect = signal
 
-    task = asyncio.create_task(periodic_dreaming(mock_agent, interval_sec=0))
+    task = asyncio.create_task(periodic_dreaming([mock_agent], interval_sec=0))
     try:
         await asyncio.wait_for(called.wait(), timeout=2.0)
     finally:

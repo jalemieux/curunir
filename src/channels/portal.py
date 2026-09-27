@@ -48,6 +48,7 @@ from typing import Any
 import websockets
 import websockets.exceptions
 
+from src.channels._agent_field import agent_of, call_provider, request_cancel
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -252,23 +253,26 @@ class PortalChannel:
 
     async def _handle_user_message(self, payload: dict) -> None:
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
+        # The portal service forwards the browser payload verbatim, so an
+        # `agent` field set by the browser reaches us with no service change.
+        agent = agent_of(payload)
         if payload.get("command") == "interrupt":
-            delivered = bool(self.cancel_session and self.cancel_session(session_id))
+            delivered = request_cancel(self.cancel_session, session_id, agent)
             logger.info(
                 "Interrupt requested for portal session %s (delivered=%s)",
                 session_id, delivered,
             )
             return
         if payload.get("command") == "history_request":
-            await self._handle_history_request({"session_id": session_id})
+            await self._handle_history_request({"session_id": session_id, "agent": agent})
             return
 
         if payload.get("command") == "skills_request":
-            await self._handle_skills_request({"session_id": session_id})
+            await self._handle_skills_request({"session_id": session_id, "agent": agent})
             return
 
         if payload.get("command") == "conversations_request":
-            await self._handle_conversations_request({"session_id": session_id})
+            await self._handle_conversations_request({"session_id": session_id, "agent": agent})
             return
 
         if payload.get("command") == "scratch_discard":
@@ -282,6 +286,7 @@ class PortalChannel:
                 session_id=session_id,
                 reply_address={},
                 command="scratch_discard",
+                agent=agent,
             ))
             return
 
@@ -294,6 +299,7 @@ class PortalChannel:
                 session_id=session_id,
                 reply_address={},
                 command="slash",
+                agent=agent,
             ))
             return
 
@@ -326,6 +332,7 @@ class PortalChannel:
             reply_address={},
             command=payload.get("command") or None,
             attachments=manifest,
+            agent=agent,
         ))
 
     def _is_duplicate(self, payload: dict) -> bool:
@@ -352,7 +359,8 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        messages = self.history_provider(session_id)
+        agent = agent_of(payload)
+        messages = call_provider(self.history_provider, session_id, agent=agent)
         # Inline attachment content/data so a reopened conversation renders
         # its files without a second fetch — same enrichment the live reply
         # path applies in send().
@@ -364,6 +372,7 @@ class PortalChannel:
                 "type": "history_snapshot",
                 "session_id": session_id,
                 "messages": messages,
+                **({"agent": agent} if agent else {}),
             }))
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during history snapshot send")
@@ -372,12 +381,14 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        skills = self.skills_provider()
+        agent = agent_of(payload)
+        skills = call_provider(self.skills_provider, agent=agent)
         try:
             await self._connection.send(json.dumps({
                 "type": "skills_snapshot",
                 "session_id": session_id,
                 "skills": skills,
+                **({"agent": agent} if agent else {}),
             }))
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during skills snapshot send")
@@ -386,12 +397,14 @@ class PortalChannel:
         if self._connection is None:
             return
         session_id = payload.get("session_id") or PORTAL_SESSION_ID
-        conversations = self.conversations_provider()
+        agent = agent_of(payload)
+        conversations = call_provider(self.conversations_provider, agent=agent)
         try:
             await self._connection.send(json.dumps({
                 "type": "conversations_snapshot",
                 "session_id": session_id,
                 "conversations": conversations,
+                **({"agent": agent} if agent else {}),
             }))
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Portal closed during conversations snapshot send")
@@ -428,6 +441,7 @@ class PortalChannel:
                 "attachments": msg.attachments if msg.attachments else None,
                 "workflow": msg.workflow,
                 "stats": msg.stats,
+                **({"agent": msg.agent} if msg.agent else {}),
             },
         }
         frame = json.dumps(wrapped)
