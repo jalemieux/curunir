@@ -1,0 +1,81 @@
+name: tests
+
+# The `tests` check on every PR. It is meant to be a required status check
+# on main, so it has no path filters: a required check that never reports
+# would block the merge.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: portal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install system tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
+
+      - name: Install curunir dependencies
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python -r requirements.txt
+
+      - name: Curunir tests
+        run: .venv/bin/python -m pytest tests/ -q
+
+      - name: JS tests
+        run: |
+          for f in tests/js/*.mjs; do
+            echo "::group::$f"
+            node "$f"
+            echo "::endgroup::"
+          done
+
+      # The portal is a separate Python project with its own lockfile.
+      - name: Install portal dependencies
+        run: |
+          uv venv portal/.venv
+          uv pip install --python portal/.venv/bin/python -r portal/requirements.lock
+          uv pip install --python portal/.venv/bin/python "pytest>=8" "pytest-asyncio>=0.23" "anyio>=4"
+
+      - name: Portal tests
+        working-directory: portal
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/portal_test
+        run: .venv/bin/python -m pytest -q
