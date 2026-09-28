@@ -298,7 +298,7 @@ class Agent:
         )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
-        # Per-session memory snapshot (README.md + profile.md). Built on the
+        # Per-session memory snapshot (README.md + shared profile.md). Built on the
         # first turn of a session and reused for the rest of that session so
         # auto-cache providers keep hitting the prefix cache across the tool
         # loop. External edits during a session are picked up next session.
@@ -350,7 +350,7 @@ class Agent:
         """System prompt for a session: static prefix + memory snapshot +
         a stable "Conversation started at" line.
 
-        The memory block (memory/README.md + memory/profile.md) and the
+        The memory block (memory/README.md + the shared profile.md) and the
         started-at line are computed once per session and cached so the system
         prompt stays byte-stable across turns within a session — required for
         auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter) to keep
@@ -363,7 +363,7 @@ class Agent:
         if cached is not None:
             return cached
 
-        block = build_memory_block(self.config.context_dir)
+        block = build_memory_block(self.config)
         started_line = f"Conversation started at: {self._session_started_at(session_id)}"
         parts = [self.static_prompt]
         if block:

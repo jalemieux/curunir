@@ -1,11 +1,13 @@
 ---
 name: profile
-description: "Use to onboard or refresh the owner's profile facts — name and role/focus. Triggered by `/profile` or by the `onboarding` orchestrator. Writes the owner's memory/profile.md."
+description: "Use to onboard or refresh the owner's profile facts — name and role/focus. Triggered by `/profile` or by the `onboarding` orchestrator. Writes the container's shared profile.md."
 ---
 
 # Profile
 
-Capture two facts about the owner: how to address them, and what they want help with. These end up in `{{context}}/memory/profile.md` and are read by future turns.
+Capture two facts about the owner: how to address them, and what they want help with. These end up in `{{shared}}/profile.md`, the one user profile every agent in this container reads, and are read by future turns.
+
+Only the container's default agent may write that file. If your `write` to it is refused, tell the user their profile is shared and ask them to run `/profile` with the default agent; don't write the facts anywhere else.
 
 ## When to use
 
@@ -23,7 +25,7 @@ Don't add follow-ups. If the user gives a short or terse answer, accept it — t
 
 ## Write
 
-After the second answer, write `{{context}}/memory/profile.md` with the `write` tool (overwriting whatever is there — the bootstrap default is a placeholder).
+After the second answer, write `{{shared}}/profile.md` with the `write` tool (overwriting whatever is there — the bootstrap default is a placeholder).
 
 The file must contain two H2 sections in this exact shape:
 

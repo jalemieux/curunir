@@ -66,22 +66,23 @@ def build_static_prompt(config: AgentConfig) -> str:
     return render_paths("\n\n".join(parts), config.path_vars)
 
 
-def build_memory_block(context_dir: Path) -> str:
-    """Coalesce memory/README.md and memory/profile.md for the system prompt.
+def build_memory_block(config: AgentConfig) -> str:
+    """Coalesce memory/README.md and the shared profile for the system prompt.
 
     Appended once per session so the routing map and owner profile are always
-    in context. Both files are optional — missing files are silently skipped.
-    Returns an empty string when neither file exists.
+    in context. The README is the agent's own (``<context>/memory/README.md``);
+    the profile is the container's single ``<shared>/profile.md``, so every
+    agent sees the same one. Both files are optional — missing files are
+    silently skipped. Returns an empty string when neither file exists.
     """
-    memory_dir = context_dir / "memory"
     parts: list[str] = []
 
-    readme = memory_dir / "README.md"
+    readme = config.context_dir / "memory" / "README.md"
     if readme.exists():
         parts.append(readme.read_text())
 
-    profile = memory_dir / "profile.md"
+    profile = config.profile_file
     if profile.exists():
         parts.append(profile.read_text())
 
-    return "\n\n".join(parts)
+    return render_paths("\n\n".join(parts), config.path_vars)

@@ -3,7 +3,9 @@
 This directory is your persistent memory. It holds three kinds of
 information, kept in separate files so they don't bleed into each other:
 
-1. **Owner facts** (`profile.md`) — who the user is.
+1. **Owner facts** (`{{shared}}/profile.md`) — who the user is. This one
+   file lives outside this directory and is shared by every agent in the
+   container; it is already in your prompt.
 2. **Owner preferences** (`preferences.md`) — how the user wants to work.
 3. **Your own realizations** (`core-insights.md`) — what you have
    learned about yourself.
@@ -18,7 +20,7 @@ When the user asks "who am I?", "what do you know about me?", or anything
 that requires knowing the owner — **always** read these in order before
 responding:
 
-1. `profile.md`
+1. `{{shared}}/profile.md`
 2. `preferences.md`
 3. `projects.md`
 4. `tasks.md`
@@ -37,7 +39,7 @@ saying "I don't know who you are."
 
 | File / dir | Purpose |
 |---|---|
-| `profile.md` | Owner identity facts: name, pronouns, family, role, contact, addresses, medical notes |
+| `{{shared}}/profile.md` | Shared across agents, outside this directory. Owner identity facts: name, pronouns, family, role, contact, addresses, medical notes |
 | `preferences.md` | Owner's working style: response length, citation conventions, consent boundaries, tool prefs |
 | `core-insights.md` | Your own accumulated realizations about how you operate |
 | `projects.md` | Current projects with status, architecture, relationships |
@@ -47,12 +49,13 @@ saying "I don't know who you are."
 | `summaries/timeline.md` | Auto-maintained chronological list of all archived conversations |
 | `summaries/topics/<slug>.md` | Auto-maintained: archives that touched the entity named by `<slug>` |
 
-All paths in the table above are relative to this directory (`context/memory/`).
+All paths in the table above are relative to this directory, except the
+shared profile, which is at `{{shared}}/profile.md`.
 
 ## Workflow
 
 1. **Orient** — read this README.
-2. **Pull context** — for any owner-related question, read `profile.md` and `preferences.md` minimum; add `projects.md` if the question touches work.
+2. **Pull context** — for any owner-related question, read `{{shared}}/profile.md` and `preferences.md` minimum; add `projects.md` if the question touches work.
 3. **Search** — use `grep` across the directory for specific names, projects, or dates.
 4. **Update** — when you learn something new, append to the right file per the routing table above.
 5. **Register** — if you create a *new* file in this directory (e.g. `recipes.md`), you **must**, in the same turn, add a row for it to the Taxonomy table above, and add it to the "Where to look first" list if it answers a recurring owner question. A new file that isn't registered in this README is invisible to future reads — it can only be found by `grep`. Creating the file and registering it are one step, not two.

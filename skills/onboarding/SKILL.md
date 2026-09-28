@@ -24,7 +24,7 @@ If `{{context}}/identity.md` does NOT exist, proceed to the full flow.
 
 ## Full flow
 
-1. **Profile.** Run `load_skill` with `name=profile`. Follow its instructions to completion — it will ask 2 questions and write `{{context}}/memory/profile.md`.
+1. **Profile.** Run `load_skill` with `name=profile`. Follow its instructions to completion — it will ask 2 questions and write `{{shared}}/profile.md`.
 2. **Preferences.** Run `load_skill` with `name=preferences`. Follow it to completion — 2 questions, writes `{{context}}/memory/preferences.md`.
 3. **Personality.** Run `load_skill` with `name=personality`. Follow it to completion — 2 questions, edits `{{context}}/identity.md`. The personality skill also fills the opening sentence and derives the `### Personality` block from the profile + preferences answers earlier in this conversation. Writing this file is what completes onboarding, so run it last.
 4. **Confirm.** Reply: "All set. You can re-run any section anytime with `/profile`, `/preferences`, or `/personality`."

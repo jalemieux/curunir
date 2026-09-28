@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import AgentConfig
 from .llm import call_llm
 from .memory_indexer import update_indexes
-from .skills import load_skill
+from .skills import load_skill, render_paths
 
 log = logging.getLogger(__name__)
 
@@ -97,9 +97,15 @@ async def _extract(
     skill_content = load_skill("extract-learnings", config.skill_dirs, paths=config.path_vars)
     if skill_content.startswith("Skill not found"):
         skill_content = ""
-    memory_taxonomy = taxonomy_path.read_text() if taxonomy_path.exists() else ""
+    memory_taxonomy = (
+        render_paths(taxonomy_path.read_text(), config.path_vars)
+        if taxonomy_path.exists() else ""
+    )
 
-    existing_topics = _format_existing_topics(_collect_existing_headings(memory_dir))
+    profile_path = config.profile_file
+    existing_topics = _format_existing_topics(
+        _collect_existing_headings(memory_dir, profile_path=profile_path)
+    )
 
     prompt = EXTRACTION_PROMPT.format(
         skill_content=skill_content,
@@ -125,7 +131,7 @@ async def _extract(
     # Write facts and track which entities they touched
     touched_files: list[str] = []
     for fact in data.get("facts", []):
-        if _write_fact(memory_dir, fact) is not None:
+        if _write_fact(memory_dir, fact, profile_path=profile_path) is not None:
             file_rel = fact.get("file")
             if file_rel:
                 touched_files.append(file_rel)
@@ -183,8 +189,19 @@ def _parse_json(text: str) -> dict | None:
         return None
 
 
-def _safe_path(memory_dir, file_path: str) -> "Path | None":
-    """Resolve file path relative to memory_dir, rejecting escapes."""
+PROFILE_FILE = "profile.md"
+
+
+def _safe_path(memory_dir, file_path: str, profile_path=None) -> "Path | None":
+    """Resolve file path relative to memory_dir, rejecting escapes.
+
+    ``profile.md`` is the one exception: when ``profile_path`` is given it
+    resolves to the container's shared profile (``<shared>/profile.md``)
+    instead, so a fact about the user reaches the single profile from any
+    agent's conversation.
+    """
+    if profile_path is not None and Path(file_path).as_posix() == PROFILE_FILE:
+        return Path(profile_path).resolve()
     resolved = (memory_dir / file_path).resolve()
     memory_resolved = memory_dir.resolve()
     if not str(resolved).startswith(str(memory_resolved) + "/") and resolved != memory_resolved:
@@ -232,21 +249,28 @@ def _replace_section(text: str, heading: str, new_block: str) -> str | None:
     return "".join(lines[:start_idx]) + block + "".join(lines[end_idx:])
 
 
-def _collect_existing_headings(memory_dir) -> dict[str, list[str]]:
+def _collect_existing_headings(memory_dir, profile_path=None) -> dict[str, list[str]]:
     """Map each tracked memory file's relative path to its list of H2 headings.
 
-    Excludes `archives/` and `README.md`.
+    Excludes `archives/` and `README.md`. When ``profile_path`` is given, the
+    shared profile is listed as ``profile.md`` (the name facts use for it).
     """
     memory_dir = Path(memory_dir)
-    if not memory_dir.exists():
-        return {}
+    paths: list[tuple[Path, str]] = []
+    if profile_path is not None and Path(profile_path).exists():
+        paths.append((Path(profile_path), PROFILE_FILE))
+    if memory_dir.exists():
+        for path in sorted(memory_dir.rglob("*.md")):
+            rel = path.relative_to(memory_dir)
+            if rel.parts and rel.parts[0] == "archives":
+                continue
+            if profile_path is not None and rel.as_posix() == PROFILE_FILE:
+                continue  # a stale per-agent copy; the shared one is authoritative
+            paths.append((path, rel.as_posix()))
 
     result: dict[str, list[str]] = {}
-    for path in sorted(memory_dir.rglob("*.md")):
-        rel = path.relative_to(memory_dir)
-        if rel.parts and rel.parts[0] == "archives":
-            continue
-        if rel.name == "README.md":
+    for path, rel_posix in paths:
+        if Path(rel_posix).name == "README.md":
             continue
         try:
             text = path.read_text()
@@ -258,7 +282,7 @@ def _collect_existing_headings(memory_dir) -> dict[str, list[str]]:
             if line.startswith("## ") and not line.startswith("### ")
         ]
         if headings:
-            result[rel.as_posix()] = headings
+            result[rel_posix] = headings
     return result
 
 
@@ -273,14 +297,14 @@ def _format_existing_topics(headings_by_file: dict[str, list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _write_fact(memory_dir, fact: dict) -> "Path | None":
+def _write_fact(memory_dir, fact: dict, profile_path=None) -> "Path | None":
     try:
         file_rel = fact.get("file", "")
         content = fact.get("content", "")
         if not file_rel or not content:
             return None
 
-        target = _safe_path(memory_dir, file_rel)
+        target = _safe_path(memory_dir, file_rel, profile_path=profile_path)
         if target is None:
             return None
 

@@ -22,7 +22,7 @@ Accept a short answer. No follow-ups.
 
 ## Derive (no new questions)
 
-Pull the profile + preferences answers. Default source is the conversation history above (when the `onboarding` orchestrator invoked you, those two steps ran first in this same conversation). If those answers aren't present — e.g. you were invoked standalone via `/personality` — `read` `{{context}}/memory/profile.md` and `{{context}}/memory/preferences.md` instead. Both files have a stable shape: profile has `## Name` and `## Role / Focus` sections; preferences has `## Communication style` and `## Response length` sections. The `**Fact:**` line under each section holds the value.
+Pull the profile + preferences answers. Default source is the conversation history above (when the `onboarding` orchestrator invoked you, those two steps ran first in this same conversation). If those answers aren't present — e.g. you were invoked standalone via `/personality` — `read` `{{shared}}/profile.md` and `{{context}}/memory/preferences.md` instead. Both files have a stable shape: profile has `## Name` and `## Role / Focus` sections; preferences has `## Communication style` and `## Response length` sections. The `**Fact:**` line under each section holds the value.
 
 - **Owner's name + role/focus** (from profile) → seeds the opening sentence and informs stance.
 - **Communication style** (from preferences) → register and warmth for the `## Personality` prose.
