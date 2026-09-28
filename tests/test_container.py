@@ -113,6 +113,7 @@ def test_agent_may_be_a_bare_name(personas, tmp_path):
     ("name: x\nagents: [finance]\noutbound: [user, vault]\n", "'vault' is in a list but has no `peers` entry"),
     ("name: x\nagents: [finance]\noutbound: [user, vault]\npeers:\n  vault:\n    url: http://v\n    token_env: PEER_VAULT_TOKEN\n", "token env 'PEER_VAULT_TOKEN', which is not set"),
     ("name: x\nagents: [finance]\npeers:\n  vault:\n    url: http://v\n", "peer 'vault' needs `url` and `token_env`"),
+    ("name: x\nagents: [finance]\nuser_delivery: cli\n", "`user_delivery` must be one of email, local_web, portal"),
     ("name: x\nagents:\n  - name: a/b\n    persona: finance\n", "may not contain '/'"),
     ("- just\n- a list\n", "must be a mapping"),
 ])
@@ -121,7 +122,7 @@ def test_manifest_validation_errors(personas, tmp_path, yaml_text, message):
         load_container(_write(tmp_path, yaml_text), environ={})
 
 
-def test_peer_with_token_set_is_accepted_with_a_warning(personas, tmp_path, caplog):
+def test_peer_with_token_set_is_accepted(personas, tmp_path, caplog):
     text = (
         "name: x\nagents: [finance]\noutbound: [user, vault]\n"
         "peers:\n  vault:\n    url: http://vault:8767\n    token_env: PEER_VAULT_TOKEN\n"
@@ -132,7 +133,7 @@ def test_peer_with_token_set_is_accepted_with_a_warning(personas, tmp_path, capl
     assert m.outbound_containers == ["vault"] and m.inbound_containers == []
     assert m.peers["vault"].url == "http://vault:8767"
     assert m.user_delivery == "portal"
-    assert "cross-container messaging is not active yet" in caplog.text
+    assert "not active yet" not in caplog.text
 
 
 def test_missing_manifest_file_raises(personas, tmp_path):

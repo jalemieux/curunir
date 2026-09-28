@@ -355,6 +355,12 @@ class EmailChannel:
         in_reply_to = msg.reply_address.get("in_reply_to")
         to = msg.reply_address.get("to")
         subject = msg.reply_address.get("subject")
+        if msg.reply_address.get("new_thread") and to:
+            # A conversation that did not start from an inbound email (a
+            # handoff from a peer container): start a new thread. Best-effort
+            # like other non-ledger sends; the recipient allowlist applies.
+            await self._send_new_thread(msg, to, subject or "")
+            return
         if not in_reply_to or not to:
             logger.error("Email send missing in_reply_to or to (got %s)", msg.reply_address)
             return
@@ -384,6 +390,20 @@ class EmailChannel:
         if in_reply_to in self.state.pending:
             self.state.ack(in_reply_to)
             self.state.save()
+
+    async def _send_new_thread(self, msg: OutgoingMessage, to: str, subject: str) -> None:
+        paths = [a["path"] for a in (msg.attachments or []) if a.get("path")]
+        try:
+            await self.client.send_email(
+                to=to, subject=subject, text_body=msg.content,
+                html_body=render_html(msg.content) or None,
+                attachment_paths=paths or None,
+            )
+        except FastmailError:
+            self._note_failure()
+            logger.exception("Failed to send new-thread email for session %s", msg.session_id)
+            return
+        self._note_success()
 
     async def _dispatch_reply(self, in_reply_to: str, payload: dict[str, Any]) -> None:
         """Send a reply payload via the appropriate Fastmail SMTP method."""

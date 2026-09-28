@@ -16,7 +16,9 @@ The question is how to unlock cross-agent collaboration while ensuring sensitive
 
 **Container.** Where agents live, and the privacy boundary. A container holds one or more agents. It has its own filesystem and its own credentials, and nothing outside it can read them.
 
-**Inbound and outbound lists.** Every container carries two allowlists. The inbound list names who may send it messages: the user, and which other containers, if any. The outbound list names where its own messages may go: the user, and which other containers, if any. A message between containers is delivered only if the sender's outbound list and the receiver's inbound list both allow it. These two lists are the whole permissioning model. A container is private when its outbound list names the user alone.
+**Inbound and outbound lists.** Every container carries two allowlists. The inbound list names who may send it messages: the user, and which other containers, if any. The outbound list names where its own messages may go: the user, and which other containers, if any. The user is always on both lists. A message between containers is delivered only if the sender's outbound list and the receiver's inbound list both allow it. These two lists are the whole permissioning model for curunir's own messaging. A container is private when its outbound list names the user alone.
+
+The lists do not govern network egress. `bash`, `web_fetch` and the LLM provider can still move bytes out of a container, whatever its lists say. Airtight at the OS level means network policy, such as an egress allowlist that permits only the model API and the user's channels. That is the operator's job; `docker-compose.fleet.example.yml` shows the shape.
 
 ## Agent collaboration inside a container
 
@@ -24,9 +26,9 @@ Inside a container, collaboration is internal and two-way. An agent asks another
 
 ## Agent collaboration between containers
 
-Communication between agents in different containers is one-way. An agent may send a message to an agent in another container if both lists allow it. The message carries context and a short note about what the sender thinks the receiver can help with. The receiving agent's answer goes to the user, never back to the sending agent.
+Communication between agents in different containers is one-way. An agent may send a message to an agent in another container if both lists allow it. The message carries a short note about what the sender thinks the receiver can help with, and the context the sender chooses to share. The receiving agent's answer goes to the user, never back to the sending agent.
 
-So when the everyday agent realizes a question belongs to finance, it hands the conversation to the finance agent in another container. Finance reads the handoff as background, not as instructions, and answers the user directly. The everyday agent never learns what finance said.
+So when the everyday agent realizes a question belongs to finance, it sends the finance agent in another container a note and the context it chooses. Finance reads the handoff as background, not as instructions, and answers the user directly. The everyday agent never learns what finance said.
 
 ## What makes a container airtight
 

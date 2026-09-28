@@ -21,11 +21,14 @@ from src.agent.scratch import SCRATCH_SESSION_ID, is_scratch
 from src.channels.base import OutgoingMessage
 from src.channels.email import EmailChannel
 from src.channels.local_web import LocalWebChannel
+from src.channels.peer import PeerChannel
 from src.channels.portal import PortalChannel
 from src.channels.ws import WebSocketChannel
 from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
-from src.container import Container, build_agent_config, resolve_manifest, route_inbound
+from src.container import (
+    Container, build_agent_config, check_airtight, resolve_manifest, route_inbound,
+)
 from src.persona import load_persona, warn_missing_keys
 from onboarding.bootstrap import bootstrap_context
 from src.document_ingest import ingest_document
@@ -897,6 +900,41 @@ async def main():
             local_web_config.host, local_web_config.port, ws_pairing_token,
         )
 
+    # Cross-container lists. Checked once every channel is known: a
+    # user_delivery channel must be enabled, and a private container
+    # (outbound: [user]) may not run email with an open allowlist.
+    check_airtight(
+        manifest,
+        enabled_channels=set(channels),
+        email_enabled="email" in channels,
+        email_restrict_outbound=email_config.restrict_outbound,
+        email_allowed_senders=email_config.allowed_senders,
+    )
+    # The peer listener exists only when `inbound` names a container; with
+    # inbound: [user] no port is opened. It is never put in `channels`: it
+    # has no send(), and a handoff enters on the user_delivery channel, so
+    # the answer goes to the user and never back to the sender.
+    peer_channel = None
+    if manifest.inbound_containers:
+        delivery_address: dict = {}
+        if manifest.user_delivery == "email":
+            if not email_config.allowed_senders:
+                raise ValueError(
+                    "user_delivery is email but EMAIL_ALLOWED_SENDERS is empty, "
+                    "so a handoff answer has no user address to go to"
+                )
+            delivery_address = {
+                "to": email_config.allowed_senders[0],
+                "subject": "Handoff",
+                "new_thread": True,
+            }
+        peer_channel = PeerChannel(
+            in_queue, manifest,
+            host=os.environ.get("PEER_HOST", "127.0.0.1"),
+            port=int(os.environ.get("PEER_PORT", "8767")),
+            delivery_address=delivery_address,
+        )
+
     extraction_interval = int(os.environ.get("EXTRACTION_INTERVAL_SEC", "60"))
     dreaming_interval = int(os.environ.get("DREAMING_INTERVAL_SEC", "86400"))
 
@@ -921,6 +959,8 @@ async def main():
     async with asyncio.TaskGroup() as tg:
         for channel in channels.values():
             tg.create_task(channel.start())
+        if peer_channel is not None:
+            tg.create_task(peer_channel.start())
         tg.create_task(route_outbound(out_queue, channels))
         tg.create_task(route_inbound(in_queue, container, out_queue))
         for name, a in container.agents.items():

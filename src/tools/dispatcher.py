@@ -38,6 +38,9 @@ def _get_native_async_executor(name: str):
     if name == "ask_agent":
         from src.tools.ask_agent import exec_ask_agent
         return exec_ask_agent
+    if name == "handoff":
+        from src.tools.handoff import exec_handoff
+        return exec_handoff
     return None
 
 
@@ -45,7 +48,7 @@ def _get_native_async_executor(name: str):
 _ASYNC_EXECUTORS_WITH_ATTACHMENTS = {"to_audio"}
 
 # Async executors that need the calling Agent (to reach its container).
-_ASYNC_EXECUTORS_WITH_AGENT = {"ask_agent"}
+_ASYNC_EXECUTORS_WITH_AGENT = {"ask_agent", "handoff"}
 
 
 async def execute_tool_call(
@@ -56,9 +59,9 @@ async def execute_tool_call(
 ) -> str:
     """Dispatch a tool call. Sync tools run in a thread, async tools are awaited directly.
 
-    ``agent`` is the calling ``Agent`` (only ``ask_agent`` uses it, to find
-    its siblings through ``agent.container``); it is optional so existing
-    callers and tests need no change.
+    ``agent`` is the calling ``Agent`` (``ask_agent`` and ``handoff`` use it
+    to reach ``agent.container``); it is optional so existing callers and
+    tests need no change.
     """
     key = name.lower()
 

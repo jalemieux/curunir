@@ -1,4 +1,4 @@
-# Example container manifest (agents-and-containers, phase 2).
+# Example container manifest (agents-and-containers).
 #
 # Select it with CURUNIR_CONTAINER=container.yaml. Without that variable the
 # process runs today's one-agent container synthesized from CURUNIR_PERSONA.
@@ -24,7 +24,12 @@ agents:
 
 # Who may send to this container and where its messages may go. `user` must
 # be in both. Naming another container requires a `peers` entry whose
-# token_env is set; cross-container messaging itself lands in phase 3.
+# token_env is set (the shared secret for that pair; a missing one fails
+# boot). An outbound container gives the agents a one-way `handoff` tool; an
+# inbound container starts the peer listener (PEER_HOST/PEER_PORT, default
+# 127.0.0.1:8767) and requires `user_delivery`: the channel (portal |
+# local_web | email) where this container answers a handoff. The answer goes
+# to the user, never back to the sender. See docker-compose.fleet.example.yml.
 inbound: [user]
 outbound: [user]
 # peers:
