@@ -164,11 +164,16 @@ Two-layer dispatcher, invoked by `ws.py` and `portal.py` before a message reache
 
 A persona is a deployment bundle selected at boot via `CURUNIR_PERSONA=<name>`.
 There is no "no persona" code path — unset falls back to `personas/default/`,
-which ships the full skill catalog and the baseline behavior prompt. Three
+which ships the full skill catalog and the baseline behavior prompt. Five
 bundles ship today: **`default`** (full catalog, no allowlist), **`finance`**
 (balance-sheet / position-tracking + research; allowlists ~27 skills, declares
-`FRED_API_KEY` / `BRAVE_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY`), and
-**`marketing`** (GTM pipeline + competitive intel; allowlists ~25 skills).
+`FRED_API_KEY` / `BRAVE_API_KEY` / `XAI_API_KEY` / `GEMINI_API_KEY`),
+**`marketing`** (GTM pipeline + competitive intel; allowlists ~25 skills),
+**`companion`** (coach / confidant; conversation-first) and **`scout`** (a
+24/7 headhunter: sourcing via `web-search` / `xai-search` /
+`linkedin-research` / `playwright`, scoring against the user's profile, a job
+pipeline on the `crm` store with a documented stage mapping, outreach drafts
+that are never sent without approval; allowlists 14 skills).
 
 `personas/<name>/persona.yaml` declares an optional **absolute** skill
 allowlist (omit `skills:` to allow every skill on disk) and key *names* for
