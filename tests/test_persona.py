@@ -183,3 +183,25 @@ def test_companion_bundle_skills_exist_on_disk():
     p = load_persona("companion")
     for name in p.skills:
         assert (Path("skills") / name / "SKILL.md").exists(), name
+
+
+def test_scout_bundle_parses_from_repo():
+    p = load_persona("scout")
+    assert p.name == "scout"
+    assert p.skills  # non-empty absolute allowlist
+    # Scout sources roles and tracks the pipeline in the CRM store.
+    assert "crm" in p.skills
+    assert "web-search" in p.skills
+    assert "xai-search" in p.skills
+    assert "linkedin-research" in p.skills
+
+
+def test_scout_bundle_declares_sourcing_keys():
+    p = load_persona("scout")
+    assert {"BRAVE_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY"} <= set(p.keys)
+
+
+def test_scout_bundle_skills_exist_on_disk():
+    p = load_persona("scout")
+    for name in p.skills:
+        assert (Path("skills") / name / "SKILL.md").exists(), name
