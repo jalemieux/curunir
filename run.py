@@ -27,7 +27,7 @@ from src.channels.router import route_outbound
 from src.config import AgentConfig, EmailChannelConfig, LocalWebConfig
 from src.container import Container, build_agent_config, resolve_manifest, route_inbound
 from src.persona import load_persona, warn_missing_keys
-from onboarding.bootstrap import bootstrap_context
+from onboarding.bootstrap import bootstrap_context, bootstrap_shared
 from src.document_ingest import ingest_document
 from src.document_text import docx_to_text_block, pdf_to_text_block
 from src.llm import describe_image
@@ -705,6 +705,7 @@ async def main():
         **({"tts_model": tts_model} if tts_model else {}),
         **({"tts_voice": tts_voice} if tts_voice else {}),
         **({"vision_model": vision_model} if vision_model else {}),
+        default_agent_name=manifest.default_agent.name,
     )
     configs: dict[str, AgentConfig] = {}
     for entry in manifest.agents:
@@ -723,6 +724,14 @@ async def main():
         # failing.
         bootstrap_context(Path(cfg.context_dir))
         configs[entry.name] = cfg
+    # One user profile per container at <shared>/profile.md: move a legacy
+    # memory/profile.md there once (default agent first), park any other
+    # per-agent copy, and seed it from context.default/ if still missing.
+    bootstrap_shared(
+        container_root,
+        [configs[manifest.default_agent.name].context_dir]
+        + [c.context_dir for n, c in configs.items() if n != manifest.default_agent.name],
+    )
     # The default agent's config also carries the container-wide settings
     # (model, shared paths) the rest of boot reads.
     config = configs[manifest.default_agent.name]

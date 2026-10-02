@@ -28,6 +28,13 @@ DREAMING MAY CHANGE (wiring)            DREAMING MUST NEVER TOUCH (facts)
   memory files
 ```
 
+The user profile is not in `{{context}}/memory/`: it is `{{shared}}/profile.md`,
+one file shared by every agent in the container. Never move it into
+`memory/` or create a `memory/profile.md`. If a README row or link still says
+`profile.md` lives in this directory, fixing it to `{{shared}}/profile.md` is
+wiring. Only the default agent may edit the shared profile; if your `edit` is
+refused, leave it alone.
+
 The test for every edit: **"is this a fact, or is it wiring?"** Moving a file,
 renaming it, registering it, fixing a link to it — wiring. The sentences and
 facts *inside* a data file — frozen. You may not touch them.

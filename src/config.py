@@ -54,10 +54,25 @@ class AgentConfig:
     shared_dir: Path | None = None
     agent_name: str = "default"
     is_default: bool = True
+    # Name of the container's default agent, the only agent whose write/edit
+    # may touch a shared state file (``shared_state_files``). Used to name
+    # it in the refusal a sibling gets.
+    default_agent_name: str = "default"
 
     def __post_init__(self) -> None:
         if self.shared_dir is None:
             self.shared_dir = self.context_dir
+
+    @property
+    def profile_file(self) -> Path:
+        """The container's single user profile, ``<shared>/profile.md``."""
+        return self.shared_dir / "profile.md"
+
+    @property
+    def shared_state_files(self) -> tuple[Path, ...]:
+        """Shared files with exactly two writers: the container's extraction
+        loop and the default agent. Sibling agents read them only."""
+        return (self.profile_file,)
 
     @property
     def path_vars(self) -> dict[str, str]:

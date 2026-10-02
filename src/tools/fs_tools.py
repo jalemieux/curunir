@@ -263,11 +263,36 @@ def exec_read(args: dict, config: AgentConfig) -> str:
         return f"Error: {e}"
 
 
+def _shared_state_refusal(path: Path, shown: str, config: AgentConfig) -> str | None:
+    """Refuse a sibling agent's write to a shared state file.
+
+    Shared state files (``config.shared_state_files``, today the user
+    profile) have two writers: the container's extraction loop and the
+    default agent. Any other agent reads them only. Bash is not gated; this
+    is the tool-level backstop to the skills' own instructions.
+    """
+    if config.is_default:
+        return None
+    target = path.resolve()
+    for state_file in config.shared_state_files:
+        if target == _resolve(state_file, config).resolve():
+            return (
+                f"Error: {shown} is shared across this container's agents and "
+                f"only the default agent '{config.default_agent_name}' may "
+                f"change it. Ask the user to make this change from "
+                f"'{config.default_agent_name}'."
+            )
+    return None
+
+
 def exec_edit(args: dict, config: AgentConfig) -> str:
     """Replace exact string in a file."""
     try:
         shown = args["file_path"]  # echo the path as the model gave it
         path = _resolve(shown, config)
+        refusal = _shared_state_refusal(path, shown, config)
+        if refusal:
+            return refusal
         if not path.exists():
             return f"Error: File not found: {shown}"
 
@@ -297,6 +322,9 @@ def exec_write(args: dict, config: AgentConfig) -> str:
     """Write content to a file, creating parent dirs if needed."""
     try:
         path = _resolve(args["file_path"], config)
+        refusal = _shared_state_refusal(path, args["file_path"], config)
+        if refusal:
+            return refusal
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args["content"])
         return f"Wrote {len(args['content'])} bytes to {args['file_path']}"

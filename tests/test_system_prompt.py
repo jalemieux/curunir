@@ -85,27 +85,25 @@ def test_skill_allowlist_forwarded_to_manifest(tmp_context, tmp_skills, agent_co
 
 
 class TestBuildMemoryBlock:
-    def test_coalesces_readme_and_profile(self, tmp_context):
+    def test_coalesces_readme_and_shared_profile(self, tmp_context):
         memory = tmp_context / "memory"
         memory.mkdir()
         (memory / "README.md").write_text("# Routing map\nWhere to look first.")
-        (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
+        (tmp_context / "profile.md").write_text("# Owner Profile\nName: Alice")
 
-        block = build_memory_block(tmp_context)
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
 
         assert "Where to look first." in block
         assert "Name: Alice" in block
 
     def test_empty_when_memory_dir_missing(self, tmp_context):
-        block = build_memory_block(tmp_context)
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
         assert block == ""
 
     def test_skips_missing_readme(self, tmp_context):
-        memory = tmp_context / "memory"
-        memory.mkdir()
-        (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
+        (tmp_context / "profile.md").write_text("# Owner Profile\nName: Alice")
 
-        block = build_memory_block(tmp_context)
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
 
         assert "Routing map" not in block
         assert "Name: Alice" in block
@@ -115,10 +113,40 @@ class TestBuildMemoryBlock:
         memory.mkdir()
         (memory / "README.md").write_text("# Routing map")
 
-        block = build_memory_block(tmp_context)
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
 
         assert "Routing map" in block
         assert "Owner Profile" not in block
+
+    def test_per_agent_memory_profile_is_not_read(self, tmp_context):
+        memory = tmp_context / "memory"
+        memory.mkdir()
+        (memory / "profile.md").write_text("# Stale copy\nName: Bob")
+
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
+
+        assert "Name: Bob" not in block
+
+    def test_every_agent_reads_the_one_shared_profile(self, tmp_path):
+        (tmp_path / "profile.md").write_text("# Owner Profile\nName: Alice")
+        for name, default in (("everyday", True), ("finance", False)):
+            ctx = tmp_path / "agents" / name
+            (ctx / "memory").mkdir(parents=True)
+            (ctx / "memory" / "README.md").write_text(f"# {name} routing")
+            cfg = AgentConfig.for_agent(name, ctx, tmp_path, is_default=default)
+
+            block = build_memory_block(cfg)
+
+            assert f"# {name} routing" in block
+            assert "Name: Alice" in block
+
+    def test_renders_path_placeholders(self, tmp_path):
+        ctx = tmp_path / "agents" / "finance"
+        (ctx / "memory").mkdir(parents=True)
+        (ctx / "memory" / "README.md").write_text("Profile: `{{shared}}/profile.md`")
+        cfg = AgentConfig.for_agent("finance", ctx, tmp_path, is_default=False)
+
+        assert f"Profile: `{tmp_path}/profile.md`" in build_memory_block(cfg)
 
 
 class TestSessionMemorySnapshot:
@@ -128,7 +156,7 @@ class TestSessionMemorySnapshot:
         memory = agent_config.context_dir / "memory"
         memory.mkdir()
         (memory / "README.md").write_text("# Routing map\nLook at people/")
-        (memory / "profile.md").write_text("# Owner Profile\nName: Alice")
+        (agent_config.profile_file).write_text("# Owner Profile\nName: Alice")
 
         agent = Agent(agent_config)
 
@@ -150,7 +178,7 @@ class TestSessionMemorySnapshot:
         memory.mkdir()
         readme = memory / "README.md"
         readme.write_text("# Routing map\nVersion ONE")
-        profile = memory / "profile.md"
+        profile = agent_config.profile_file
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
@@ -179,7 +207,7 @@ class TestSessionMemorySnapshot:
         memory.mkdir()
         readme = memory / "README.md"
         readme.write_text("# Routing map\nVersion ONE")
-        profile = memory / "profile.md"
+        profile = agent_config.profile_file
         profile.write_text("# Owner Profile\nFirst snapshot")
 
         agent = Agent(agent_config)
