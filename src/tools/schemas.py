@@ -510,3 +510,61 @@ def ask_agent_schema(siblings: list[dict]) -> dict:
             },
         },
     }
+
+
+def handoff_schema(containers: list[str]) -> dict:
+    """Schema for the ``handoff`` tool, generated per container.
+
+    Not registered in ``ALL_TOOL_SCHEMAS``: the ``container`` enum is exactly
+    the containers this container's ``outbound`` list names.
+    ``Agent._get_tool_schemas`` appends it only when that list is non-empty,
+    so a private container (``outbound: [user]``) never sees it.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": "handoff",
+            "description": (
+                "Hand a question to an agent in another container when it "
+                "belongs there. One-way: the other container answers the user "
+                "directly and you never see its answer. You learn only "
+                "'delivered' or 'refused: <reason>'. Send only what the other "
+                "container needs: a short note on what you think it can help "
+                "with, and the context you choose to share. Tell the user you "
+                "handed it off and where the answer will arrive."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "container": {
+                        "type": "string",
+                        "enum": list(containers),
+                        "description": "Which container to hand off to.",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": (
+                            "A short note: what you think the receiver can "
+                            "help with."
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "The background the receiver needs, self-contained: "
+                            "it has none of your conversation. Include only "
+                            "what you intend to share."
+                        ),
+                    },
+                    "agent": {
+                        "type": "string",
+                        "description": (
+                            "Optional: a specific agent in the receiving "
+                            "container. Omit for its default agent."
+                        ),
+                    },
+                },
+                "required": ["container", "note", "context"],
+            },
+        },
+    }

@@ -1,0 +1,81 @@
+# Example fleet: two curunir containers on one host (agents-and-containers,
+# phase 3). Copy it, fill in the env files, and run
+#   docker compose -f docker-compose.fleet.example.yml up
+#
+# - `home` hosts the everyday agent. Its outbound list names `vault`, so its
+#   agents get a `handoff` tool that POSTs to vault's peer channel.
+# - `vault` hosts the finance agent and is private: outbound is [user] only.
+#   Its inbound list names `home`, so it runs the peer listener (PEER_PORT)
+#   and answers each handoff on its own user channel (user_delivery), never
+#   back to home.
+#
+# The manifests (fleet/home.yaml, fleet/vault.yaml) look like:
+#
+#   # fleet/home.yaml                      # fleet/vault.yaml
+#   name: home                             name: vault
+#   agents: [{name: everyday,              agents: [{name: finance, context: .}]
+#             persona: default,            inbound: [user, home]
+#             context: .}]                 outbound: [user]
+#   inbound: [user]                        peers:
+#   outbound: [user, vault]                  home:
+#   peers:                                     url: http://home:8767
+#     vault:                                   token_env: PEER_PAIR_TOKEN
+#       url: http://vault:8767             user_delivery: portal
+#       token_env: PEER_PAIR_TOKEN
+#
+# PEER_PAIR_TOKEN is the shared secret for the home<->vault pair. Set the
+# same value in both env files (generate with
+# `python -c 'import secrets; print(secrets.token_urlsafe(32))'`). A missing
+# secret fails boot.
+#
+# "Nothing reads in": each container has its own `context` volume and its
+# own env file (credentials). The two volumes are disjoint; neither service
+# mounts the other's.
+#
+# Network egress is NOT governed by the inbound/outbound lists. The lists
+# govern curunir's own messaging only; `bash`, `web_fetch` and the LLM
+# provider can still move bytes out of a "private" container. Airtight at the
+# OS level is the operator's job: put vault on a network whose egress is
+# limited to the model API and the user channels (portal, mail), e.g. an
+# egress proxy or firewall allowlist. Docker's `internal: true` network below
+# blocks all egress on `fleet`; vault additionally joins `egress`, which is
+# where such a filtering proxy would sit.
+
+services:
+  home:
+    image: ghcr.io/jalemieux/curunir:${CURUNIR_TAG:-latest}
+    env_file: ./fleet/home.env
+    environment:
+      CURUNIR_CONTAINER: /app/fleet/home.yaml
+      WS_HOST: 0.0.0.0
+    volumes:
+      - ./fleet:/app/fleet:ro
+      - home-context:/app/context
+    ports:
+      - "127.0.0.1:8765:8765"
+    networks: [fleet, egress]
+    restart: unless-stopped
+
+  vault:
+    image: ghcr.io/jalemieux/curunir:${CURUNIR_TAG:-latest}
+    env_file: ./fleet/vault.env
+    environment:
+      CURUNIR_CONTAINER: /app/fleet/vault.yaml
+      # The peer listener must be reachable from `home` on the fleet network.
+      # It is not published on the host.
+      PEER_HOST: 0.0.0.0
+      PEER_PORT: "8767"
+    volumes:
+      - ./fleet:/app/fleet:ro
+      - vault-context:/app/context
+    networks: [fleet, egress]
+    restart: unless-stopped
+
+networks:
+  fleet:
+    internal: true    # container-to-container only; no route out
+  egress: {}          # replace with a network behind your egress allowlist
+
+volumes:
+  home-context:
+  vault-context:

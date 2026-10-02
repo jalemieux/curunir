@@ -17,7 +17,7 @@ from src.config import AgentConfig
 from src.llm import call_llm, classify_provider_error
 from src.skills import parse_frontmatter
 from src.tools.dispatcher import execute_tool_call
-from src.tools.schemas import ask_agent_schema, get_tool_schemas
+from src.tools.schemas import ask_agent_schema, get_tool_schemas, handoff_schema
 from src.usage_store import UsageRecord, UsageStore
 
 
@@ -388,6 +388,14 @@ class Agent:
             ]
             if siblings:
                 base = base + [ask_agent_schema(siblings)]
+        # handoff exists only when the outbound list names another container:
+        # a private container (outbound: [user]) never registers it. Same
+        # self.tools gate as ask_agent, so sub-agents and siblings answering
+        # an ask cannot hand off.
+        if container is not None and self.tools is None:
+            targets = container.manifest.outbound_containers
+            if targets:
+                base = base + [handoff_schema(targets)]
         return base
 
     def _load_history(self, session_id: str) -> list[dict]:
@@ -412,12 +420,19 @@ class Agent:
 
         The ephemeral Scratch slot is also excluded — it has its own pinned
         slot in the portal and must never appear as a saved row, even if a
-        transcript file ever leaked to disk.
+        transcript file ever leaked to disk. Handoff conversations
+        (``handoff:<id>``) are badged ``handoff``.
         """
-        return [
+        rows = [
             c for c in conversation_store.list_conversations(self.config.context_dir)
             if c.get("channel") != "email" and not is_scratch(c.get("session_id"))
         ]
+        # A handoff from a peer container is stored under its delivery
+        # channel; the sidebar badge is derived from the session-id prefix.
+        for c in rows:
+            if str(c.get("session_id", "")).startswith("handoff:"):
+                c["channel"] = "handoff"
+        return rows
 
     def history_snapshot(self, session_id: str = "portal") -> list[dict]:
         """Return a chat-shaped projection of conversation history for the portal.

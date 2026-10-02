@@ -14,10 +14,11 @@ Two entry points:
   deployment: the persona from ``CURUNIR_PERSONA`` with its context at the
   container root (``context: .``) and ``inbound``/``outbound`` of ``[user]``.
 
-The inbound/outbound lists, ``peers`` and ``user_delivery`` are parsed and
-structurally validated here so a manifest is forward-compatible, but
-cross-container messaging (handoff, the peer channel) lands in phase 3; a
-manifest that names another container boots with a warning.
+The inbound/outbound lists, ``peers`` and ``user_delivery`` govern
+cross-container messaging (phase 3): the ``handoff`` tool exists only when
+``outbound`` names a container, and the peer listener
+(``src/channels/peer.py``) starts only when ``inbound`` does.
+:func:`check_airtight` holds the boot-time checks that go with them.
 """
 from __future__ import annotations
 
@@ -40,6 +41,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 logger = logging.getLogger(__name__)
 
 USER = "user"
+
+# Channels a handoff answer may be delivered on (``user_delivery``). Each is a
+# channel that reaches the user without a live reply address from them.
+USER_DELIVERY_CHANNELS = frozenset({"portal", "local_web", "email"})
 
 # Fixed session ids that pre-date multi-agent routing. They belong to the
 # default agent; every other agent's conversations use minted UUIDs so portal
@@ -243,16 +248,20 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
                 f"container manifest: peer {container_name!r} names token env "
                 f"{peer.token_env!r}, which is not set"
             )
-    if named:
-        logger.warning(
-            "container %s lists other containers (%s); cross-container "
-            "messaging is not active yet in this build",
-            name, ", ".join(sorted(named)),
-        )
 
     user_delivery = data.get("user_delivery")
     if user_delivery is not None and (not isinstance(user_delivery, str) or not user_delivery.strip()):
         raise ValueError("container manifest: `user_delivery` must be a channel name")
+    if user_delivery is not None and user_delivery.strip() not in USER_DELIVERY_CHANNELS:
+        raise ValueError(
+            f"container manifest: `user_delivery` must be one of "
+            f"{', '.join(sorted(USER_DELIVERY_CHANNELS))} (got {user_delivery.strip()!r})"
+        )
+    if any(c != USER for c in inbound) and user_delivery is None:
+        raise ValueError(
+            "container manifest: `inbound` names a container, so `user_delivery` "
+            "must say which channel delivers handoff answers to the user"
+        )
 
     return ContainerManifest(
         name=name, agents=tuple(entries), inbound=inbound, outbound=outbound,
@@ -268,6 +277,64 @@ def resolve_manifest(environ: Mapping[str, str] | None = None) -> ContainerManif
     if manifest_path:
         return load_container(manifest_path, environ)
     return synthesize_container(environ.get("CURUNIR_PERSONA"))
+
+
+def peer_token(manifest: ContainerManifest, peer: str, environ: Mapping[str, str] | None = None) -> str:
+    """The shared secret for the pair (this container, ``peer``)."""
+    environ = os.environ if environ is None else environ
+    return environ.get(manifest.peers[peer].token_env, "")
+
+
+def check_airtight(
+    manifest: ContainerManifest,
+    *,
+    enabled_channels: set[str] | frozenset[str],
+    email_enabled: bool = False,
+    email_restrict_outbound: bool = True,
+    email_allowed_senders: list[str] | tuple[str, ...] = (),
+) -> None:
+    """Boot-time list enforcement that needs the channel config.
+
+    Raises ``ValueError`` (boot fails) when:
+
+    - ``user_delivery`` is set but names a channel that is not enabled, so a
+      handoff answer would have nowhere to go;
+    - the container is private (``outbound`` names no container) and email
+      is enabled with ``EMAIL_RESTRICT_OUTBOUND=false`` or an empty
+      ``EMAIL_ALLOWED_SENDERS``. An empty allowlist makes both the recipient
+      check and the inbound sender check no-ops, a silent open door. A
+      synthesized container (no manifest, today's deployment) logs this at
+      ERROR instead of refusing to boot.
+    """
+    if manifest.user_delivery and manifest.user_delivery not in enabled_channels:
+        raise ValueError(
+            f"container {manifest.name!r}: user_delivery is "
+            f"{manifest.user_delivery!r}, but that channel is not enabled "
+            f"(enabled: {', '.join(sorted(enabled_channels)) or 'none'})"
+        )
+    if email_enabled and not manifest.outbound_containers:
+        problem = None
+        if not email_restrict_outbound:
+            problem = (
+                "EMAIL_RESTRICT_OUTBOUND=false lets email reach anyone; set it "
+                "to true or disable email"
+            )
+        elif not email_allowed_senders:
+            problem = (
+                "EMAIL_ALLOWED_SENDERS is empty, which disables both the "
+                "recipient and the sender allowlist; list the user's addresses "
+                "or disable email"
+            )
+        if problem:
+            message = f"container {manifest.name!r} is private (outbound: [user]) but {problem}"
+            if manifest.source is None:
+                # A synthesized container is today's single-persona
+                # deployment; refusing to boot it would break existing
+                # installs on upgrade. Opting into a manifest opts into the
+                # hard check.
+                logger.error("%s (not enforced without a container manifest)", message)
+            else:
+                raise ValueError(message)
 
 
 def build_agent_config(entry: AgentEntry, root: Path, **overrides) -> AgentConfig:
