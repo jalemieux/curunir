@@ -266,9 +266,12 @@ async def call_llm(
     if api_base:
         kwargs["api_base"] = api_base
     extra_body: dict = {}
-    if openrouter_provider:
-        extra_body["provider"] = {"order": [openrouter_provider]}
     if model.startswith("openrouter/"):
+        # OpenRouter-only request fields. Anthropic rejects any extra_body
+        # ("extra_body: Extra inputs are not permitted"), so a provider
+        # preference left in the env must not leak onto other backends.
+        if openrouter_provider:
+            extra_body["provider"] = {"order": [openrouter_provider]}
         # Ask OpenRouter to include the authoritative cost in the response.
         extra_body["usage"] = {"include": True}
     if extra_body:
