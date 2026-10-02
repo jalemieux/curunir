@@ -1,0 +1,27 @@
+# Code Factory per-repo settings. Read by the factory bot from the default
+# branch (never from a PR branch), see jalemieux/code_factory docs/codefactory.example.yml.
+#
+# Risk tiers: a diff takes the strictest tier of any file it touches.
+# fnmatch syntax; `*` crosses slashes. Anything unlisted is tier C.
+#
+# A set from the spike 0.2 backlog dry-run (dev_stack notes/backlog-classification.md):
+#   src/agent/**, src/llm.py, src/tools/dispatcher.py  — core loop
+#   src/channels/**     — agent transport; both [security] path-traversal PRs
+#                         and the unauthenticated-listener fix classified C without it
+#   src/tools/schemas.py, src/tools/delegate.py — tool-parse and delegation critical path
+#   run.py              — fat critical entrypoint touched by 19 of 53 diffed PRs
+#   portal/ws_*         — websocket servers
+
+tiers:
+  A:
+    - src/agent/**
+    - src/channels/**
+    - src/llm.py
+    - src/tools/dispatcher.py
+    - src/tools/schemas.py
+    - src/tools/delegate.py
+    - run.py
+    - portal/ws_*
+  B:
+    - skills/**
+    - personas/**
