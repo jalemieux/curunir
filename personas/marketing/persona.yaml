@@ -1,5 +1,9 @@
 name: marketing
 description: Go-to-market assistant for builders — product onboarding, ICP & positioning, GTM planning, competitive intelligence, and demand validation.
+# Routing text for sibling agents in a multi-agent container: when to send
+# a request here. Shown in their ask_agent / handoff tool descriptions
+# (falls back to `description`). Override per agent in container.yaml.
+handles: Go-to-market work for a product the user is building. Positioning, ICP, GTM plans, competitor research, landing-page tests, or the lead pipeline. Not for general writing help.
 
 # ABSOLUTE skill allowlist. Only these register for this deployment.
 skills:

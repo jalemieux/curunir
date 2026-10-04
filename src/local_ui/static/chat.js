@@ -8,7 +8,7 @@
 //
 // Portal-only concerns are reached only through injected hooks, never named
 // directly: getSessionId(), hooks.onUnhandledFrame(), hooks.onTurnFinal(),
-// hooks.onSocketOpen(). Local passes none of them.
+// hooks.onSocketOpen(), hooks.onFollowHandoff(). Local passes none of them.
 //
 // Depends on globals `marked` and `hljs` (loaded via <script> in the host).
 // Canonical home: src/local_ui/static/. See the design doc:
@@ -69,6 +69,15 @@ export function computeScrollPinned(scrollTop, scrollHeight, clientHeight, thres
 
 export function shouldAutoScroll(pinned, force) {
   return force || pinned;
+}
+
+// The well-formed entries of a final frame's `handoffs` field.
+export function handoffTargets(handoffs) {
+  if (!Array.isArray(handoffs)) return [];
+  return handoffs.filter(
+    (h) => h && typeof h.agent === "string" && h.agent
+      && typeof h.session_id === "string" && h.session_id,
+  );
 }
 
 export function createChat(config) {
@@ -399,6 +408,25 @@ export function createChat(config) {
     msgEl.appendChild(wrap);
   }
 
+  // A reply whose turn handed the request to a sibling agent carries
+  // `handoffs: [{agent, session_id}]`. Offer one button per handoff; the page
+  // (hooks.onFollowHandoff) switches agent and opens that conversation.
+  function appendHandoffActions(msgEl, handoffs) {
+    if (!msgEl || !hooks.onFollowHandoff) return;
+    const list = handoffTargets(handoffs);
+    if (!list.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "response-actions handoff-actions";
+    for (const h of list) {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "resp-action handoff-follow";
+      btn.textContent = `Continue with ${h.agent} →`;
+      btn.addEventListener("click", () => hooks.onFollowHandoff(h));
+      wrap.appendChild(btn);
+    }
+    msgEl.appendChild(wrap);
+  }
+
   async function copyResponse(rawText, btn) {
     const original = btn.textContent;
     let ok = false;
@@ -449,6 +477,7 @@ export function createChat(config) {
       finalizeActivity(inProgressMsg);
       inProgressMsg.classList.remove("stopping");
       appendResponseActions(inProgressMsg);
+      appendHandoffActions(inProgressMsg, m.handoffs);
       inProgressMsg = null;
       if (hooks.onTurnFinal) hooks.onTurnFinal();
     }

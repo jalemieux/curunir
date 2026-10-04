@@ -39,6 +39,7 @@ from src.schedule_store import db as schedule_db
 from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
+from src.turn_context import TurnContext, current_turn
 from src.usage_store import UsageStore
 
 
@@ -472,6 +473,13 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         # to attach to its reply, and a metadata bag for workflow/stats.
         attachments = []
         metadata: dict = {}
+        # Where this turn came from, for tools that open a conversation on
+        # the user's channel (a sibling `handoff`).
+        turn = TurnContext(
+            channel=msg.channel, session_id=msg.session_id,
+            reply_address=msg.reply_address,
+        )
+        current_turn.set(turn)
 
         try:
             # Inbound prep runs inside the try: route images through
@@ -522,6 +530,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             workflow=metadata.get("workflow"),
             stats=metadata.get("stats"),
             agent=agent_name,
+            handoffs=turn.handoffs or None,
         ))
 
 

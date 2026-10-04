@@ -8,7 +8,9 @@ A persona is a deployment bundle:
 - a `prompts/` directory of `.md` files layered on top of `context/identity.md`
   in the system prompt;
 - an optional list of API-key names (documentation / soft warning only —
-  never a hard failure).
+  never a hard failure);
+- an optional `handles:` line telling sibling agents when to route a request
+  here (falls back to `description`).
 
 Core tools are universal across personas and are not curated here.
 
@@ -34,6 +36,10 @@ class Persona:
     description: str
     skills: list[str] | None  # None = no allowlist; every skill on disk
     keys: list[str] = field(default_factory=list)
+    # Routing text written for *other agents*: when a request should be sent
+    # to this persona. Shown in sibling agents' ask_agent / handoff tool
+    # descriptions; `description` (written for people) is the fallback.
+    handles: str = ""
 
 
 def persona_dir(name: str) -> Path:
@@ -79,6 +85,7 @@ def load_persona(name: str) -> Persona:
         description=str(data.get("description", "")),
         skills=skills,
         keys=[str(k) for k in keys],
+        handles=" ".join(str(data.get("handles") or "").split()),
     )
 
 

@@ -67,14 +67,16 @@ def _strip_channel_prefix(text: str) -> str:
     return text
 
 
-_HANDOFF_HEADER = re.compile(r"\[Handoff from container '([^']*)'")
+_HANDOFF_HEADER = re.compile(r"\[Handoff from (?:container|sibling agent) '([^']*)'")
 
 
 def _handoff_summary(text: str) -> str:
-    """Summarize a peer handoff as ``<sender container>: <note>``.
+    """Summarize a handoff as ``<sender>: <note>``.
 
     A ``handoff:<id>`` conversation opens with the wrapper
-    ``src/channels/peer.py::wrap_handoff`` builds, so every such row would
+    ``src/channels/peer.py::wrap_handoff`` (a peer container) or
+    ``wrap_sibling_handoff`` (an agent in this container) builds, so every
+    such row would
     otherwise share one title. The wrapper stays in the transcript; only
     title/preview use this. Text that isn't a handoff wrapper is returned
     unchanged.

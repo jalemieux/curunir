@@ -393,24 +393,30 @@ class Agent:
         if session_id and session_id in self._session_tools:
             extra = get_tool_schemas(list(self._session_tools[session_id]))
             base = base + extra
-        # ask_agent is a default tool only inside a multi-agent container and
-        # only for the container's own agents (self.tools is None): a
-        # restricted tool list (sub-agents) never gets it, so asks can't recurse.
+        # ask_agent and handoff are per-container tools, offered only to the
+        # container's own agents (self.tools is None): a restricted tool list
+        # (delegate sub-agents, a sibling answering an ask) gets neither, so
+        # asks can't recurse and a consulted sibling can't hand off.
         container = self.container
-        if container is not None and container.multi_agent and self.tools is None:
-            siblings = [
-                s for s in container.describe() if s["name"] != self.config.agent_name
-            ]
-            if siblings:
-                base = base + [ask_agent_schema(siblings)]
-        # handoff exists only when the outbound list names another container:
-        # a private container (outbound: [user]) never registers it. Same
-        # self.tools gate as ask_agent, so sub-agents and siblings answering
-        # an ask cannot hand off.
-        if container is not None and self.tools is None:
-            targets = container.manifest.outbound_containers
-            if targets:
-                base = base + [handoff_schema(targets)]
+        if container is None or self.tools is not None:
+            return base
+        manifest = container.manifest
+        siblings = [
+            {"name": a.name, "description": a.description, "handles": a.handles}
+            for a in manifest.siblings_of(self.config.agent_name)
+        ]
+        # ask_agent (a consult) exists only inside a multi-agent container.
+        if siblings:
+            base = base + [ask_agent_schema(siblings)]
+        # handoff (a transfer) reaches siblings and the containers the
+        # outbound list names. A private single-agent container
+        # (outbound: [user]) has no target and never registers it.
+        containers = [
+            {"name": c, "description": manifest.peers[c].description if c in manifest.peers else ""}
+            for c in manifest.outbound_containers
+        ]
+        if siblings or containers:
+            base = base + [handoff_schema(siblings, containers)]
         return base
 
     def _load_history(self, session_id: str) -> list[dict]:

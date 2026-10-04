@@ -15,8 +15,9 @@ Two entry points:
   container root (``context: .``) and ``inbound``/``outbound`` of ``[user]``.
 
 The inbound/outbound lists, ``peers`` and ``user_delivery`` govern
-cross-container messaging (phase 3): the ``handoff`` tool exists only when
-``outbound`` names a container, and the peer listener
+cross-container messaging (phase 3): the ``handoff`` tool reaches another
+container only when ``outbound`` names it (inside a multi-agent container it
+also reaches siblings, in process), and the peer listener
 (``src/channels/peer.py``) starts only when ``inbound`` does.
 :func:`check_airtight` holds the boot-time checks that go with them.
 """
@@ -58,7 +59,15 @@ class AgentEntry:
     persona: str
     context: str            # relative to the container root; "." = the root itself
     default: bool = False
-    description: str = ""   # the persona's description, for routing hints/UI
+    description: str = ""   # the persona's description, for people (UI)
+    # When a sibling should route a request here: the manifest's per-agent
+    # `handles`, else the persona's. Empty → `description` is the hint.
+    handles: str = ""
+
+    @property
+    def routing_hint(self) -> str:
+        """What sibling agents are told about this agent."""
+        return self.handles or self.description
 
     def context_dir(self, root: Path) -> Path:
         """This agent's private context dir under the container root."""
@@ -72,6 +81,7 @@ class AgentEntry:
 class PeerEntry:
     url: str
     token_env: str
+    description: str = ""   # what the container is for, shown to the handoff tool
 
 
 @dataclass(frozen=True)
@@ -123,7 +133,7 @@ def synthesize_container(persona_name: str | None = None) -> ContainerManifest:
     persona = load_persona(persona_name)
     entry = AgentEntry(
         name=persona_name, persona=persona_name, context=".",
-        default=True, description=persona.description,
+        default=True, description=persona.description, handles=persona.handles,
     )
     return ContainerManifest(name=persona_name, agents=(entry,))
 
@@ -204,9 +214,13 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
             context = f"agents/{agent_name}"
         if not isinstance(context, str) or not context.strip():
             raise ValueError(f"container manifest: agent {agent_name!r} has an invalid `context`")
+        handles = raw.get("handles")
+        if handles is not None and not isinstance(handles, str):
+            raise ValueError(f"container manifest: agent {agent_name!r} has an invalid `handles`")
         entries.append(AgentEntry(
             name=agent_name, persona=persona_name, context=context.strip(),
             default=bool(raw.get("default", False)), description=persona.description,
+            handles=" ".join((handles or "").split()) or persona.handles,
         ))
 
     defaults = [a for a in entries if a.default]
@@ -234,7 +248,13 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
     for peer_name, raw_peer in raw_peers.items():
         if not isinstance(raw_peer, dict) or not raw_peer.get("url") or not raw_peer.get("token_env"):
             raise ValueError(f"container manifest: peer {peer_name!r} needs `url` and `token_env`")
-        peers[str(peer_name)] = PeerEntry(url=str(raw_peer["url"]), token_env=str(raw_peer["token_env"]))
+        peer_desc = raw_peer.get("description")
+        if peer_desc is not None and not isinstance(peer_desc, str):
+            raise ValueError(f"container manifest: peer {peer_name!r} has an invalid `description`")
+        peers[str(peer_name)] = PeerEntry(
+            url=str(raw_peer["url"]), token_env=str(raw_peer["token_env"]),
+            description=" ".join((peer_desc or "").split()),
+        )
 
     named = {c for c in (*inbound, *outbound) if c != USER}
     for container_name in sorted(named):

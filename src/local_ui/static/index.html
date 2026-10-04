@@ -1310,6 +1310,18 @@ chat = createChat({
       requestConversations();
       if (filesRail && !filesRail.classList.contains("collapsed")) loadFiles();
     },
+    // "Continue with <agent>" under a reply that handed the request to a
+    // sibling: switch the picker to that agent and open its handoff
+    // conversation.
+    onFollowHandoff: (h) => {
+      if (!agentsMeta.some((a) => a.name === h.agent)) return;
+      selectAgent(h.agent);
+      activeSessionId = h.session_id;
+      rememberSession(activeSessionId);
+      chat.rebind();
+      requestConversations();
+      renderConversations();
+    },
   },
 });
 

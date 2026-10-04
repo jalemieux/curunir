@@ -21,11 +21,17 @@ agents:
   # persona defaults to the agent name; context defaults to agents/<name>,
   # i.e. context/agents/finance/{identity.md,memory/,conversations/,schedules.db}.
   - name: finance
+    # Optional: when siblings should route a request to this agent. Replaces
+    # the persona's own `handles:` line (personas/<persona>/persona.yaml) in
+    # their ask_agent / handoff tool descriptions, so routing can be tuned for
+    # this mix of agents without editing the persona.
+    # handles: Questions about the household's money, including the mortgage.
 
 # Who may send to this container and where its messages may go. `user` must
 # be in both. Naming another container requires a `peers` entry whose
 # token_env is set (the shared secret for that pair; a missing one fails
-# boot). An outbound container gives the agents a one-way `handoff` tool; an
+# boot). An outbound container is a target of the agents' one-way `handoff`
+# tool (which also reaches sibling agents in a multi-agent container); an
 # inbound container starts the peer listener (PEER_HOST/PEER_PORT, default
 # 127.0.0.1:8767) and requires `user_delivery`: the channel (portal |
 # local_web | email) where this container answers a handoff. The answer goes
@@ -36,4 +42,6 @@ outbound: [user]
 #   vault:
 #     url: http://vault:8767
 #     token_env: PEER_VAULT_TOKEN
+#     # Optional: what the container is for, shown to the handoff tool.
+#     description: Private finance and medical records.
 # user_delivery: portal
