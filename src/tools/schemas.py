@@ -559,8 +559,12 @@ def handoff_schema(containers: list[str]) -> dict:
                     "agent": {
                         "type": "string",
                         "description": (
-                            "Optional: a specific agent in the receiving "
-                            "container. Omit for its default agent."
+                            "Normally omit this: the receiving container's "
+                            "default agent gets the handoff. Set it only to "
+                            "an agent you know exists in the receiving "
+                            "container. Never one of this container's own "
+                            "agents (the names ask_agent offers): the "
+                            "receiver does not have them and will refuse."
                         ),
                     },
                 },

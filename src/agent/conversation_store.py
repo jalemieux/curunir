@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,8 +67,44 @@ def _strip_channel_prefix(text: str) -> str:
     return text
 
 
+_HANDOFF_HEADER = re.compile(r"\[Handoff from container '([^']*)'")
+
+
+def _handoff_summary(text: str) -> str:
+    """Summarize a peer handoff as ``<sender container>: <note>``.
+
+    A ``handoff:<id>`` conversation opens with the wrapper
+    ``src/channels/peer.py::wrap_handoff`` builds, so every such row would
+    otherwise share one title. The wrapper stays in the transcript; only
+    title/preview use this. Text that isn't a handoff wrapper is returned
+    unchanged.
+    """
+    header = _HANDOFF_HEADER.match(text)
+    if not header:
+        return text
+    lines = text.split("\n")
+    try:
+        start = lines.index("Sender's note:") + 1
+    except ValueError:
+        return text
+    if start >= len(lines) or not lines[start].endswith("text"):
+        return text
+    fence = lines[start][:-len("text")]
+    if len(fence) < 3 or set(fence) != {"`"}:
+        return text
+    try:
+        end = lines.index(fence, start + 1)
+    except ValueError:
+        return text
+    return f"{header.group(1)}: " + "\n".join(lines[start + 1:end])
+
+
 def _first_user_text(history: list[dict]) -> str:
     """Extract the typed text of the first user turn (handles multimodal)."""
+    return _handoff_summary(_first_user_raw(history))
+
+
+def _first_user_raw(history: list[dict]) -> str:
     for entry in history:
         if entry.get("role") != "user":
             continue
