@@ -7,9 +7,10 @@ description: "Use when the user wants to view, change, or shape this agent's ide
 
 The agent's persona is the contents of `{{context}}/identity.md` — just the
 `## Identity` (name) and `## Personality` (voice / stance) sections. It is
-read verbatim into every system prompt, so edits take effect on the next
-turn — no restart needed. This skill helps the user inspect and edit it
-safely.
+read verbatim into the system prompt at the start of each conversation, so
+edits take effect in the next conversation (the current one keeps the
+identity it started with) — no restart needed. This skill helps the user
+inspect and edit it safely.
 
 ## Scope: persona only
 

@@ -284,24 +284,26 @@ class Agent:
         # path for memory extraction is tracked per-conversation on disk
         # (conversation_store metadata), not in memory.
         self.sessions: dict[str, list[dict]] = {}
-        # The static prefix carries no timestamp — it must be byte-stable across
-        # every session and the whole process lifetime so auto-cache providers
-        # (OpenAI, DeepSeek, xAI, GLM via OpenRouter) keep hitting the prefix
-        # cache. Time enters as two correctly-scoped signals instead: a stable
-        # per-session "Conversation started at" line (added in
-        # _get_session_prompt) and a live per-turn "Current date/time" note
-        # injected outside the cached prefix in handle().
-        self.static_prompt = build_static_prompt(config)
+        # The static prefix (identity + persona prompts + skill manifest) is
+        # not held here: _get_session_prompt rebuilds it at the start of each
+        # conversation, so an identity.md written by onboarding or a skill the
+        # agent authors is picked up without a restart. It carries no
+        # timestamp, so a rebuild from unchanged files is byte-identical and
+        # auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter) keep
+        # hitting the prefix cache across conversations. This boot-time build
+        # only emits the once-per-process log lines (missing-identity warning,
+        # manifest listing, prefix size).
         logger.info(
             "system prompt prefix size: %d chars (identity + skill manifest)",
-            len(self.static_prompt),
+            len(build_static_prompt(config)),
         )
         self.tools = tools  # None = all tools
         self._session_tools: dict[str, set[str]] = {}  # extra tools loaded by skills
-        # Per-session memory snapshot (README.md + shared profile.md). Built on the
-        # first turn of a session and reused for the rest of that session so
-        # auto-cache providers keep hitting the prefix cache across the tool
-        # loop. External edits during a session are picked up next session.
+        # Per-session system prompt (static prefix + memory snapshot + started-at
+        # line). Built on the first turn of a session and reused for the rest
+        # of that session so auto-cache providers keep hitting the prefix cache
+        # across the tool loop. External edits during a session are picked up
+        # next session.
         self._session_prompts: dict[str, str] = {}
         # First-turn fallback timestamp for brand-new sessions that have not
         # been persisted yet (conversation_store.save runs after the turn).
@@ -350,7 +352,8 @@ class Agent:
         """System prompt for a session: static prefix + memory snapshot +
         a stable "Conversation started at" line.
 
-        The memory block (memory/README.md + the shared profile.md) and the
+        The static prefix (identity + persona prompts + skill manifest), the
+        memory block (memory/README.md + the shared profile.md) and the
         started-at line are computed once per session and cached so the system
         prompt stays byte-stable across turns within a session — required for
         auto-cache providers (OpenAI, DeepSeek, xAI, GLM via OpenRouter) to keep
@@ -365,13 +368,25 @@ class Agent:
 
         block = build_memory_block(self.config)
         started_line = f"Conversation started at: {self._session_started_at(session_id)}"
-        parts = [self.static_prompt]
+        parts = [build_static_prompt(self.config, announce=False)]
         if block:
             parts.append(block)
         parts.append(started_line)
         prompt = "\n\n".join(parts)
         self._session_prompts[session_id] = prompt
         return prompt
+
+    def forget_session(self, session_id: str) -> list[dict] | None:
+        """Drop a session's in-memory state and return its history, if any.
+
+        Used when a conversation is cleared: the frozen system prompt and the
+        started-at fallback go with the history, so a fixed session id (`cli`,
+        `portal`, `local`) reused for the next conversation gets a freshly
+        built prompt instead of the cleared conversation's.
+        """
+        self._session_prompts.pop(session_id, None)
+        self._session_started_at_cache.pop(session_id, None)
+        return self.sessions.pop(session_id, None)
 
     def _get_tool_schemas(self, session_id: str | None = None) -> list[dict]:
         base = get_tool_schemas(self.tools)

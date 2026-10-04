@@ -187,6 +187,7 @@ async def test_delete_command_extracts_then_removes_transcript(
     archives = memory_dir / "archives" / "conversations"
     agent = Agent(agent_config)
     agent.sessions["cli"] = _history()
+    agent._get_session_prompt("cli")
     cs.save(agent_config.context_dir, "cli", _history())
 
     in_q: asyncio.Queue = asyncio.Queue()
@@ -203,6 +204,9 @@ async def test_delete_command_extracts_then_removes_transcript(
     # Transcript removed, but the memory summary survives.
     assert cs.load(agent_config.context_dir, "cli") is None
     assert "cli" not in agent.sessions
+    # The cleared conversation's frozen system prompt goes with it, so the
+    # next conversation on this fixed session id rebuilds from disk.
+    assert "cli" not in agent._session_prompts
     mds = list(archives.glob("*.md"))
     assert len(mds) == 1
     assert "final summary" in mds[0].read_text()

@@ -98,23 +98,28 @@ def load_registry(
 
 
 def build_skill_manifest(
-    skill_dirs: list[Path], allowlist: set[str] | None = None
+    skill_dirs: list[Path],
+    allowlist: set[str] | None = None,
+    announce: bool = True,
 ) -> str:
     """Return markdown table of catalog skills (name + description).
 
     Skills flagged `hidden: true` are omitted — they stay in the registry
     (loadable, slash-forceable) but the agent won't route to them on its own.
     `allowlist` is forwarded to `load_registry` to scope the manifest to a
-    persona's allowed skills.
+    persona's allowed skills. `announce=False` skips the listing log lines
+    (the per-conversation rebuild; the boot-time build logs them once).
     """
     registry = load_registry(skill_dirs, allowlist)
     catalog = [s for s in registry.values() if not s.hidden]
     if not catalog:
-        logger.info("no catalog skills found in %s", [str(d) for d in skill_dirs])
+        if announce:
+            logger.info("no catalog skills found in %s", [str(d) for d in skill_dirs])
         return ""
 
-    logger.info("manifest lists %d skills: %s",
-                len(catalog), ", ".join(s.name for s in catalog))
+    if announce:
+        logger.info("manifest lists %d skills: %s",
+                    len(catalog), ", ".join(s.name for s in catalog))
 
     lines = [
         "## Available Skills",

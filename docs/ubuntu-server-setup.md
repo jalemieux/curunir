@@ -153,8 +153,9 @@ docker compose up -d curunir
 `context/` can start empty — `onboarding/bootstrap.py` scaffolds
 `memory/`, the SQLite stores, etc. on first boot (it never overwrites files
 you place yourself). It does **not** create `identity.md` — drop your own in
-for a custom persona, then `docker compose restart curunir`. Until then it
-boots a generic default personality (logged as a warning).
+for a custom persona; the next conversation picks it up, no restart needed.
+Until then it runs a generic default personality (logged as a warning at
+boot).
 
 ### Verify the boot
 

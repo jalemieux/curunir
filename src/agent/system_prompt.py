@@ -9,7 +9,7 @@ from src.skills import build_skill_manifest, render_paths
 logger = logging.getLogger(__name__)
 
 
-def build_static_prompt(config: AgentConfig) -> str:
+def build_static_prompt(config: AgentConfig, announce: bool = True) -> str:
     """Build the static portion of the system prompt.
 
     Order:
@@ -28,20 +28,29 @@ def build_static_prompt(config: AgentConfig) -> str:
     agent boots with a default (faceless) personality. A missing file usually
     means onboarding hasn't run or context/ wasn't mounted, hence the warning.
 
-    This prefix carries no timestamp, so it is byte-stable across every session
-    and the whole process lifetime — required for auto-cache providers (OpenAI /
-    DeepSeek / xAI / GLM via OpenRouter) to hit the cache. Time enters as two
-    correctly-scoped signals elsewhere: a stable per-session "Conversation
-    started at" line (added in Agent._get_session_prompt, sourced from the
-    conversation's persisted created_at) and a live per-turn "Current date/time"
-    note injected *outside* this cached prefix as a trailing message in
-    Agent.handle(). The split keeps the cacheable prefix stable while still
+    This prefix carries no timestamp, so it is a pure function of the files
+    it reads: rebuilt from unchanged files it is byte-identical, which is all
+    auto-cache providers (OpenAI / DeepSeek / xAI / GLM via OpenRouter) need to
+    hit the cache. Agent._get_session_prompt therefore builds it at the start
+    of each conversation and freezes it for that conversation, so an edited
+    identity.md or a newly authored skill shows up in the next conversation
+    without a restart, and the cache only misses when a file actually changed.
+    Time enters as two correctly-scoped signals elsewhere: a stable per-session
+    "Conversation started at" line (added in Agent._get_session_prompt, sourced
+    from the conversation's persisted created_at) and a live per-turn "Current
+    date/time" note injected *outside* this cached prefix as a trailing message
+    in Agent.handle(). The split keeps the cacheable prefix stable while still
     giving the model a fresh clock each turn.
+
+    ``announce=False`` is the per-conversation rebuild: it skips the
+    missing-identity warning and the manifest listing, which the boot-time
+    build already logged once (scheduled jobs and ask_agent open many
+    sessions).
     """
     parts = []
     if config.identity_file.exists():
         parts.append(config.identity_file.read_text())
-    else:
+    elif announce:
         logger.warning(
             "Identity file not found: %s. Booting with a default personality "
             "(no identity layer). Run onboarding to generate one, or ensure "
@@ -57,6 +66,7 @@ def build_static_prompt(config: AgentConfig) -> str:
     manifest = build_skill_manifest(
         config.skill_dirs,
         set(config.skill_allowlist) if config.skill_allowlist else None,
+        announce=announce,
     )
     if manifest:
         parts.append(manifest)
