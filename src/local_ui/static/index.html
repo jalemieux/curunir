@@ -100,6 +100,14 @@
     background: rgba(139,148,158,.18); color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.3px;
   }
+  /* A reply arrived while the row wasn't open (see sidebar.js). */
+  .conv-row.unread .conv-title::before {
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    margin-right: 6px; border-radius: 50%; background: var(--accent);
+    vertical-align: middle;
+  }
+  .conv-row.unread.handoff { box-shadow: inset 2px 0 0 var(--accent); }
+  .conv-row.unread.handoff .conv-channel { background: var(--accent); color: #fff; }
   .conv-del {
     position: absolute; right: 6px; top: 7px;
     width: 18px; height: 18px; padding: 0; line-height: 1;
@@ -429,6 +437,7 @@
 <script type="module">
 import { createConnection } from "/static/connection.js";
 import { createChat } from "/static/chat.js";
+import { routeUnhandledFrame, markRead, rowClass, agentsWithUnread } from "/static/sidebar.js";
 
 // === Auth token ===
 // The operator opens http://host:port/?token=XXX. We read it once and reuse
@@ -462,6 +471,9 @@ if (!activeSessionId) {
   localStorage.setItem(SESSION_KEY, activeSessionId);
 }
 let conversations = [];  // latest conversations_snapshot, drives the sidebar
+// Conversations that got a reply while they weren't open (session id → agent),
+// e.g. a handoff from a peer container. In-memory: a reload starts clean.
+const unread = new Map();
 const conversationListEl = document.getElementById("conversation-list");
 
 // === Agents (multi-agent container) ===
@@ -1192,16 +1204,24 @@ function applyModules(modules) {
 // Agent picker: shown only when the container runs 2+ agents.
 function renderAgentPicker() {
   agentPickerEl.innerHTML = "";
+  const waiting = agentsWithUnread(unread, currentAgentName());
   for (const a of agentsMeta) {
     const opt = document.createElement("option");
     opt.value = a.name;
-    opt.textContent = a.default ? `${a.name} (default)` : a.name;
+    opt.textContent = (a.default ? `${a.name} (default)` : a.name) + (waiting.has(a.name) ? " •" : "");
     if (a.description) opt.title = a.description;
     agentPickerEl.appendChild(opt);
   }
   agentPickerEl.hidden = agentsMeta.length <= 1;
   const current = agentsMeta.find((a) => (activeAgent ? a.name === activeAgent : a.default));
   if (current) agentPickerEl.value = current.name;
+}
+
+// Name of the agent the console is showing (null on a single-agent container).
+function currentAgentName() {
+  if (activeAgent) return activeAgent;
+  const def = agentsMeta.find((a) => a.default);
+  return def ? def.name : null;
 }
 
 // Make `name` the active agent (the default agent — by name or null — maps to
@@ -1271,13 +1291,17 @@ chat = createChat({
   hooks: {
     // Socket just opened — pull the conversation list for the sidebar.
     onSocketOpen: () => requestConversations(),
-    // chat.js routes frames for other sessions here; we only care about the
-    // conversation list snapshot.
+    // chat.js routes frames for other sessions here: the conversation list
+    // snapshot, and the final reply of a turn in a conversation that isn't
+    // open (a handoff starts one with no action from the user). The latter
+    // re-pulls the list so the row appears, flagged unread until opened.
     onUnhandledFrame: (msg) => {
-      if (msg && msg.type === "conversations_snapshot") {
-        conversations = msg.conversations || [];
-        renderConversations();
-      }
+      routeUnhandledFrame(msg, {
+        unread,
+        activeSessionId,
+        onSnapshot: (list) => { conversations = list; renderConversations(); },
+        onBackgroundFinal: () => { requestConversations(); renderAgentPicker(); },
+      });
     },
     // A turn just finished — re-pull so a brand-new conversation joins the
     // list (and titles/timestamps refresh) after its first reply. Also refresh
@@ -1310,6 +1334,8 @@ function relativeTime(iso) {
 }
 
 function renderConversations() {
+  // Whatever is open is read — covers every path that changes the session.
+  if (markRead(unread, activeSessionId)) renderAgentPicker();
   conversationListEl.innerHTML = "";
   if (!conversations.length) {
     const empty = document.createElement("div");
@@ -1320,7 +1346,8 @@ function renderConversations() {
   }
   for (const c of conversations) {
     const row = document.createElement("div");
-    row.className = "conv-row" + (c.session_id === activeSessionId ? " active" : "");
+    row.className = rowClass(c, activeSessionId, unread);
+    if (row.classList.contains("unread")) row.title = "New reply";
     row.innerHTML =
       '<div class="conv-title"></div>' +
       '<div class="conv-meta"><span class="conv-channel"></span><span class="conv-time"></span></div>' +
@@ -1362,6 +1389,7 @@ function deleteConversation(id) {
   // memory, then removes the transcript (parity with the portal).
   conn.send({ content: "", command: "clear", session_id: id });
   conversations = conversations.filter((c) => c.session_id !== id);
+  markRead(unread, id);
   renderConversations();
   // Deleting the conversation you're in drops you into a fresh one.
   if (id === activeSessionId) startNew();
