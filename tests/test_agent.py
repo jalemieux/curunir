@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agent import conversation_store as cs
+from src.agent.system_prompt import build_static_prompt
 from src.agent.agent import (
     Agent,
     _arg_parse_error_message,
@@ -1002,7 +1003,7 @@ class TestOnboardingGate:
 
 class TestAgentInit:
     def test_loads_identity(self, agent):
-        assert "test assistant" in agent.static_prompt.lower()
+        assert "test assistant" in agent._get_session_prompt("s1").lower()
 
     def test_missing_identity_boots_with_warning(self, tmp_path, tmp_skills, caplog, monkeypatch):
         from src.config import AgentConfig
@@ -1016,6 +1017,93 @@ class TestAgentInit:
             agent = Agent(config)
         assert "Identity file not found" in caplog.text
         assert agent is not None
+
+
+def _prefix(prompt: str) -> str:
+    """A session prompt minus its per-session "Conversation started at" line."""
+    return prompt.split("Conversation started at:")[0]
+
+
+class TestPrefixBuiltPerConversation:
+    """#566: the static prefix is built at the start of each conversation,
+    not once at boot."""
+
+    def test_identity_written_after_boot_reaches_new_session(self, agent_config):
+        agent_config.identity_file.unlink()
+        agent = Agent(agent_config)
+        assert "Wren" not in agent._get_session_prompt("before")
+
+        agent_config.identity_file.write_text("You are Wren.")
+        assert "You are Wren." in agent._get_session_prompt("after")
+
+    def test_identity_edit_after_boot_reaches_new_session(self, agent, agent_config):
+        assert "test assistant" in agent._get_session_prompt("s1")
+        agent_config.identity_file.write_text("You are Wren.")
+        prompt = agent._get_session_prompt("s2")
+        assert "You are Wren." in prompt
+        assert "test assistant" not in prompt
+
+    async def test_in_flight_session_keeps_its_prompt(self, agent, agent_config):
+        captured: list[str] = []
+
+        async def fake_call_llm(model, messages, tools, **kwargs):
+            captured.append(messages[0]["content"])
+            return LLMResponse(text="ok", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", new=fake_call_llm):
+            await agent.handle("first", "s1")
+            agent_config.identity_file.write_text("You are Wren.")
+            await agent.handle("second", "s1")
+            await agent.handle("first", "s2")
+
+        assert captured[0] == captured[1]
+        assert "You are Wren." not in captured[1]
+        assert "You are Wren." in captured[2]
+
+    def test_unchanged_files_give_byte_identical_prefix(self, agent, tmp_skills):
+        skill = tmp_skills / "alpha"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(
+            "---\nname: alpha\ndescription: Use for alpha things\n---\nbody\n"
+        )
+        first = _prefix(agent._get_session_prompt("s1"))
+        second = _prefix(agent._get_session_prompt("s2"))
+        assert "| alpha |" in first
+        assert first == second
+
+    def test_skill_added_after_boot_is_listed_in_new_session(self, agent, tmp_skills):
+        assert "| authored |" not in agent._get_session_prompt("s1")
+        skill = tmp_skills / "authored"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(
+            "---\nname: authored\ndescription: Use for authored things\n---\nbody\n"
+        )
+        assert "| authored |" in agent._get_session_prompt("s2")
+        assert "| authored |" not in agent._get_session_prompt("s1")
+
+    def test_missing_identity_warning_is_boot_only(self, agent_config, caplog):
+        agent_config.identity_file.unlink()
+        with caplog.at_level("INFO"):
+            agent = Agent(agent_config)
+            assert caplog.text.count("Identity file not found") == 1
+            caplog.clear()
+            for sid in ("s1", "s2", "sched:job:1"):
+                agent._get_session_prompt(sid)
+        assert "Identity file not found" not in caplog.text
+        assert "catalog skills" not in caplog.text
+        assert "manifest lists" not in caplog.text
+
+    def test_forget_session_drops_frozen_prompt(self, agent, agent_config):
+        """A cleared conversation on a fixed session id (`cli`) must not pin
+        its prompt on the next conversation under the same id."""
+        agent.sessions["cli"] = [{"role": "user", "content": "hi"}]
+        agent._get_session_prompt("cli")
+        agent_config.identity_file.write_text("You are Wren.")
+
+        assert agent.forget_session("cli") == [{"role": "user", "content": "hi"}]
+        assert "cli" not in agent.sessions
+        assert "You are Wren." in agent._get_session_prompt("cli")
+        assert agent.forget_session("never-seen") is None
 
 
 class TestSystemPromptCaching:
@@ -1037,10 +1125,11 @@ class TestSystemPromptCaching:
         assert captured[0] == captured[1], "system prompt mutated between calls"
 
     async def test_static_prompt_has_no_boot_timestamp(self, agent):
-        """The static prefix is truly static now — no boot timestamp baked in,
-        so it stays byte-stable across every session and process lifetime."""
-        assert "Conversation started at" not in agent.static_prompt
+        """The static prefix carries no timestamp, so a rebuild from unchanged
+        files is byte-identical; the agent holds no boot-time copy of it."""
+        assert "Conversation started at" not in build_static_prompt(agent.config)
         assert not hasattr(agent, "_boot_time")
+        assert not hasattr(agent, "static_prompt")
 
     async def test_session_prompt_carries_started_at(self, agent):
         """The per-session prompt appends a stable 'Conversation started at'
