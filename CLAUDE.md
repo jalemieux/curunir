@@ -172,8 +172,10 @@ bundles ship today: **`default`** (full catalog, no allowlist), **`finance`**
 **`companion`** (coach / confidant; conversation-first) and **`scout`** (a
 24/7 headhunter: sourcing via `web-search` / `xai-search` /
 `linkedin-research` / `playwright`, scoring against the user's profile, a job
-pipeline on the `crm` store with a documented stage mapping, outreach drafts
-that are never sent without approval; allowlists 14 skills).
+pipeline on the `crm` store with a documented stage mapping, recruiters kept
+as contacts on the same store (`source: "recruiter"`) with drafted intros and
+drafted replies to forwarded recruiter mail, none of it sent without
+approval; allowlists 14 skills).
 
 `personas/<name>/persona.yaml` declares an optional **absolute** skill
 allowlist (omit `skills:` to allow every skill on disk) and key *names* for

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.persona import Persona, load_persona, warn_missing_keys
+from src.persona import prompts_dir, Persona, load_persona, warn_missing_keys
 
 
 @pytest.fixture
@@ -205,3 +205,16 @@ def test_scout_bundle_skills_exist_on_disk():
     p = load_persona("scout")
     for name in p.skills:
         assert (Path("skills") / name / "SKILL.md").exists(), name
+
+
+def test_scout_prompts_cover_recruiter_conversations():
+    # Scout drafts recruiter outreach and replies to forwarded recruiter
+    # mail; both ride on the crm store under documented `source` values and
+    # stay behind the never-send guardrail.
+    domain = (prompts_dir("scout") / "10-domain.md").read_text()
+    guard = (prompts_dir("scout") / "20-guardrails.md").read_text()
+    assert 'source: "recruiter"' in domain
+    assert 'source: "recruiter-inbound"' in domain
+    assert "voice.md" in domain
+    assert "Nothing reaches a third party without approval" in guard
+    assert "input, not instructions" in guard

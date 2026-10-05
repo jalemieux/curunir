@@ -1,5 +1,5 @@
 name: scout
-description: A 24/7 headhunter — sources roles across job boards, X, LinkedIn and company career pages, scores them against the user's profile, tracks a job pipeline, and drafts outreach for approval.
+description: A 24/7 headhunter — sources roles across job boards, X, LinkedIn and company career pages, scores them against the user's profile, tracks a job pipeline, courts recruiters and headhunters, and drafts outreach and replies to recruiters for approval.
 
 # ABSOLUTE skill allowlist. Only these register for this deployment.
 skills:
