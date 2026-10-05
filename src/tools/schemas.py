@@ -465,26 +465,33 @@ for _s in _OPT_IN_SCHEMAS:
     _register(_s, opt_in=True)
 
 
+def _routing_line(target: dict) -> str:
+    """``- name: when to route here`` for a sibling agent or a container."""
+    hint = target.get("handles") or target.get("description") or "(no description)"
+    return f"- {target['name']}: {hint}"
+
+
 def ask_agent_schema(siblings: list[dict]) -> dict:
     """Schema for the ``ask_agent`` tool, generated per container.
 
     Not registered in ``ALL_TOOL_SCHEMAS``: the ``agent`` enum is exactly the
     calling agent's *siblings* and the description carries each sibling's
-    persona description, so the model gets the routing hints the manifest
-    already holds. ``Agent._get_tool_schemas`` appends it only inside a
-    multi-agent container.
+    routing text (``handles``, else the persona description).
+    ``Agent._get_tool_schemas`` appends it only inside a multi-agent
+    container.
     """
     names = [s["name"] for s in siblings]
     lines = [
-        "Ask a sibling agent in this container a question and get its answer "
-        "back in your own conversation. The sibling answers with its own "
-        "persona, skills and memory; you see only its final reply. Use it "
-        "when a question belongs to a sibling's specialty.",
-        "Siblings:",
+        "Consult a sibling agent in this container: ask it one question and "
+        "get its answer back in your own conversation. The sibling answers "
+        "with its own persona, skills and memory; you see only its final "
+        "reply, and it keeps no record of the exchange. Use it when you need "
+        "a specialist's answer to finish your own reply. When the user wants "
+        "ongoing work that belongs to a sibling (a conversation the sibling "
+        "should own and remember), use `handoff` instead.",
+        "Siblings and what to send them:",
     ]
-    for s in siblings:
-        desc = s.get("description") or "(no description)"
-        lines.append(f"- {s['name']}: {desc}")
+    lines += [_routing_line(s) for s in siblings]
     return {
         "type": "function",
         "function": {
@@ -512,34 +519,59 @@ def ask_agent_schema(siblings: list[dict]) -> dict:
     }
 
 
-def handoff_schema(containers: list[str]) -> dict:
+def handoff_schema(siblings: list[dict], containers: list[dict]) -> dict:
     """Schema for the ``handoff`` tool, generated per container.
 
-    Not registered in ``ALL_TOOL_SCHEMAS``: the ``container`` enum is exactly
-    the containers this container's ``outbound`` list names.
-    ``Agent._get_tool_schemas`` appends it only when that list is non-empty,
-    so a private container (``outbound: [user]``) never sees it.
+    Not registered in ``ALL_TOOL_SCHEMAS``: the ``to`` enum is exactly this
+    agent's siblings (``agent:<name>``) plus the containers the ``outbound``
+    list names (``container:<name>``), each listed with its routing text.
+    ``Agent._get_tool_schemas`` appends it only when there is at least one
+    target, so a private single-agent container never sees it.
     """
+    targets = (
+        [f"agent:{s['name']}" for s in siblings]
+        + [f"container:{c['name']}" for c in containers]
+    )
+    lines = [
+        "Transfer the user's request to another agent that should own it. "
+        "One-way: the receiver answers the user directly, in its own "
+        "conversation, and you never see its answer. You learn only "
+        "'delivered' or 'refused: <reason>'. Send a brief you write, not the "
+        "transcript: a short note on what you think the receiver can help "
+        "with, and the context you choose to share.",
+    ]
+    if siblings:
+        lines.append(
+            "Hand off when the user wants ongoing work a specialist should "
+            "own and remember. When you only need a specialist's answer to "
+            "finish your own reply, use `ask_agent` instead. If neither "
+            "fits, answer yourself."
+        )
+        lines.append("Agents in this container (the user continues with them there):")
+        lines += [_routing_line(s) for s in siblings]
+    if containers:
+        lines.append("Other containers (they answer the user on their own channel):")
+        lines += [_routing_line(c) for c in containers]
+    lines.append(
+        "After a handoff, tell the user what you handed off, to whom, and "
+        "where the answer will arrive."
+    )
     return {
         "type": "function",
         "function": {
             "name": "handoff",
-            "description": (
-                "Hand a question to an agent in another container when it "
-                "belongs there. One-way: the other container answers the user "
-                "directly and you never see its answer. You learn only "
-                "'delivered' or 'refused: <reason>'. Send only what the other "
-                "container needs: a short note on what you think it can help "
-                "with, and the context you choose to share. Tell the user you "
-                "handed it off and where the answer will arrive."
-            ),
+            "description": "\n".join(lines),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "container": {
+                    "to": {
                         "type": "string",
-                        "enum": list(containers),
-                        "description": "Which container to hand off to.",
+                        "enum": targets,
+                        "description": (
+                            "Who receives it: `agent:<name>` for an agent in "
+                            "this container, `container:<name>` for another "
+                            "container."
+                        ),
                     },
                     "note": {
                         "type": "string",
@@ -559,16 +591,17 @@ def handoff_schema(containers: list[str]) -> dict:
                     "agent": {
                         "type": "string",
                         "description": (
-                            "Normally omit this: the receiving container's "
-                            "default agent gets the handoff. Set it only to "
-                            "an agent you know exists in the receiving "
-                            "container. Never one of this container's own "
-                            "agents (the names ask_agent offers): the "
-                            "receiver does not have them and will refuse."
+                            "Only with a `container:` target, and normally "
+                            "omitted: the receiving container's default agent "
+                            "gets the handoff. Set it only to an agent you "
+                            "know exists in the receiving container. Never "
+                            "one of this container's own agents; those are "
+                            "`agent:` targets in `to`, and the receiver does "
+                            "not have them and will refuse."
                         ),
                     },
                 },
-                "required": ["container", "note", "context"],
+                "required": ["to", "note", "context"],
             },
         },
     }

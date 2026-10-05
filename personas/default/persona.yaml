@@ -1,6 +1,10 @@
 name: default
 description: Stock Curunir deployment. Ships the full skill catalog and the
   baseline behavior prompt; loaded automatically when CURUNIR_PERSONA is unset.
+# Routing text for sibling agents in a multi-agent container: when to send
+# a request here. Shown in their ask_agent / handoff tool descriptions
+# (falls back to `description`). Override per agent in container.yaml.
+handles: General requests that no specialist agent covers. Everyday questions, research, files, scheduling, and anything spanning several areas.
 
 # No `skills:` field — omitted means "every skill on disk." Named personas
 # (personas/<other>/persona.yaml) declare an absolute allowlist to curate.

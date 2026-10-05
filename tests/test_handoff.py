@@ -233,7 +233,7 @@ def test_handoff_tool_is_absent_for_a_private_container(tmp_path):
 def test_handoff_tool_enum_is_the_outbound_containers(tmp_path):
     agent = _agent(tmp_path, _home())
     schema = next(s for s in agent._get_tool_schemas() if s["function"]["name"] == "handoff")
-    assert schema["function"]["parameters"]["properties"]["container"]["enum"] == ["vault"]
+    assert schema["function"]["parameters"]["properties"]["to"]["enum"] == ["container:vault"]
     # a restricted-tool sub-agent never gets it
     sub = Agent(agent.config, tools=["read"])
     sub.container = agent.container
@@ -242,10 +242,11 @@ def test_handoff_tool_enum_is_the_outbound_containers(tmp_path):
 
 def test_handoff_schema_steers_agent_away_from_siblings():
     from src.tools.schemas import handoff_schema
-    desc = handoff_schema(["vault"])["function"]["parameters"]["properties"]["agent"]["description"]
+    schema = handoff_schema([], [{"name": "vault", "description": ""}])["function"]
+    desc = schema["parameters"]["properties"]["agent"]["description"]
     assert "omit" in desc.lower() and "receiving container" in desc
     assert "this container's own agents" in desc
-    assert "agent" not in handoff_schema(["vault"])["function"]["parameters"]["required"]
+    assert "agent" not in schema["parameters"]["required"]
 
 
 async def test_handoff_executor_rechecks_the_outbound_list(tmp_path):
@@ -450,6 +451,14 @@ def test_handoff_title_reads_a_note_that_contains_fences(tmp_path):
     note = "see ```this``` and\nSender's note:\nsecond line"
     record = _saved(tmp_path, "handoff:h3", wrap_handoff("home", "everyday", note, "ctx"))
     assert record["title"] == "home: see ```this``` and Sender's note: second line"
+
+
+def test_sibling_handoff_conversation_is_titled_from_the_note(tmp_path):
+    from src.channels.peer import wrap_sibling_handoff
+    wrapped = wrap_sibling_handoff("everyday", "Rebalance the retirement account", "Jac asked on Monday.")
+    record = _saved(tmp_path, "handoff:h4", wrapped)
+    assert record["title"] == "everyday: Rebalance the retirement account"
+    assert record["history"][0]["content"] == wrapped
 
 
 def test_text_that_only_resembles_a_handoff_keeps_its_title(tmp_path):

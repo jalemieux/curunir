@@ -494,11 +494,19 @@ Without `CURUNIR_CONTAINER`, the process is a one-agent container built from
   multi-agent container; the sibling answers with its own persona, skills
   and memory in a throwaway session that is never persisted, and the answer
   comes back as the tool result. Sibling answers cannot recurse.
+- Agents can **hand off** to each other. `handoff` transfers a request a
+  sibling should own: the sender writes a brief (never the transcript), the
+  sibling opens a new saved conversation with the user, and the local
+  console offers "Continue with <agent>". On channels with no agent picker
+  (email, portal, CLI) a sibling handoff is refused and the agent consults
+  instead. A persona's `handles:` line (or the per-agent override in
+  `container.yaml`) tells siblings when to route to it.
 - `python -m src.usage --by agent` breaks the token ledger down per agent.
 
 The inbound/outbound lists and `peers` describe messaging *between*
-containers (`docs/agents-and-containers.md`); the manifest validates them
-now, and the handoff transport is the next phase.
+containers (`docs/agents-and-containers.md`): `handoff` reaches a container
+the `outbound` list names, and the peer listener accepts the ones `inbound`
+names.
 
 ## Evals
 

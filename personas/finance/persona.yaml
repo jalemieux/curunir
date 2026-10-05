@@ -1,5 +1,9 @@
 name: finance
 description: Local, private personal-finance assistant — capital allocation, position tracking, investment-thesis lifecycle, tax strategy.
+# Routing text for sibling agents in a multi-agent container: when to send
+# a request here. Shown in their ask_agent / handoff tool descriptions
+# (falls back to `description`). Override per agent in container.yaml.
+handles: The user's own money. Net worth, holdings, trades, capital allocation, an investment thesis, or tax strategy. Not for general market trivia unrelated to their finances.
 
 # ABSOLUTE skill allowlist. Only these register for this deployment.
 skills:

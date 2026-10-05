@@ -248,6 +248,9 @@
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
 .cu-chat .msg.assistant .response-actions .resp-action:disabled { cursor: default; opacity: 0.7; }
+.cu-chat .msg.assistant .handoff-actions .handoff-follow {
+  color: var(--accent); border-color: var(--accent);
+}
 .cu-chat .msg.assistant.stopping .body::after {
   content: " stopping…"; color: var(--hint); font-style: italic; font-size: 12px;
 }

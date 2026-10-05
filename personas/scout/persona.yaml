@@ -1,5 +1,9 @@
 name: scout
 description: A 24/7 headhunter — sources roles across job boards, X, LinkedIn and company career pages, scores them against the user's profile, tracks a job pipeline, courts recruiters and headhunters, and drafts outreach and replies to recruiters for approval.
+# Routing text for sibling agents in a multi-agent container: when to send
+# a request here. Shown in their ask_agent / handoff tool descriptions
+# (falls back to `description`). Override per agent in container.yaml.
+handles: The user's job search. Finding and scoring roles, the job pipeline, recruiter and headhunter outreach, or replies to recruiters. Not for general career advice or resume writing.
 
 # ABSOLUTE skill allowlist. Only these register for this deployment.
 skills:

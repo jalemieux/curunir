@@ -804,6 +804,27 @@ async def test_send_delivers_to_bound_socket(channel):
 
 
 @pytest.mark.asyncio
+async def test_send_carries_sibling_handoffs_only_when_present(channel):
+    sent = []
+
+    class FakeSocket:
+        async def send_text(self, data):
+            sent.append(json.loads(data))
+
+    channel._socket = FakeSocket()
+    handoffs = [{"agent": "coach", "session_id": "handoff:abc"}]
+    await channel.send(OutgoingMessage(
+        content="handed off", channel="local_web", session_id="s1",
+        reply_address={}, final=True, handoffs=handoffs,
+    ))
+    await channel.send(OutgoingMessage(
+        content="plain", channel="local_web", session_id="s1", reply_address={},
+    ))
+    assert sent[0]["handoffs"] == handoffs
+    assert "handoffs" not in sent[1]
+
+
+@pytest.mark.asyncio
 async def test_send_without_socket_is_noop(channel):
     # No socket bound — must not raise.
     await channel.send(OutgoingMessage(

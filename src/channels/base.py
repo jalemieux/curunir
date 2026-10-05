@@ -32,6 +32,10 @@ class OutgoingMessage:
     stats: dict | None = None
     # The agent that produced this reply; channels echo it on outbound frames.
     agent: str | None = None
+    # Sibling handoffs made during this turn, as ``{agent, session_id}``: the
+    # local console offers "continue with <agent>" for each. Other channels
+    # ignore it.
+    handoffs: list[dict] | None = None
 
 
 class Channel(Protocol):
