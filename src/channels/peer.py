@@ -10,7 +10,8 @@ Per request it:
 1. maps the bearer token to a sender container (each ``peers`` entry's token
    is the shared secret for that pair) — unknown token → 401;
 2. checks the sender against the ``inbound`` list — not listed → 403;
-3. caps the body at 256 KB — larger → 413;
+3. caps the body at 256 KB — larger → 413; a malformed or spoofed payload
+   → 400; a ``to_agent`` this container doesn't have → 422;
 4. dedups on ``handoff_id`` with a bounded recent-id ledger;
 5. enqueues an ``IncomingMessage`` on the container's ``user_delivery``
    channel, with the note and context wrapped as background, not
@@ -45,6 +46,10 @@ MAX_PAYLOAD_BYTES = 256 * 1024
 _RECENT_HANDOFF_CAP = 1024
 _MAX_ID_LEN = 128
 
+# Answered when ``to_agent`` names no agent in this container. Mapped to a
+# fixed reason by the sender (``src/tools/handoff.py::_REFUSALS``).
+UNKNOWN_AGENT_STATUS = 422
+
 SESSION_PREFIX = "handoff:"
 
 
@@ -58,7 +63,11 @@ def _fence(text: str) -> str:
 
 
 def wrap_handoff(from_container: str, from_agent: str | None, note: str, context: str) -> str:
-    """The handoff as the receiving agent sees it: background, not instructions."""
+    """The handoff as the receiving agent sees it: background, not instructions.
+
+    ``conversation_store._handoff_summary`` reads the sender and note back out
+    of this text for the sidebar title; keep the two in step.
+    """
     sender = f"container '{from_container}'"
     if from_agent:
         sender += f" (agent '{from_agent}')"
@@ -191,8 +200,11 @@ class PeerChannel:
             # claiming to be someone else is refused rather than trusted.
             if data.get("from_container") not in (None, sender):
                 return JSONResponse({"error": "sender mismatch"}, status_code=400)
+            # Its own status, not 400: the sender never reads the body, so the
+            # status is the only way it can tell its model what to fix. 422
+            # rather than 404, which a mistyped peer URL also produces.
             if to_agent is not None and self.manifest.agent(to_agent) is None:
-                return JSONResponse({"error": "unknown agent"}, status_code=400)
+                return JSONResponse({"error": "unknown agent"}, status_code=UNKNOWN_AGENT_STATUS)
 
             if self._seen_handoff(handoff_id):
                 logger.info("peer: duplicate handoff %s from %s ignored", handoff_id, sender)

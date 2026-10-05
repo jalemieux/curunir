@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 from src.agent.agent import Agent
 from src.channels.email import EmailChannel
 from src.channels.base import OutgoingMessage
-from src.channels.peer import MAX_PAYLOAD_BYTES, PeerChannel, wrap_handoff
+from src.channels.peer import (
+    MAX_PAYLOAD_BYTES, UNKNOWN_AGENT_STATUS, PeerChannel, wrap_handoff,
+)
 from src.config import AgentConfig, EmailChannelConfig
 from src.container import (
     AgentEntry, Container, ContainerManifest, PeerEntry, check_airtight, load_container,
@@ -105,12 +107,34 @@ def test_payload_over_cap_without_content_length_is_413(peer):
 
 @pytest.mark.parametrize("bad", [
     {"handoff_id": ""}, {"note": ""}, {"context": 5}, {"from_container": "someone-else"},
-    {"to_agent": "ghost"},
+    {"to_agent": 7},
 ])
 def test_malformed_or_spoofed_payload_is_400(peer, bad):
     _, queue, client = peer
     assert _post(client, _payload(**bad)).status_code == 400
     assert queue.empty()
+
+
+def test_invalid_json_is_400(peer):
+    _, queue, client = peer
+    resp = client.post(
+        "/peer/handoff", content=b"{not json",
+        headers={"Authorization": "Bearer home-secret"},
+    )
+    assert resp.status_code == 400
+    assert queue.empty()
+
+
+def test_unknown_to_agent_has_its_own_status(peer):
+    """Not the generic 400: the status is all the sender's model learns."""
+    _, queue, client = peer
+    resp = _post(client, _payload(to_agent="ghost"))
+    assert resp.status_code == UNKNOWN_AGENT_STATUS == 422
+    assert queue.empty()
+    # Nothing was recorded as seen: the corrected retry reuses no id, but a
+    # refused handoff must not poison the dedup ledger either.
+    assert _post(client, _payload()).status_code == 202
+    assert queue.qsize() == 1
 
 
 def test_handoff_lands_on_user_delivery_channel_as_background(peer):
@@ -216,6 +240,14 @@ def test_handoff_tool_enum_is_the_outbound_containers(tmp_path):
     assert "handoff" not in _names(sub)
 
 
+def test_handoff_schema_steers_agent_away_from_siblings():
+    from src.tools.schemas import handoff_schema
+    desc = handoff_schema(["vault"])["function"]["parameters"]["properties"]["agent"]["description"]
+    assert "omit" in desc.lower() and "receiving container" in desc
+    assert "this container's own agents" in desc
+    assert "agent" not in handoff_schema(["vault"])["function"]["parameters"]["required"]
+
+
 async def test_handoff_executor_rechecks_the_outbound_list(tmp_path):
     agent = _agent(tmp_path, _home(outbound=("user",)))
     out = await exec_handoff(
@@ -250,7 +282,9 @@ async def test_handoff_posts_and_returns_only_delivered(tmp_path, monkeypatch):
 
 @respx.mock
 @pytest.mark.parametrize("status, reason", [
-    (401, "does not recognize"), (403, "inbound list"), (413, "larger"), (500, "HTTP 500"),
+    (400, "malformed"), (401, "does not recognize"), (403, "inbound list"),
+    (413, "larger"), (500, "HTTP 500"),
+    (UNKNOWN_AGENT_STATUS, "no agent by that name; omit 'agent'"),
 ])
 async def test_refusals_never_echo_the_response_body(tmp_path, monkeypatch, status, reason):
     monkeypatch.setenv("PEER_VAULT_TOKEN", "vault-secret")
@@ -387,3 +421,37 @@ def test_handoff_conversations_are_badged(tmp_path):
     conversation_store.save(tmp_path, "abc", [{"role": "user", "content": "hi"}], channel="portal")
     rows = {c["session_id"]: c["channel"] for c in agent.conversations_snapshot()}
     assert rows == {"handoff:h1": "handoff", "abc": "portal"}
+
+
+# --- sidebar title ----------------------------------------------------------
+
+def _saved(tmp_path, sid, content):
+    from src.agent import conversation_store
+    conversation_store.save(tmp_path, sid, [{"role": "user", "content": content}], channel="local_web")
+    return conversation_store.load(tmp_path, sid)
+
+
+def test_handoff_conversation_is_titled_from_the_note(tmp_path):
+    wrapped = wrap_handoff("home", "everyday", "Please remind Jac to review the Q3 numbers", "Q3 closed Friday.")
+    record = _saved(tmp_path, "handoff:h1", wrapped)
+    assert record["title"] == "home: Please remind Jac to review the Q3 numbers"
+    assert record["preview"] == "home: Please remind Jac to review the Q3 numbers"
+    # The wrapper stays in the transcript; only title/preview change.
+    assert record["history"][0]["content"] == wrapped
+
+
+def test_handoff_title_without_agent_or_context_and_truncated(tmp_path):
+    record = _saved(tmp_path, "handoff:h2", wrap_handoff("home", None, "word " * 40, ""))
+    assert record["title"].startswith("home: word word")
+    assert len(record["title"]) <= 60 and record["title"].endswith("…")
+
+
+def test_handoff_title_reads_a_note_that_contains_fences(tmp_path):
+    note = "see ```this``` and\nSender's note:\nsecond line"
+    record = _saved(tmp_path, "handoff:h3", wrap_handoff("home", "everyday", note, "ctx"))
+    assert record["title"] == "home: see ```this``` and Sender's note: second line"
+
+
+def test_text_that_only_resembles_a_handoff_keeps_its_title(tmp_path):
+    record = _saved(tmp_path, "abc", "[Handoff from container 'home' is a phrase I typed")
+    assert record["title"] == "[Handoff from container 'home' is a phrase I typed"

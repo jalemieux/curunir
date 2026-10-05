@@ -32,6 +32,10 @@ _REFUSALS = {
     400: "the receiver rejected the request as malformed",
     401: "the receiver does not recognize this container's token",
     403: "this container is not in the receiver's inbound list",
+    422: (
+        "the receiver has no agent by that name; omit 'agent' to reach its "
+        "default agent"
+    ),
     413: "the handoff is larger than the receiver accepts",
 }
 
