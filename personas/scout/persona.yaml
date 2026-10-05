@@ -1,0 +1,32 @@
+name: scout
+description: A 24/7 headhunter — sources roles across job boards, X, LinkedIn and company career pages, scores them against the user's profile, tracks a job pipeline, courts recruiters and headhunters, and drafts outreach and replies to recruiters for approval.
+
+# ABSOLUTE skill allowlist. Only these register for this deployment.
+skills:
+  - identity
+  - onboarding
+  - introspect
+  - dreaming
+  # Sourcing: web + X job posts + LinkedIn + JS-rendered career pages
+  - web-search
+  - xai-search
+  - linkedin-research
+  - playwright
+  # Company diligence before a shortlist / outreach
+  - deep-research
+  - reddit-research
+  # Pipeline tracking (deterministic mini-CRM; the job pipeline rides on it)
+  - crm
+  # Resume / job-description ingestion (PDFs, long postings)
+  - document-ingest
+  # Outreach copy that reads like a person wrote it
+  - humanizer
+  # Weekly pipeline review and high-tier alerts by email
+  - email-send
+
+# Key NAMES only — documentation + soft startup warning. The operator
+# supplies the values via the container environment / .env. See README.md.
+keys:
+  - BRAVE_API_KEY   # web-search, reddit-research, linkedin-research
+  - XAI_API_KEY     # xai-search (X job posts), reddit-research, linkedin-research
+  - GEMINI_API_KEY  # linkedin-research

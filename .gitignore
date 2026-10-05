@@ -53,3 +53,6 @@ landing_pages
 
 # Deployment host list (real targets are private; .example is committed)
 scripts/.deploy-hosts
+
+# Per-deployment container manifest (copy container.example.yaml)
+container.yaml
