@@ -570,6 +570,32 @@ async def test_non_openrouter_omits_usage_flag():
 
 
 @pytest.mark.asyncio
+async def test_non_openrouter_ignores_openrouter_provider():
+    """A provider preference left in the env must not leak onto a non-OpenRouter
+    backend: Anthropic rejects any extra_body with
+    "extra_body: Extra inputs are not permitted"."""
+    mock_message = MagicMock()
+    mock_message.content = "ok"
+    mock_message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    mock_response.model = "claude-sonnet-5-5"
+
+    with patch("src.llm.litellm") as mock_litellm:
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+        await call_llm(
+            "anthropic/claude-sonnet-5-5",
+            [{"role": "user", "content": "hi"}],
+            [],
+            openrouter_provider="z-ai/f8",
+        )
+
+    kwargs = mock_litellm.acompletion.call_args.kwargs
+    assert "extra_body" not in kwargs
+
+
+@pytest.mark.asyncio
 async def test_stream_extracts_billing_dimensions():
     """Streaming path also populates the new usage fields from the final usage chunk."""
     delta_text = MagicMock()
