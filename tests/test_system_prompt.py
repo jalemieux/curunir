@@ -96,6 +96,34 @@ class TestBuildMemoryBlock:
         assert "Where to look first." in block
         assert "Name: Alice" in block
 
+    def test_appends_agent_user_notes_after_the_shared_profile(self, tmp_context):
+        """memory/user.md (what the user told this agent alone) follows the
+        shared profile, so a sibling agent sees both."""
+        memory = tmp_context / "memory"
+        memory.mkdir()
+        (tmp_context / "profile.md").write_text("# Owner Profile\nName: Alice")
+        (memory / "user.md").write_text("# User Notes\nTraining for a marathon")
+
+        block = build_memory_block(AgentConfig(context_dir=tmp_context))
+
+        assert block.index("Name: Alice") < block.index("Training for a marathon")
+
+    def test_user_notes_are_per_agent(self, tmp_path):
+        shared = tmp_path / "context"
+        for name in ("coach", "scout"):
+            (shared / "agents" / name / "memory").mkdir(parents=True)
+        (shared / "profile.md").write_text("Name: Alice")
+        (shared / "agents" / "coach" / "memory" / "user.md").write_text("coach-only note")
+
+        def block(name):
+            return build_memory_block(
+                AgentConfig.for_agent(name, shared / "agents" / name, shared, is_default=False)
+            )
+
+        assert "coach-only note" in block("coach")
+        assert "coach-only note" not in block("scout")
+        assert "Name: Alice" in block("scout")
+
     def test_empty_when_memory_dir_missing(self, tmp_context):
         block = build_memory_block(AgentConfig(context_dir=tmp_context))
         assert block == ""

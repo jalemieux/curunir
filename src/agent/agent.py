@@ -298,8 +298,9 @@ def _onboarding_nudge(config: AgentConfig) -> str:
         return _SETUP_NOTE_PREFIX + (
             "The user is already onboarded (their profile is in your context), "
             f"but this agent ('{config.agent_name}') isn't set up yet. Use the "
-            "`onboarding` skill: it skips the profile step and only sets up how "
-            "you work with them and how you present."
+            "`onboarding` skill: don't re-ask their name or role; ask what they "
+            "want this agent specifically to know, then set up preferences and "
+            "personality."
         )
     nudge = _SETUP_NOTE_PREFIX + (
         "The user has just connected and isn't onboarded yet. "

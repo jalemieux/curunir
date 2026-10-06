@@ -1029,6 +1029,7 @@ class TestOnboardingGate:
         assert "'coach'" in note
         assert "isn't onboarded yet" not in note
         assert "`onboarding` skill" in note
+        assert "don't re-ask their name or role" in note
 
     async def test_gate_note_placeholder_profile_is_not_filled(self, agent):
         """The bootstrap placeholder (headings only) still means 'user not

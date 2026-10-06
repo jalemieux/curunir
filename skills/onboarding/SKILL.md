@@ -22,7 +22,7 @@ Check whether `{{context}}/identity.md` exists (e.g. `bash` `test -f {{context}}
 
 If `{{context}}/identity.md` does NOT exist, check whether the user is already known: `{{shared}}/profile.md` is filled when it has a `**Fact:**` line (e.g. `bash` `grep -q -F '**Fact:**' {{shared}}/profile.md`).
 
-- Filled → another agent in this container already onboarded the user. Skip step 1. Open with one line that uses their name, like "Hi <name>. I'm new here, so two quick questions on how I should work with you, then how I present." Then run steps 2 to 4.
+- Filled → another agent in this container already onboarded the user. Open with one line that uses their name, like "Hi <name>. I'm new here, so a few quick questions before we start." Then run the full flow, except that in step 1 you follow the profile skill's **Profile already set up** section: one question, saved to `{{context}}/memory/user.md`, name and role not re-asked.
 - Not filled → proceed to the full flow.
 
 ## Full flow

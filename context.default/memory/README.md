@@ -21,10 +21,11 @@ that requires knowing the owner — **always** read these in order before
 responding:
 
 1. `{{shared}}/profile.md`
-2. `preferences.md`
-3. `projects.md`
-4. `tasks.md`
-5. `people/*.md`
+2. `user.md`
+3. `preferences.md`
+4. `projects.md`
+5. `tasks.md`
+6. `people/*.md`
 
 See the Taxonomy table below for what each file holds.
 
@@ -40,6 +41,7 @@ saying "I don't know who you are."
 | File / dir | Purpose |
 |---|---|
 | `{{shared}}/profile.md` | Shared across agents, outside this directory. Owner identity facts: name, pronouns, family, role, contact, addresses, medical notes |
+| `user.md` | What the user told you, specifically, beyond the shared profile. Already in your prompt when it exists |
 | `preferences.md` | Owner's working style: response length, citation conventions, consent boundaries, tool prefs |
 | `core-insights.md` | Your own accumulated realizations about how you operate |
 | `projects.md` | Current projects with status, architecture, relationships |
@@ -76,6 +78,8 @@ about*:
 
 - **About the owner as a person** (a new address, a family member, a job
   change, a medical note) → `profile.md`.
+- **About the owner, but meant for you alone** (something they said
+  they want this agent specifically to know) → `user.md`.
 - **About how the owner wants to work** (a tone shift, a new citation
   preference, a consent rule) → `preferences.md`.
 - **About yourself** (a recurring failure mode, a validated approach,

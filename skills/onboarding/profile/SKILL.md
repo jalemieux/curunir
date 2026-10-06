@@ -7,7 +7,7 @@ description: "Use to onboard or refresh the owner's profile facts — name and r
 
 Capture two facts about the owner: how to address them, and what they want help with. These end up in `{{shared}}/profile.md`, the one user profile every agent in this container reads, and are read by future turns.
 
-Only the container's default agent may write that file. If you are not the default agent (the setup note says so, or your `write` is refused), still ask the two questions but skip the write: tell the user their profile is kept by the default agent (name it) and will be filled in from this conversation. Don't write the facts anywhere else.
+Only the container's default agent may write that file. If the orchestrator sent you to **Profile already set up**, or you are not the default agent (the setup note says so, or your `write` is refused), follow that section instead of Conversation and Write.
 
 ## When to use
 
@@ -52,6 +52,27 @@ read into context on every turn.
 
 Use today's date in UTC for `<YYYY-MM-DD>`. Run `bash` with `date -u +%Y-%m-%d` and use the output verbatim.
 
+## Profile already set up
+
+The shared profile is in your context. Don't re-ask name or role, and never write `{{shared}}/profile.md` from here.
+
+Ask one question: "Your profile is already set up. Is there anything you want me, specifically, to know that isn't in it?" Trust the first answer. If they have nothing to add, write nothing.
+
+Otherwise save it to `{{context}}/memory/user.md`, your own notes about the user, with the `write` tool. If the file exists, `read` it first and keep what is there.
+
+```
+# User Notes
+
+What this agent knows about the user beyond the shared profile.
+
+## <short topic>
+
+**Source:** onboarding - <YYYY-MM-DD>
+**Fact:** <what the user said, verbatim or lightly cleaned up>
+```
+
+If the shared profile is still empty (the user reached you before the default agent), ask the two questions under Conversation instead and save the answers to `{{context}}/memory/user.md` in the same shape.
+
 ## Return
 
-After the write succeeds (or, when you are not the default agent, after telling the user where the profile is kept), output a one-liner like "Got it — saved." and stop. The orchestrator will pick up from there.
+After the write succeeds (or the user had nothing to add), output a one-liner like "Got it — saved." and stop. The orchestrator will pick up from there.
