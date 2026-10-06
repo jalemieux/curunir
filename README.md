@@ -142,6 +142,71 @@ agents, each with its own private context under `context/agents/<name>/`
 and one shared area — see
 `docs/superpowers/specs/2026-09-26-agents-and-containers-design.md`.
 
+## Try it out
+
+The fastest way to see what curunir is like is to run one agent on your own
+machine and talk to it in a browser. You need Docker and an API key for one
+LLM provider. The default model is Anthropic's Claude Sonnet; any provider
+LiteLLM supports works by setting `MODEL` (see `.env.example`).
+
+1. **Clone and configure.** Two lines of `.env` are enough to start:
+
+   ```bash
+   git clone https://github.com/jalemieux/curunir.git
+   cd curunir
+   cat > .env <<'EOF'
+   ANTHROPIC_API_KEY=sk-ant-...
+   LOCAL_UI_ENABLED=true
+   EOF
+   ```
+
+2. **Build and start.** The first build takes several minutes because the
+   image ships pandoc, TeX and Chromium for the report and browser skills;
+   later starts are seconds.
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build curunir
+   ```
+
+3. **Open the console.** The boot log prints a line like
+   `Local web console enabled on http://0.0.0.0:8766/?token=...`; open
+   that URL with `localhost` in place of `0.0.0.0`. The token is also in
+   `context/.ws-token`, so on a Mac this is a shortcut:
+
+   ```bash
+   open "http://localhost:8766/?token=$(cat context/.ws-token)"
+   ```
+
+   Prefer a terminal? `python cli.py` in a second shell connects over the
+   WebSocket channel and finds the token on its own.
+
+4. **Say hello.** There is no identity yet, so your first message starts a
+   six-prompt onboarding (who you are, how you like to work, the agent's
+   personality). It writes `context/identity.md`, and from then on the
+   agent is yours. Try `/help` for the slash commands, `/skills` for the
+   catalog, or just ask it to do something: research a topic, schedule a
+   daily digest, read a file you drop in `context/workspace/`.
+
+Everything the agent learns lives in `context/` (identity, memory,
+schedules, conversations). Stop it with Ctrl-C; start it again and it
+remembers. Delete `context/` to start over from onboarding.
+
+**Without Docker.** Python 3.12+ runs the same thing without the PDF and
+browser toolchain:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python run.py              # WebSocket on :8765, console on :8766
+```
+
+**Running it for real.** Once you want an agent that stays up, has an
+email address, or hosts several agents, move to a host that pulls the
+prebuilt image instead of building from source. The image on GHCR is
+private today, so that path needs a GitHub token with `read:packages`;
+see **[docs/deployment.md](docs/deployment.md)** and
+[Containers](#containers-several-agents-in-one-process).
+
 ## Quick Start
 
 ### Local
