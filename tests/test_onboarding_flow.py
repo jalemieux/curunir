@@ -41,8 +41,10 @@ class TestGateMessageMatchesOrchestrator:
         mock_response = LLMResponse(text="welcome", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hi", "s1")
-        user_msg = next(m for m in mock_llm.call_args[0][1] if m["role"] == "user")
-        assert "onboarding" in user_msg["content"].lower()
+        # The gate's note follows the user's own message.
+        user_msgs = [m for m in mock_llm.call_args[0][1] if m["role"] == "user"]
+        assert user_msgs[0]["content"] == "hi"
+        assert "`onboarding` skill" in user_msgs[1]["content"]
 
         registry = load_registry([REPO_SKILLS])
         assert "onboarding" in registry, (
