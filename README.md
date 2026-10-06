@@ -149,16 +149,23 @@ machine and talk to it in a browser. You need Docker and an API key for one
 LLM provider. The default model is Anthropic's Claude Sonnet; any provider
 LiteLLM supports works by setting `MODEL` (see `.env.example`).
 
-1. **Clone and configure.** Two lines of `.env` are enough to start:
+1. **Clone and configure.** Two lines of `.env` are enough to start: the API
+   key for your model's provider, and the switch for the web console.
 
    ```bash
    git clone https://github.com/jalemieux/curunir.git
    cd curunir
    cat > .env <<'EOF'
-   ANTHROPIC_API_KEY=sk-ant-...
+   <PROVIDER>_API_KEY=...
    LOCAL_UI_ENABLED=true
    EOF
    ```
+
+   Replace `<PROVIDER>` with your provider's name in upper case. That is the
+   variable LiteLLM reads for the provider prefix of `MODEL`: with no `MODEL`
+   set the default is an `anthropic/...` model, so the key is Anthropic's;
+   add a line such as `MODEL=openrouter/<model>` and it is
+   `OPENROUTER_API_KEY` instead.
 
 2. **Build and start.** The first build takes several minutes because the
    image ships pandoc, TeX and Chromium for the report and browser skills;
@@ -641,7 +648,7 @@ skills dir derive from `context_dir`, and `usage_db` from `shared_dir`, via
 `AgentConfig()` is the same single-agent layout with every historical
 default.
 
-API keys are set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.). See `.env.example` for the full list.
+The LLM API key is set via the environment variable LiteLLM reads for your `MODEL`'s provider: the provider prefix in upper case plus `_API_KEY` (`OPENROUTER_API_KEY` for `openrouter/...`, and likewise for the default `anthropic/...` model). curunir reads no provider key itself. See `.env.example` for the other keys skills use.
 
 Useful operational env vars:
 
