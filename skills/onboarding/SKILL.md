@@ -20,7 +20,10 @@ Check whether `{{context}}/identity.md` exists (e.g. `bash` `test -f {{context}}
 - one section → `load_skill` that one section, follow it, exit when it returns.
 - "cancel" or anything ambiguous → say "OK, leaving things as they are." and stop.
 
-If `{{context}}/identity.md` does NOT exist, proceed to the full flow.
+If `{{context}}/identity.md` does NOT exist, check whether the user is already known: `{{shared}}/profile.md` is filled when it has a `**Fact:**` line (e.g. `bash` `grep -q -F '**Fact:**' {{shared}}/profile.md`).
+
+- Filled → another agent in this container already onboarded the user. Skip step 1. Open with one line that uses their name, like "Hi <name>. I'm new here, so two quick questions on how I should work with you, then how I present." Then run steps 2 to 4.
+- Not filled → proceed to the full flow.
 
 ## Full flow
 

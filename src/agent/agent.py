@@ -271,6 +271,48 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
     return [t.strip() for t in tools_str.split(",") if t.strip()]
 
 
+def _profile_filled(config: AgentConfig) -> bool:
+    """True once the container's shared profile holds a real fact.
+
+    The bootstrap placeholder (``context.default/profile.md``) has headings
+    only; onboarding and extraction both write ``**Fact:**`` lines.
+    """
+    try:
+        return "**Fact:**" in config.profile_file.read_text()
+    except OSError:
+        return False
+
+
+def _onboarding_nudge(config: AgentConfig) -> str:
+    """Instruction the onboarding gate sends alongside the user's first message.
+
+    Two situations: the user is not onboarded at all (profile still the
+    placeholder), or the user is known and only this agent is new (profile
+    filled by a sibling, no identity.md here).
+    """
+    header = "[Setup note from the system, not written by the user.] "
+    if _profile_filled(config):
+        return header + (
+            f"The user is already onboarded (their profile is in your context), "
+            f"but this agent ('{config.agent_name}') isn't set up yet. Use the "
+            "`onboarding` skill: it skips the profile step and only sets up how "
+            "you work with them and how you present."
+        )
+    nudge = header + (
+        "The user has just connected and isn't onboarded yet. "
+        "Open with a one-line preamble like 'Since you're new, "
+        "let's get you set up — about a minute.' Then use the "
+        "`onboarding` skill to walk them through it."
+    )
+    if not config.is_default:
+        nudge += (
+            f" You are not this container's default agent "
+            f"('{config.default_agent_name}'), so do not write the shared "
+            "profile; the `profile` skill says what to do instead."
+        )
+    return nudge
+
+
 class Agent:
     def __init__(
         self,
@@ -558,22 +600,23 @@ class Agent:
         history = self.sessions.setdefault(session_id, [])
 
         # Onboarding gate: first user turn of a fresh session, no identity.md,
-        # not a scheduled task → rewrite the message into an instruction that
-        # kicks off the onboarding orchestrator. identity.md is the personality
-        # layer, decoupled from behavior/persona; its absence is exactly the
-        # "not yet onboarded" signal (onboarding writes it). Mid-flow turns have
-        # non-empty history and pass through unchanged.
+        # not a scheduled task → add a note that kicks off the onboarding
+        # orchestrator. identity.md is the personality layer, decoupled from
+        # behavior/persona; its absence is exactly the "this agent is not set
+        # up yet" signal (onboarding writes it). Mid-flow turns have non-empty
+        # history and pass through unchanged. The note rides like the live
+        # time note below: trailing and never written into history, so the
+        # user's own first message is what the transcript keeps.
+        onboarding_note = None
         if (
             system_task_prompt is None
             and len(history) == 0
             and not self.config.identity_file.exists()
         ):
-            message = (
-                "The user has just connected and isn't onboarded yet. "
-                "Open with a one-line preamble like 'Since you're new, "
-                "let's get you set up — about a minute.' Then use the "
-                "`onboarding` skill to walk them through it."
-            )
+            onboarding_note = {
+                "role": "user",
+                "content": _onboarding_nudge(self.config),
+            }
 
         if system_task_prompt:
             # System-initiated task: inject task as a user message so all LLM
@@ -595,9 +638,11 @@ class Agent:
         }
 
         def _assemble_messages() -> list[dict]:
-            """[system] + history + live-time note. The note is never written
-            into history — it is appended only at LLM-call assembly time."""
-            return [{"role": "system", "content": system_prompt}] + history + [live_time_note]
+            """[system] + history + onboarding note (first un-onboarded turn
+            only) + live-time note. The notes are never written into history —
+            they are appended only at LLM-call assembly time."""
+            notes = [onboarding_note] if onboarding_note else []
+            return [{"role": "system", "content": system_prompt}] + history + notes + [live_time_note]
 
         _trim_history(history, max_chars=self.config.max_history_chars)
         messages = _assemble_messages()

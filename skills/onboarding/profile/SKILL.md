@@ -7,7 +7,7 @@ description: "Use to onboard or refresh the owner's profile facts — name and r
 
 Capture two facts about the owner: how to address them, and what they want help with. These end up in `{{shared}}/profile.md`, the one user profile every agent in this container reads, and are read by future turns.
 
-Only the container's default agent may write that file. If your `write` to it is refused, tell the user their profile is shared and ask them to run `/profile` with the default agent; don't write the facts anywhere else.
+Only the container's default agent may write that file. If you are not the default agent (the setup note says so, or your `write` is refused), still ask the two questions but skip the write: tell the user their profile is kept by the default agent and will be filled in from this conversation. Don't write the facts anywhere else.
 
 ## When to use
 
@@ -54,4 +54,4 @@ Use today's date in UTC for `<YYYY-MM-DD>`. Run `bash` with `date -u +%Y-%m-%d` 
 
 ## Return
 
-After the write succeeds, output a one-liner like "Got it — saved." and stop. The orchestrator will pick up from there.
+After the write succeeds (or, when you are not the default agent, after telling the user where the profile is kept), output a one-liner like "Got it — saved." and stop. The orchestrator will pick up from there.
