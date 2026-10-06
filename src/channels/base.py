@@ -36,6 +36,10 @@ class OutgoingMessage:
     # local console offers "continue with <agent>" for each. Other channels
     # ignore it.
     handoffs: list[dict] | None = None
+    # Which stretch of the turn's text this frame belongs to (see
+    # ``TextSegments`` in run.py). Set on text deltas and on the final reply;
+    # a client that ignores it behaves as before.
+    segment: int | None = None
 
 
 class Channel(Protocol):

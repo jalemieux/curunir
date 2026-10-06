@@ -447,7 +447,10 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         # Streaming hooks: the agent loop fires these mid-turn so the user
         # sees tool activity and partial text without waiting for the final
         # response. Each goes out as a non-final OutgoingMessage.
+        segments = TextSegments()
+
         async def on_tool_call(name: str, args_str: str):
+            segments.tool_call()
             await out_queue.put(OutgoingMessage(
                 content="",
                 channel=msg.channel,
@@ -467,6 +470,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 delta=True,
                 final=False,
                 agent=agent_name,
+                segment=segments.text(),
             ))
 
         # Outbound sinks the agent fills during the turn: any files it wants
@@ -531,7 +535,48 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             stats=metadata.get("stats"),
             agent=agent_name,
             handoffs=turn.handoffs or None,
+            segment=segments.final(),
         ))
+
+
+class TextSegments:
+    """Numbers the stretches of text one turn streams, split at tool rounds.
+
+    The loop streams the text of every iteration, including iterations that
+    end in tool calls ("I'll check your schedule first, then…"), but the final
+    reply carries only the last iteration's text. Stamping each text delta
+    with a segment number, and the final reply with the segment it completes,
+    lets a streaming client tell that interim text from the reply and keep it
+    instead of overwriting it. A new segment starts with the first text after
+    a tool call that itself followed text.
+    """
+
+    def __init__(self) -> None:
+        self._n = 0
+        self._has_text = False
+        self._tool_since_text = False
+
+    def tool_call(self) -> None:
+        if self._has_text:
+            self._tool_since_text = True
+
+    def text(self) -> int:
+        """Segment of the text delta being sent now."""
+        if self._tool_since_text:
+            self._n += 1
+            self._tool_since_text = False
+        self._has_text = True
+        return self._n
+
+    def final(self) -> int:
+        """Segment the final reply belongs to.
+
+        The segment still streaming when the turn ended, or a new one when
+        the last thing the loop did was a tool round (an interrupt, an error,
+        the iteration cap): what was streamed before it is then interim text,
+        not a draft of this reply.
+        """
+        return self._n + 1 if self._tool_since_text else self._n
 
 
 async def _run_extraction_pass(agent: Agent) -> None:

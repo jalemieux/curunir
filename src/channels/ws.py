@@ -373,6 +373,8 @@ class WebSocketChannel:
         }
         if msg.agent:
             payload["agent"] = msg.agent
+        if msg.segment is not None:
+            payload["segment"] = msg.segment
         try:
             await connection.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
