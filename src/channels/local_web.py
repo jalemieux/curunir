@@ -732,6 +732,8 @@ class LocalWebChannel:
             frame["agent"] = msg.agent
         if msg.handoffs:
             frame["handoffs"] = msg.handoffs
+        if msg.segment is not None:
+            frame["segment"] = msg.segment
         try:
             await ws.send_text(json.dumps(frame))
         except (WebSocketDisconnect, RuntimeError):

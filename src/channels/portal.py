@@ -442,6 +442,7 @@ class PortalChannel:
                 "workflow": msg.workflow,
                 "stats": msg.stats,
                 **({"agent": msg.agent} if msg.agent else {}),
+                **({"segment": msg.segment} if msg.segment is not None else {}),
             },
         }
         frame = json.dumps(wrapped)

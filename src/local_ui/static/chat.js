@@ -80,6 +80,46 @@ export function handoffTargets(handoffs) {
   );
 }
 
+// === Turn text (pure helpers, node-tested in tests/js/test_chat_turn_text.mjs) ===
+// One assistant bubble holds the text of a whole turn. The agent streams the
+// text of every loop iteration, including ones that end in tool calls ("I'll
+// check your schedule first, then…"); only the last one is the reply. `raw` is
+// what the body shows (the stretch being streamed, then the reply) and
+// `interim` the earlier stretches, kept in a collapsed section rather than
+// overwritten when the reply lands.
+export function newTurnText() {
+  return { interim: [], raw: "", segment: null };
+}
+
+function shelve(t) {
+  if (t.raw.trim()) t.interim.push(t.raw);
+  t.raw = "";
+}
+
+// Fold one live frame in. Text deltas and the final reply carry `segment`,
+// which changes at a tool round. A frame without it (an older server) stays in
+// the current segment, which is the old behaviour: the final reply replaces
+// what was streamed.
+export function applyTextFrame(t, m) {
+  if (!m || !(m.delta || m.content)) return t;
+  const seg = Number.isInteger(m.segment) ? m.segment : t.segment;
+  if (seg !== t.segment && t.segment !== null) shelve(t);
+  t.segment = seg;
+  if (m.delta) t.raw += m.content || "";
+  else t.raw = m.content;  // the complete text of this segment
+  return t;
+}
+
+// Fold in the next assistant message of the same turn from a history
+// snapshot: each earlier message's text becomes interim, the last is the
+// reply, which is what the live path arrives at.
+export function applyHistoryText(t, content) {
+  if (!content) return t;
+  shelve(t);
+  t.raw = content;
+  return t;
+}
+
 export function createChat(config) {
   const {
     container,
@@ -316,10 +356,9 @@ export function createChat(config) {
       renderAttachments(el, m.attachments);
     } else if (m.role === "assistant") {
       const el = historyAssistant || (historyAssistant = appendMessage("assistant"));
-      const body = el.querySelector(".body");
       if (m.content) {
-        body.dataset.raw = body.dataset.raw ? body.dataset.raw + "\n\n" + m.content : m.content;
-        body.innerHTML = md(body.dataset.raw);
+        applyHistoryText(turnText(el), m.content);
+        renderTurnText(el, false);
       }
       appendToolCalls(el, m.tool_calls);
       renderAttachments(el, m.attachments);
@@ -330,6 +369,41 @@ export function createChat(config) {
     }
   }
 
+  // Per-bubble turn text (see newTurnText); the DOM is rendered from it.
+  function turnText(msgEl) {
+    return msgEl._turnText || (msgEl._turnText = newTurnText());
+  }
+
+  // Paint a bubble from its turn text: the reply (or the stretch streaming
+  // now) in .body, earlier stretches in a section above it that is open while
+  // the turn is live and collapsed once it is done. body.dataset.raw stays the
+  // reply alone, so Copy and Print give the reply.
+  function renderTurnText(msgEl, live) {
+    const t = turnText(msgEl);
+    const body = msgEl.querySelector(".body");
+    if (body.dataset.raw !== t.raw) {
+      body.dataset.raw = t.raw;
+      body.innerHTML = t.raw ? md(t.raw) : "";
+    }
+    let box = msgEl.querySelector("details.interim");
+    if (!t.interim.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement("details");
+      box.className = "interim";
+      box.innerHTML = '<summary>Earlier in this turn</summary><div class="interim-steps"></div>';
+      msgEl.insertBefore(box, body);
+      box.open = live;
+    }
+    const steps = box.querySelector(".interim-steps");
+    for (let i = steps.children.length; i < t.interim.length; i++) {
+      const step = document.createElement("div");
+      step.className = "interim-step";
+      step.innerHTML = md(t.interim[i]);
+      steps.appendChild(step);
+    }
+    if (!live) box.open = false;
+  }
+
   function ensureActivityIndicator(msgEl, live) {
     let tools = msgEl.querySelector("details.tools");
     if (tools) return tools;
@@ -337,7 +411,7 @@ export function createChat(config) {
     tools.className = live ? "tools live" : "tools";
     tools.innerHTML = live
       ? '<summary><div class="activity-row"><span class="pill"><span class="pill-dot"></span>' +
-        '<span class="pill-label">Thinking</span></span><span class="tool-current"></span>' +
+        '<span class="pill-label">Working</span></span><span class="tool-current"></span>' +
         '<span class="ticker-caret">▶</span></div></summary><div class="tool-list"></div>'
       : '<summary><div class="ticker"><span class="ticker-dot"></span><span class="ticker-count"></span>' +
         '<span class="ticker-caret">▶</span></div></summary><div class="tool-list"></div>';
@@ -460,14 +534,8 @@ export function createChat(config) {
 
   function renderAgentChunk(m) {
     if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
-    const body = inProgressMsg.querySelector(".body");
-    if (m.delta) {
-      body.dataset.raw = (body.dataset.raw || "") + (m.content || "");
-      body.innerHTML = md(body.dataset.raw);
-    } else if (m.content) {
-      body.dataset.raw = m.content;
-      body.innerHTML = md(m.content);
-    }
+    applyTextFrame(turnText(inProgressMsg), m);
+    renderTurnText(inProgressMsg, !m.final);
     appendToolCalls(inProgressMsg, m.tool_calls);
     renderAttachments(inProgressMsg, m.attachments);
     if (m.tool_calls && m.tool_calls.length) {

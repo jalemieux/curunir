@@ -164,6 +164,14 @@
 .cu-chat .system-msg { color: var(--system-text); }
 
 /* === Activity indicator (tool ticker) === */
+/* Text from earlier tool rounds of the same turn (see renderTurnText). */
+.cu-chat .msg details.interim { margin: 2px 0 8px; color: var(--muted); font-size: 13px; }
+.cu-chat .msg details.interim > summary { cursor: pointer; user-select: none; font-size: 12px; }
+.cu-chat .msg details.interim .interim-steps {
+  margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--border);
+}
+.cu-chat .msg details.interim .interim-step + .interim-step { margin-top: 6px; }
+.cu-chat .msg details.interim .interim-step > p { margin: 0 0 4px; }
 .cu-chat .msg details.tools { margin: 8px 0 2px; }
 .cu-chat .msg details.tools > summary { list-style: none; cursor: pointer; user-select: none; outline: none; }
 .cu-chat .msg details.tools > summary::-webkit-details-marker { display: none; }
