@@ -1012,6 +1012,51 @@ class TestOnboardingGate:
         assert len(notes(sent[0])) == 1 and len(notes(sent[1])) == 1
         assert notes(sent[2]) == []
 
+    async def test_gate_note_when_only_this_agent_is_new(self, agent):
+        """Profile already filled (a sibling onboarded the user) → the note
+        says the agent is new, not the user."""
+        agent.config.identity_file.unlink()
+        agent.config.profile_file.parent.mkdir(parents=True, exist_ok=True)
+        agent.config.profile_file.write_text(
+            "# Owner Profile\n\n## Name\n\n**Fact:** Sam\n"
+        )
+        agent.config.agent_name = "coach"
+        mock_response = LLMResponse(text="hi Sam", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hi", "s1")
+        note = _real_user_msgs(mock_llm.call_args[0][1])[1]["content"]
+        assert "already onboarded" in note
+        assert "'coach'" in note
+        assert "isn't onboarded yet" not in note
+        assert "`onboarding` skill" in note
+
+    async def test_gate_note_placeholder_profile_is_not_filled(self, agent):
+        """The bootstrap placeholder (headings only) still means 'user not
+        onboarded'."""
+        agent.config.identity_file.unlink()
+        agent.config.profile_file.parent.mkdir(parents=True, exist_ok=True)
+        agent.config.profile_file.write_text("# Owner Profile\n\n## Identity\n\n## Role\n")
+        mock_response = LLMResponse(text="welcome", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hi", "s1")
+        note = _real_user_msgs(mock_llm.call_args[0][1])[1]["content"]
+        assert "isn't onboarded yet" in note
+        assert "default agent" not in note
+
+    async def test_gate_note_tells_a_sibling_not_to_write_the_profile(self, agent):
+        """User not onboarded + non-default agent → the note names the default
+        agent and forbids the shared-profile write."""
+        agent.config.identity_file.unlink()
+        agent.config.is_default = False
+        agent.config.default_agent_name = "main"
+        mock_response = LLMResponse(text="welcome", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
+            await agent.handle("hi", "s1")
+        note = _real_user_msgs(mock_llm.call_args[0][1])[1]["content"]
+        assert "isn't onboarded yet" in note
+        assert "'main'" in note
+        assert "do not write the shared profile" in note
+
     async def test_gate_stays_quiet_when_identity_exists(self, agent):
         """If identity.md exists, user's first message passes through unchanged."""
         # The agent fixture's context already has identity.md (= onboarded).
