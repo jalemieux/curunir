@@ -955,17 +955,62 @@ class TestOnboardingGate:
     """Hard gate fires on first un-onboarded turn; passes through otherwise."""
 
     async def test_gate_fires_when_identity_missing_and_empty_history(self, agent):
-        """First user message + no identity.md → message rewritten to onboarding directive."""
+        """First user message + no identity.md → onboarding note sent after it."""
         agent.config.identity_file.unlink()  # un-onboarded: no personality layer yet
         mock_response = LLMResponse(text="welcome", tool_calls=None)
         with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
             await agent.handle("hi", "s1")
-        # Inspect the user message that was sent to the LLM.
+        # Inspect the user messages that were sent to the LLM.
         messages = mock_llm.call_args[0][1]
         user_msgs = _real_user_msgs(messages)
-        assert len(user_msgs) == 1
-        assert "isn't onboarded yet" in user_msgs[0]["content"]
-        assert "`onboarding` skill" in user_msgs[0]["content"]
+        assert len(user_msgs) == 2
+        assert user_msgs[0]["content"] == "hi"
+        assert "isn't onboarded yet" in user_msgs[1]["content"]
+        assert "`onboarding` skill" in user_msgs[1]["content"]
+        # The live time note stays the final message.
+        assert messages[-1]["content"].startswith("Current date/time:")
+
+    async def test_gate_keeps_user_message_and_does_not_persist_note(self, agent):
+        """The transcript keeps the user's own words; the note is never in
+        history, on disk, or in history_snapshot (#578)."""
+        agent.config.identity_file.unlink()
+        mock_response = LLMResponse(text="welcome", tool_calls=None)
+        with patch("src.agent.agent.call_llm", new_callable=AsyncMock, return_value=mock_response):
+            await agent.handle("what's on my calendar?", "s1")
+        history = agent.sessions["s1"]
+        assert history[0] == {"role": "user", "content": "what's on my calendar?"}
+        assert not any("onboard" in str(m.get("content")).lower() for m in history)
+        snapshot = agent.history_snapshot("s1")
+        assert snapshot[0]["role"] == "user"
+        assert snapshot[0]["content"] == "what's on my calendar?"
+        assert not any("onboard" in str(m.get("content")).lower() for m in snapshot)
+
+    async def test_gate_note_rides_every_iteration_of_the_first_turn_only(self, agent):
+        """The note is resent on each tool-loop iteration of the gated turn
+        and is gone on the next turn."""
+        agent.config.identity_file.unlink()
+        tool_call = {
+            "id": "c1", "type": "function",
+            "function": {"name": "load_skill", "arguments": json.dumps({"name": "nope"})},
+        }
+        sent = []
+
+        async def fake_llm(model, messages, *a, **kw):
+            sent.append(list(messages))
+            if len(sent) == 1:
+                return LLMResponse(text="", tool_calls=[tool_call])
+            return LLMResponse(text="ok", tool_calls=None)
+
+        with patch("src.agent.agent.call_llm", side_effect=fake_llm):
+            await agent.handle("hi", "s1")
+            await agent.handle("Sam", "s1")
+        assert len(sent) == 3
+
+        def notes(msgs):
+            return [m for m in msgs if "Setup note" in str(m.get("content"))]
+
+        assert len(notes(sent[0])) == 1 and len(notes(sent[1])) == 1
+        assert notes(sent[2]) == []
 
     async def test_gate_stays_quiet_when_identity_exists(self, agent):
         """If identity.md exists, user's first message passes through unchanged."""
