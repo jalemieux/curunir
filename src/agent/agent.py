@@ -271,15 +271,50 @@ def _parse_skill_tools(skill_content: str) -> list[str]:
     return [t.strip() for t in tools_str.split(",") if t.strip()]
 
 
-# Sent alongside the user's first message by the onboarding gate in
-# ``Agent.handle``; the prefix lets the model tell it from the user's text.
-_ONBOARDING_NUDGE = (
-    "[Setup note from the system, not written by the user.] "
-    "The user has just connected and isn't onboarded yet. "
-    "Open with a one-line preamble like 'Since you're new, "
-    "let's get you set up — about a minute.' Then use the "
-    "`onboarding` skill to walk them through it."
-)
+_SETUP_NOTE_PREFIX = "[Setup note from the system, not written by the user.] "
+
+
+def _profile_filled(config: AgentConfig) -> bool:
+    """True once the container's shared profile holds a real fact.
+
+    The bootstrap placeholder (``context.default/profile.md``) has headings
+    only; onboarding and extraction both write ``**Fact:**`` lines.
+    """
+    try:
+        return "**Fact:**" in config.profile_file.read_text()
+    except OSError:
+        return False
+
+
+def _onboarding_nudge(config: AgentConfig) -> str:
+    """Note the onboarding gate in ``Agent.handle`` sends alongside the user's
+    first message; the prefix lets the model tell it from the user's text.
+
+    Two situations: the user is not onboarded at all (profile still the
+    placeholder), or the user is known and only this agent is new (profile
+    filled by a sibling, no identity.md here).
+    """
+    if _profile_filled(config):
+        return _SETUP_NOTE_PREFIX + (
+            "The user is already onboarded (their profile is in your context), "
+            f"but this agent ('{config.agent_name}') isn't set up yet. Use the "
+            "`onboarding` skill: don't re-ask their name or role; ask what they "
+            "want this agent specifically to know, then set up preferences and "
+            "personality."
+        )
+    nudge = _SETUP_NOTE_PREFIX + (
+        "The user has just connected and isn't onboarded yet. "
+        "Open with a one-line preamble like 'Since you're new, "
+        "let's get you set up — about a minute.' Then use the "
+        "`onboarding` skill to walk them through it."
+    )
+    if not config.is_default:
+        nudge += (
+            " You are not this container's default agent "
+            f"('{config.default_agent_name}'), so do not write the shared "
+            "profile; the `profile` skill says what to do instead."
+        )
+    return nudge
 
 
 class Agent:
@@ -584,7 +619,7 @@ class Agent:
         ):
             onboarding_note = {
                 "role": "user",
-                "content": _ONBOARDING_NUDGE,
+                "content": _onboarding_nudge(self.config),
             }
 
         if system_task_prompt:

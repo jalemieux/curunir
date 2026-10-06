@@ -20,7 +20,10 @@ Check whether `{{context}}/identity.md` exists (e.g. `bash` `test -f {{context}}
 - one section → `load_skill` that one section, follow it, exit when it returns.
 - "cancel" or anything ambiguous → say "OK, leaving things as they are." and stop.
 
-If `{{context}}/identity.md` does NOT exist, proceed to the full flow.
+If `{{context}}/identity.md` does NOT exist, check whether the user is already known: `{{shared}}/profile.md` is filled when it has a `**Fact:**` line (e.g. `bash` `grep -q -F '**Fact:**' {{shared}}/profile.md`).
+
+- Filled → another agent in this container already onboarded the user. Open with one line that uses their name, like "Hi <name>. I'm new here, so a few quick questions before we start." Then run the full flow, except that in step 1 you follow the profile skill's **Profile already set up** section: one question, saved to `{{context}}/memory/user.md`, name and role not re-asked.
+- Not filled → proceed to the full flow.
 
 ## Full flow
 
