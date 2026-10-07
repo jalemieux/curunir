@@ -1213,3 +1213,29 @@ async def test_no_aliases_is_identical_to_before(email_config, in_queue):
     assert set(client.send_reply.await_args.kwargs) == {
         "in_reply_to", "to", "subject", "text_body", "html_body",
     }
+
+
+@pytest.mark.asyncio
+async def test_bcc_to_an_alias_routes_by_x_delivered_to(email_config, in_queue):
+    """Fastmail writes no Delivered-To: it stamps X-Delivered-to with the
+    original RCPT TO (the alias) and X-Resolved-to with the final mailbox. A
+    Bcc'd alias appears only there, so the real parser has to surface it."""
+    from src.channels.fastmail import _parse_detail
+    raw = (
+        "Message-ID: <m1@example.com>\r\n"
+        "Date: Thu, 14 May 2026 15:31:00 +0000\r\n"
+        "From: alice@example.com\r\n"
+        "To: bob@example.com\r\n"
+        "X-Delivered-to: finance@curunir.ai\r\n"
+        "X-Resolved-to: jac@curunir.ai\r\n"
+        "Subject: fyi\r\n\r\nsee below\r\n"
+    ).encode()
+    detail = _parse_detail(raw)
+    assert detail["recipients"] == ["bob@example.com", "finance@curunir.ai"]
+
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    await ch._enqueue_detail(detail, "alice@example.com")
+    (incoming,) = in_queue_drain(ch)
+    assert incoming.agent == "finance"
+    assert incoming.reply_address["from"] == "finance@curunir.ai"

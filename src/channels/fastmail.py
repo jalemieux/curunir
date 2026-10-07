@@ -99,8 +99,10 @@ def _recipients(msg: email.message.Message) -> list[str]:
     """Addresses the message was sent to, lowercased, in header order.
 
     ``To`` first, then ``Cc``, then the delivery headers, which are how a
-    Bcc'd alias can still show up: ``Delivered-To`` and ``X-Delivered-To``
-    (servers differ on which they stamp). Duplicates are dropped.
+    Bcc'd alias still shows up. Fastmail stamps ``X-Delivered-to`` with the
+    original RCPT TO (the alias) and writes no ``Delivered-To``; that one is
+    read too for other servers. ``X-Resolved-to`` (the final mailbox) is
+    not: it never names an alias. Duplicates are dropped.
     """
     out: list[str] = []
     for header in ("To", "Cc", "Delivered-To", "X-Delivered-To"):
