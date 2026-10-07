@@ -63,6 +63,9 @@ class AgentEntry:
     # When a sibling should route a request here: the manifest's per-agent
     # `handles`, else the persona's. Empty → `description` is the hint.
     handles: str = ""
+    # Optional alias on the container's mailbox (lowercased). Inbound mail
+    # addressed to it is routed to this agent and answered From it.
+    email: str | None = None
 
     @property
     def routing_hint(self) -> str:
@@ -113,6 +116,11 @@ class ContainerManifest:
         return [a for a in self.agents if a.name != name]
 
     @property
+    def email_addresses(self) -> dict[str, str]:
+        """Per-agent mailbox aliases as ``{address: agent name}``."""
+        return {a.email: a.name for a in self.agents if a.email}
+
+    @property
     def outbound_containers(self) -> list[str]:
         return [c for c in self.outbound if c != USER]
 
@@ -144,6 +152,15 @@ def _as_list(value, what: str) -> list:
     if not isinstance(value, list):
         raise ValueError(f"container manifest: `{what}` must be a list")
     return value
+
+
+def _is_address(value: str) -> bool:
+    """A bare ``local@domain`` address: no display name, no whitespace."""
+    local, at, domain = value.partition("@")
+    return bool(
+        at and local and "." in domain.strip(".") and "@" not in domain
+        and not any(c.isspace() or c in "<>,;\"" for c in value)
+    )
 
 
 def _parse_list(data: dict, key: str) -> tuple[str, ...]:
@@ -187,6 +204,7 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
 
     entries: list[AgentEntry] = []
     seen: set[str] = set()
+    seen_emails: dict[str, str] = {}
     for raw in raw_agents:
         if isinstance(raw, str):
             raw = {"name": raw}
@@ -217,10 +235,25 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
         handles = raw.get("handles")
         if handles is not None and not isinstance(handles, str):
             raise ValueError(f"container manifest: agent {agent_name!r} has an invalid `handles`")
+        agent_email = raw.get("email")
+        if agent_email is not None:
+            if not isinstance(agent_email, str) or not _is_address(agent_email.strip()):
+                raise ValueError(
+                    f"container manifest: agent {agent_name!r} has an invalid `email` "
+                    "(expected a bare address like finance@example.com)"
+                )
+            agent_email = agent_email.strip().lower()
+            if agent_email in seen_emails:
+                raise ValueError(
+                    f"container manifest: agents {seen_emails[agent_email]!r} and "
+                    f"{agent_name!r} share the email address {agent_email!r}"
+                )
+            seen_emails[agent_email] = agent_name
         entries.append(AgentEntry(
             name=agent_name, persona=persona_name, context=context.strip(),
             default=bool(raw.get("default", False)), description=persona.description,
             handles=" ".join((handles or "").split()) or persona.handles,
+            email=agent_email,
         ))
 
     defaults = [a for a in entries if a.default]
@@ -231,6 +264,12 @@ def load_container(path: Path | str, environ: Mapping[str, str] | None = None) -
         raise ValueError(
             "container manifest: exactly one agent must have `default: true` "
             f"(found {len(defaults)})"
+        )
+    if defaults[0].email:
+        logger.info(
+            "container manifest: default agent %r sets `email` (%s); it already "
+            "receives mail addressed to no agent, so this only changes its From",
+            defaults[0].name, defaults[0].email,
         )
     contexts = [a.context for a in entries]
     if len(set(contexts)) != len(contexts):

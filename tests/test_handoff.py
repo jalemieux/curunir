@@ -186,6 +186,26 @@ def test_email_delivery_starts_a_new_thread_to_the_user(peer):
     }
 
 
+def test_email_delivery_answers_from_the_receiving_agents_alias():
+    """#587: a handoff answered by email goes out From the target agent's
+    alias when it has one, and From the inbox (no `from`) otherwise."""
+    agents = (
+        AgentEntry("finance", "finance", ".", True, "money"),
+        AgentEntry("medical", "default", "agents/medical", False, "health",
+                   email="medical@curunir.ai"),
+    )
+    queue: asyncio.Queue = asyncio.Queue()
+    channel = PeerChannel(
+        queue, _vault(user_delivery="email", agents=agents), environ=ENV,
+        delivery_address={"to": "me@example.com", "subject": "Handoff", "new_thread": True},
+    )
+    client = TestClient(channel.app)
+    assert _post(client, _payload(handoff_id="h1", to_agent="medical")).status_code == 202
+    assert queue.get_nowait().reply_address["from"] == "medical@curunir.ai"
+    assert _post(client, _payload(handoff_id="h2")).status_code == 202
+    assert "from" not in queue.get_nowait().reply_address
+
+
 def test_peer_channel_refuses_a_container_with_no_inbound_peer():
     with pytest.raises(ValueError):
         PeerChannel(asyncio.Queue(), _vault(inbound=("user",)), environ=ENV)

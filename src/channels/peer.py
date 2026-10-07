@@ -172,10 +172,14 @@ class PeerChannel:
             self._seen.popitem(last=False)
         return False
 
-    def _reply_address(self, sender: str) -> dict:
+    def _reply_address(self, sender: str, to_agent: str | None = None) -> dict:
         address = dict(self.delivery_address)
         if "subject" in address:  # email: name the sender in the new thread
             address["subject"] = f"Handoff from {sender}"
+            # ...and answer From the receiving agent's alias, if it has one.
+            entry = self.manifest.agent(to_agent) if to_agent else self.manifest.default_agent
+            if entry is not None and entry.email:
+                address["from"] = entry.email
         return address
 
     # --- app ---------------------------------------------------------------
@@ -239,7 +243,7 @@ class PeerChannel:
                 content=wrap_handoff(sender, from_agent, note, context),
                 channel=self.delivery_channel,
                 session_id=f"{SESSION_PREFIX}{handoff_id}",
-                reply_address=self._reply_address(sender),
+                reply_address=self._reply_address(sender, to_agent),
                 agent=to_agent,
             )
             await self.in_queue.put(msg)

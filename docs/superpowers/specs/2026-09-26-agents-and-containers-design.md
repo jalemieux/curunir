@@ -352,9 +352,9 @@ The rest of `main` changes shape only where it assumed one agent:
   unknown agent-to-portal frame types with a warning (`ws_agent.py:151`), so
   advertising the agent list to the portal browser needs a service change.
   That is why the portal picker is phase 4.
-- **Email** routes to the default agent. Per-address routing (e.g.
-  `finance@`) is out of scope. Email state is shared (one mailbox per
-  container).
+- **Email** routes to the default agent unless the mail is addressed to
+  an agent's `email` alias (per-address routing, added later in #587).
+  Email state is shared (one mailbox per container).
 - **Session ids** are unique per agent store, since each agent has its own
   `conversations/`. The fixed ids (`portal`, `local`, `scratch`) are reserved
   for the default agent. UIs mint UUIDs for every other agent's
@@ -519,7 +519,7 @@ Each phase is its own PR and is shippable alone:
 4. **Later, out of scope here.**
    - a portal UI agent picker (needs the service to forward an `agents`
      frame; payload routing already passes the field through)
-   - per-address email routing
+   - per-address email routing (since done, #587)
    - reply-to-handoff threads
 
 ## Testing

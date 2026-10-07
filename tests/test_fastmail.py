@@ -572,3 +572,80 @@ def test_build_client_from_env_constructs_client(monkeypatch):
     assert c.inbox == "jac@curunir.ai"
     assert c.allowed_recipients == ["a@x.com", "b@x.com"]
     assert c.restrict_outbound is False
+
+
+# --- recipients and From alias (#587) ------------------------------------
+
+def test_normalize_envelope_returns_recipients_in_header_order():
+    raw = _header_bytes(**{
+        "Message-ID": "<m1@curunir.ai>",
+        "From": "alice@example.com",
+        "To": '"Finance" <Finance@Curunir.ai>, jac@curunir.ai',
+        "Cc": "bob@example.com, finance@curunir.ai",
+        "Delivered-To": "jac@curunir.ai",
+    })
+    msg = _normalize_envelope(raw, internaldate=None)
+    assert msg["recipients"] == ["finance@curunir.ai", "jac@curunir.ai", "bob@example.com"]
+
+
+def test_normalize_envelope_recipients_empty_when_headers_absent():
+    raw = _header_bytes(**{"Message-ID": "<m1@curunir.ai>", "From": "alice@example.com"})
+    assert _normalize_envelope(raw, internaldate=None)["recipients"] == []
+
+
+def test_parse_detail_returns_recipients():
+    from src.channels.fastmail import _parse_detail
+    raw = (
+        "Message-ID: <m1@curunir.ai>\r\nFrom: alice@example.com\r\n"
+        "To: jac@curunir.ai\r\nDelivered-To: finance@curunir.ai\r\n"
+        "X-Delivered-To: coach@curunir.ai\r\n"
+        "Subject: hi\r\n\r\nbody\r\n"
+    ).encode()
+    assert _parse_detail(raw)["recipients"] == [
+        "jac@curunir.ai", "finance@curunir.ai", "coach@curunir.ai",
+    ]
+
+
+def test_fetch_envelope_asks_for_the_recipient_headers(client):
+    imap = MagicMock()
+    imap.uid.return_value = ("NO", None)
+    client._fetch_envelope(imap, b"1")
+    fields = imap.uid.call_args.args[2]
+    for header in ("TO", "CC", "DELIVERED-TO", "X-DELIVERED-TO"):
+        assert f" {header} " in fields
+
+
+def test_send_reply_honours_from_addr_and_keeps_the_message_id(client):
+    import asyncio
+    ids = {}
+    for from_addr in (None, "finance@curunir.ai"):
+        holder, factory = _capture_smtp()
+        with patch("src.channels.fastmail.smtplib.SMTP_SSL", side_effect=factory):
+            asyncio.run(client.send_reply(
+                in_reply_to="<m1@curunir.ai>", to="alice@example.com", text_body="Hi",
+                subject="Re: hello", from_addr=from_addr,
+            ))
+        msg = holder["smtp"].sent[0]
+        assert msg["From"] == (from_addr or "jac@curunir.ai")
+        ids[from_addr] = msg["Message-ID"]
+    # The alias does not change the stable reply id, so retry dedup holds.
+    assert ids[None] == ids["finance@curunir.ai"]
+
+
+def test_send_email_and_attachments_honour_from_addr(client, tmp_path):
+    import asyncio
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    holder, factory = _capture_smtp()
+    with patch("src.channels.fastmail.smtplib.SMTP_SSL", side_effect=factory):
+        asyncio.run(client.send_email(
+            to="alice@example.com", subject="s", text_body="b", from_addr="finance@curunir.ai",
+        ))
+    assert holder["smtp"].sent[0]["From"] == "finance@curunir.ai"
+    holder, factory = _capture_smtp()
+    with patch("src.channels.fastmail.smtplib.SMTP_SSL", side_effect=factory):
+        asyncio.run(client.send_with_attachments(
+            in_reply_to="<m1@curunir.ai>", to="alice@example.com", subject="s",
+            text_body="b", attachment_paths=[str(f)], from_addr="finance@curunir.ai",
+        ))
+    assert holder["smtp"].sent[0]["From"] == "finance@curunir.ai"
