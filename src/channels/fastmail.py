@@ -98,11 +98,12 @@ def _to_iso_utc(dt: datetime | None) -> str | None:
 def _recipients(msg: email.message.Message) -> list[str]:
     """Addresses the message was sent to, lowercased, in header order.
 
-    ``To`` first, then ``Cc``, then ``Delivered-To`` (which is how a Bcc'd or
-    list-expanded alias still shows up). Duplicates are dropped.
+    ``To`` first, then ``Cc``, then the delivery headers, which are how a
+    Bcc'd alias can still show up: ``Delivered-To`` and ``X-Delivered-To``
+    (servers differ on which they stamp). Duplicates are dropped.
     """
     out: list[str] = []
-    for header in ("To", "Cc", "Delivered-To"):
+    for header in ("To", "Cc", "Delivered-To", "X-Delivered-To"):
         values = [str(v) for v in msg.get_all(header) or []]
         for _, addr in getaddresses(values):
             addr = addr.strip().lower()
@@ -352,7 +353,7 @@ class FastmailClient:
             "fetch",
             uid,
             "(INTERNALDATE BODY.PEEK[HEADER.FIELDS "
-            "(MESSAGE-ID DATE FROM TO CC DELIVERED-TO SUBJECT REFERENCES IN-REPLY-TO)])",
+            "(MESSAGE-ID DATE FROM TO CC DELIVERED-TO X-DELIVERED-TO SUBJECT REFERENCES IN-REPLY-TO)])",
         )
         if status != "OK" or not data:
             return None

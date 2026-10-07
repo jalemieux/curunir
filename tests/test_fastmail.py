@@ -598,9 +598,12 @@ def test_parse_detail_returns_recipients():
     raw = (
         "Message-ID: <m1@curunir.ai>\r\nFrom: alice@example.com\r\n"
         "To: jac@curunir.ai\r\nDelivered-To: finance@curunir.ai\r\n"
+        "X-Delivered-To: coach@curunir.ai\r\n"
         "Subject: hi\r\n\r\nbody\r\n"
     ).encode()
-    assert _parse_detail(raw)["recipients"] == ["jac@curunir.ai", "finance@curunir.ai"]
+    assert _parse_detail(raw)["recipients"] == [
+        "jac@curunir.ai", "finance@curunir.ai", "coach@curunir.ai",
+    ]
 
 
 def test_fetch_envelope_asks_for_the_recipient_headers(client):
@@ -608,7 +611,7 @@ def test_fetch_envelope_asks_for_the_recipient_headers(client):
     imap.uid.return_value = ("NO", None)
     client._fetch_envelope(imap, b"1")
     fields = imap.uid.call_args.args[2]
-    for header in ("TO", "CC", "DELIVERED-TO"):
+    for header in ("TO", "CC", "DELIVERED-TO", "X-DELIVERED-TO"):
         assert f" {header} " in fields
 
 
