@@ -12,7 +12,8 @@ name: home
 agents:
   # The legacy agent keeps context/ as its context (`context: .`), so an
   # existing deployment gains siblings without moving a single file. It is
-  # the default: it receives every message that names no agent, and email.
+  # the default: it receives every message that names no agent, and all
+  # email not addressed to another agent's `email` alias.
   - name: everyday
     persona: default
     context: .
@@ -26,6 +27,11 @@ agents:
     # their ask_agent / handoff tool descriptions, so routing can be tuned for
     # this mix of agents without editing the persona.
     # handles: Questions about the household's money, including the mortgage.
+    # Optional: an alias on the container's one mailbox (same Fastmail
+    # account, so it lands in the same INBOX). Mail sent To/Cc this address
+    # goes to this agent and is answered From it; all other mail goes to the
+    # default agent. Must be unique across agents.
+    # email: finance@example.com
 
 # Who may send to this container and where its messages may go. `user` must
 # be in both. Naming another container requires a `peers` entry whose

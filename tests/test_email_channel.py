@@ -569,7 +569,7 @@ async def test_poll_once_skips_failed_attachment_but_keeps_message(email_config,
     assert incoming.attachments is None  # download failed → no manifest entry
 
 
-from src.channels.base import OutgoingMessage
+from src.channels.base import IncomingMessage, OutgoingMessage
 
 
 def _outgoing(content, *, reply_address, attachments=None, final=True):
@@ -1061,3 +1061,155 @@ async def test_poll_transient_failure_pins_cursor_but_processes_newer(email_conf
     assert [i.reply_address["in_reply_to"] for i in items] == ["m_new"]
     # Cursor pinned behind the failed older message so it is retried.
     assert ch.state.is_after_cursor(datetime(2026, 5, 14, 15, 31, 0, tzinfo=_UTC), "m_old")
+
+
+# --- per-agent addresses (#587) ------------------------------------------
+
+_ALIASES = {"finance@curunir.ai": "finance", "coach@curunir.ai": "coach"}
+
+
+def _make_routed_channel(in_queue, config, client, aliases=_ALIASES):
+    with patch("src.channels.email.FastmailClient", return_value=client):
+        return EmailChannel(in_queue, config, agent_addresses=aliases)
+
+
+async def _poll_one_to(ch, client, recipients, mid="m1", from_email="alice@example.com"):
+    """Poll one inbound whose detail carries the given recipient list."""
+    client.list_messages.return_value = {
+        "messages": [_msg(mid, ts="2026-05-14T15:31:00Z", from_email=from_email)],
+        "next_cursor": None,
+    }
+    client.get_message.side_effect = lambda m: {
+        **_detail(m, from_email=from_email), "recipients": recipients,
+    }
+    ch.state.set_cursor(datetime(2026, 5, 14, 15, 0, 0, tzinfo=_UTC), "")
+    await ch._poll_once()
+    return in_queue_drain(ch)
+
+
+@pytest.mark.asyncio
+async def test_mail_to_an_agent_alias_is_routed_to_that_agent(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    (incoming,) = await _poll_one_to(ch, client, ["finance@curunir.ai"])
+    assert incoming.agent == "finance"
+    assert incoming.reply_address["from"] == "finance@curunir.ai"
+    # Persisted with the ledger entry, so a restart keeps the alias.
+    assert ch.state.pending["m1"].reply_address["from"] == "finance@curunir.ai"
+
+
+@pytest.mark.asyncio
+async def test_mail_to_the_inbox_goes_to_the_default_agent(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    (incoming,) = await _poll_one_to(ch, client, ["jac@curunir.ai"])
+    assert incoming.agent is None
+    assert "from" not in incoming.reply_address
+
+
+@pytest.mark.asyncio
+async def test_cc_match_routes_and_first_alias_in_header_order_wins(email_config, in_queue, caplog):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    # `recipients` is To, then Cc, then Delivered-To: the inbox was in To,
+    # coach and finance in Cc.
+    with caplog.at_level("INFO", logger="src.channels.email"):
+        (incoming,) = await _poll_one_to(
+            ch, client, ["jac@curunir.ai", "coach@curunir.ai", "finance@curunir.ai"],
+        )
+    assert incoming.agent == "coach"
+    assert incoming.reply_address["from"] == "coach@curunir.ai"
+    assert "addressed to several agents" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sender_allowlist_applies_before_routing(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    incoming = await _poll_one_to(
+        ch, client, ["finance@curunir.ai"], from_email="mallory@example.com",
+    )
+    assert incoming == []
+    client.get_message.assert_not_called()
+    assert ch.state.pending == {}
+
+
+@pytest.mark.asyncio
+async def test_reply_is_sent_from_the_alias(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    (incoming,) = await _poll_one_to(ch, client, ["finance@curunir.ai"])
+    await ch.send(_outgoing("the answer", reply_address=incoming.reply_address))
+    assert client.send_reply.await_args.kwargs["from_addr"] == "finance@curunir.ai"
+    assert "m1" not in ch.state.pending
+
+    # With attachments too.
+    (incoming,) = await _poll_one_to(ch, client, ["finance@curunir.ai"], mid="m2")
+    await ch.send(_outgoing(
+        "see attached", reply_address=incoming.reply_address,
+        attachments=[{"path": "/tmp/x.pdf"}],
+    ))
+    assert client.send_with_attachments.await_args.kwargs["from_addr"] == "finance@curunir.ai"
+
+
+@pytest.mark.asyncio
+async def test_retried_send_reuses_the_alias_from_the_ledger(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    (incoming,) = await _poll_one_to(ch, client, ["finance@curunir.ai"])
+    client.send_reply.side_effect = FastmailError("outage")
+    await ch.send(_outgoing("the answer", reply_address=incoming.reply_address))
+    assert ch.state.pending["m1"].status == "retry"
+
+    # A restart in between: the alias has to come back from disk.
+    restarted = _make_routed_channel(in_queue, email_config, client)
+    client.send_reply.side_effect = None
+    client.send_reply.reset_mock()
+    await restarted._drain_retries()
+    client.send_reply.assert_awaited_once()
+    assert client.send_reply.await_args.kwargs["from_addr"] == "finance@curunir.ai"
+    assert "m1" not in restarted.state.pending
+
+
+@pytest.mark.asyncio
+async def test_from_that_is_not_a_configured_alias_falls_back_to_the_inbox(email_config, in_queue):
+    """A stale ledger entry (alias removed from the manifest) or any other
+    value in a reply address must not become the From header."""
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    await ch.send(_outgoing("hi", reply_address={
+        "to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m9",
+        "from": "ceo@elsewhere.example",
+    }))
+    assert "from_addr" not in client.send_reply.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_new_thread_send_uses_the_alias(email_config, in_queue):
+    client = AsyncMock()
+    ch = _make_routed_channel(in_queue, email_config, client)
+    await ch.send(_outgoing("answer", reply_address={
+        "to": "alice@example.com", "subject": "Handoff from home", "new_thread": True,
+        "from": "finance@curunir.ai",
+    }))
+    assert client.send_email.await_args.kwargs["from_addr"] == "finance@curunir.ai"
+
+
+@pytest.mark.asyncio
+async def test_no_aliases_is_identical_to_before(email_config, in_queue):
+    """Golden: a container with no agent addresses builds the same
+    IncomingMessage and makes the same client call as before #587, even when
+    the mail's recipients are known."""
+    client = AsyncMock()
+    ch, _ = _make_channel(in_queue, email_config, client=client)
+    (incoming,) = await _poll_one_to(ch, client, ["jac@curunir.ai", "finance@curunir.ai"])
+    assert incoming == IncomingMessage(
+        content="[channel: email, from: alice@example.com]\nhi body",
+        channel="email", session_id="t1",
+        reply_address={"to": "alice@example.com", "subject": "Re: hi", "in_reply_to": "m1"},
+        attachments=None,
+    )
+    await ch.send(_outgoing("# Hi back", reply_address=incoming.reply_address))
+    assert set(client.send_reply.await_args.kwargs) == {
+        "in_reply_to", "to", "subject", "text_body", "html_body",
+    }

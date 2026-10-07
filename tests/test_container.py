@@ -289,3 +289,38 @@ async def test_route_inbound_reserved_session_ids_belong_to_the_default_agent(si
     # ...but the default agent may use them
     await _route_one(c, _msg(None, sid=sid))
     assert c.queues["everyday"].get_nowait().session_id == sid
+
+
+# --- per-agent email addresses (#587) ----------------------------------------
+
+def test_agent_email_is_parsed_and_lowercased(personas, tmp_path):
+    m = load_container(_write(tmp_path, TWO_AGENTS + "    email: Finance@Curunir.AI\n"), environ={})
+    assert m.agent("finance").email == "finance@curunir.ai"
+    assert m.agent("everyday").email is None
+    assert m.email_addresses == {"finance@curunir.ai": "finance"}
+
+
+def test_no_agent_email_by_default(personas, tmp_path):
+    assert load_container(_write(tmp_path, TWO_AGENTS), environ={}).email_addresses == {}
+    assert synthesize_container("finance").email_addresses == {}
+    assert synthesize_container("finance").default_agent.email is None
+
+
+@pytest.mark.parametrize("yaml_text, message", [
+    (TWO_AGENTS + "    email: FINANCE@curunir.ai\n  - name: marketing\n    email: finance@curunir.ai\n",
+     "agents 'finance' and 'marketing' share the email address 'finance@curunir.ai'"),
+    (TWO_AGENTS + "    email: not-an-address\n", "agent 'finance' has an invalid `email`"),
+    (TWO_AGENTS + "    email: 'Finance <finance@curunir.ai>'\n", "agent 'finance' has an invalid `email`"),
+    (TWO_AGENTS + "    email: [finance@curunir.ai]\n", "agent 'finance' has an invalid `email`"),
+])
+def test_agent_email_validation_errors(personas, tmp_path, yaml_text, message):
+    with pytest.raises(ValueError, match=__import__("re").escape(message)):
+        load_container(_write(tmp_path, yaml_text), environ={})
+
+
+def test_default_agent_email_is_allowed_and_logged(personas, tmp_path, caplog):
+    text = TWO_AGENTS.replace("    default: true\n", "    default: true\n    email: home@curunir.ai\n")
+    with caplog.at_level("INFO", logger="src.container"):
+        m = load_container(_write(tmp_path, text), environ={})
+    assert m.default_agent.email == "home@curunir.ai"
+    assert "default agent 'everyday' sets `email`" in caplog.text

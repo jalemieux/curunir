@@ -29,9 +29,19 @@ _REPLY_PREFIXES = ("re:", "fw:", "fwd:")
 
 
 class EmailChannel:
-    def __init__(self, in_queue: asyncio.Queue, config: EmailChannelConfig):
+    def __init__(
+        self, in_queue: asyncio.Queue, config: EmailChannelConfig,
+        agent_addresses: dict[str, str] | None = None,
+    ):
         self.in_queue = in_queue
         self.config = config
+        # Per-agent aliases on this one mailbox, ``{address: agent name}``
+        # (the manifest's `email` fields). Inbound mail addressed to one is
+        # routed to that agent and answered From it; anything else goes to
+        # the default agent From the inbox, as before.
+        self.agent_addresses = {
+            addr.lower(): name for addr, name in (agent_addresses or {}).items()
+        }
         self.client = FastmailClient(
             imap_host=config.imap_host,
             smtp_host=config.smtp_host,
@@ -226,6 +236,35 @@ class EmailChannel:
         await self._enqueue_detail(detail, sender)
         return True
 
+    def _route(self, detail: dict[str, Any]) -> tuple[str | None, str | None]:
+        """``(agent, alias)`` for an inbound message, by recipient address.
+
+        The first recipient (To, then Cc, then Delivered-To) that is an
+        agent's alias wins. No match → ``(None, None)``: the default agent.
+        """
+        if not self.agent_addresses:
+            return None, None
+        matches = [r for r in detail.get("recipients") or [] if r in self.agent_addresses]
+        if not matches:
+            return None, None
+        agents = list(dict.fromkeys(self.agent_addresses[m] for m in matches))
+        if len(agents) > 1:
+            logger.info(
+                "Email %s is addressed to several agents (%s); routing to %s",
+                detail.get("message_id"), ", ".join(agents), agents[0],
+            )
+        return self.agent_addresses[matches[0]], matches[0]
+
+    def _from_for(self, address: dict[str, Any]) -> str | None:
+        """The alias to send From, or None for the inbox.
+
+        Only a currently configured agent alias is honoured, so a stale
+        ledger entry (alias since removed from the manifest) or any other
+        value in a reply address falls back to the inbox.
+        """
+        from_addr = str(address.get("from") or "").lower()
+        return from_addr if from_addr in self.agent_addresses else None
+
     async def _enqueue_detail(self, detail: dict[str, Any], sender: str) -> None:
         """Build an IncomingMessage from a message detail, record it in the
         pending-reply ledger, and enqueue it.
@@ -254,6 +293,11 @@ class EmailChannel:
             "subject": reply_subject,
             "in_reply_to": message_id,
         }
+        agent, alias = self._route(detail)
+        if alias:
+            # Persisted with the ledger entry, so the reply (and any retry
+            # of it) goes out From the address the user wrote to.
+            reply_address["from"] = alias
         self.state.add_pending(
             message_id,
             created_at=self._parse_ts(detail.get("created_at", "")),
@@ -266,10 +310,12 @@ class EmailChannel:
             session_id=thread_id,
             reply_address=reply_address,
             attachments=attachments,
+            agent=agent,
         )
         await self.in_queue.put(incoming)
-        logger.info("Queued email from %s (thread %s): %s",
-                    sender, incoming.session_id, subject)
+        logger.info("Queued email from %s (thread %s)%s: %s",
+                    sender, incoming.session_id,
+                    f" for agent {agent}" if agent else "", subject)
 
     async def _process_attachments(
         self, detail: dict[str, Any], thread_id: str
@@ -373,6 +419,9 @@ class EmailChannel:
             "html_body": render_html(msg.content) or None,
             "attachment_paths": paths,
         }
+        from_addr = self._from_for(msg.reply_address)
+        if from_addr:
+            payload["from"] = from_addr
         try:
             await self._dispatch_reply(in_reply_to, payload)
         except FastmailError as e:
@@ -393,11 +442,13 @@ class EmailChannel:
 
     async def _send_new_thread(self, msg: OutgoingMessage, to: str, subject: str) -> None:
         paths = [a["path"] for a in (msg.attachments or []) if a.get("path")]
+        from_addr = self._from_for(msg.reply_address)
         try:
             await self.client.send_email(
                 to=to, subject=subject, text_body=msg.content,
                 html_body=render_html(msg.content) or None,
                 attachment_paths=paths or None,
+                **({"from_addr": from_addr} if from_addr else {}),
             )
         except FastmailError:
             self._note_failure()
@@ -407,6 +458,8 @@ class EmailChannel:
 
     async def _dispatch_reply(self, in_reply_to: str, payload: dict[str, Any]) -> None:
         """Send a reply payload via the appropriate Fastmail SMTP method."""
+        from_addr = self._from_for(payload)
+        sender = {"from_addr": from_addr} if from_addr else {}
         if payload.get("attachment_paths"):
             await self.client.send_with_attachments(
                 in_reply_to=in_reply_to,
@@ -415,6 +468,7 @@ class EmailChannel:
                 text_body=payload["text_body"],
                 attachment_paths=payload["attachment_paths"],
                 html_body=payload.get("html_body"),
+                **sender,
             )
         else:
             await self.client.send_reply(
@@ -423,6 +477,7 @@ class EmailChannel:
                 subject=payload.get("subject", ""),
                 text_body=payload["text_body"],
                 html_body=payload.get("html_body"),
+                **sender,
             )
 
     def _next_retry_at(self, attempts_after: int) -> datetime:

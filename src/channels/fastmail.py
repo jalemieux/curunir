@@ -95,6 +95,22 @@ def _to_iso_utc(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
+def _recipients(msg: email.message.Message) -> list[str]:
+    """Addresses the message was sent to, lowercased, in header order.
+
+    ``To`` first, then ``Cc``, then ``Delivered-To`` (which is how a Bcc'd or
+    list-expanded alias still shows up). Duplicates are dropped.
+    """
+    out: list[str] = []
+    for header in ("To", "Cc", "Delivered-To"):
+        values = [str(v) for v in msg.get_all(header) or []]
+        for _, addr in getaddresses(values):
+            addr = addr.strip().lower()
+            if addr and addr not in out:
+                out.append(addr)
+    return out
+
+
 def _normalize_envelope(header_bytes: bytes, internaldate: datetime | None) -> dict[str, Any]:
     """Map an inbound message's envelope headers to the channel's dict shape."""
     msg = email.message_from_bytes(header_bytes)
@@ -112,6 +128,7 @@ def _normalize_envelope(header_bytes: bytes, internaldate: datetime | None) -> d
         "message_id": message_id,
         "created_at": _to_iso_utc(created),
         "from_email": (msg.get("From") or "").strip(),
+        "recipients": _recipients(msg),
         "subject": _decode_mime_header(msg.get("Subject")),
         "thread_id": _thread_root(
             message_id=message_id,
@@ -192,6 +209,7 @@ def _parse_detail(raw_bytes: bytes) -> dict[str, Any]:
     return {
         "message_id": message_id,
         "from_email": (msg.get("From") or "").strip(),
+        "recipients": _recipients(msg),
         "subject": _decode_mime_header(msg.get("Subject")),
         "text_body": text_body,
         "html_body": html_body,
@@ -334,7 +352,7 @@ class FastmailClient:
             "fetch",
             uid,
             "(INTERNALDATE BODY.PEEK[HEADER.FIELDS "
-            "(MESSAGE-ID DATE FROM SUBJECT REFERENCES IN-REPLY-TO)])",
+            "(MESSAGE-ID DATE FROM TO CC DELIVERED-TO SUBJECT REFERENCES IN-REPLY-TO)])",
         )
         if status != "OK" or not data:
             return None
@@ -426,9 +444,10 @@ class FastmailClient:
         cc: list[str] | None = None,
         in_reply_to: str | None = None,
         attachment_paths: list[str] | None = None,
+        from_addr: str | None = None,
     ) -> EmailMessage:
         msg = EmailMessage()
-        msg["From"] = self.inbox
+        msg["From"] = from_addr or self.inbox
         msg["To"] = ", ".join(to)
         if cc:
             msg["Cc"] = ", ".join(cc)
@@ -465,12 +484,13 @@ class FastmailClient:
         text_body: str,
         subject: str = "",
         html_body: str | None = None,
+        from_addr: str | None = None,
     ) -> dict[str, Any]:
         self._check_recipients_allowed(to)
         message_id = _stable_reply_msgid(in_reply_to, self._domain)
         msg = self._build_message(
             to=[to], subject=subject, text_body=text_body, html_body=html_body,
-            message_id=message_id, in_reply_to=in_reply_to,
+            message_id=message_id, in_reply_to=in_reply_to, from_addr=from_addr,
         )
         await asyncio.to_thread(self._smtp_send, msg)
         return {"id": message_id}
@@ -484,13 +504,14 @@ class FastmailClient:
         text_body: str,
         attachment_paths: list[str],
         html_body: str | None = None,
+        from_addr: str | None = None,
     ) -> dict[str, Any]:
         self._check_recipients_allowed(to)
         message_id = _stable_reply_msgid(in_reply_to, self._domain)
         msg = self._build_message(
             to=[to], subject=subject, text_body=text_body, html_body=html_body,
             message_id=message_id, in_reply_to=in_reply_to,
-            attachment_paths=attachment_paths,
+            attachment_paths=attachment_paths, from_addr=from_addr,
         )
         await asyncio.to_thread(self._smtp_send, msg)
         return {"id": message_id}
@@ -505,6 +526,7 @@ class FastmailClient:
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         attachment_paths: list[str] | None = None,
+        from_addr: str | None = None,
     ) -> dict[str, Any]:
         """Send a new (cold) outbound email — no threading headers."""
         to_list = [to] if isinstance(to, str) else list(to)
@@ -513,6 +535,7 @@ class FastmailClient:
         msg = self._build_message(
             to=to_list, subject=subject, text_body=text_body, html_body=html_body,
             message_id=message_id, cc=cc, attachment_paths=attachment_paths,
+            from_addr=from_addr,
         )
         # bcc recipients are added to the envelope but not a visible header.
         bcc_list = list(bcc or [])

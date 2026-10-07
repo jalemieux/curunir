@@ -904,7 +904,9 @@ async def main():
         if not email_config.user or not email_config.password:
             logger.error("EMAIL_ENABLED=true but FASTMAIL_USER or FASTMAIL_PASSWORD is unset; skipping email channel")
         else:
-            email_channel = EmailChannel(in_queue, email_config)
+            email_channel = EmailChannel(
+                in_queue, email_config, agent_addresses=manifest.email_addresses,
+            )
             channels["email"] = email_channel
             logger.info("Email channel enabled for inbox %s (poll every %ds)",
                         email_config.inbox, email_config.poll_interval_sec)
