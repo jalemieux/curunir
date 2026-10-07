@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from src.persona import load_persona
+
 from src.skills import (
     build_skill_manifest,
     load_registry,
@@ -381,6 +383,38 @@ def test_allowlist_filters_registry(tmp_path):
         _write_allowlist_skill(skills_dir, n)
     reg = load_registry([skills_dir], allowlist={"identity", "financial-analysis"})
     assert set(reg) == {"identity", "financial-analysis"}
+
+
+def test_allowlisted_skill_brings_its_nested_sub_skills(tmp_path):
+    """Allowing `onboarding` must allow the sub-skills it loads by name
+    (onboarding/profile, ...), or the flow dead-ends on "Skill not found"."""
+    skills_dir = tmp_path / "skills"
+    for n in ["onboarding", "onboarding/profile", "onboarding/personality", "web-search"]:
+        d = skills_dir / n
+        d.mkdir(parents=True)
+        leaf = n.split("/")[-1]
+        (d / "SKILL.md").write_text(f"---\nname: {leaf}\ndescription: d\n---\n\nbody of {leaf}\n")
+
+    reg = load_registry([skills_dir], allowlist={"onboarding"})
+    assert set(reg) == {"onboarding", "profile", "personality"}
+    assert "body of profile" in load_skill("profile", [skills_dir], allowlist={"onboarding"})
+    # the parent is not implied by a child, and siblings stay out
+    assert set(load_registry([skills_dir], allowlist={"profile"})) == {"profile"}
+
+
+def test_shipped_personas_can_finish_onboarding():
+    """Every shipped persona that allows `onboarding` reaches the three
+    sub-skills the orchestrator loads; `personality` writes identity.md."""
+    repo = Path(__file__).resolve().parent.parent
+    checked = 0
+    for persona_file in sorted((repo / "personas").glob("*/persona.yaml")):
+        allow = load_persona(persona_file.parent.name).skills
+        if allow is None or "onboarding" not in allow:
+            continue
+        reg = load_registry([repo / "skills"], allowlist=set(allow))
+        assert {"profile", "preferences", "personality"} <= set(reg), persona_file
+        checked += 1
+    assert checked
 
 
 def test_no_allowlist_returns_all(tmp_path):

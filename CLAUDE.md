@@ -186,7 +186,7 @@ allowlist (omit `skills:` to allow every skill on disk) and key *names* for
 a soft startup warning. Core tools are universal — personas do not curate
 them. The allowlist is plumbed through `build_skill_manifest`, `load_skill`,
 `portal_skill_list`, and the slash-command resolver so a curated persona
-cannot reach skills outside its allowlist.
+cannot reach skills outside its allowlist. One exception, in `load_registry`: an allowed skill brings the sub-skills nested under its own directory (today only `onboarding/profile`, `onboarding/preferences`, `onboarding/personality`), because the parent loads them by name; without it a curated persona's onboarding dead-ends on "Skill not found" and never writes `identity.md`.
 
 `personas/<name>/prompts/*.md` is read directly from the bundle (sorted by
 filename, e.g. `10-domain.md` then `20-guardrails.md`) and appended to the
