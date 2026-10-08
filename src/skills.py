@@ -55,8 +55,9 @@ def load_registry(
     `build_skill_manifest` omits them from the agent's system prompt.
 
     When `allowlist` is given, the registry is filtered down to only those
-    skill names (an absolute persona allowlist); names in the allowlist that
-    match no discovered skill are logged as warnings. `None` leaves the
+    skill names (an absolute persona allowlist) plus the sub-skills nested
+    under an allowed skill's directory; names in the allowlist that match no
+    discovered skill are logged as warnings. `None` leaves the
     registry unfiltered.
     """
     registry: dict[str, Skill] = {}
@@ -93,7 +94,18 @@ def load_registry(
             logger.warning(
                 "persona allowlist names unknown skill '%s'", unknown
             )
-        registry = {k: v for k, v in registry.items() if k in allowlist}
+        # An allowed skill brings its nested sub-skills (a SKILL.md under its
+        # own directory, e.g. onboarding/profile): the parent loads them by
+        # name, so a persona that allows the parent must be able to reach them.
+        allowed_dirs = [
+            v.path.parent for k, v in registry.items() if k in allowlist
+        ]
+        registry = {
+            k: v
+            for k, v in registry.items()
+            if k in allowlist
+            or any(d in v.path.parents for d in allowed_dirs)
+        }
     return registry
 
 
