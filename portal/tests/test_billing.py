@@ -106,6 +106,58 @@ async def test_checkout_redirects_to_stripe(client, stripe_on):
     assert data["cancel_url"] == "http://localhost:8000/pricing"
 
 
+UPFRONT = {"id": "price_device", "active": True, "unit_amount": 80000,
+           "currency": "usd", "recurring": None}
+
+
+@pytest.fixture
+def upfront_plan(monkeypatch, stripe_on):
+    """One plan whose recurring price is paired with a one-time upfront fee."""
+    monkeypatch.setattr(settings, "stripe_price_ids", "price_basic+price_device")
+    inner = billing._stripe
+
+    async def fake_stripe(method, path, *, params=None, data=None):
+        if path == "/prices/price_device":
+            return UPFRONT
+        return await inner(method, path, params=params, data=data)
+
+    monkeypatch.setattr(billing, "_stripe", fake_stripe)
+    return stripe_on
+
+
+@pytest.mark.asyncio
+async def test_plan_with_upfront_fee_shows_and_charges_it(client, upfront_plan):
+    resp = await client.get("/pricing")
+    assert resp.status_code == 200
+    assert "Plus $800 once" in resp.text
+    assert "$20" in resp.text
+
+    resp = await client.post(
+        "/billing/checkout", data={"price_id": "price_basic"}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    data = upfront_plan[-1][2]
+    assert data["mode"] == "subscription"
+    assert data["line_items[0][price]"] == "price_basic"
+    assert data["line_items[1][price]"] == "price_device"
+
+    # The upfront price is not itself a plan that can be bought alone.
+    resp = await client.post(
+        "/billing/checkout", data={"price_id": "price_device"}, follow_redirects=False
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_plan_is_hidden_when_its_upfront_price_is_not_one_time(
+    client, upfront_plan, monkeypatch
+):
+    monkeypatch.setitem(UPFRONT, "recurring", {"interval": "month"})
+    resp = await client.get("/pricing")
+    assert resp.status_code == 200
+    assert "No plans are available" in resp.text
+
+
 @pytest.mark.asyncio
 async def test_checkout_rejects_a_price_not_on_offer(client, stripe_on):
     resp = await client.post(

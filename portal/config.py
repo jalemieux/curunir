@@ -28,11 +28,20 @@ class Settings(BaseSettings):
     # the /billing/* routes 404 until the secret key and price ids are set.
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
-    stripe_price_ids: str = ""  # comma-separated Stripe Price ids, in display order
+    # Comma-separated plans, in display order. Each is a recurring Stripe Price
+    # id, optionally followed by `+` and a one-time Price id charged with the
+    # first payment (an upfront fee): `price_monthly+price_upfront,price_other`.
+    stripe_price_ids: str = ""
 
     @property
-    def stripe_price_id_list(self) -> list[str]:
-        return [p.strip() for p in self.stripe_price_ids.split(",") if p.strip()]
+    def stripe_plans(self) -> dict[str, str | None]:
+        """Recurring price id -> its upfront one-time price id, or None."""
+        plans: dict[str, str | None] = {}
+        for entry in self.stripe_price_ids.split(","):
+            recurring, _, upfront = entry.strip().partition("+")
+            if recurring.strip():
+                plans[recurring.strip()] = upfront.strip() or None
+        return plans
 
     @property
     def admin_email_set(self) -> set[str]:

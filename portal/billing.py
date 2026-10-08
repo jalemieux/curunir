@@ -6,7 +6,9 @@ subscription in the `subscriptions` table. Card data never touches the portal.
 
 Plans are not defined here: STRIPE_PRICE_IDS names the Stripe Prices to offer,
 and the page reads each plan's name, description, features and amount from
-Stripe, so a price change is made in the Stripe dashboard only.
+Stripe, so a price change is made in the Stripe dashboard only. A plan may
+pair its recurring price with a one-time price (`recurring+upfront`) that
+Stripe charges with the first payment, e.g. hardware bought outright.
 
 The whole surface 404s until STRIPE_SECRET_KEY and STRIPE_PRICE_IDS are set.
 Stripe is called over its REST API with httpx (already a dependency) rather
@@ -51,7 +53,7 @@ _CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
 # Stripe amounts are in the currency's smallest unit; these have no minor unit.
 _ZERO_DECIMAL = {"jpy", "krw", "vnd", "clp", "pyg", "xaf", "xof", "ugx", "rwf"}
 
-_plan_cache: tuple[float, tuple[str, ...], list["Plan"]] | None = None
+_plan_cache: tuple[float, str, list["Plan"]] | None = None
 
 
 class StripeError(Exception):
@@ -66,10 +68,11 @@ class Plan:
     price_display: str
     interval_display: str
     features: list[str]
+    upfront_display: str = ""  # one-time amount due with the first payment
 
 
 def _configured() -> bool:
-    return bool(settings.stripe_secret_key and settings.stripe_price_id_list)
+    return bool(settings.stripe_secret_key and settings.stripe_plans)
 
 
 def _require_configured() -> None:
@@ -133,15 +136,23 @@ def _plan_from_price(price: dict) -> Optional[Plan]:
     )
 
 
+async def _upfront_display(price_id: str) -> Optional[str]:
+    price = await _stripe("GET", f"/prices/{price_id}")
+    # An upfront fee must be an active one-time price.
+    if not price.get("active") or price.get("recurring") or price.get("unit_amount") is None:
+        return None
+    return _format_amount(price["unit_amount"], price["currency"])
+
+
 async def load_plans() -> list[Plan]:
     """Plans in STRIPE_PRICE_IDS order, cached briefly to spare Stripe."""
     global _plan_cache
-    ids = tuple(settings.stripe_price_id_list)
+    spec = settings.stripe_price_ids
     now = time.monotonic()
-    if _plan_cache and _plan_cache[1] == ids and now - _plan_cache[0] < _PLAN_CACHE_SEC:
+    if _plan_cache and _plan_cache[1] == spec and now - _plan_cache[0] < _PLAN_CACHE_SEC:
         return _plan_cache[2]
     plans = []
-    for price_id in ids:
+    for price_id, upfront_id in settings.stripe_plans.items():
         price = await _stripe(
             "GET", f"/prices/{price_id}", params={"expand[]": "product"}
         )
@@ -149,8 +160,18 @@ async def load_plans() -> list[Plan]:
         if plan is None:
             logger.warning("billing: price %s is not a sellable plan; skipped", price_id)
             continue
+        if upfront_id:
+            upfront = await _upfront_display(upfront_id)
+            # Never sell the plan without its upfront fee.
+            if upfront is None:
+                logger.warning(
+                    "billing: upfront price %s of plan %s is not an active "
+                    "one-time price; plan skipped", upfront_id, price_id,
+                )
+                continue
+            plan.upfront_display = upfront
         plans.append(plan)
-    _plan_cache = (now, ids, plans)
+    _plan_cache = (now, spec, plans)
     return plans
 
 
@@ -174,8 +195,18 @@ async def checkout(request: Request, price_id: str = Form(..., max_length=128)):
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
     # Only prices the operator listed can be bought, whatever the form says.
-    if price_id not in settings.stripe_price_id_list:
+    plans = settings.stripe_plans
+    if price_id not in plans:
         raise HTTPException(status.HTTP_400_BAD_REQUEST)
+    line_items = {
+        "line_items[0][price]": price_id,
+        "line_items[0][quantity]": "1",
+    }
+    # A one-time price in a subscription-mode session is added to the first
+    # invoice only.
+    if plans[price_id]:
+        line_items["line_items[1][price]"] = plans[price_id]
+        line_items["line_items[1][quantity]"] = "1"
     base = settings.portal_base_url.rstrip("/")
     try:
         session = await _stripe(
@@ -183,8 +214,7 @@ async def checkout(request: Request, price_id: str = Form(..., max_length=128)):
             "/checkout/sessions",
             data={
                 "mode": "subscription",
-                "line_items[0][price]": price_id,
-                "line_items[0][quantity]": "1",
+                **line_items,
                 "success_url": f"{base}/billing/success",
                 "cancel_url": f"{base}/pricing",
             },
