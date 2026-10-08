@@ -16,6 +16,7 @@ async def test_root_serves_homepage_when_unauth(client):
         b"Life coach",
         b"Career coach",
         b"Medical research",
+        b"Go-to-market strategist",
         b"General assistant",
     ):
         assert role in body
