@@ -4,11 +4,29 @@ from portal import auth, db
 
 
 @pytest.mark.asyncio
-async def test_root_serves_finance_landing_when_unauth(client):
-    # Unauthenticated `/` is the public face of curunir.ai and serves the
-    # finance landing page (the research assistant lives at /assistant). It is
-    # not gated behind an invite redirect.
+async def test_root_serves_homepage_when_unauth(client):
+    # Unauthenticated `/` is the public face of curunir.ai: the homepage that
+    # lists every role. It is not gated behind an invite redirect.
     resp = await client.get("/", follow_redirects=False)
+    assert resp.status_code == 200
+    body = resp.content
+    assert b"Your AI agent lives on your desk." in body
+    for role in (
+        b"Financial analyst",
+        b"Life coach",
+        b"Career coach",
+        b"Medical research",
+        b"General assistant",
+    ):
+        assert role in body
+    # Sign-ups from this page are segmented as source="home".
+    assert b"source: 'home'" in body
+
+
+@pytest.mark.asyncio
+async def test_finance_landing_still_served_at_finance(client):
+    # The homepage links to it; it used to be what `/` served.
+    resp = await client.get("/finance/", follow_redirects=False)
     assert resp.status_code == 200
     assert b"Your private financial analyst." in resp.content
 

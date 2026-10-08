@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir — Your AI agent lives on your desk.</title>
+<meta name="description" content="Curunir is a small device that runs an AI agent. The models live in the cloud. Your conversations, notes, financials and health questions stay on the device.">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --ink: #0a0a0a;
+    --ink-2: #404040;
+    --ink-3: #525252;
+    --rule: #e5e5e5;
+    --accent: #e63946;
+    --accent-text: #c1121f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); }
+  a:hover { color: var(--accent-text); }
+  .mono { font-family: 'Geist Mono', monospace; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
+
+  /* Header */
+  header.top {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    align-items: center; justify-content: space-between;
+    padding-top: 24px; padding-bottom: 24px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none; font-weight: 600; font-size: 18px; min-height: 44px;
+  }
+  .sq { width: 14px; height: 14px; background: var(--accent); display: inline-block; }
+  nav.links { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center; font-size: 15px; }
+  nav.links a { text-decoration: none; padding: 12px 0; }
+  .btn {
+    display: inline-block; text-decoration: none;
+    background: var(--ink); color: var(--bg);
+    padding: 15px 24px; font-weight: 500; font-size: 16px;
+    border: 0; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: #262626; color: var(--bg); }
+  nav.links a.btn { padding: 12px 18px; font-size: 15px; }
+  .btn.accent { background: var(--accent); color: var(--ink); font-weight: 600; }
+  .btn.accent:hover { background: #f05561; color: var(--ink); }
+
+  /* Hero */
+  .hero {
+    display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-end;
+    padding-top: 72px; padding-bottom: 88px;
+  }
+  .hero-copy { flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
+  .eyebrow { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  h1 {
+    font-size: clamp(40px, 6vw, 76px); line-height: 1.02;
+    letter-spacing: -0.035em; font-weight: 600;
+  }
+  .lede { font-size: 20px; color: var(--ink-2); max-width: 620px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+  .cta-row .text-link { padding: 15px 4px; font-size: 16px; }
+
+  /* Hero side panel: where things live */
+  .lives { flex: 2 1 300px; min-width: 0; border: 1px solid #d4d4d4; background: var(--surface); }
+  .lives > div { padding: 24px; }
+  .lives > div + div { border-top: 1px solid var(--rule); }
+  .lives h2 { font-size: 13px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
+  .lives .on-device h2 { color: var(--accent-text); }
+  .lives .in-cloud h2 { color: var(--ink-3); }
+  .lives ul { list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 16px; }
+  .lives .in-cloud ul { color: var(--ink-2); }
+
+  /* Statement band */
+  .band { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--surface); }
+  .band p {
+    padding-top: 40px; padding-bottom: 40px; max-width: 920px;
+    font-size: clamp(20px, 2.4vw, 28px); line-height: 1.35; letter-spacing: -0.01em;
+  }
+
+  /* Section heads */
+  h2.sec {
+    font-size: clamp(32px, 4vw, 52px); line-height: 1.05;
+    letter-spacing: -0.03em; font-weight: 600;
+  }
+  .sec-head {
+    display: flex; flex-wrap: wrap; gap: 24px 64px;
+    align-items: flex-end; justify-content: space-between; margin-bottom: 40px;
+  }
+  .sec-head h2 { flex: 1 1 360px; }
+  .sec-head p { flex: 1 1 360px; max-width: 480px; font-size: 17px; color: var(--ink-2); }
+
+  /* Roles */
+  #does { padding-top: 96px; padding-bottom: 40px; }
+  .roles { border-top: 2px solid var(--ink); }
+  .role {
+    display: flex; flex-wrap: wrap; gap: 12px 32px;
+    padding: 32px 0; border-bottom: 1px solid var(--rule);
+  }
+  .role .num { flex: 0 0 56px; font-size: 14px; color: var(--accent-text); padding-top: 8px; }
+  .role h3 {
+    flex: 1 1 220px; font-size: 28px; line-height: 1.15;
+    letter-spacing: -0.02em; font-weight: 600;
+  }
+  .role p { flex: 2 1 380px; font-size: 16px; color: var(--ink-2); }
+  .role ul {
+    flex: 1 1 200px; list-style: none;
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 13px; color: var(--ink-2);
+  }
+
+  /* How it works */
+  #how { padding-top: 72px; padding-bottom: 72px; }
+  #how .sub { margin: 12px 0 40px; font-size: 22px; letter-spacing: -0.01em; }
+  .cards { display: flex; flex-wrap: wrap; gap: 24px; }
+  .card {
+    flex: 1 1 320px; min-width: 0;
+    background: var(--surface); border: 1px solid var(--rule); padding: 28px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .card h3 { font-size: 19px; font-weight: 600; }
+  .card p { font-size: 16px; color: var(--ink-2); }
+
+  /* Why it's different */
+  #why { background: var(--ink); color: var(--bg); }
+  #why .wrap { display: flex; flex-wrap: wrap; gap: 32px 64px; padding-top: 96px; padding-bottom: 96px; }
+  #why h2 { flex: 1 1 320px; }
+  #why .body {
+    flex: 2 1 420px; min-width: 0;
+    display: flex; flex-direction: column; gap: 20px;
+    font-size: 18px; color: #d4d4d4;
+  }
+  #why .flip { font-size: 24px; line-height: 1.3; color: var(--bg); letter-spacing: -0.01em; }
+
+  /* Invite */
+  #beta { padding-top: 96px; padding-bottom: 96px; display: flex; flex-direction: column; gap: 28px; }
+  #beta .closing {
+    font-size: clamp(24px, 3vw, 36px); line-height: 1.25;
+    letter-spacing: -0.02em; max-width: 880px;
+  }
+  #betaForm { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  #betaForm .field { display: flex; flex-direction: column; gap: 6px; flex: 0 1 340px; min-width: 0; }
+  #betaForm label { font-size: 13px; color: var(--ink-2); }
+  #betaForm input {
+    font-family: inherit; font-size: 16px; padding: 14px 16px; width: 100%;
+    border: 1px solid #a3a3a3; background: var(--surface); color: var(--ink);
+  }
+  #betaForm input:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
+  #betaForm .btn { padding: 16px 28px; font-size: 17px; }
+  #betaForm .btn:disabled { opacity: 0.6; cursor: default; }
+  #betaStatus { font-size: 13px; color: var(--ink-3); }
+
+  footer { border-top: 1px solid var(--rule); }
+  footer .wrap { padding-top: 28px; padding-bottom: 28px; font-size: 13px; color: var(--ink-3); }
+  footer a { color: var(--ink-3); }
+
+  @media (max-width: 640px) {
+    .wrap { padding-left: 20px; padding-right: 20px; }
+    .hero { padding-top: 40px; padding-bottom: 56px; }
+    #does { padding-top: 64px; }
+    #why .wrap, #beta { padding-top: 64px; padding-bottom: 64px; }
+    .role .num { flex-basis: 100%; padding-top: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <a class="brand" href="#top"><span class="sq"></span><span>Curunir</span></a>
+  <nav class="links">
+    <a href="#does">What it does</a>
+    <a href="#how">How it works</a>
+    <a href="#why">Why it's different</a>
+    <a class="btn" href="#beta">Request an invite</a>
+  </nav>
+</header>
+
+<main>
+  <section id="top" class="hero wrap">
+    <div class="hero-copy">
+      <div class="eyebrow mono">Closed beta</div>
+      <h1>Your AI agent lives on your desk. Your data stays in your house.</h1>
+      <p class="lede">Curunir is a small device that sits next to you and runs an AI agent. It thinks, remembers, and picks up the right tool on its own, the way a colleague would.</p>
+      <div class="cta-row">
+        <a class="btn" href="#beta">Request an invite</a>
+        <a class="text-link" href="#does">See everything it does</a>
+      </div>
+    </div>
+    <div class="lives">
+      <div class="on-device">
+        <h2 class="mono">On the device</h2>
+        <ul>
+          <li>Your conversations</li>
+          <li>Your notes</li>
+          <li>Your financials</li>
+          <li>Your health questions</li>
+        </ul>
+      </div>
+      <div class="in-cloud">
+        <h2 class="mono">In the cloud</h2>
+        <ul>
+          <li>The language models</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <p class="wrap">Not "your data is encrypted." Not "we respect your privacy." Your data isn't on their servers. It's on a box on your desk.</p>
+  </section>
+
+  <section id="does" class="wrap">
+    <div class="sec-head">
+      <h2 class="sec">What it does</h2>
+      <p>Curunir is a configurable agent harness. You set up the personalities and skills you want, and it goes to work. Right now it runs these.</p>
+    </div>
+
+    <div class="roles">
+      <div class="role">
+        <div class="num mono">01</div>
+        <h3>Financial analyst</h3>
+        <p>Pulls live market data, reads SEC filings, builds fact-checked investment memos, and tracks your portfolio with a real computed ledger, not numbers the LLM made up. Ask it to stress-test a thesis and it pulls the sources, fact-checks its own draft, and hands you the memo with every claim cited. <a href="/finance/">More on the financial analyst</a></p>
+        <ul class="mono">
+          <li>Live market data</li>
+          <li>SEC filings</li>
+          <li>Computed ledger</li>
+          <li>Cited memos</li>
+        </ul>
+      </div>
+
+      <div class="role">
+        <div class="num mono">02</div>
+        <h3>Life coach</h3>
+        <p>A consistent conversational partner that remembers your goals, your habits, and what you've been working through between conversations, not just within one. It keeps notes in local memory so it picks up where you left off, months later.</p>
+        <ul class="mono">
+          <li>Goals and habits</li>
+          <li>Notes in local memory</li>
+          <li>Long-term continuity</li>
+        </ul>
+      </div>
+
+      <div class="role">
+        <div class="num mono">03</div>
+        <h3>Career coach</h3>
+        <p>Tracks your job search pipeline, helps with outreach, scores roles against your criteria, and remembers the context of your search so you're not starting over every time you open a new chat.</p>
+        <ul class="mono">
+          <li>Search pipeline</li>
+          <li>Outreach help</li>
+          <li>Role scoring</li>
+        </ul>
+      </div>
+
+      <div class="role">
+        <div class="num mono">04</div>
+        <h3>Medical research</h3>
+        <p>Gathers sources from medical literature, fact-checks claims against the evidence, and builds a research briefing you can take to your doctor. Same architecture as the investment memo: gather, verify, synthesize. Applied to a domain where getting it wrong matters more.</p>
+        <ul class="mono">
+          <li>Medical literature</li>
+          <li>Evidence check</li>
+          <li>Doctor-ready briefing</li>
+        </ul>
+      </div>
+
+      <div class="role">
+        <div class="num mono">05</div>
+        <h3>General assistant</h3>
+        <p>Scheduling, research, web search, document analysis. The everyday stuff, but with memory and tools and the same privacy guarantee. It remembers what you asked last time and what you decided.</p>
+        <ul class="mono">
+          <li>Scheduling</li>
+          <li>Web search</li>
+          <li>Document analysis</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="wrap">
+    <h2 class="sec">How it works</h2>
+    <p class="sub">The models are in the cloud. Your data is not.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>The model travels. Your information doesn't.</h3>
+        <p>When you ask it something, Curunir sends the question to cloud-based language models and brings the answer back. Your portfolio, your notes, your conversations, your health research stay on the device, in local memory.</p>
+      </div>
+      <div class="card">
+        <h3>It has memory</h3>
+        <p>It remembers what you're working on between conversations. Your holdings, your theses, your goals, your search pipeline. It picks up where you left off, not from scratch every time.</p>
+      </div>
+      <div class="card">
+        <h3>It has tools</h3>
+        <p>Live market data, SEC filings, web search, Reddit, X, YouTube, podcasts. Curunir reaches for the right source on its own and cites it inline. Every claim traces back to a source you can open yourself.</p>
+      </div>
+      <div class="card">
+        <h3>It fact-checks itself</h3>
+        <p>Every research output goes through a separate fact-checker agent before you see it. The agent that wrote the answer is not the agent that verified it. If the evidence doesn't support a claim, it gets corrected or cut.</p>
+      </div>
+      <div class="card">
+        <h3>You can reach it from anywhere</h3>
+        <p>Web, CLI, or email, through a thin portal that passes the conversation along and keeps the data where it is. Ask from your phone and the answer comes from the box on your desk.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="why">
+    <div class="wrap">
+      <h2 class="sec">Why it's different</h2>
+      <div class="body">
+        <p>Every other AI assistant you've used lives in someone else's cloud. Your conversations, your questions, your financial data, your health worries sit in a database that belongs to a trillion-dollar company. Indexed, searchable, one policy change away from being used in ways you didn't agree to.</p>
+        <p class="flip">Curunir flips that. The intelligence is rented. The data is owned.</p>
+        <p>You get the agent without handing over the parts that are actually yours.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="beta" class="wrap">
+    <p class="closing">It's a box on your desk that thinks. It remembers. It cites its sources. And it keeps your private life private, not by promising to, but by design.</p>
+    <form id="betaForm">
+      <div class="field">
+        <label class="mono" for="betaEmail">Email</label>
+        <input id="betaEmail" type="email" name="email" required autocomplete="email" placeholder="you@yourdomain.com">
+      </div>
+      <button class="btn accent" type="submit">Request an invite</button>
+    </form>
+    <div class="mono" id="betaStatus" role="status">Curunir is in closed beta.</div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap mono">SmartLayer Ventures (<a href="https://smartlayer.ventures">smartlayer.ventures</a>)</div>
+</footer>
+
+<script>
+(function() {
+  const form = document.getElementById('betaForm');
+  const status = document.getElementById('betaStatus');
+  if (!form) return;
+  const label = 'Request an invite';
+  function fail(msg) {
+    const btn = form.querySelector('button');
+    btn.disabled = false;
+    btn.textContent = label;
+    status.textContent = msg;
+    status.style.color = 'var(--accent-text)';
+  }
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    const email = form.email.value.trim();
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/beta/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email, source: 'home'}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ok) {
+        form.style.display = 'none';
+        status.textContent = data.created
+          ? 'You\'re on the list. We\'ll be in touch.'
+          : 'Already on the list. We\'ll be in touch.';
+        status.style.color = 'var(--ink)';
+      } else if (r.status === 429) {
+        fail('Too many requests. Try again in a minute.');
+      } else {
+        fail('Please check your email and try again.');
+      }
+    } catch (err) {
+      fail('Network error. Try again.');
+    }
+  });
+})();
+</script>
+</body>
+</html>
