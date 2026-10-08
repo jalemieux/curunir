@@ -252,7 +252,10 @@ route returns 404) until these are set:
 
 - `STRIPE_SECRET_KEY` — a Stripe secret or restricted key that can read
   Prices and Products and create Checkout Sessions
-- `STRIPE_PRICE_IDS` — comma-separated Stripe Price ids, in display order
+- `STRIPE_PRICE_IDS` — comma-separated plans, in display order. Each is a
+  recurring Stripe Price id, optionally followed by `+` and a one-time Price
+  id charged with the first payment (an upfront fee), e.g.
+  `price_monthly100+price_device800,price_monthly200`
 - `STRIPE_WEBHOOK_SECRET` — the signing secret of the webhook endpoint below
 
 Plans are defined in Stripe, not in the repo. For each listed Price the page

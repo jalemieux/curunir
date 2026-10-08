@@ -102,8 +102,62 @@ async def test_checkout_redirects_to_stripe(client, stripe_on):
     assert (method, path) == ("POST", "/checkout/sessions")
     assert data["mode"] == "subscription"
     assert data["line_items[0][price]"] == "price_basic"
+    assert data["metadata[app]"] == "curunir"
+    assert data["subscription_data[metadata][app]"] == "curunir"
     assert data["success_url"] == "http://localhost:8000/billing/success"
     assert data["cancel_url"] == "http://localhost:8000/pricing"
+
+
+UPFRONT = {"id": "price_device", "active": True, "unit_amount": 80000,
+           "currency": "usd", "recurring": None}
+
+
+@pytest.fixture
+def upfront_plan(monkeypatch, stripe_on):
+    """One plan whose recurring price is paired with a one-time upfront fee."""
+    monkeypatch.setattr(settings, "stripe_price_ids", "price_basic+price_device")
+    inner = billing._stripe
+
+    async def fake_stripe(method, path, *, params=None, data=None):
+        if path == "/prices/price_device":
+            return UPFRONT
+        return await inner(method, path, params=params, data=data)
+
+    monkeypatch.setattr(billing, "_stripe", fake_stripe)
+    return stripe_on
+
+
+@pytest.mark.asyncio
+async def test_plan_with_upfront_fee_shows_and_charges_it(client, upfront_plan):
+    resp = await client.get("/pricing")
+    assert resp.status_code == 200
+    assert "Plus $800 once" in resp.text
+    assert "$20" in resp.text
+
+    resp = await client.post(
+        "/billing/checkout", data={"price_id": "price_basic"}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    data = upfront_plan[-1][2]
+    assert data["mode"] == "subscription"
+    assert data["line_items[0][price]"] == "price_basic"
+    assert data["line_items[1][price]"] == "price_device"
+
+    # The upfront price is not itself a plan that can be bought alone.
+    resp = await client.post(
+        "/billing/checkout", data={"price_id": "price_device"}, follow_redirects=False
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_plan_is_hidden_when_its_upfront_price_is_not_one_time(
+    client, upfront_plan, monkeypatch
+):
+    monkeypatch.setitem(UPFRONT, "recurring", {"interval": "month"})
+    resp = await client.get("/pricing")
+    assert resp.status_code == 200
+    assert "No plans are available" in resp.text
 
 
 @pytest.mark.asyncio
@@ -140,6 +194,7 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
             "id": "sub_1",
             "customer": "cus_1",
             "status": "active",
+            "metadata": {"app": "curunir"},
             "items": {"data": [{
                 "price": {"id": "price_basic"},
                 "current_period_end": 1900000000,
@@ -152,6 +207,7 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
             "mode": "subscription",
             "subscription": "sub_1",
             "customer": "cus_1",
+            "metadata": {"app": "curunir"},
             "customer_details": {"email": "Buyer@Example.com"},
         }},
     }
@@ -176,6 +232,19 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
     row = await db.get_subscription("sub_1")
     assert row["status"] == "canceled"
     assert row["email"] == "buyer@example.com"
+
+
+@pytest.mark.asyncio
+async def test_webhook_ignores_another_products_subscription(client, stripe_on):
+    # A shared Stripe account delivers other products' events here too.
+    event = {
+        "type": "customer.subscription.created",
+        "data": {"object": {"id": "sub_other", "customer": "cus_9", "status": "active"}},
+    }
+    payload, headers = _signed(event)
+    resp = await client.post("/billing/webhook", content=payload, headers=headers)
+    assert resp.status_code == 200
+    assert await db.get_subscription("sub_other") is None
 
 
 @pytest.mark.asyncio
