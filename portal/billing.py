@@ -49,6 +49,11 @@ _PLAN_CACHE_SEC = 300
 # captured request can't be replayed later.
 _WEBHOOK_TOLERANCE_SEC = 300
 
+# The Stripe account may be shared with other products, whose events reach
+# this webhook too. Checkout stamps this on the session and its subscription,
+# and the webhook records only objects that carry it.
+_APP_TAG = "curunir"
+
 _CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
 # Stripe amounts are in the currency's smallest unit; these have no minor unit.
 _ZERO_DECIMAL = {"jpy", "krw", "vnd", "clp", "pyg", "xaf", "xof", "ugx", "rwf"}
@@ -215,6 +220,8 @@ async def checkout(request: Request, price_id: str = Form(..., max_length=128)):
             data={
                 "mode": "subscription",
                 **line_items,
+                "metadata[app]": _APP_TAG,
+                "subscription_data[metadata][app]": _APP_TAG,
                 "success_url": f"{base}/billing/success",
                 "cancel_url": f"{base}/pricing",
             },
@@ -286,6 +293,10 @@ async def webhook(request: Request):
         obj = event["data"]["object"]
     except (ValueError, KeyError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST)
+
+    if (obj.get("metadata") or {}).get("app") != _APP_TAG:
+        # Another product's event on a shared Stripe account.
+        return {"ok": True}
 
     # The two event families arrive in no guaranteed order; each upsert fills
     # only the columns it knows, so either order ends in the same row.

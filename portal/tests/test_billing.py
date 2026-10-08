@@ -102,6 +102,8 @@ async def test_checkout_redirects_to_stripe(client, stripe_on):
     assert (method, path) == ("POST", "/checkout/sessions")
     assert data["mode"] == "subscription"
     assert data["line_items[0][price]"] == "price_basic"
+    assert data["metadata[app]"] == "curunir"
+    assert data["subscription_data[metadata][app]"] == "curunir"
     assert data["success_url"] == "http://localhost:8000/billing/success"
     assert data["cancel_url"] == "http://localhost:8000/pricing"
 
@@ -192,6 +194,7 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
             "id": "sub_1",
             "customer": "cus_1",
             "status": "active",
+            "metadata": {"app": "curunir"},
             "items": {"data": [{
                 "price": {"id": "price_basic"},
                 "current_period_end": 1900000000,
@@ -204,6 +207,7 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
             "mode": "subscription",
             "subscription": "sub_1",
             "customer": "cus_1",
+            "metadata": {"app": "curunir"},
             "customer_details": {"email": "Buyer@Example.com"},
         }},
     }
@@ -228,6 +232,19 @@ async def test_webhook_records_subscription_in_either_event_order(client, stripe
     row = await db.get_subscription("sub_1")
     assert row["status"] == "canceled"
     assert row["email"] == "buyer@example.com"
+
+
+@pytest.mark.asyncio
+async def test_webhook_ignores_another_products_subscription(client, stripe_on):
+    # A shared Stripe account delivers other products' events here too.
+    event = {
+        "type": "customer.subscription.created",
+        "data": {"object": {"id": "sub_other", "customer": "cus_9", "status": "active"}},
+    }
+    payload, headers = _signed(event)
+    resp = await client.post("/billing/webhook", content=payload, headers=headers)
+    assert resp.status_code == 200
+    assert await db.get_subscription("sub_other") is None
 
 
 @pytest.mark.asyncio
