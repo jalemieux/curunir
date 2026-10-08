@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir — Pricing</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --ink: #0a0a0a;
+    --ink-2: #404040;
+    --ink-3: #525252;
+    --rule: #e5e5e5;
+    --accent: #e63946;
+    --accent-text: #c1121f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); }
+  a:hover { color: var(--accent-text); }
+  .mono { font-family: 'Geist Mono', monospace; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
+  header.top {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    align-items: center; justify-content: space-between;
+    padding-top: 24px; padding-bottom: 24px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none; font-weight: 600; font-size: 18px; min-height: 44px;
+  }
+  .sq { width: 14px; height: 14px; background: var(--accent); display: inline-block; }
+  header.top nav a { text-decoration: none; padding: 12px 0; font-size: 15px; }
+
+  .head { padding-top: 64px; padding-bottom: 48px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: clamp(36px, 5vw, 60px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 600; }
+  .head p { font-size: 19px; color: var(--ink-2); max-width: 620px; }
+
+  .plans { display: flex; flex-wrap: wrap; gap: 24px; padding-bottom: 96px; }
+  .plan {
+    flex: 1 1 300px; min-width: 0;
+    background: var(--surface); border: 1px solid var(--rule); padding: 32px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .plan h2 { font-size: 22px; letter-spacing: -0.015em; font-weight: 600; }
+  .plan .desc { font-size: 15px; color: var(--ink-2); }
+  .price { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .price .amount { font-size: 44px; line-height: 1; letter-spacing: -0.03em; font-weight: 600; }
+  .price .interval { font-size: 13px; color: var(--ink-3); }
+  .plan ul {
+    list-style: none; border-top: 1px solid var(--rule); padding-top: 20px;
+    display: flex; flex-direction: column; gap: 8px; font-size: 15px; color: var(--ink-2);
+  }
+  .plan form { margin-top: auto; }
+  .btn {
+    display: block; width: 100%; text-align: center;
+    background: var(--ink); color: var(--bg);
+    padding: 15px 24px; font-weight: 500; font-size: 16px;
+    border: 0; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: #262626; }
+  .empty { padding-bottom: 96px; font-size: 17px; color: var(--ink-2); }
+
+  footer { border-top: 1px solid var(--rule); }
+  footer .wrap { padding-top: 28px; padding-bottom: 28px; font-size: 13px; color: var(--ink-3); }
+  footer a { color: var(--ink-3); }
+
+  @media (max-width: 640px) {
+    .wrap { padding-left: 20px; padding-right: 20px; }
+    .head { padding-top: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <a class="brand" href="/"><span class="sq"></span><span>Curunir</span></a>
+  <nav><a href="/">Back to home</a></nav>
+</header>
+
+<main class="wrap">
+  <div class="head">
+    <h1>Pricing</h1>
+    <p>Pick a plan. Payment is handled by Stripe; your card details never reach Curunir.</p>
+  </div>
+
+  {% if plans %}
+  <div class="plans">
+    {% for plan in plans %}
+    <section class="plan">
+      <h2>{{ plan.name }}</h2>
+      <div class="price">
+        <span class="amount">{{ plan.price_display }}</span>
+        <span class="interval mono">{{ plan.interval_display }}</span>
+      </div>
+      {% if plan.description %}<p class="desc">{{ plan.description }}</p>{% endif %}
+      {% if plan.features %}
+      <ul>
+        {% for feature in plan.features %}<li>{{ feature }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      <form method="post" action="/billing/checkout">
+        <input type="hidden" name="price_id" value="{{ plan.price_id }}">
+        <button class="btn" type="submit">Subscribe</button>
+      </form>
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No plans are available right now.</p>
+  {% endif %}
+</main>
+
+<footer>
+  <div class="wrap mono">SmartLayer Ventures (<a href="https://smartlayer.ventures">smartlayer.ventures</a>)</div>
+</footer>
+
+</body>
+</html>
