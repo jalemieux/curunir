@@ -24,6 +24,15 @@ async def test_root_serves_homepage_when_unauth(client):
 
 
 @pytest.mark.asyncio
+async def test_homepage_device_photo_is_served(client):
+    page = await client.get("/", follow_redirects=False)
+    assert b'src="/home/device-desk.jpg"' in page.content
+    resp = await client.get("/home/device-desk.jpg", follow_redirects=False)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+
+
+@pytest.mark.asyncio
 async def test_finance_landing_still_served_at_finance(client):
     # The homepage links to it; it used to be what `/` served.
     resp = await client.get("/finance/", follow_redirects=False)
