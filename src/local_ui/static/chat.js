@@ -83,10 +83,12 @@ export function handoffTargets(handoffs) {
 // === Turn text (pure helpers, node-tested in tests/js/test_chat_turn_text.mjs) ===
 // One assistant bubble holds the text of a whole turn. The agent streams the
 // text of every loop iteration, including ones that end in tool calls ("I'll
-// check your schedule first, then…"); only the last one is the reply. `raw` is
-// what the body shows (the stretch being streamed, then the reply) and
-// `interim` the earlier stretches, kept in a collapsed section rather than
-// overwritten when the reply lands.
+// check your schedule first, then…") and ones that already talk to the user
+// ("Hi, I'm Scout…"). `raw` is the stretch being streamed (in the end, the
+// last one) and `interim` the earlier stretches, kept rather than overwritten
+// when the last one lands. The bubble shows all of them, in order, at the same
+// weight (see turnTextFull): where a stretch falls relative to a tool round
+// says nothing about whether it was meant for the user.
 export function newTurnText() {
   return { interim: [], raw: "", segment: null };
 }
@@ -111,13 +113,28 @@ export function applyTextFrame(t, m) {
 }
 
 // Fold in the next assistant message of the same turn from a history
-// snapshot: each earlier message's text becomes interim, the last is the
-// reply, which is what the live path arrives at.
+// snapshot: each earlier message's text becomes interim, the last is `raw`,
+// which is what the live path arrives at.
 export function applyHistoryText(t, content) {
   if (!content) return t;
   shelve(t);
   t.raw = content;
   return t;
+}
+
+// A stretch that ends inside a code fence would swallow the next stretch
+// when the two are rendered as one markdown document, so close it.
+function closeFence(text) {
+  const fences = text.match(/^\s*(```|~~~)/gm) || [];
+  if (fences.length % 2 === 0) return text;
+  return text + "\n" + fences[fences.length - 1].trim();
+}
+
+// Everything the agent said in the turn, in order, as one markdown text:
+// what the bubble renders and what Copy and Print give.
+export function turnTextFull(t) {
+  const earlier = t.interim.map(closeFence);
+  return [...earlier, t.raw].filter((s) => s.trim()).join("\n\n");
 }
 
 export function createChat(config) {
@@ -358,7 +375,7 @@ export function createChat(config) {
       const el = historyAssistant || (historyAssistant = appendMessage("assistant"));
       if (m.content) {
         applyHistoryText(turnText(el), m.content);
-        renderTurnText(el, false);
+        renderTurnText(el);
       }
       appendToolCalls(el, m.tool_calls);
       renderAttachments(el, m.attachments);
@@ -374,34 +391,16 @@ export function createChat(config) {
     return msgEl._turnText || (msgEl._turnText = newTurnText());
   }
 
-  // Paint a bubble from its turn text: the reply (or the stretch streaming
-  // now) in .body, earlier stretches in a section above it that is open while
-  // the turn is live and collapsed once it is done. body.dataset.raw stays the
-  // reply alone, so Copy and Print give the reply.
-  function renderTurnText(msgEl, live) {
-    const t = turnText(msgEl);
+  // Paint a bubble from its turn text: all of the turn's text in .body, in
+  // order. body.dataset.raw is that same text, so Copy and Print give the
+  // whole turn, as shown.
+  function renderTurnText(msgEl) {
+    const full = turnTextFull(turnText(msgEl));
     const body = msgEl.querySelector(".body");
-    if (body.dataset.raw !== t.raw) {
-      body.dataset.raw = t.raw;
-      body.innerHTML = t.raw ? md(t.raw) : "";
+    if (body.dataset.raw !== full) {
+      body.dataset.raw = full;
+      body.innerHTML = full ? md(full) : "";
     }
-    let box = msgEl.querySelector("details.interim");
-    if (!t.interim.length) { if (box) box.remove(); return; }
-    if (!box) {
-      box = document.createElement("details");
-      box.className = "interim";
-      box.innerHTML = '<summary>Earlier in this turn</summary><div class="interim-steps"></div>';
-      msgEl.insertBefore(box, body);
-      box.open = live;
-    }
-    const steps = box.querySelector(".interim-steps");
-    for (let i = steps.children.length; i < t.interim.length; i++) {
-      const step = document.createElement("div");
-      step.className = "interim-step";
-      step.innerHTML = md(t.interim[i]);
-      steps.appendChild(step);
-    }
-    if (!live) box.open = false;
   }
 
   function ensureActivityIndicator(msgEl, live) {
@@ -535,7 +534,7 @@ export function createChat(config) {
   function renderAgentChunk(m) {
     if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
     applyTextFrame(turnText(inProgressMsg), m);
-    renderTurnText(inProgressMsg, !m.final);
+    renderTurnText(inProgressMsg);
     appendToolCalls(inProgressMsg, m.tool_calls);
     renderAttachments(inProgressMsg, m.attachments);
     if (m.tool_calls && m.tool_calls.length) {

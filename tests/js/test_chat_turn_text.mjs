@@ -3,7 +3,9 @@
 // Text the agent streamed before a tool call used to be overwritten when the
 // final reply arrived. The pure helpers exported from chat.js keep it as
 // "interim" text instead, split at the `segment` the worker stamps on text
-// deltas and on the final reply.
+// deltas and on the final reply. The bubble then shows every stretch in
+// order at the same weight (turnTextFull, #589): text before a tool round is
+// often addressed to the user, so it is not filed away as secondary.
 //
 //   node tests/js/test_chat_turn_text.mjs
 
@@ -13,7 +15,7 @@ import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mod = await import(path.resolve(here, "../../src/local_ui/static/chat.js"));
-const { newTurnText, applyTextFrame, applyHistoryText } = mod;
+const { newTurnText, applyTextFrame, applyHistoryText, turnTextFull } = mod;
 
 const run = (frames) => frames.reduce(applyTextFrame, newTurnText());
 const delta = (content, segment) => ({ content, delta: true, final: false, segment });
@@ -117,6 +119,67 @@ const tool = (name) => ({ content: "", tool_calls: [name], final: false });
   const reloaded = history.reduce((t, m) => applyHistoryText(t, m.content), newTurnText());
   assert.deepEqual(reloaded.interim, live.interim);
   assert.equal(reloaded.raw, live.raw);
+}
+
+// === What the bubble shows (#589) ===
+
+// The reported case: a greeting, a tool round, more dialog, a tool round, the
+// rest. Everything the agent said is shown, in the order it was said.
+{
+  const t = run([
+    delta("Hey Jac. I'm Scout.", 0), tool("load_skill onboarding"),
+    delta("A couple quick questions.", 1), tool("load_skill profile"),
+    delta("Good news: I already know you.", 2),
+    { content: "Good news: I already know you.", final: true, segment: 2 },
+  ]);
+  assert.equal(
+    turnTextFull(t),
+    "Hey Jac. I'm Scout.\n\nA couple quick questions.\n\nGood news: I already know you.",
+  );
+}
+
+// While live, the stretch being streamed follows the earlier ones.
+{
+  const t = run([delta("First.", 0), tool("a"), delta("Sec", 1)]);
+  assert.equal(turnTextFull(t), "First.\n\nSec");
+}
+
+// One segment, no tool round: just the reply, once.
+{
+  const t = run([delta("Hel", 0), delta("lo", 0), { content: "Hello", final: true, segment: 0 }]);
+  assert.equal(turnTextFull(t), "Hello");
+}
+
+// Nothing said yet (only tool frames): nothing to show.
+assert.equal(turnTextFull(run([tool("read")])), "");
+
+// An older server (no `segment`) still shows the final reply alone.
+{
+  const t = run([
+    { content: "I'll check.", delta: true, final: false }, tool("read"),
+    { content: "Free at 3pm.", final: true },
+  ]);
+  assert.equal(turnTextFull(t), "Free at 3pm.");
+}
+
+// A stretch cut off inside a code fence must not swallow the next one.
+{
+  const t = run([delta("Running:\n```bash\nls", 0), tool("bash"), delta("Done.", 1)]);
+  assert.equal(turnTextFull(t), "Running:\n```bash\nls\n```\n\nDone.");
+  const closed = run([delta("```\nls\n```", 0), tool("bash"), delta("Done.", 1)]);
+  assert.equal(turnTextFull(closed), "```\nls\n```\n\nDone.");
+}
+
+// Reload agrees with live on what is shown.
+{
+  const live = run([
+    delta("First.", 0), tool("a"), delta("Second.", 1), tool("b"),
+    delta("Done.", 2), { content: "Done.", final: true, segment: 2 },
+  ]);
+  const reloaded = ["First.", "", "Second.", "Done."]
+    .reduce((t, c) => applyHistoryText(t, c), newTurnText());
+  assert.equal(turnTextFull(reloaded), turnTextFull(live));
+  assert.equal(turnTextFull(live), "First.\n\nSecond.\n\nDone.");
 }
 
 console.log("test_chat_turn_text: all assertions passed");
