@@ -164,6 +164,10 @@ async def healthz():
     return JSONResponse({"status": "ok" if ok else "degraded"})
 
 
+# Homepage assets (the device photo). The page itself is served by `/` above.
+if _HOME_DIR.exists():
+    app.mount("/home", StaticFiles(directory=_HOME_DIR), name="home")
+
 # Research-assistant landing assets. Reports are mounted at /r/ so the in-page
 # absolute links resolve regardless of which URL serves the page (the finance
 # page reuses this same /r/ mount for its real memos). The research page is
