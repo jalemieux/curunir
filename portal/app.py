@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from portal import admin, auth, beta, db, sign_in, track, ws_agent, ws_browser
+from portal import admin, auth, beta, billing, db, sign_in, track, ws_agent, ws_browser
 from portal.config import settings
 
 
@@ -92,6 +92,7 @@ app.include_router(sign_in.router)
 app.include_router(admin.router)
 app.include_router(beta.router)
 app.include_router(track.router)
+app.include_router(billing.router)
 app.include_router(ws_agent.router)
 app.include_router(ws_browser.router)
 

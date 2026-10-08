@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curunir — Subscription confirmed</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #fafafa; color: #0a0a0a;
+    font-family: 'Geist', -apple-system, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  a { color: #0a0a0a; }
+  a:hover { color: #c1121f; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 32px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 10px;
+    text-decoration: none; font-weight: 600; font-size: 18px; min-height: 44px;
+  }
+  .sq { width: 14px; height: 14px; background: #e63946; display: inline-block; }
+  main { padding-top: 72px; padding-bottom: 96px; display: flex; flex-direction: column; gap: 20px; }
+  h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.05; letter-spacing: -0.03em; font-weight: 600; }
+  p { font-size: 18px; color: #404040; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="/"><span class="sq"></span><span>Curunir</span></a>
+  <main>
+    <h1>Thanks. Your payment went through.</h1>
+    <p>Stripe is emailing your receipt now. We'll follow up at the same address with next steps.</p>
+    <p><a href="/">Back to home</a></p>
+  </main>
+</div>
+</body>
+</html>

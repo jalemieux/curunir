@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     seed_user_email: str = ""
     seed_container_token: str = ""
 
+    # Stripe subscription billing (portal/billing.py). The /pricing page and
+    # the /billing/* routes 404 until the secret key and price ids are set.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_ids: str = ""  # comma-separated Stripe Price ids, in display order
+
+    @property
+    def stripe_price_id_list(self) -> list[str]:
+        return [p.strip() for p in self.stripe_price_ids.split(",") if p.strip()]
+
     @property
     def admin_email_set(self) -> set[str]:
         return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}

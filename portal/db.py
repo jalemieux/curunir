@@ -1,5 +1,6 @@
 import secrets
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -269,3 +270,51 @@ async def variant_event_counts() -> list[tuple[str, str, int]]:
             """
         )
     return [(r["variant"], r["event_type"], r["n"]) for r in rows]
+
+
+# ---------- Stripe subscriptions ----------
+
+async def upsert_subscription(
+    stripe_subscription_id: str,
+    stripe_customer_id: Optional[str] = None,
+    email: Optional[str] = None,
+    price_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_period_end: Optional[datetime] = None,
+) -> None:
+    """Insert or update one subscription row.
+
+    A `None` argument leaves the stored column alone, so the checkout and
+    subscription webhook events can arrive in either order.
+    """
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO subscriptions (
+              stripe_subscription_id, stripe_customer_id, email,
+              price_id, status, current_period_end
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (stripe_subscription_id) DO UPDATE SET
+              stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, subscriptions.stripe_customer_id),
+              email = COALESCE(EXCLUDED.email, subscriptions.email),
+              price_id = COALESCE(EXCLUDED.price_id, subscriptions.price_id),
+              status = COALESCE(EXCLUDED.status, subscriptions.status),
+              current_period_end = COALESCE(EXCLUDED.current_period_end, subscriptions.current_period_end),
+              updated_at = NOW()
+            """,
+            stripe_subscription_id,
+            stripe_customer_id,
+            email.strip().lower() if email else None,
+            price_id,
+            status,
+            current_period_end,
+        )
+
+
+async def get_subscription(stripe_subscription_id: str) -> Optional[asyncpg.Record]:
+    async with get_pool().acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM subscriptions WHERE stripe_subscription_id = $1",
+            stripe_subscription_id,
+        )

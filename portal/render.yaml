@@ -16,6 +16,13 @@ services:
         sync: false   # set per-environment in dashboard
       - key: ADMIN_EMAILS
         sync: false
+      # Stripe billing: /pricing and /billing/* stay off (404) until these are set.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_IDS
+        sync: false
 
 databases:
   - name: curunir-portal-db
