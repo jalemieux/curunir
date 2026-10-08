@@ -97,6 +97,7 @@ app.include_router(ws_browser.router)
 
 
 _STATIC_DIR = Path(__file__).parent / "static"
+_HOME_DIR = _STATIC_DIR / "home"
 _LANDING_DIR = _STATIC_DIR / "landing"
 _LAUNCH_DIR = _STATIC_DIR / "launch"
 _FINANCE_DIR = _STATIC_DIR / "finance"
@@ -121,12 +122,12 @@ def _is_mobile_ua(user_agent: str | None) -> bool:
 @app.get("/")
 async def root(request: Request, user=Depends(auth.optional_current_user)):
     if user is None:
-        # Public landing page. The finance assistant is the primary public face
-        # of curunir.ai, so unauthenticated `/` serves the finance landing; the
-        # research assistant lives at /assistant (and the legacy /curunir alias).
+        # Public homepage: the device, every role it runs, and the privacy
+        # model. Its beta form posts source="home". The persona landings stay
+        # at /finance, /launch and /assistant (plus the legacy /curunir alias).
         # Unauthenticated phone visitors stay here rather than being bounced to
         # /m (which 401s) — that would trap them with no next step.
-        return FileResponse(_FINANCE_DIR / "index.html")
+        return FileResponse(_HOME_DIR / "index.html")
     # Authenticated: redirect phones to the mobile UI unless ?desktop=1 forces
     # the desktop SPA.
     if "desktop" not in request.query_params and _is_mobile_ua(
