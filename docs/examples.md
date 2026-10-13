@@ -152,8 +152,8 @@ sending it. You review, edit and press send from Gmail. It cannot send.
 > Draft an intro to `jane@acme.com` about the conference and put it in my Gmail
 > drafts.
 
-Needs a one-time Google OAuth setup (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
-`GMAIL_REFRESH_TOKEN`); the steps are in `skills/gmail-draft/SKILL.md`.
+Needs a one-time Google OAuth setup (`gmail_draft.py auth`); the steps are in
+`skills/gmail-draft/SKILL.md`.
 
 ---
 

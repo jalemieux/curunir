@@ -60,22 +60,30 @@ Report the error to the user and stop. A `Gmail is not configured` or
 `Gmail authorization failed` error is an operator fix (below), not something to
 work around — do not fall back to sending the email some other way.
 
+The Gmail credentials belong to this script alone. Never read, print, copy or
+edit the credentials file, never call the Gmail API yourself (`curl`, Python,
+`web_fetch`), and never run the `auth` command.
+
 ## Setup (operator, once)
 
 1. In a Google Cloud project: enable the **Gmail API**, configure the OAuth
    consent screen, add the scope `https://www.googleapis.com/auth/gmail.compose`
    and create an OAuth client of type **Desktop app**.
-2. Put the client's id and secret in `.env` as `GMAIL_CLIENT_ID` and
-   `GMAIL_CLIENT_SECRET`.
-3. On a machine with a browser, with those two variables exported, run
-   `python skills/gmail-draft/gmail_draft.py auth`, open the printed URL and
-   approve. It prints a `GMAIL_REFRESH_TOKEN=...` line; add it to `.env` and
-   restart.
+2. At your own shell, in the repo root, on a machine with a browser, run
+   `python skills/gmail-draft/gmail_draft.py auth`. Paste the client ID and
+   secret when prompted, open the printed URL and approve.
+
+That writes the client and the refresh token to `.gmail-draft.json` (mode 0600)
+in the shared context directory, beside `.ws-token`. No restart is needed. Do
+**not** put these values in `.env`: every command the agent runs inherits the
+environment, and this file is read only by the script.
 
 The refresh token does not expire while the consent screen is published
 ("In production"). With the consent screen left in "Testing", Google expires it
-after 7 days and step 3 has to be repeated.
+after 7 days and step 2 has to be repeated.
 
 `gmail.compose` is the narrowest Gmail scope that can create a draft, but the
 scope also covers sending. Draft-only is a property of this script, which calls
-only `users.drafts.create`.
+only `users.drafts.create`. Keeping the token out of the environment narrows who
+can use it but is not a hard boundary: the agent runs as the same OS user and
+could read the file if it set out to.

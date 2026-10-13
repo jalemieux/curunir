@@ -7,9 +7,12 @@ Note the OAuth scope itself (`gmail.compose`, the narrowest one that can create
 a draft) would also permit sending, so "draft-only" is enforced here, not by
 Google.
 
-Credentials come from the environment: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET,
-GMAIL_REFRESH_TOKEN. Each run trades the refresh token for a short-lived access
-token, so there is no token file to keep and no manual re-auth.
+Credentials live in one 0600 file, `<shared>/.gmail-draft.json`, written by the
+`auth` subcommand and read only by this script. They are deliberately NOT
+environment variables: the bash tool hands the whole process environment to
+every command the model runs, so a token in `.env` would be one `printenv`
+away from any other code. Each run trades the stored refresh token for a
+short-lived access token, so there is no manual re-auth.
 
     # once, by the operator, at a shell on a machine with a browser:
     python skills/gmail-draft/gmail_draft.py auth
@@ -28,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import getpass
 import json
 import os
 import secrets
@@ -46,10 +50,34 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 DRAFTS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
 
+_KEYS = ("client_id", "client_secret", "refresh_token")
 _AUTH_HINT = (
-    "set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN; the operator "
-    "gets the refresh token by running `python skills/gmail-draft/gmail_draft.py auth`"
+    "the operator must run `python skills/gmail-draft/gmail_draft.py auth` once, at "
+    "their own shell; do not try to create or read the credentials file yourself"
 )
+
+
+def creds_path() -> str:
+    """The credentials file, next to `.ws-token` in the container's shared dir."""
+    return os.path.join(os.environ.get("CURUNIR_SHARED_DIR") or "context", ".gmail-draft.json")
+
+
+def load_creds(path: str) -> dict:
+    """Read the credentials file; {} when it is missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_creds(path: str, creds: dict) -> None:
+    """Write the credentials file, owner-readable only from the first byte."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(creds, f)
+    os.chmod(path, 0o600)  # the mode arg is ignored when the file already existed
 
 
 class GmailError(Exception):
@@ -124,7 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--html-file", dest="html_file",
         help="Optional path to an HTML body; overrides the auto-rendered HTML part.",
     )
-    a = sub.add_parser("auth", help="Operator-only: one-time OAuth consent, prints a refresh token.")
+    a = sub.add_parser("auth", help="Operator-only: one-time OAuth consent, stores the credentials.")
     a.add_argument("--port", type=int, default=8769, help="Loopback port for the OAuth redirect.")
     return p
 
@@ -160,12 +188,10 @@ def build_raw(*, to, cc, bcc, subject, text_body, html_body) -> str:
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
 
-def cmd_draft(args, *, post=_post, env=None) -> int:
-    env = os.environ if env is None else env
-    creds = {k: env.get(k, "") for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")}
-    missing = [k for k, v in creds.items() if not v]
-    if missing:
-        return _fail(f"Gmail is not configured: missing {', '.join(missing)}", _AUTH_HINT)
+def cmd_draft(args, *, post=_post, path=None) -> int:
+    creds = load_creds(path or creds_path())
+    if not all(creds.get(k) for k in _KEYS):
+        return _fail("Gmail is not configured", _AUTH_HINT)
 
     try:
         text_body = _read_file(args.body_file) if args.body_file else args.body
@@ -189,16 +215,15 @@ def cmd_draft(args, *, post=_post, env=None) -> int:
     try:
         access = post(TOKEN_URL, form={
             "grant_type": "refresh_token",
-            "client_id": creds["GMAIL_CLIENT_ID"],
-            "client_secret": creds["GMAIL_CLIENT_SECRET"],
-            "refresh_token": creds["GMAIL_REFRESH_TOKEN"],
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "refresh_token": creds["refresh_token"],
         })["access_token"]
     except (GmailError, KeyError) as e:
         return _fail(
             f"Gmail authorization failed: {e}",
             "the refresh token or client credentials were rejected (revoked, expired or "
-            "mistyped); the operator must re-run `python skills/gmail-draft/gmail_draft.py auth` "
-            "and update GMAIL_REFRESH_TOKEN",
+            "mistyped); the operator must re-run `python skills/gmail-draft/gmail_draft.py auth`",
         )
 
     try:
@@ -214,12 +239,16 @@ def cmd_draft(args, *, post=_post, env=None) -> int:
     return 0
 
 
-def cmd_auth(args, *, post=_post, env=None) -> int:
-    """One-time consent: open the URL, catch the redirect on loopback, print the token."""
-    env = os.environ if env is None else env
-    client_id, client_secret = env.get("GMAIL_CLIENT_ID", ""), env.get("GMAIL_CLIENT_SECRET", "")
+def cmd_auth(args, *, post=_post, path=None) -> int:
+    """One-time consent: prompt for the client, catch the redirect, store the token."""
+    path = path or creds_path()
+    if not sys.stdin.isatty():
+        return _fail("auth is interactive and operator-only", _AUTH_HINT)
+    # Prompted, not flags or env: keeps the secret out of shell history and .env.
+    client_id = input("OAuth client ID: ").strip()
+    client_secret = getpass.getpass("OAuth client secret: ").strip()
     if not client_id or not client_secret:
-        return _fail("set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET first",
+        return _fail("client ID and secret are both required",
                      "create a Desktop-app OAuth client in Google Cloud; see the skill's Setup section")
 
     redirect = f"http://127.0.0.1:{args.port}"
@@ -258,8 +287,12 @@ def cmd_auth(args, *, post=_post, env=None) -> int:
     if not tok.get("refresh_token"):
         return _fail("Google returned no refresh token",
                      "remove the app at myaccount.google.com/permissions and run auth again")
-    print(f"GMAIL_REFRESH_TOKEN={tok['refresh_token']}")
-    print("Add that line to .env and restart curunir.", file=sys.stderr)
+    try:
+        save_creds(path, {"client_id": client_id, "client_secret": client_secret,
+                          "refresh_token": tok["refresh_token"]})
+    except OSError as e:
+        return _fail(f"could not write {path}: {e}")
+    print(f"Saved to {path} (mode 0600). No restart needed.", file=sys.stderr)
     return 0
 
 
