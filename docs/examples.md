@@ -146,6 +146,15 @@ just tell Curunir "enable the email-send skill" and it will do it for you).
 Note: if Curunir is already replying on an inbound email thread, you don't
 need this skill — the email channel sends its final response automatically.
 
+**`gmail-draft`** — Put an email in *your own* Gmail Drafts folder instead of
+sending it. You review, edit and press send from Gmail. It cannot send.
+
+> Draft an intro to `jane@acme.com` about the conference and put it in my Gmail
+> drafts.
+
+Needs a one-time Google OAuth setup (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
+`GMAIL_REFRESH_TOKEN`); the steps are in `skills/gmail-draft/SKILL.md`.
+
 ---
 
 ## Build new skills
