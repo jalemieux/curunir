@@ -36,6 +36,7 @@ import hashlib
 import imaplib
 import logging
 import mimetypes
+import re
 import smtplib
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
@@ -454,7 +455,8 @@ class FastmailClient:
         msg["To"] = ", ".join(to)
         if cc:
             msg["Cc"] = ", ".join(cc)
-        msg["Subject"] = subject
+        # Incoming subjects can retain RFC header folding after decoding.
+        msg["Subject"] = re.sub(r"[\r\n]+[ \t]*", " ", subject)
         msg["Date"] = email.utils.formatdate(localtime=True)
         msg["Message-ID"] = message_id
         if in_reply_to:
