@@ -389,6 +389,21 @@ def test_send_reply_builds_threaded_mime(client):
     assert "Hi back" in body
 
 
+@pytest.mark.parametrize("linebreak", ["\r\n ", "\n ", "\r", "\n"])
+def test_send_reply_unfolds_subject(client, linebreak):
+    holder, factory = _capture_smtp()
+    with patch("src.channels.fastmail.smtplib.SMTP_SSL", side_effect=factory):
+        import asyncio
+        asyncio.run(client.send_reply(
+            in_reply_to="<m1@curunir.ai>", to="alice@example.com", text_body="Hi back",
+            subject=f"Re: Bay Club [{linebreak}ref:123 ]",
+        ))
+    msg = holder["smtp"].sent[0]
+    assert msg["Subject"] == "Re: Bay Club [ ref:123 ]"
+    assert msg["In-Reply-To"] == "<m1@curunir.ai>"
+    assert msg.as_bytes()
+
+
 def test_send_reply_message_id_is_stable_across_retries(client):
     """A reply's Message-ID is derived from in_reply_to so a re-send dedupes."""
     ids = []
