@@ -23,7 +23,7 @@ Use `site:reddit.com` to scope Brave Search results to Reddit posts:
 curl -s "https://api.search.brave.com/res/v1/web/search?q=site%3Areddit.com+YOUR+QUERY&count=10" \
   -H "Accept: application/json" \
   -H "X-Subscription-Token: $BRAVE_API_KEY" \
-  | jq -r '.web.results[] | {title, url}'
+  | jq -r '(.web.results // [])[] | {title, url}'
 ```
 
 ### xAI web_search with `allowed_domains` (alternative)
@@ -83,7 +83,7 @@ End-to-end: Brave Search discovers posts, then each post is fetched in full:
 URLS=$(curl -s "https://api.search.brave.com/res/v1/web/search?q=site%3Areddit.com+YOUR+QUERY&count=5" \
   -H "Accept: application/json" \
   -H "X-Subscription-Token: $BRAVE_API_KEY" \
-  | jq -r '.web.results[].url')
+  | jq -r '(.web.results // [])[].url')
 
 # Step 2: Extract full content from each post
 for url in $URLS; do

@@ -80,7 +80,7 @@ for q in \
   curl -s "https://api.search.brave.com/res/v1/web/search?q=$(printf %s "$q" | jq -sRr @uri)&count=10&freshness=pd" \
     -H "Accept: application/json" \
     -H "X-Subscription-Token: $BRAVE_API_KEY" \
-    | jq '.web.results[] | {title, url, description, page_age}'
+    | jq '(.web.results // [])[] | {title, url, description, page_age}'
 done > /tmp/digest-<slug>/candidates.jsonl
 ```
 

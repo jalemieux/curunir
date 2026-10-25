@@ -63,7 +63,7 @@ curl -s https://api.x.ai/v1/responses \
 curl -s "https://api.search.brave.com/res/v1/web/search?q=site%3Alinkedin.com+YOUR+QUERY" \
   -H "Accept: application/json" \
   -H "X-Subscription-Token: $BRAVE_API_KEY" \
-  | jq '.web.results[] | {title, url, description}'
+  | jq '(.web.results // [])[] | {title, url, description}'
 ```
 
 Brave returns titles, URLs, and description snippets — useful for discovering which LinkedIn pages exist and getting surface-level summaries, but less synthesized than Gemini or xAI.

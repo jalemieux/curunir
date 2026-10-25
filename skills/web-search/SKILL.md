@@ -39,7 +39,7 @@ curl -s "https://api.search.brave.com/res/v1/web/search?q=climate+policy+2026&co
 
 ## Reading Results
 
-Results are in `.web.results[]`. Each result has:
+Results are in `(.web.results // [])[]`. Each result has:
 
 - `title` — page title
 - `url` — link
@@ -51,8 +51,14 @@ Use `jq` to extract what you need:
 curl -s "https://api.search.brave.com/res/v1/web/search?q=YOUR+QUERY" \
   -H "Accept: application/json" \
   -H "X-Subscription-Token: $BRAVE_API_KEY" \
-  | jq '.web.results[] | {title, url, description}'
+  | jq '(.web.results // [])[] | {title, url, description}'
 ```
+
+The `// []` guard is important: when Brave returns no `.web.results` (zero
+hits, a spellcheck-altered query, or an error/quota payload), `.web.results[]`
+would abort with `Cannot iterate over null`. The guarded form prints nothing
+instead. **An empty result set printing nothing is normal — treat it as "no
+results," not a tool failure, and don't retry the same query.**
 
 ## Search Operators
 
@@ -69,7 +75,7 @@ Example:
 curl -s "https://api.search.brave.com/res/v1/web/search?q=site%3Areuters.com+AI+regulation" \
   -H "Accept: application/json" \
   -H "X-Subscription-Token: $BRAVE_API_KEY" \
-  | jq '.web.results[] | {title, url, description}'
+  | jq '(.web.results // [])[] | {title, url, description}'
 ```
 
 ## Research Pattern
