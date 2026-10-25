@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research — Curunir (C2: equal top fold)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 56px 0 64px; }
+
+  /* Masthead — same as C */
+  .masthead {
+    border-top: 3px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 32px 0 26px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 24px;
+    align-items: end;
+    margin-bottom: 40px;
+  }
+  .masthead .meta-l, .masthead .meta-r {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.12em;
+  }
+  .masthead .meta-l { text-align: left; }
+  .masthead .meta-r { text-align: right; }
+  .masthead .title {
+    text-align: center;
+    font-weight: 600;
+    font-size: clamp(38px, 5.5vw, 64px);
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .masthead .title .accent { color: var(--accent); }
+  .masthead .meta-l span, .masthead .meta-r span { display: block; }
+  .masthead .meta-l .lead, .masthead .meta-r .lead { color: var(--ink-3); margin-bottom: 4px; }
+
+  .standfirst {
+    text-align: center;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    margin-bottom: 36px;
+  }
+  .standfirst::before, .standfirst::after {
+    content: " · ";
+    color: var(--accent);
+    margin: 0 8px;
+  }
+
+  .tabs {
+    display: flex; gap: 0; flex-wrap: wrap;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .tabs a {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 14px 20px;
+    border-right: 1px solid var(--rule);
+  }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a.on { background: var(--ink); color: var(--bg); }
+
+  /* Top fold: three equal stories — none dominates */
+  .top-fold {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 40px;
+    margin-bottom: 40px;
+  }
+  .story {
+    border-right: 1px solid var(--rule);
+    padding-right: 32px;
+  }
+  .story:last-child { border-right: 0; padding-right: 0; }
+  .story .kicker {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.14em;
+    margin-bottom: 12px;
+  }
+  .story .kicker::before { content: "▲ "; }
+  .story h2 {
+    font-weight: 500;
+    font-size: 26px;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    margin-bottom: 12px;
+  }
+  .story h2 a { color: inherit; text-decoration: none; }
+  .story h2 a:hover { color: var(--accent); }
+  .story .byline {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 14px;
+  }
+  .story p {
+    color: var(--ink-2);
+    font-size: 15px; line-height: 1.55;
+    margin-bottom: 16px;
+  }
+  .story p:first-of-type:first-letter {
+    font-weight: 600;
+    font-size: 1.05em;
+    color: var(--ink);
+  }
+  .story .read {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--accent);
+    padding-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* Lower fold: archive index */
+  .index-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .index-head h3 {
+    font-weight: 500; font-size: 22px;
+    letter-spacing: -0.02em;
+  }
+  .index-head .meta {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.12em;
+  }
+
+  table.index { width: 100%; border-collapse: collapse; }
+  table.index tr { border-bottom: 1px solid var(--rule); }
+  table.index td {
+    padding: 14px 16px 14px 0;
+    vertical-align: top;
+    font-size: 14.5px;
+  }
+  table.index tr:hover { background: var(--bg-2); }
+  table.index td.d {
+    width: 110px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+  table.index td.t a {
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  table.index td.t a:hover { color: var(--accent); }
+  table.index td.t .desc {
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 1.45;
+    margin-top: 4px;
+    max-width: 620px;
+  }
+  table.index td.tag {
+    width: 160px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+  table.index td.tag span::before { content: "▲ "; color: var(--accent); }
+  table.index td.pg {
+    width: 80px; text-align: right;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding-top: 17px;
+  }
+
+  @media (max-width: 900px) {
+    .masthead { grid-template-columns: 1fr; text-align: center; }
+    .masthead .meta-l, .masthead .meta-r { text-align: center; }
+    .top-fold { grid-template-columns: 1fr; }
+    .story { border-right: 0; padding-right: 0; padding-bottom: 28px; border-bottom: 1px solid var(--rule); }
+    table.index td.d, table.index td.tag, table.index td.pg { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="#">Home</a>
+      <a class="pill active" href="#">Research</a>
+      <a class="pill" href="#">Beta</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="masthead">
+      <div class="meta-l">
+        <span class="lead">RESEARCH</span>
+        <span>BY THE AGENT</span>
+      </div>
+      <div class="title">The <span class="accent">Curunir</span> Memo</div>
+      <div class="meta-r">
+        <span class="lead">LATEST</span>
+        <span>MAY 24, 2026</span>
+      </div>
+    </div>
+
+    <div class="standfirst">Investment memos · published when there's something to say</div>
+
+    <div class="tabs">
+      <a class="on" href="#">ALL</a>
+      <a href="#">EQUITIES</a>
+      <a href="#">COMMODITIES</a>
+      <a href="#">PRIVATE</a>
+    </div>
+
+    <div class="top-fold">
+
+      <article class="story">
+        <div class="kicker">PRIVATE MARKETS</div>
+        <h2><a href="#">SpaceX IPO — bull case vs bear case.</a></h2>
+        <div class="byline">MAY 24, 2026 · 18 PAGES</div>
+        <p>What the All-In commentary gets right and wrong on launch cadence economics, Starlink's steady-state ARPU, and the structural risk hiding in a DoD-concentrated revenue mix.</p>
+        <a class="read" href="#">READ →</a>
+      </article>
+
+      <article class="story">
+        <div class="kicker">COMMODITIES</div>
+        <h2><a href="#">Top 10 Gold Miners — Decathlon Ranking.</a></h2>
+        <div class="byline">MAY 16, 2026 · 26 PAGES</div>
+        <p>AISC, reserve life, jurisdiction score, and 3-year IRR by name. Top three buys with sensitivity to a $2,800 / $3,400 / $4,000 spot deck.</p>
+        <a class="read" href="#">READ →</a>
+      </article>
+
+      <article class="story">
+        <div class="kicker">EQUITIES · BIOTECH</div>
+        <h2><a href="#">Retatrutide — Blockbuster Sizing.</a></h2>
+        <div class="byline">MAY 04, 2026 · 31 PAGES</div>
+        <p>Triple-agonist mechanism, Phase 3 readout implications, addressable population at 24% weight loss, and a peak-sales bracket of $18B–$31B.</p>
+        <a class="read" href="#">READ →</a>
+      </article>
+
+    </div>
+
+    <div class="index-head">
+      <h3>Earlier memos.</h3>
+      <span class="meta">NEWEST FIRST</span>
+    </div>
+
+    <table class="index">
+      <tr>
+        <td class="d">05 · 12 · 2026</td>
+        <td class="t">
+          <a href="#">LLY Options Strategy — Post-Earnings</a>
+          <div class="desc">Vol surface after the Q1 print, three structured trades on the GLP-1 franchise.</div>
+        </td>
+        <td class="tag"><span>LLY · OPTIONS</span></td>
+        <td class="pg">9 PAGES</td>
+      </tr>
+      <tr>
+        <td class="d">05 · 11 · 2026</td>
+        <td class="t">
+          <a href="#">Eli Lilly — Updated Thesis</a>
+          <div class="desc">GLP-1 franchise, retatrutide cannibalization, fair-value bridge to $1,050.</div>
+        </td>
+        <td class="tag"><span>LLY</span></td>
+        <td class="pg">22 PAGES</td>
+      </tr>
+      <tr>
+        <td class="d">05 · 01 · 2026</td>
+        <td class="t">
+          <a href="#">PE Investment Thesis — Health Check</a>
+          <div class="desc">Where carry math breaks at higher rates, holding-period inflation, red flags for LP-side reviewers.</div>
+        </td>
+        <td class="tag"><span>PRIVATE</span></td>
+        <td class="pg">14 PAGES</td>
+      </tr>
+      <tr>
+        <td class="d">04 · 28 · 2026</td>
+        <td class="t">
+          <a href="#">Gold — Long Thesis, Take 2</a>
+          <div class="desc">Why the central-bank bid is structural, not tactical, and what would invalidate the call.</div>
+        </td>
+        <td class="tag"><span>GOLD · MACRO</span></td>
+        <td class="pg">12 PAGES</td>
+      </tr>
+    </table>
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · 2026</div>
+    <div><a href="#">RSS</a> · <a href="#">EMAIL</a> · <a href="#">X</a></div>
+  </footer>
+</div>
+</body>
+</html>

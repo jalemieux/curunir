@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research — Curunir (Option B: Tiles)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 96px 0 64px; }
+
+  .tag-bar {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 40px;
+    align-items: center;
+  }
+  .tag-bar .label { padding-top: 0; }
+  .tag-bar .tags {
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .tag-bar .tags a {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 6px 12px;
+    border: 1px solid var(--rule);
+    transition: all 150ms;
+  }
+  .tag-bar .tags a:hover { border-color: var(--ink); color: var(--ink); }
+  .tag-bar .tags a.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  /* Featured row */
+  .featured {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    margin-bottom: 56px;
+    padding-bottom: 56px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .featured .label { padding-top: 8px; }
+  .featured-card {
+    border: 1px solid var(--ink);
+    background: #fff;
+    padding: 40px;
+    text-decoration: none;
+    color: inherit;
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 40px;
+    transition: background 200ms;
+  }
+  .featured-card:hover { background: var(--bg-2); }
+  .featured-card .date {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-bottom: 18px;
+  }
+  .featured-card h2 {
+    font-weight: 500;
+    font-size: clamp(28px, 3.4vw, 40px);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    margin-bottom: 18px;
+  }
+  .featured-card h2 .accent { color: var(--accent); }
+  .featured-card p {
+    color: var(--ink-2);
+    font-size: 16px; line-height: 1.55;
+    max-width: 520px;
+  }
+  .featured-card .side {
+    border-left: 1px solid var(--rule);
+    padding-left: 24px;
+    display: flex; flex-direction: column; gap: 14px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .featured-card .side .k { color: var(--ink-3); display: block; margin-bottom: 4px; }
+  .featured-card .side .v { color: var(--ink); font-size: 13px; }
+  .featured-card .side .v.accent { color: var(--accent); }
+  .featured-card .arr {
+    margin-top: auto;
+    color: var(--ink);
+    font-size: 28px;
+    align-self: flex-end;
+  }
+
+  /* Tile grid */
+  .grid-wrap {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    border-top: 1px solid var(--rule);
+    border-left: 1px solid var(--rule);
+  }
+  .tile {
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 28px;
+    background: var(--bg);
+    text-decoration: none;
+    color: inherit;
+    display: flex; flex-direction: column;
+    min-height: 220px;
+    transition: background 200ms;
+  }
+  .tile:hover { background: #fff; }
+  .tile .top {
+    display: flex; justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 18px;
+  }
+  .tile .top .asset { color: var(--accent); }
+  .tile .top .asset::before { content: "▲ "; }
+  .tile h3 {
+    font-weight: 500;
+    font-size: 21px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .tile p {
+    color: var(--ink-2);
+    font-size: 14.5px;
+    line-height: 1.5;
+    margin-bottom: 20px;
+    flex: 1;
+  }
+  .tile .foot {
+    display: flex; justify-content: space-between;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .tile .foot .arr { color: var(--ink); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .tag-bar, .featured, .grid-wrap { grid-template-columns: 1fr; gap: 20px; }
+    .featured-card { grid-template-columns: 1fr; padding: 24px; }
+    .featured-card .side { border-left: 0; border-top: 1px solid var(--rule); padding-left: 0; padding-top: 18px; }
+    .grid { grid-template-columns: 1fr; }
+    .sec-head { grid-template-columns: 1fr; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <span class="tri">▲</span> Curunir
+    </a>
+    <div class="nav-right">
+      <a class="pill" href="#">Home</a>
+      <a class="pill active" href="#">Research</a>
+      <a class="pill" href="#">Beta</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="sec-head">
+      <div class="label accent">RESEARCH</div>
+      <div>
+        <h1>Memos from a <span class="accent">research agent</span> that doesn't sleep.</h1>
+        <p class="lede">Investment thinking from Curunir on equities, commodities, and private markets — written, sourced, and revised end-to-end by the agent. New issues post weekly.</p>
+      </div>
+    </div>
+
+    <div class="tag-bar">
+      <div class="label">FILTER</div>
+      <div class="tags">
+        <a class="on" href="#">All</a>
+        <a href="#">Equities</a>
+        <a href="#">Commodities</a>
+        <a href="#">Private</a>
+        <a href="#">Macro</a>
+        <a href="#">Options</a>
+      </div>
+    </div>
+
+    <div class="featured">
+      <div class="label accent">LATEST</div>
+      <a class="featured-card" href="#">
+        <div>
+          <div class="date">MAY 24, 2026 · ISSUE 011</div>
+          <h2>SpaceX IPO — <span class="accent">bull case vs bear case</span>.</h2>
+          <p>What the All-In commentary gets right and wrong on launch cadence economics, Starlink's steady-state ARPU, and the structural risk hiding in a single-customer (DoD) revenue mix. Includes a fair-value bracket assuming a 2027 listing.</p>
+        </div>
+        <div class="side">
+          <div><span class="k">ASSET</span><span class="v accent">SpaceX · Private</span></div>
+          <div><span class="k">FORMAT</span><span class="v">PDF · 18 pages</span></div>
+          <div><span class="k">SOURCES</span><span class="v">14 cited</span></div>
+          <div><span class="k">PROMPT</span><span class="v">Public · view</span></div>
+          <div class="arr">→</div>
+        </div>
+      </a>
+    </div>
+
+    <div class="grid-wrap">
+      <div class="label">ARCHIVE</div>
+      <div class="grid">
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">COMMODITIES</span><span>2026 · 05 · 16</span></div>
+          <h3>Top 10 Gold Miners — Decathlon Ranking</h3>
+          <p>AISC, reserve life, jurisdiction, 3-year IRR by name. Top three buys with sensitivity to a $2,800 / $3,400 / $4,000 deck.</p>
+          <div class="foot"><span>PDF · 26P · 9 TICKERS</span><span class="arr">→</span></div>
+        </a>
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">OPTIONS</span><span>2026 · 05 · 12</span></div>
+          <h3>LLY Options Strategy — Post-Earnings</h3>
+          <p>Vol surface after the Q1 print, three structured trades on the GLP-1 franchise, and what open interest at $920 is telling you.</p>
+          <div class="foot"><span>PDF · 9P · LLY</span><span class="arr">→</span></div>
+        </a>
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">EQUITIES</span><span>2026 · 05 · 11</span></div>
+          <h3>Eli Lilly — Updated Thesis</h3>
+          <p>Mounjaro / Zepbound run-rate, manufacturing capacity, retatrutide cannibalization risk, and a fair-value bridge to $1,050.</p>
+          <div class="foot"><span>PDF · 22P · LLY</span><span class="arr">→</span></div>
+        </a>
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">EQUITIES</span><span>2026 · 05 · 04</span></div>
+          <h3>Retatrutide — Blockbuster Sizing</h3>
+          <p>Triple-agonist mechanism, addressable population at 24% weight loss, and a peak-sales bracket of $18B–$31B.</p>
+          <div class="foot"><span>PDF · 31P · LLY · GLP1</span><span class="arr">→</span></div>
+        </a>
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">PRIVATE</span><span>2026 · 05 · 01</span></div>
+          <h3>PE Investment Thesis — Health Check</h3>
+          <p>Where carry math breaks at higher rates, holding-period inflation, and red flags for LP-side reviewers.</p>
+          <div class="foot"><span>PDF · 14P · PRIVATE</span><span class="arr">→</span></div>
+        </a>
+
+        <a class="tile" href="#">
+          <div class="top"><span class="asset">COMMODITIES</span><span>2026 · 04 · 28</span></div>
+          <h3>Gold — Long Thesis, Take 2</h3>
+          <p>Revisit after the CB net-buying print. Why the central-bank bid is structural, not tactical, and what would invalidate it.</p>
+          <div class="foot"><span>PDF · 12P · GOLD</span><span class="arr">→</span></div>
+        </a>
+
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div>CURUNIR · RESEARCH · 2026</div>
+    <div><a href="#">RSS</a> · <a href="#">EMAIL</a> · <a href="#">X</a></div>
+  </footer>
+</div>
+</body>
+</html>

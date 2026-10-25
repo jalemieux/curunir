@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Research section — Curunir mock options</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  main { padding: 80px 0; }
+  .opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .opt {
+    border: 1px solid var(--ink);
+    padding: 28px;
+    text-decoration: none;
+    color: inherit;
+    background: #fff;
+    transition: background 200ms;
+  }
+  .opt:hover { background: var(--bg-2); }
+  .opt .label { margin-bottom: 12px; }
+  .opt h3 {
+    font-weight: 500; font-size: 24px;
+    letter-spacing: -0.02em; margin-bottom: 10px;
+  }
+  .opt p { color: var(--ink-2); font-size: 14.5px; line-height: 1.5; }
+  @media (max-width: 800px) { .opts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main>
+    <div class="sec-head">
+      <div class="label accent">MOCKS</div>
+      <div>
+        <h1>Research section — three directions.</h1>
+        <p class="lede">Pick a direction (or mash up the parts you like). All three reuse the landing page's tokens — Geist, mono labels, triangle markers, red accent, hard black borders.</p>
+      </div>
+    </div>
+
+    <div class="opts">
+      <a class="opt" href="option-a-ledger.html">
+        <div class="label accent">A · LEDGER</div>
+        <h3>Filing-cabinet list.</h3>
+        <p>One row per memo, dense and scannable. Left rail filters by asset class and year. Feels closest to a research firm's working archive — think Klarman / Bridgewater publications page.</p>
+      </a>
+      <a class="opt" href="option-b-tiles.html">
+        <div class="label accent">B · TILES</div>
+        <h3>Featured + grid.</h3>
+        <p>Big featured card up top for the latest issue, then a 2-up tile grid for the archive. Most visual, easiest to skim, best for sharing on X (the featured card is the shareable "issue").</p>
+      </a>
+      <a class="opt" href="option-c-broadsheet.html">
+        <div class="label accent">C · BROADSHEET</div>
+        <h3>Periodical / masthead.</h3>
+        <p>Frames the memos as a publication — masthead, section tabs, lead story with columns, then an archive table. Strongest editorial voice and the most "showcase what Curunir can do".</p>
+      </a>
+    </div>
+  </main>
+</div>
+</body>
+</html>
