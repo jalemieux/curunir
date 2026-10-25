@@ -13,8 +13,40 @@ permissions:
   packages: write
 
 jobs:
+  audit:
+    name: Audit dependencies (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: curunir
+            file: requirements.txt
+          - name: portal
+            file: portal/requirements.lock
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pip-audit queries PyPI's advisory feed + OSV for every pinned version.
+      # Both files are fully pinned, so --no-deps audits exactly what ships
+      # rather than re-resolving. Non-zero exit on any advisory gates the
+      # build below — an image with a known-vulnerable dependency does not
+      # reach GHCR. Raise the CVE floor in requirements.in / portal/pyproject.toml
+      # and recompile to clear a finding; never pin around it in the lockfile.
+      - name: pip-audit
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit
+          pip-audit --strict --no-deps -r "${{ matrix.file }}"
+
   build:
     name: Build ${{ matrix.name }}
+    needs: audit
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

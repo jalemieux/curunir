@@ -1,0 +1,39 @@
+# Source of truth for the curunir container's Python dependencies.
+#
+# requirements.txt is COMPILED from this file — do not edit it by hand:
+#
+#   uv pip compile requirements.in -o requirements.txt \
+#     --generate-hashes --universal --python-version 3.12
+#
+# `--universal` resolves across platforms with environment markers so one
+# lockfile serves both linux/amd64 and linux/arm64 image builds (see
+# .github/workflows/build-image.yml). `--generate-hashes` lets the Dockerfile
+# install with --require-hashes, so a compromised or substituted artifact on
+# PyPI fails the build instead of shipping.
+#
+# Add CVE floors here (`pkg>=X.Y.Z` with a comment naming the CVE) rather than
+# relying on the compile picking up a fix — a bare refresh fixes today and
+# silently regresses on the next resolution. Mirrors portal/pyproject.toml.
+
+litellm
+markdown
+python-dotenv
+rich
+prompt_toolkit
+httpx
+trafilatura
+pypdf[crypto]
+python-docx
+openpyxl
+websockets
+fastapi
+uvicorn[standard]
+pytest
+pytest-asyncio
+croniter
+shot-scraper
+openai>=1.0
+yfinance
+respx
+yt-dlp
+PyYAML>=6.0
