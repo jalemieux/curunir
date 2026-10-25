@@ -46,10 +46,11 @@ and the judge-model setup. The full suite spends real model tokens on the SUT
 
 ## Position-tracking tasks (the P/T/W families)
 
-The `tracking`-tagged tasks (P2, T1–T5, W1–W3) ask about the *owner's* balance
-sheet, so they must read a **seeded portfolio fixture** from memory rather than
-being handed numbers in-prompt — that's the only way they measure the
-memory-schema fix. `--fixture <name>` stashes the real `context/memory/`, seeds
+The `tracking`-tagged tasks (P2, T1–T5, W1–W4) ask about the *owner's* stored
+state — the balance sheet for P2/T*/W1–W3, the idea log (`idea-log.md`, #506)
+for W4 — so they must read a **seeded memory fixture** rather than being handed
+the facts in-prompt; that's the only way they measure the memory-schema and
+memory-convention behavior. `--fixture <name>` stashes the real `context/memory/`, seeds
 `fixtures/memory/<name>/` in, runs, and **restores on exit** (even on error):
 
 ```bash

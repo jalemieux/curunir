@@ -13,8 +13,13 @@ watches, or gold — read **`portfolios.md`** before answering. It holds every
 account, the real-estate equity, the watch collection, physical gold, and the
 liabilities.
 
+When the user mentions an investment idea, asks to "log this," or asks what
+ideas are in flight — read **`idea-log.md`**. Dormant (aged-out) ideas live in
+`archives/idea-log-archive.md`, still searchable.
+
 ## Taxonomy
 
 | File | Purpose |
 |---|---|
 | `portfolios.md` | The owner's complete balance sheet: brokerage / IRA / 401k / PE accounts, two properties + mortgages, watch collection (per-piece basis + dates), physical gold, cash, and the line of credit. |
+| `idea-log.md` | Fleeting investment ideas between spark and formal thesis: pipeline table + per-idea detail (hypothesis, promote/kill criteria, `Last touched`, status). Dormant entries move verbatim to `archives/idea-log-archive.md`. |
