@@ -1,4 +1,8 @@
-litellm
+# Pinned: litellm 1.106.x imports the optional `mcp` package from its core
+# completion path (`proxy/_experimental/mcp_server/catalog.py`), so every
+# call fails with "No module named 'mcp'" unless the proxy extra is
+# installed. 1.104.0 is the last release verified in production.
+litellm==1.104.0
 markdown
 python-dotenv
 rich
