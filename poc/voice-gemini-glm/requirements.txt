@@ -1,0 +1,7 @@
+google-genai>=2.34
+fastapi
+uvicorn[standard]
+websockets
+httpx
+python-dotenv
+pytest

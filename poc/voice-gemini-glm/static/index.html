@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voice POC: Gemini Live + GLM</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1.5rem; max-width: 1100px; color: #222; }
+  h1 { font-size: 1.2rem; }
+  fieldset { border: 1px solid #ccc; display: inline-block; margin-right: 1rem; }
+  button { font-size: 1rem; padding: .4rem 1rem; }
+  #status { margin-left: 1rem; font-weight: 600; }
+  .cols { display: flex; gap: 1.5rem; margin-top: 1rem; }
+  .cols > div { flex: 1; min-width: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #ddd; padding: 2px 5px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  pre { background: #f6f6f6; padding: .5rem; height: 320px; overflow: auto; font-size: 12px; margin: 0; }
+  #transcript { height: 160px; }
+  .user { color: #0a5; } .gemini { color: #06c; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>Voice POC: Gemini Live + GLM</h1>
+<fieldset>
+  <legend>Mode</legend>
+  <label><input type="radio" name="mode" value="gemini" checked> A: Gemini only</label>
+  <label><input type="radio" name="mode" value="glm"> B: Gemini + GLM (ask_agent)</label>
+</fieldset>
+<button id="connect">Connect</button>
+<span id="status">disconnected</span>
+<p><small>Use headphones so the microphone does not pick up Gemini. Columns are milliseconds. "speech end" is the last voice heard by the browser's energy VAD; "playback" is when the first sample of the reply left the speaker queue.</small></p>
+
+<div class="cols">
+  <div>
+    <h3>Latency per turn</h3>
+    <table id="turns">
+      <thead><tr>
+        <th>turn</th><th>mode</th><th>speech end → first audio</th><th>speech end → playback</th>
+        <th>speech end → tool call</th><th>GLM first token</th><th>GLM total</th><th>GLM done → first audio</th>
+        <th>answer chars</th><th>note</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <h3>Transcript</h3>
+    <pre id="transcript"></pre>
+  </div>
+  <div>
+    <h3>Events</h3>
+    <pre id="log"></pre>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
