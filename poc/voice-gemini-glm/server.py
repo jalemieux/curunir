@@ -229,9 +229,9 @@ class VoiceSession:
     async def send_json(self, obj: dict) -> None:
         await self.ws.send_text(json.dumps(obj))
 
-    async def event(self, name: str, **extra) -> None:
-        log.info("turn %d %s %s", self.turn.n, name, extra if extra else "")
-        await self.send_json({"type": "event", "name": name, "t": now_ms(), "turn": self.turn.n, **extra})
+    async def event(self, event_name: str, **extra) -> None:
+        log.info("turn %d %s %s", self.turn.n, event_name, extra if extra else "")
+        await self.send_json({"type": "event", "name": event_name, "t": now_ms(), "turn": self.turn.n, **extra})
 
     def spawn(self, coro) -> None:
         task = asyncio.create_task(coro)
@@ -347,11 +347,15 @@ class VoiceSession:
         turn = self.turn
         turn.tool_call = t_received
         turn.question = (fc.args or {}).get("question", "")
-        await self.event("tool_call", name=fc.name, question=turn.question)
+        await self.event("tool_call", function=fc.name, question=turn.question)
         if fc.name != "ask_agent":
             result = {"error": f"unknown function {fc.name}"}
         else:
-            result = await ask_glm(turn.question, turn, self.http, self.openrouter_key)
+            try:
+                result = await ask_glm(turn.question, turn, self.http, self.openrouter_key)
+            except Exception as e:  # never leave Gemini waiting on a crashed handler
+                log.exception("ask_glm failed")
+                result = {"error": f"agent call failed: {type(e).__name__}"}
         await self.event("glm_done", **{k: v for k, v in result.items() if k == "error"},
                          first_token_ms=turn.durations().get("glm_first_token"), total_ms=turn.durations().get("glm_total"))
         if fc.id in self.cancelled:
