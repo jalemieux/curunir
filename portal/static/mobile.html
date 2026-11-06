@@ -1104,6 +1104,7 @@ const voice = {
   playerNode: null, stream: null, talking: false, state: "off",
   lastPlayedSeq: 0, turn: null, interruptedTurn: null, t0: null,
   caption: null, firstAudioMs: null, stages: null,
+  lastDataSeq: 0, audioClosed: false, hint: null,
 };
 const voiceBtn = document.getElementById("voice-btn");
 const voiceBar = document.getElementById("voice-bar");
@@ -1115,7 +1116,13 @@ const vs = {
   timing: document.getElementById("vs-timing"), spacer: document.getElementById("vs-spacer"),
 };
 const pttBtn = document.getElementById("ptt-btn");
-const { orbState, modePill, foldCaption, timingLine } = window.VoiceScreen;
+const { orbState, modePill, foldCaption, timingLine, playbackDone } = window.VoiceScreen || {
+  // /voice/screen.js did not load (a cookie race on an auth-gated asset): the chat must
+  // still work, voice is simply unavailable.
+  orbState: () => ({ cls: "off", label: "voice unavailable, reload the page" }),
+  modePill: () => "", foldCaption: (c) => c || { text: "", segment: null }, timingLine: () => [], playbackDone: () => true,
+};
+if (!window.VoiceScreen) voiceBtn.disabled = true;
 
 voiceBtn.addEventListener("click", () => { if (voice.on) showVoiceScreen(); else voiceOn(); });
 document.getElementById("vs-back").addEventListener("click", hideVoiceScreen);
@@ -1130,10 +1137,12 @@ function hideVoiceScreen() { vs.screen.hidden = true; voiceBar.hidden = !voice.o
 // under the composer when the screen is closed.
 function setVoiceState(state, detail) {
   voice.state = state;
-  const { cls, label } = orbState(state, { ptt: voice.ptt, talking: voice.talking, detail });
+  let { cls, label } = orbState(state, { ptt: voice.ptt, talking: voice.talking, detail });
+  if (state === "ready" && voice.hint) { label = voice.hint; voice.hint = null; } // painted once, then the default
   vs.orb.className = `vs-orb ${cls}`;
   vs.label.textContent = label;
   voiceStateEl.textContent = label;
+  if (!voice.on && vs.screen.hidden) voiceBar.hidden = true; // voice is over: nothing stale under the composer
 }
 
 function renderTiming() {
@@ -1166,7 +1175,12 @@ async function voiceOn() {
     voice.playerNode.connect(voice.ctx.destination);
     voice.playerNode.port.onmessage = (e) => {
       const m = e.data;
-      if (m.type === "played") voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
+      if (m.type === "played") {
+        voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
+        if (voice.state === "speaking" && playbackDone({ closed: voice.audioClosed, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) {
+          setVoiceState("ready");
+        }
+      }
       if (m.type === "playback_start" && voice.t0 !== null) {
         voice.firstAudioMs = performance.now() - voice.t0;
         voice.t0 = null;
@@ -1218,6 +1232,7 @@ function voiceInterrupt() {
   if (!voice.on) return;
   voiceClearPlayback();
   voice.interruptedTurn = voice.turn;
+  voice.audioClosed = true; voice.lastDataSeq = 0;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId, played_seq: voice.lastPlayedSeq }));
   }
@@ -1250,7 +1265,7 @@ function voiceTranscript(msg) {
     // The server's clock is not ours: count back the stages it reports.
     voice.t0 = performance.now() - (msg.stt_ms || 0) - (msg.vad_silence_ms || 0);
   }
-  if (!msg.text) { vs.label.textContent = "heard nothing, try again"; return; }
+  if (!msg.text) { voice.hint = "heard nothing, try again"; return; } // the ready frame right behind paints it
   vs.you.textContent = `“${msg.text}”`;
   vs.reply.textContent = "";
   voice.caption = null;
@@ -1274,17 +1289,22 @@ function voiceAudio(msg) {
   if (msg.turn_id !== voice.turn) {
     voice.turn = msg.turn_id;
     voice.lastPlayedSeq = 0; // seq restarts with every reply
+    voice.lastDataSeq = 0; voice.audioClosed = false;
     voice.playerNode.port.postMessage({ type: "mark", turn: msg.turn_id });
     setVoiceState("speaking");
   }
   if (msg.data) {
+    voice.lastDataSeq = Math.max(voice.lastDataSeq, msg.seq);
     const bytes = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
     voice.playerNode.port.postMessage({ type: "audio", pcm: bytes.buffer, seq: msg.seq }, [bytes.buffer]);
   }
   if (msg.final) {
+    // Synthesis is over; the phone's speaker is not. Stay in speaking until the last
+    // slice has played (the worklet reports each one), unless the turn was stopped.
+    voice.audioClosed = true;
     if (msg.stopped) voiceClearPlayback();
     if (msg.stages) { voice.stages = msg.stages; renderTiming(); }
-    setVoiceState("ready");
+    if (msg.stopped || playbackDone({ closed: true, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) setVoiceState("ready");
   }
 }
 

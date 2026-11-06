@@ -2,7 +2,7 @@
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
-const { orbState, modePill, foldCaption, timingLine } = require("../../portal/static/voice/screen.js");
+const { orbState, modePill, foldCaption, timingLine, playbackDone } = require("../../portal/static/voice/screen.js");
 
 // orb and label per state and mode
 assert.deepEqual(orbState("ready"), { cls: "ready", label: "listening for you" });
@@ -36,4 +36,9 @@ assert.deepEqual(timingLine(1420, { transcript: 510, first_text_delta: 930, firs
   ["you stopped → first audio 1.4 s", "transcript 0.5 · first text 0.9 · first audio sent 1.2 s after speech end"]);
 assert.deepEqual(timingLine(undefined, {}), []);
 assert.deepEqual(timingLine(800, null), ["you stopped → first audio 0.8 s"]);
+// speaking lasts until the last slice has played, not until synthesis ended
+assert.equal(playbackDone({ closed: false, lastDataSeq: 7, playedSeq: 7 }), false);
+assert.equal(playbackDone({ closed: true, lastDataSeq: 7, playedSeq: 2 }), false);
+assert.equal(playbackDone({ closed: true, lastDataSeq: 7, playedSeq: 7 }), true);
+assert.equal(playbackDone({ closed: true, lastDataSeq: 0, playedSeq: 0 }), true);  // a reply with no audio at all
 console.log("voice screen tests ok");

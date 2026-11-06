@@ -60,7 +60,13 @@
     return parts;
   }
 
-  const api = { orbState, modePill, foldCaption, timingLine };
+  // The closing audio frame arrives when synthesis ends, seconds before the phone's
+  // speaker is done; the reply is over for the user when its last data slice has played.
+  function playbackDone({ closed = false, lastDataSeq = 0, playedSeq = 0 } = {}) {
+    return closed && (lastDataSeq === 0 || playedSeq >= lastDataSeq);
+  }
+
+  const api = { orbState, modePill, foldCaption, timingLine, playbackDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VoiceScreen = api;
 })(typeof window !== "undefined" ? window : globalThis);
