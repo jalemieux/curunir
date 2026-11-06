@@ -30,9 +30,10 @@ class SentenceChunker:
         self.buf += delta
         out: list[str] = []
         while True:
-            cut = self._sentence_cut()
+            limit = self._open_fence()
+            cut = self._sentence_cut(limit)
             if cut is None and not self.started:
-                cut = self._clause_cut()
+                cut = self._clause_cut(limit)
             if cut is None:
                 break
             head, self.buf = self.buf[:cut[0]].strip(), self.buf[cut[1]:]
@@ -41,13 +42,20 @@ class SentenceChunker:
                 self.started = True
         return out
 
+    def _open_fence(self) -> int | None:
+        """Start of an unclosed code fence, past which nothing is cut yet: the
+        whole block must reach ``speakable`` in one piece."""
+        if self.buf.count("```") % 2 == 0:
+            return None
+        return self.buf.rfind("```")
+
     def flush(self) -> str | None:
         rest = self.buf.strip()
         self.buf = ""
         return rest or None
 
-    def _sentence_cut(self) -> tuple[int, int] | None:
-        for m in _SENTENCE_END.finditer(self.buf):
+    def _sentence_cut(self, limit: int | None = None) -> tuple[int, int] | None:
+        for m in _SENTENCE_END.finditer(self.buf, 0, len(self.buf) if limit is None else limit):
             end = m.start(1) if m.group(1) is not None else m.start(2)
             head = self.buf[:end].strip()
             if len(head) < self.min_chars:
@@ -58,8 +66,8 @@ class SentenceChunker:
             return end, m.end()
         return None
 
-    def _clause_cut(self) -> tuple[int, int] | None:
-        for m in _CLAUSE_BREAK.finditer(self.buf):
+    def _clause_cut(self, limit: int | None = None) -> tuple[int, int] | None:
+        for m in _CLAUSE_BREAK.finditer(self.buf, 0, len(self.buf) if limit is None else limit):
             end = m.start(1) if m.group(1) is not None else m.start()
             if len(self.buf[:end].split()) >= self.first_chunk_words:
                 return end, m.end()

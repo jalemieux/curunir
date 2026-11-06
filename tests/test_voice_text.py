@@ -55,6 +55,12 @@ def test_token_by_token_matches_whole_text():
     assert tokens == whole == ["First things first, we need the file, then we parse it.", "Second: run the tests!", "Done?"]
 
 
+def test_code_fence_is_held_until_closed_so_speakable_sees_it_whole():
+    out = run(["Here it is:\n```py", "thon\nprint(1)\n", "```\nTry it. Done."])
+    assert out == ["Here it is:", "```python\nprint(1)\n```", "Try it.", "Done."]
+    assert [speakable(s) for s in out] == ["Here it is:", "I've put the code in the chat.", "Try it.", "Done."]
+
+
 @pytest.mark.parametrize("md,spoken", [
     ("Here is the fix:\n```python\nprint(1)\n```\nTry it.", "Here is the fix:\nI've put the code in the chat.\nTry it."),
     ("Run `pytest tests/` first.", "Run pytest tests/ first."),
