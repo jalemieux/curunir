@@ -7,7 +7,7 @@ import re
 
 _SENTENCE_END = re.compile(r"[.!?][\"')\]]*(\s+)|(\n+)")  # group 1 or 2 is the whitespace to drop
 _CLAUSE_BREAK = re.compile(r"[,;:](\s+)|\s[—–-](\s)")  # the punctuation stays with the head
-_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "no", "inc", "ltd"}
+_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "inc", "ltd"}
 
 
 class SentenceChunker:
@@ -76,9 +76,12 @@ class SentenceChunker:
             head = self.buf[:end].strip()
             if len(head) < self.min_chars:
                 continue
-            last = head.rstrip(".!?\"')]").rsplit(None, 1)[-1].lower() if head else ""
-            if last in _ABBREVIATIONS or (len(last) == 1 and last.isalpha()):
-                continue  # "Dr. Smith", "J. Doe"
+            word = head.rstrip(".!?\"')]").rsplit(None, 1)[-1] if head else ""
+            following = self.buf[m.end():m.end() + 1]
+            if word.lower() in _ABBREVIATIONS:
+                continue  # "Dr. Smith", "e.g. this"
+            if len(word) == 1 and word.isupper() and word not in ("I", "A") and following.isupper():
+                continue  # an initial, "J. Doe"; not "So did I." or "Plan A." (the one-letter words)
             return end, m.end()
         return None
 
@@ -98,8 +101,8 @@ _TABLE_LINE = re.compile(r"^\s*\|.*\|\s*$", re.M)
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.M)
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.M)
 _LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
-_BARE_URL = re.compile(r"https?://\S+")
-_EMPHASIS = re.compile(r"(\*{1,3}|_{1,3}|~~)(?=\S)(.+?)(?<=\S)\1")
+_BARE_URL = re.compile(r"https?://\S+?(?=[.,;:!?)]*(?:\s|$))")  # trailing punctuation stays
+_EMPHASIS = re.compile(r"(?<!\w)(\*{1,3}|_{1,3}|~~)(?=\S)(.+?)(?<=\S)\1(?!\w)")  # not the underscores of my_var_name
 _EMOJI = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF⭐⬆↔-↪️]"
 )

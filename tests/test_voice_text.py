@@ -41,6 +41,9 @@ def test_no_clause_cut_before_eight_words():
     ("Dr. Smith arrived late. Fine.", ["Dr. Smith arrived late.", "Fine."]),
     ("See e.g. the notes. Then go.", ["See e.g. the notes.", "Then go."]),
     ("J. Doe wrote it. Really.", ["J. Doe wrote it.", "Really."]),
+    ("The answer is no. Let me explain why.", ["The answer is no.", "Let me explain why."]),
+    ("So did I. Then we left early.", ["So did I.", "Then we left early."]),
+    ("Pick plan A. Then plan B follows.", ["Pick plan A.", "Then plan B follows."]),
     ('He said "stop." Then he left.', ['He said "stop."', "Then he left."]),
     ("Line one\nLine two", ["Line one", "Line two"]),
 ])
@@ -67,6 +70,8 @@ def test_code_fence_is_held_until_closed_so_speakable_sees_it_whole():
     ("| a | b |\n|---|---|\n| 1 | 2 |\nThat is the table.", "That is the table."),
     ("## Plan\n- step one\n- step two\n1. third", "Plan\nstep one\nstep two\nthird"),
     ("See [the docs](https://example.com/x) or https://example.com/y now.", "See the docs or a link now."),
+    ("Visit https://x.y/z. Done", "Visit a link. Done"),
+    ("Set `my_var_name` to _this_ value.", "Set my_var_name to this value."),
     ("This is **bold**, *italic* and ~~gone~~.", "This is bold, italic and gone."),
     ("Great job 🎉 see you ☀️ tomorrow", "Great job see you tomorrow"),
     ("Too   many    spaces\n\n\n\nand lines", "Too many spaces\n\nand lines"),
