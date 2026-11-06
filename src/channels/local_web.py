@@ -75,6 +75,9 @@ LOCAL_SESSION_ID = "local"
 _RECENT_MSG_CAP = 256
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "local_ui" / "static"
+#: The portal's voice page (portal/static/voice.html and voice/), served here too so
+#: voice can be tried against this console without the portal.
+_VOICE_DIR = Path(__file__).resolve().parent.parent.parent / "portal" / "static"
 
 
 class LocalWebChannel:
@@ -235,6 +238,17 @@ class LocalWebChannel:
         @app.get("/")
         async def index() -> FileResponse:
             return FileResponse(str(_STATIC_DIR / "index.html"))
+
+        @app.get("/voice")
+        async def voice_page() -> FileResponse:
+            return FileResponse(str(_VOICE_DIR / "voice.html"))
+
+        @app.get("/voice/{asset}")
+        async def voice_asset(asset: str):
+            path = (_VOICE_DIR / "voice" / asset).resolve()
+            if path.parent != (_VOICE_DIR / "voice").resolve() or not path.is_file():
+                return JSONResponse({"error": "not found"}, status_code=404)
+            return FileResponse(str(path))
 
         @app.get("/api/usage")
         async def api_usage(

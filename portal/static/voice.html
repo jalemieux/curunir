@@ -76,6 +76,9 @@
 // audio goes up as `audio` frames (PCM16 16 kHz), the reply comes back as `audio_chunk`
 // frames (PCM16 24 kHz) next to the text frames, which feed the captions here.
 const $ = (id) => document.getElementById(id);
+// On the local console the chat is "/" with the same pairing token, not the portal's /m.
+const pageToken = new URLSearchParams(location.search).get("token");
+if (pageToken) $("to-chat").href = `/?token=${encodeURIComponent(pageToken)}`;
 const el = { orb: $("orb"), label: $("label"), mode: $("mode"), you: $("you"), reply: $("reply"), timing: $("timing"),
              status: $("status"), ptt: $("ptt"), spacer: $("spacer"), end: $("end") };
 const { orbState, modePill, foldCaption, timingLine, playbackDone } = window.VoiceScreen || {
@@ -99,7 +102,9 @@ const voice = {
 // === socket ===
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/ws/browser`);
+  // The local console (src/channels/local_web.py) serves this page too and wants its
+  // pairing token on the socket; the portal authenticates by cookie and has none.
+  ws = new WebSocket(`${proto}//${location.host}/ws/browser${pageToken ? `?token=${encodeURIComponent(pageToken)}` : ""}`);
   ws.onopen = () => { backoff = 1000; };
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onclose = () => {

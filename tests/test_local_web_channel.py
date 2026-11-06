@@ -84,6 +84,16 @@ def test_root_serves_spa(client):
     assert "text/html" in r.headers["content-type"]
 
 
+def test_voice_page_and_its_scripts_are_served(client):
+    import re
+
+    html = client.get("/voice").text
+    assert "/ws/browser" in html
+    for src in re.findall(r'["\'](/voice/[^"\']+\.js)["\']', html) + ["/voice/mic-worklet.js", "/voice/player-worklet.js"]:
+        assert client.get(src).status_code == 200, src
+    assert client.get("/voice/..%2f..%2fapp.py").status_code == 404
+
+
 def test_spa_assets_are_served(client):
     """Every local js/css asset the SPA references must be fetchable.
 
