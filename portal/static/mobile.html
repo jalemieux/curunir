@@ -1105,7 +1105,9 @@ const voice = {
   lastPlayedSeq: 0, turn: null, interruptedTurn: null, t0: null,
   caption: null, firstAudioMs: null, stages: null,
   lastDataSeq: 0, audioClosed: false, hint: null,
+  ready: false, readyTimer: null,
 };
+const VOICE_READY_TIMEOUT_MS = 10000; // an agent without voice never answers voice_on
 const voiceBtn = document.getElementById("voice-btn");
 const voiceBar = document.getElementById("voice-bar");
 const voiceStateEl = document.getElementById("voice-state");
@@ -1200,7 +1202,9 @@ async function voiceOn() {
     source.connect(voice.micNode).connect(mute).connect(voice.ctx.destination);
     voice.micNode.port.onmessage = (e) => {
       if (e.data.type !== "pcm") return;
-      if (!voice.on || !ws || ws.readyState !== WebSocket.OPEN) return;
+      // Nothing goes up before the agent has said ready: an agent without voice would
+      // read audio frames as chat messages, one empty turn after another.
+      if (!voice.on || !voice.ready || !ws || ws.readyState !== WebSocket.OPEN) return;
       if (voice.ptt && !voice.talking) return;
       ws.send(JSON.stringify({ type: "audio", session_id: sessionId, data: b64(e.data.buf) }));
     };
@@ -1210,8 +1214,13 @@ async function voiceOn() {
     return;
   }
   voice.on = true;
+  voice.ready = false;
   voiceBtn.setAttribute("aria-pressed", "true");
   ws.send(JSON.stringify({ type: "voice_on", session_id: sessionId }));
+  clearTimeout(voice.readyTimer);
+  voice.readyTimer = setTimeout(() => {
+    if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("unavailable"); }
+  }, VOICE_READY_TIMEOUT_MS);
 }
 
 function voiceOff() {
@@ -1222,7 +1231,9 @@ function voiceOff() {
 
 function voiceTeardown() {
   voice.on = false;
+  voice.ready = false;
   voice.talking = false;
+  clearTimeout(voice.readyTimer);
   voiceBtn.setAttribute("aria-pressed", "false");
   pttBtn.hidden = true; vs.spacer.hidden = false;
   voice.stream?.getTracks().forEach((t) => t.stop());
@@ -1247,7 +1258,10 @@ function voiceInterrupt() {
 
 function voiceState(msg) {
   if (!voice.on) return;
+  if (msg.state === "loading") clearTimeout(voice.readyTimer); // the agent answered; models are loading
   if (msg.state === "ready" && typeof msg.server_vad === "boolean") {
+    voice.ready = true;
+    clearTimeout(voice.readyTimer);
     voice.serverVad = msg.server_vad;
     voice.ptt = !msg.server_vad;
     voice.provider = msg.provider || voice.provider;
