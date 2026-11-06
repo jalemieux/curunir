@@ -10,6 +10,7 @@ assert.deepEqual(orbState("ready", { ptt: true }), { cls: "ready", label: "hold 
 assert.deepEqual(orbState("ready", { ptt: true, talking: true }), { cls: "listening", label: "hearing you" });
 assert.equal(orbState("listening").cls, "listening");
 assert.equal(orbState("speaking").cls, "speaking");
+assert.doesNotMatch(orbState("speaking", { ptt: true }).label, /talk over/);  // hold-to-talk: talking over does nothing
 assert.equal(orbState("loading").cls, "loading");
 assert.equal(orbState("off").cls, "off");
 assert.notEqual(orbState("unavailable").label, orbState("no_voice").label);  // models failed vs no voice release: told apart

@@ -22,6 +22,7 @@
         ? { cls: talking ? "listening" : "ready", label: talking ? "hearing you" : "hold the button and talk" }
         : { cls: "ready", label: "listening for you" };
     }
+    if (state === "speaking" && ptt) return { cls: "speaking", label: "speaking, hold the button or tap the orb to interrupt" };
     if (state === "error") return { cls: "off", label: detail ? `voice unavailable: ${detail}` : "voice unavailable" };
     const s = STATES[state] || { cls: "ready", label: state };
     return { cls: s.cls, label: s.label };
