@@ -1,9 +1,9 @@
 # Findings
 
-Status: **not yet measured**. The bot that built this POC has no Gemini or
-OpenRouter key in its environment, so the numbers below are to be filled in by
-whoever runs it first. The procedure is fixed so both modes are compared on the
-same questions.
+Status: mode D measured on the owner's machine (2026-11-06) and by the bot
+with a synthetic driver; modes A to C were tried by the owner but not logged.
+The procedure below is fixed so the modes can be compared on the same
+questions; the mode A to C rows are still to be filled in.
 
 ## Procedure
 
@@ -28,11 +28,69 @@ Questions (same set in both modes):
 
 ## Measurements
 
+### Mode D, owner's session, M5 Pro, 2026-11-06 (from voice-poc.log)
+
+Silero VAD on the server, Whisper large-v3-turbo on MLX, GLM 5.2 via
+OpenRouter with thinking off, Kokoro. "turn detected" is 500 ms after the
+last voice (Silero's silence window). Browser playback start was not logged
+server-side, so the last column is server-side first audio.
+
+| Question                   | STT (ms) | GLM first token | GLM total | first token → first audio | turn detected → first audio | speech end → first audio |
+| -------------------------- | -------: | --------------: | --------: | ------------------------: | --------------------------: | -----------------------: |
+| Can you hear me?           |      189 |             842 |       995 |                       454 |                        1485 |                     1985 |
+| What is your name?         |      185 |             296 |       490 |                       676 |                        1158 |                     1658 |
+| What model are you using?  |      187 |             385 |       729 |                       962 |                        1535 |                     2035 |
+| Who trained you?           |      190 |             296 |      1201 |                      1555 |                        2042 |                     2542 |
+| Thank you.                 |      183 |             445 |       751 |                       465 |                        1093 |                     1593 |
+
+Owner's verdict in the thread: "much better" than the first local version
+(browser energy VAD as turn detector, GLM thinking on), which was "terrible".
+
+### Mode D, bot's synthetic driver (Kokoro speech plus room noise into the WebSocket, real GLM)
+
+| Run                          | STT | GLM first token | TTS first sentence | speech end → first audio |
+| ---------------------------- | --: | --------------: | -----------------: | -----------------------: |
+| thinking on, first question  | 207 |            1169 |                264 |                     2290 |
+| thinking on, follow-up       | 184 |            1910 |                187 |                     2886 |
+| thinking off, first question | 186 |             662 |                364 |                     1744 |
+| thinking off, follow-up      | 175 |            1549 |                339 |                     2564 |
+
+GLM first token varies between 0.3 and 1.9 s across runs on OpenRouter for the
+same prompt; measured directly, thinking off gives 0.3 to 0.4 s and thinking on
+0.7 to 2.3 s.
+
+### Modes A to C
+
 | Question | Mode | speech end → playback (ms) | speech end → tool call | GLM first token | GLM total | GLM done → first audio |
 | -------- | ---- | -------------------------- | ---------------------- | --------------- | --------- | ---------------------- |
 |          |      |                            |                        |                 |           |                        |
 
-## Expected shape of the result
+Not logged. The owner's verdict in the thread: mode C "works pretty good".
+
+## Findings
+
+1. **Gemini as the voice of another brain has a structural flaw.** The Live
+   API cannot force a function call, so in mode B Gemini answers some
+   questions itself with its own knowledge and personality. Mode C narrows it
+   with a prompt but cannot close it, and Gemini still paraphrases.
+2. **Privacy floor with Gemini Live.** Google receives all speech and, since
+   it must speak them, all of the agent's answers. Paid tier: not used for
+   training, logged 55 days for abuse monitoring, no zero-retention or region
+   option. Only the local stack (mode D) keeps audio off Google.
+3. **The dominant latency in mode D is the brain, not the local stack.**
+   Whisper is under 200 ms, Kokoro 200 to 400 ms per sentence; GLM's first
+   token is 0.3 to 1.9 s depending on OpenRouter's mood, and the first
+   sentence must complete before it can be spoken. Turn detection adds a
+   fixed 500 ms silence window.
+4. **Turn detection decides the experience.** An energy-threshold VAD in the
+   browser made mode D unusable in a normal room; Silero on the server fixed
+   it. GLM's thinking, left on, doubled or tripled the wait.
+5. **Mode D end to end, owner's session: 1.6 to 2.5 s from last voice to
+   first audio**, of which 0.5 s is the silence window and most of the rest
+   is OpenRouter. A local brain (`AGENT_BASE_URL`) would remove the network
+   part and is the next thing to measure.
+
+## Expected shape of the result (written before measuring)
 
 Stage costs that cannot be avoided in the mode B design:
 
