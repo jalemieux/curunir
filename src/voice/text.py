@@ -49,6 +49,20 @@ class SentenceChunker:
             return None
         return self.buf.rfind("```")
 
+    def _inside_fence(self, pos: int) -> bool:
+        """Is ``pos`` inside a closed code fence? Its newlines are not sentence ends."""
+        start = 0
+        while True:
+            open_ = self.buf.find("```", start)
+            if open_ < 0:
+                return False
+            close = self.buf.find("```", open_ + 3)
+            if close < 0:
+                return False
+            if open_ <= pos < close + 3:
+                return True
+            start = close + 3
+
     def flush(self) -> str | None:
         rest = self.buf.strip()
         self.buf = ""
@@ -56,6 +70,8 @@ class SentenceChunker:
 
     def _sentence_cut(self, limit: int | None = None) -> tuple[int, int] | None:
         for m in _SENTENCE_END.finditer(self.buf, 0, len(self.buf) if limit is None else limit):
+            if self._inside_fence(m.start()):
+                continue
             end = m.start(1) if m.group(1) is not None else m.start(2)
             head = self.buf[:end].strip()
             if len(head) < self.min_chars:
@@ -68,6 +84,8 @@ class SentenceChunker:
 
     def _clause_cut(self, limit: int | None = None) -> tuple[int, int] | None:
         for m in _CLAUSE_BREAK.finditer(self.buf, 0, len(self.buf) if limit is None else limit):
+            if self._inside_fence(m.start()):
+                continue
             end = m.start(1) if m.group(1) is not None else m.start()
             if len(self.buf[:end].split()) >= self.first_chunk_words:
                 return end, m.end()
