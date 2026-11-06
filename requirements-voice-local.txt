@@ -1,0 +1,7 @@
+# Optional: VOICE_PROVIDER=local (src/voice/providers.py). Kept out of the image.
+kokoro
+soundfile
+numpy
+silero-vad
+mlx-whisper; sys_platform == "darwin"      # Apple Silicon: Whisper on Metal
+faster-whisper; sys_platform != "darwin"   # CPU or CUDA via CTranslate2
