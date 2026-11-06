@@ -37,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 
-from local_voice import LocalSpeech, SentenceSplitter
+from local_voice import LocalSpeech, SentenceSplitter, TurnDetector
 
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
@@ -51,6 +51,9 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "z-ai/glm-5.2")
 AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
 OPENROUTER_URL = AGENT_BASE_URL + "/chat/completions"
 GLM_TIMEOUT_S = float(os.getenv("GLM_TIMEOUT_S", "30"))
+# "off" sends OpenRouter's reasoning={"enabled": false}: GLM 5.2 then answers in 0.3-0.4 s instead
+# of thinking for 0.7-2.3 s first. "default" leaves the model's own behaviour.
+GLM_REASONING = os.getenv("GLM_REASONING", "off").lower()
 # BLOCKING: Gemini waits silently for the answer (cleanest latency measurement).
 # NON_BLOCKING: Gemini may keep talking; the answer is delivered with scheduling=INTERRUPT.
 ASK_AGENT_BLOCKING = os.getenv("ASK_AGENT_BEHAVIOR", "BLOCKING").upper() != "NON_BLOCKING"
@@ -169,6 +172,8 @@ def parse_sse_line(line: str) -> tuple[str, str] | None:
 async def stream_chat(messages: list[dict], http: httpx.AsyncClient, api_key: str) -> AsyncIterator[tuple[str, str]]:
     """Stream ("content"|"reasoning", text) deltas from the agent model. Raises AgentError."""
     body = {"model": OPENROUTER_MODEL, "stream": True, "messages": messages}
+    if GLM_REASONING == "off":
+        body["reasoning"] = {"enabled": False}
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         async with http.stream("POST", OPENROUTER_URL, headers=headers, json=body, timeout=GLM_TIMEOUT_S) as r:
@@ -432,9 +437,10 @@ class VoiceSession(BrowserSession):
 
 
 class LocalVoiceSession(BrowserSession):
-    """Mode local: browser VAD -> Whisper -> GLM token stream -> sentences -> Kokoro -> browser.
+    """Mode local: Silero VAD -> Whisper -> GLM token stream -> sentences -> Kokoro -> browser.
 
-    Nothing spoken leaves the machine except the transcript sent to the agent model.
+    The turn detector runs here on the mic stream; the browser's energy VAD is ignored in
+    this mode. Nothing spoken leaves the machine except the transcript sent to the agent.
     """
 
     def __init__(self, ws: WebSocket, http: httpx.AsyncClient, api_key: str, speech: LocalSpeech):
@@ -446,10 +452,12 @@ class LocalVoiceSession(BrowserSession):
         self.preroll: collections.deque[bytes] = collections.deque(maxlen=PREROLL_CHUNKS)
         self.utterance: list[bytes] | None = None
         self.turn_task: asyncio.Task | None = None
+        self.vad: TurnDetector | None = None
 
     async def run(self) -> None:
         await self.send_json({"type": "status", "state": "loading", "detail": "loading local speech models"})
         await self.speech.ready()
+        self.vad = self.speech.turn_detector()
         await self.send_json({"type": "status", "state": "connected", "model": f"{LOCAL_STT_MODEL} + kokoro/{LOCAL_TTS_VOICE}",
                               "mode": "local", "glm_model": OPENROUTER_MODEL})
         try:
@@ -462,25 +470,33 @@ class LocalVoiceSession(BrowserSession):
         self.preroll.append(data)
         if self.utterance is not None:
             self.utterance.append(data)
+        signal = self.vad.feed(data)
+        if signal == "start":
+            await self.on_speech_start()
+        elif signal == "end" and self.utterance is not None:
+            await self.on_speech_end()
+
+    async def on_speech_start(self) -> None:
+        if self.turn_task and not self.turn_task.done():
+            await self.interrupt()
+        else:
+            await self.send_json({"type": "clear"})  # a reply may still be playing in the browser
+        self.utterance = list(self.preroll)
+        await self.event("speech_start", source="silero-vad")
+
+    async def on_speech_end(self) -> None:
+        pcm = b"".join(self.utterance)
+        self.utterance = None
+        t = now_ms()
+        self.turn.speech_end = t - self.vad.silence_ms  # Silero reports the end after the silence window
+        self.turn.speech_end_source = "silero-vad"
+        self.turn.turn_detected = t
+        await self.event("speech_end", source="silero-vad", audio_ms=len(pcm) // 32)
+        self.turn_task = asyncio.create_task(self.respond(self.turn, pcm))
 
     async def on_browser_event(self, ev: dict) -> bool:
-        if await super().on_browser_event(ev):
-            return True
-        kind = ev.get("type")
-        if kind == "speech_start":
-            if self.turn_task and not self.turn_task.done():
-                await self.interrupt()
-            self.utterance = list(self.preroll)
-            await self.event("speech_start", source="browser-vad")
-        elif kind == "speech_end" and self.utterance is not None:
-            pcm = b"".join(self.utterance)
-            self.utterance = None
-            self.turn.speech_end = to_server_time(ev["t_client"], self.offset_ms)
-            self.turn.speech_end_source = "browser-vad"
-            self.turn.turn_detected = now_ms()
-            await self.event("speech_end", source="browser-vad", audio_ms=len(pcm) // 32)
-            self.turn_task = asyncio.create_task(self.respond(self.turn, pcm))
-        return True
+        # The browser's energy VAD is only informative here; Silero decides the turns.
+        return await super().on_browser_event(ev) or ev.get("type") in ("speech_start", "speech_end")
 
     async def interrupt(self) -> None:
         self.turn_task.cancel()

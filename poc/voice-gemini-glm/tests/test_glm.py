@@ -47,6 +47,7 @@ def test_streams_answer_and_records_first_token():
     assert seen["auth"] == "Bearer key"
     body = json.loads(seen["body"])
     assert body["stream"] is True and body["messages"][-1]["content"] == "capital of France?"
+    assert body["reasoning"] == {"enabled": False}  # GLM_REASONING defaults to off
     assert turn.glm_start <= turn.glm_first_token <= turn.glm_done
     assert turn.answer_chars == len("Paris is it.")
 

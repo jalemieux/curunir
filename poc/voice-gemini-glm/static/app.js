@@ -107,10 +107,14 @@ async function startAudio() {
     if (m.type === "pcm") { if (ws?.readyState === 1) ws.send(m.buf); }
     else if (m.type === "speech_end") send({ type: "speech_end", t_client: Date.now() - m.silence_ms });
     else if (m.type === "speech_start") {
-      // Barge-in: stop local playback at once, whatever the server decides. The server may have
-      // finished sending a reply that is still playing here.
-      playerNode?.port.postMessage({ type: "clear" });
+      // Gemini modes: stop local playback at once on barge-in; the server may have finished
+      // sending a reply that is still playing here. In local mode the server's VAD decides.
+      if (mode !== "local") playerNode?.port.postMessage({ type: "clear" });
       send({ type: "speech_start" });
+    }
+    else if (m.type === "level") {
+      $("level").value = m.rms;
+      $("levelText").textContent = `${m.rms.toFixed(3)} ${m.speaking ? "speaking" : ""}`;
     }
   };
   logLine(`audio started: mic ${micCtx.sampleRate} Hz, out ${outCtx.sampleRate} Hz, output latency ${Math.round((outCtx.outputLatency || 0) * 1000)} ms`);

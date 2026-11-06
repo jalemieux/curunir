@@ -10,7 +10,7 @@ Gemini Live through a small FastAPI backend. Three modes:
 - **C, Gemini as voice only**: every user turn goes through `ask_agent`, and
   Gemini is told to speak the answer word for word. GLM is the only brain;
   every turn pays its latency.
-- **D, local voice**: no Gemini. The browser's energy VAD is the turn
+- **D, local voice**: no Gemini. Silero VAD on the server is the turn
   detector, Whisper (MLX) transcribes, GLM's token stream is cut into
   sentences, Kokoro speaks each sentence as soon as it is complete, and
   barge-in cancels the turn. Only the transcript reaches the agent model.
@@ -61,7 +61,9 @@ modes by disconnecting first.
 
 Everything is configured in `.env` (see `.env.example`): models, voice, GLM
 timeout, the agent endpoint (`AGENT_BASE_URL`, any OpenAI-compatible server,
-so a local Ollama or LM Studio model can replace GLM), and whether `ask_agent` is BLOCKING (Gemini waits silently) or
+so a local Ollama or LM Studio model can replace GLM), whether GLM may think
+before answering (`GLM_REASONING`, off by default: measured 0.3 s to first
+token instead of 0.7 to 2.3 s), and whether `ask_agent` is BLOCKING (Gemini waits silently) or
 NON_BLOCKING (Gemini may keep talking and the answer arrives with
 `scheduling=INTERRUPT`).
 
@@ -71,7 +73,9 @@ NON_BLOCKING (Gemini may keep talking and the answer arrives with
   transcript) and "TTS first sentence" (first sentence handed to Kokoro to its
   audio sent). "speech end" is the last voice heard by
   the browser's energy VAD (converted to the server clock with a ping-based
-  offset). "first audio" is the first audio chunk received from Gemini on the
+  offset), or by Silero in mode D. The mic level meter shows what the browser
+  VAD hears; if it says "speaking" while you are silent, the room is too
+  noisy for the energy VAD and the Gemini-mode timestamps are off. "first audio" is the first audio chunk received from Gemini on the
   server. "playback" is when the first sample of the reply left the browser's
   playback queue. The GLM columns are measured on the server around the
   OpenRouter request (streaming, so first token is visible).
@@ -85,10 +89,10 @@ Server logs carry the same events.
 
 Speaking over Gemini makes it send `interrupted`; the server forwards a `clear`
 message, the browser drops its playback queue, and the turn is closed as
-interrupted. In mode D the browser VAD's `speech_start` cancels the running
-turn (GLM stream and TTS), sends `clear`, and the sentences already sent are
-kept in the conversation history marked as interrupted. In every mode the
-browser also clears its own playback queue when its VAD hears the user start,
+interrupted. In mode D Silero's speech start cancels the running turn (GLM stream and
+TTS), sends `clear`, and the sentences already sent are kept in the
+conversation history marked as interrupted. In the Gemini modes the browser
+also clears its own playback queue when its energy VAD hears the user start,
 because the server can be done sending a reply the speakers are still playing. If Gemini cancels a pending `ask_agent` call
 (`tool_call_cancellation`), the GLM request still finishes but its result is
 dropped instead of being sent back, so no stale answer is spoken.

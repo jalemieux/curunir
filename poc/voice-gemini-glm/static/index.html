@@ -31,7 +31,8 @@
 </fieldset>
 <button id="connect">Connect</button>
 <span id="status">disconnected</span> <span id="delegated"></span>
-<p><small>Use headphones so the microphone does not pick up Gemini. Columns are milliseconds. "speech end" is the last voice heard by the browser's energy VAD; "playback" is when the first sample of the reply left the speaker queue. In mode D the browser VAD is the turn detector and the first connect loads the local models (about 20 s).</small></p>
+<div>mic level <meter id="level" min="0" max="0.3" low="0.015" value="0"></meter> <span id="levelText"></span> <small>(browser energy VAD: speaking above 0.015; mode D uses Silero on the server instead)</small></div>
+<p><small>Use headphones so the microphone does not pick up Gemini. Columns are milliseconds. "speech end" is the last voice heard by the browser's energy VAD; "playback" is when the first sample of the reply left the speaker queue. In mode D Silero VAD on the server is the turn detector and the first connect loads the local models (about 20 s).</small></p>
 
 <div class="cols">
   <div>

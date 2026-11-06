@@ -11,6 +11,7 @@ class MicProcessor extends AudioWorkletProcessor {
     this.n = 0;
     this.speaking = false;
     this.lastVoice = 0;
+    this.lastLevel = 0;
   }
 
   process(inputs) {
@@ -28,6 +29,10 @@ class MicProcessor extends AudioWorkletProcessor {
       }
     }
     const rms = Math.sqrt(energy / ch.length);
+    if (currentTime - this.lastLevel > 0.1) {
+      this.lastLevel = currentTime;
+      this.port.postMessage({ type: "level", rms, speaking: this.speaking });
+    }
     if (rms > THRESHOLD) {
       if (!this.speaking) { this.speaking = true; this.port.postMessage({ type: "speech_start" }); }
       this.lastVoice = currentTime;

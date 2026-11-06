@@ -17,10 +17,24 @@ class FakeWs:
         self.audio.append(b)
 
 
+class FakeVad:
+    silence_ms = 500
+
+    def __init__(self):
+        self.script = []
+
+    def feed(self, pcm):
+        return self.script.pop(0) if self.script else None
+
+
 class FakeSpeech:
     def __init__(self, text="what is the capital of france"):
         self.text = text
         self.synthesized = []
+        self.vad = FakeVad()
+
+    def turn_detector(self):
+        return self.vad
 
     def transcribe(self, pcm):
         return self.text if pcm else ""
@@ -44,6 +58,7 @@ def fake_stream(*deltas, error=None):
 
 def make(speech=None):
     s = LocalVoiceSession(FakeWs(), http=None, api_key="k", speech=speech or FakeSpeech())
+    s.vad = s.speech.turn_detector()
     return s
 
 
@@ -101,11 +116,14 @@ def test_speech_start_interrupts_running_turn(monkeypatch):
     s = make()
 
     async def go():
-        await s.on_browser_event({"type": "speech_start"})
-        await s.on_audio(b"\x00" * 1280)
-        await s.on_browser_event({"type": "speech_end", "t_client": 1000.0})
+        s.vad.script = ["start", None, "end"]
+        for _ in range(3):
+            await s.on_audio(b"\x00" * 1280)
+        assert s.turns[1].speech_end_source == "silero-vad"
+        assert s.turns[1].turn_detected - s.turns[1].speech_end == 500
         await asyncio.sleep(0.05)  # let the first sentence reach TTS
-        await s.on_browser_event({"type": "speech_start"})  # barge-in
+        s.vad.script = ["start"]
+        await s.on_audio(b"\x00" * 1280)  # barge-in
         assert s.turn_task.cancelled() or s.turn_task.done()
 
     asyncio.run(go())
@@ -114,3 +132,17 @@ def test_speech_start_interrupts_running_turn(monkeypatch):
     assert s.turns[1].interrupted and s.turn.n == 2
     assert s.history[-1]["content"] == "First sentence here. [interrupted]"
     assert s.utterance is not None  # the interrupting speech is being captured
+
+
+def test_speech_start_after_finished_turn_clears_browser_playback():
+    s = make()
+    s.vad.script = ["start"]
+    asyncio.run(s.on_audio(b"\x00" * 1280))
+    assert {"type": "clear"} in s.ws.sent and s.utterance is not None
+
+
+def test_browser_vad_events_are_ignored_in_local_mode():
+    s = make()
+    asyncio.run(s.on_browser_event({"type": "speech_start"}))
+    asyncio.run(s.on_browser_event({"type": "speech_end", "t_client": 1.0}))
+    assert s.utterance is None and s.turn_task is None
