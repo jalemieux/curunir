@@ -24,3 +24,13 @@ def test_gemini_only_turn_has_no_glm_stages():
 
 def test_browser_time_maps_to_server_clock():
     assert to_server_time(5000.0, -120.5) == 4879.5
+
+
+def test_modes_declare_tools_and_prompts():
+    import server
+    assert server.live_config("gemini").tools is None
+    for mode in ("glm", "always"):
+        cfg = server.live_config(mode)
+        assert cfg.tools[0].function_declarations[0].name == "ask_agent"
+        assert cfg.system_instruction == server.MODES[mode]
+    assert "without exception" in server.PROMPT_ALWAYS_DELEGATE

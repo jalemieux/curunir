@@ -11,6 +11,8 @@ same questions.
 2. Mode A: ask each question below, wait for the full reply. Note the
    "speech end → playback" column.
 3. Mode B: disconnect, switch mode, connect, ask the same questions.
+   Then mode C the same way; note the "delegated n/n turns" counter, which
+   says how often Gemini obeyed the always-delegate instruction.
 4. Interrupt Gemini mid-sentence once in each mode and check that no stale
    audio plays after the interruption.
 5. Copy the table rows here.
@@ -21,6 +23,7 @@ Questions (same set in both modes):
 2. "Explain in a few sentences why the sky is blue."
 3. "Give me three tips for sleeping better."
 4. "What did I ask you first?" (follow-up / context check)
+5. "Thanks, that's all." (small talk: mode B should not delegate, mode C must)
 
 ## Measurements
 

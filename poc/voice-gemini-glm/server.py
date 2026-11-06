@@ -3,7 +3,7 @@
 Browser <-WebSocket-> this server <-Gemini Live-> Gemini
                                   <-HTTPS-> OpenRouter (GLM), on ask_agent calls
 
-Browser protocol (one WebSocket at /ws?mode=gemini|glm):
+Browser protocol (one WebSocket at /ws?mode=gemini|glm|always):
   browser -> server  binary : 16-bit PCM, 16 kHz, mono microphone audio
   browser -> server  json   : {"type": "ping", "t_client"}            clock sync probe
                               {"type": "clock", "offset_ms", "rtt_ms"} browser's estimate of server - client clock
@@ -58,6 +58,14 @@ PROMPT_WITH_AGENT = (
     "user in your own words. Do not answer substantive questions yourself. Keep spoken answers concise. "
     "If ask_agent returns an error, tell the user briefly that the agent did not answer."
 )
+PROMPT_ALWAYS_DELEGATE = (
+    "You are only the voice of an assistant; you have no knowledge of your own. On every user turn, without "
+    "exception, call ask_agent with what the user said, as one self-contained message, then speak the answer "
+    "it returns word for word. Never answer, greet, acknowledge or comment yourself, and never add anything "
+    "to the agent's answer. If ask_agent returns an error, say only: the agent did not answer."
+)
+MODES = {"gemini": PROMPT_GEMINI_ONLY, "glm": PROMPT_WITH_AGENT, "always": PROMPT_ALWAYS_DELEGATE}
+
 GLM_SYSTEM = (
     "You are the reasoning engine behind a voice assistant. Your answer will be read aloud. "
     "Answer in plain prose, no markdown, no lists, at most four sentences unless more is essential."
@@ -180,7 +188,7 @@ async def ask_glm(question: str, turn: Turn, http: httpx.AsyncClient, api_key: s
 
 def live_config(mode: str) -> types.LiveConnectConfig:
     tools = None
-    if mode == "glm":
+    if mode != "gemini":
         decl = types.FunctionDeclaration(
             name="ask_agent",
             description="Ask the reasoning agent a question. Returns its complete text answer.",
@@ -196,7 +204,7 @@ def live_config(mode: str) -> types.LiveConnectConfig:
         tools = [types.Tool(function_declarations=[decl])]
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
-        system_instruction=PROMPT_WITH_AGENT if mode == "glm" else PROMPT_GEMINI_ONLY,
+        system_instruction=MODES[mode],
         tools=tools,
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=GEMINI_VOICE))
@@ -223,6 +231,8 @@ class VoiceSession:
         self.turns: dict[int, Turn] = {1: self.turn}
         self.cancelled: set[str] = set()
         self.tasks: set[asyncio.Task] = set()
+        self.turns_done = 0
+        self.turns_delegated = 0
 
     # ---- helpers
 
@@ -337,7 +347,10 @@ class VoiceSession:
                         await self.event("first_audio_chunk")
                     await self.ws.send_bytes(part.inline_data.data)
         if sc.turn_complete:
-            await self.event("turn_complete")
+            self.turns_done += 1
+            self.turns_delegated += self.turn.tool_call is not None
+            await self.event("turn_complete", delegated=self.turn.tool_call is not None,
+                             delegated_turns=f"{self.turns_delegated}/{self.turns_done}")
             await self.send_json(self.turn.summary())
             self.new_turn()
             return True
@@ -383,12 +396,13 @@ async def ws_endpoint(ws: WebSocket, mode: str = "gemini"):
     await ws.accept()
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-    if not gemini_key or (mode == "glm" and not openrouter_key):
+    if mode not in MODES:
+        mode = "gemini"
+    if not gemini_key or (mode != "gemini" and not openrouter_key):
         await ws.send_text(json.dumps({"type": "status", "state": "error",
                                        "detail": "GEMINI_API_KEY (and OPENROUTER_API_KEY for glm mode) must be set"}))
         await ws.close()
         return
-    mode = "glm" if mode == "glm" else "gemini"
     gemini = genai.Client(api_key=gemini_key)
     async with httpx.AsyncClient() as http:
         try:

@@ -26,9 +26,10 @@
   <legend>Mode</legend>
   <label><input type="radio" name="mode" value="gemini" checked> A: Gemini only</label>
   <label><input type="radio" name="mode" value="glm"> B: Gemini + GLM (ask_agent)</label>
+  <label><input type="radio" name="mode" value="always"> C: Gemini as voice only, every turn via GLM</label>
 </fieldset>
 <button id="connect">Connect</button>
-<span id="status">disconnected</span>
+<span id="status">disconnected</span> <span id="delegated"></span>
 <p><small>Use headphones so the microphone does not pick up Gemini. Columns are milliseconds. "speech end" is the last voice heard by the browser's energy VAD; "playback" is when the first sample of the reply left the speaker queue.</small></p>
 
 <div class="cols">
@@ -38,7 +39,7 @@
       <thead><tr>
         <th>turn</th><th>mode</th><th>speech end → first audio</th><th>speech end → playback</th>
         <th>speech end → tool call</th><th>GLM first token</th><th>GLM total</th><th>GLM done → first audio</th>
-        <th>answer chars</th><th>note</th>
+        <th>answer chars</th><th>delegated</th><th>note</th>
       </tr></thead>
       <tbody></tbody>
     </table>

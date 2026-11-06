@@ -1,10 +1,20 @@
 # POC: realtime voice with Gemini Live + GLM
 
 A standalone experiment, not part of the curunir runtime. A browser talks to
-Gemini Live through a small FastAPI backend. In mode B, Gemini delegates
-substantive questions to GLM (via OpenRouter) through one function,
-`ask_agent(question)`, and speaks the answer. The page measures the latency of
-every stage so the two modes can be compared on the same questions.
+Gemini Live through a small FastAPI backend. Three modes:
+
+- **A, Gemini only**: Gemini answers everything itself.
+- **B, Gemini + GLM**: Gemini delegates substantive questions to GLM (via
+  OpenRouter) through one function, `ask_agent(question)`, and speaks the
+  answer. Small talk stays with Gemini.
+- **C, Gemini as voice only**: every user turn goes through `ask_agent`, and
+  Gemini is told to speak the answer word for word. GLM is the only brain;
+  every turn pays its latency.
+
+The page measures the latency of every stage so the modes can be compared on
+the same questions. In modes B and C it also counts how many turns Gemini
+actually delegated, because the Live API cannot force a function call: the
+prompt asks, the model decides.
 
 ```
 browser mic (PCM16 16 kHz) --ws--> server.py --Gemini Live--> gemini-3.8-live
@@ -72,6 +82,7 @@ Live path needs a key and a microphone and is exercised by hand.
 | Test                      | How                                                     |
 | ------------------------- | ------------------------------------------------------- |
 | General conversation      | Mode A, or small talk in mode B: no tool call logged    |
+| Every turn delegated      | Mode C: "delegated n/n turns" next to the status        |
 | Question delegated to GLM | Mode B: `tool_call` event, then `glm_done`, then audio  |
 | Long GLM response         | Ask for a detailed explanation; read GLM total column   |
 | Interrupt Gemini          | Talk over it: `clear` sent, row marked interrupted      |

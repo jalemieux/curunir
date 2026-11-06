@@ -47,7 +47,8 @@ async function onServerEvent(ev) {
       pongs.get(ev.t_client)?.(ev);
       break;
     case "event":
-      { const { type, name, t, turn, ...rest } = ev; logLine(`turn ${turn} ${name} ${Object.keys(rest).length ? JSON.stringify(rest) : ""}`); }
+      { const { type, name, t, turn, ...rest } = ev; logLine(`turn ${turn} ${name} ${Object.keys(rest).length ? JSON.stringify(rest) : ""}`);
+        if (rest.delegated_turns && mode !== "gemini") $("delegated").textContent = `delegated ${rest.delegated_turns} turns`; }
       break;
     case "transcript":
       { const el = $("transcript"); el.innerHTML += `<span class="${ev.who}">${ev.who}:</span> ${escapeHtml(ev.text)}\n`; el.scrollTop = el.scrollHeight; }
@@ -125,7 +126,8 @@ function renderTurn(t) {
   const cell = (k) => (d[k] === undefined ? "" : d[k]);
   const note = [t.interrupted ? "interrupted" : "", t.speech_end ? "" : "no speech end", t.question ? `q: ${t.question}` : ""].filter(Boolean).join("; ");
   row.innerHTML = [t.n, mode, cell("speech_end_to_first_audio"), cell("speech_end_to_playback"), cell("speech_end_to_tool_call"),
-    cell("glm_first_token"), cell("glm_total"), cell("glm_done_to_first_audio"), t.answer_chars || "", escapeHtml(note)]
+    cell("glm_first_token"), cell("glm_total"), cell("glm_done_to_first_audio"), t.answer_chars || "",
+    mode === "gemini" ? "" : (t.tool_call ? "yes" : "no"), escapeHtml(note)]
     .map((v) => `<td>${v}</td>`).join("");
 }
 
