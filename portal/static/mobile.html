@@ -1164,6 +1164,7 @@ function voiceState(msg) {
 
 function voiceTranscript(msg) {
   voice.interruptedTurn = null; // a new reply may come now
+  voice.lastPlayedSeq = 0; // an interrupt before its first slice must not carry the old reply's number
   if (voice.serverVad) {
     voiceMetricEl.textContent = "";
     // The server's clock is not ours: count back the stages it reports.
