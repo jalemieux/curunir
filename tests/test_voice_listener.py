@@ -258,3 +258,30 @@ def test_listeners_registry_replaces_and_closes_per_channel():
     assert det.resets == 1 and reg.get("portal", "s", None) is b
     reg.close_channel("portal")
     assert reg.get("portal", "s", None) is None
+
+
+async def test_voice_on_with_ptt_skips_the_server_detector(monkeypatch):
+    monkeypatch.setattr(listener_mod, "listeners", Listeners())
+    detector = FakeDetector(["start", "end"])
+    providers = FakeProviders(detector=detector)
+    emitted, enqueued = [], []
+
+    async def emit(frame):
+        emitted.append(frame)
+
+    async def enqueue(msg):
+        enqueued.append(msg)
+
+    kw = dict(channel="portal", session_id="p", agent=None, enqueue=enqueue, emit=emit, cancel=lambda: None,
+              providers=providers)
+    await handle_voice_frame({"type": "voice_on", "ptt": True}, **kw)
+    import asyncio
+    await asyncio.sleep(0.02)  # the listener opens in a task
+    assert emitted[-1]["state"] == "ready" and emitted[-1]["server_vad"] is False
+    pcm = b"\x01" * 1280
+    for _ in range(2):  # the detector would have said start, then end
+        await handle_voice_frame({"type": "audio", "data": base64.b64encode(pcm).decode()}, **kw)
+    assert not any(f.get("state") == "listening" for f in emitted) and detector.script == ["start", "end"]
+    await handle_voice_frame({"type": "audio_end"}, **kw)
+    await listener_mod.listeners.get("portal", "p", None).flush()
+    assert providers.stt.heard == [pcm * 2] and enqueued[0].content == "what time is it"

@@ -204,7 +204,7 @@ async function voiceOn() {
     setVoiceState("error", err.message);
     return;
   }
-  send({ type: "voice_on" });
+  send({ type: "voice_on", ptt: true }); // first version: it listens only while the button is held
   clearTimeout(voice.readyTimer);
   voice.readyTimer = setTimeout(() => {
     if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("no_voice"); } // nothing answered at all
