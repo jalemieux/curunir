@@ -10,7 +10,8 @@ frames continuously, and either lets the server end each utterance (the
 ``SpeechToText`` provider, tells the client what it heard (``transcript``
 frame) and enqueues the text as a voice turn, which the speaker (speaker.py)
 then answers as audio. ``{"type": "voice_on"}`` opens the listener and is
-answered with the mode the server can offer; ``{"type": "voice_off"}`` drops
+answered with the mode the server can offer; ``{"type": "voice_on", "ptt": true}``
+asks for push-to-talk even when the server has a turn detector. ``{"type": "voice_off"}`` drops
 it. Every channel calls ``handle_voice_frame`` with its own enqueue, emit and
 cancel callables, so the logic lives here once.
 """
@@ -42,9 +43,10 @@ def _now_ms() -> float:
 
 class VoiceListener:
     def __init__(self, providers, *, channel: str, session_id: str, agent: str | None,
-                 enqueue: Enqueue, emit: Emit, cancel: Cancel):
+                 enqueue: Enqueue, emit: Emit, cancel: Cancel, ptt: bool = False):
         self.stt = providers.stt
-        self.detector = providers.turn_detector()  # None: the client ends utterances
+        # None: the client ends utterances (no detector, or the client asked for push-to-talk)
+        self.detector = None if ptt else providers.turn_detector()
         settings = getattr(providers, "settings", None)
         self.provider = getattr(settings, "provider", None) or "unknown"
         self.channel, self.session_id, self.agent = channel, session_id, agent
@@ -235,7 +237,8 @@ async def handle_voice_frame(payload: dict, *, channel: str, session_id: str, ag
                     await emit({"type": "voice_state", "state": "unavailable", "session_id": session_id})
                     return
             listener = await asyncio.to_thread(VoiceListener, providers, channel=channel, session_id=session_id,
-                                               agent=agent, enqueue=enqueue, emit=emit, cancel=cancel)
+                                               agent=agent, enqueue=enqueue, emit=emit, cancel=cancel,
+                                               ptt=payload.get("ptt") is True)
             listeners.open(listener)
             await listener.ready()
 

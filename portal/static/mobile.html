@@ -390,39 +390,6 @@ details.tools summary::-webkit-details-marker { display: none; }
   #print-doc { display: block !important; color: #000; background: #fff; }
 }
 #print-doc { display: none; }
-#voice-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
-#voice-bar { padding: 6px 2px 2px; font-size: 13px; color: var(--tool); }
-#voice-bar[hidden] { display: none; }
-
-/* The voice screen (#617): full-screen over the chat while voice mode is open. */
-#voice-screen { position: fixed; inset: 0; z-index: 60; background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
-  padding: calc(12px + var(--safe-top)) 20px calc(24px + var(--safe-bottom)); }
-#voice-screen[hidden] { display: none; }
-.vs-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
-.vs-title { font-weight: 600; font-size: 18px; }
-.vs-icon { border: none; background: none; font-size: 26px; color: var(--accent); padding: 4px 10px; }
-.vs-pill { font-size: 12px; color: var(--tool); background: var(--bubble); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
-.vs-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; min-height: 0; }
-.vs-orb { width: 150px; height: 150px; border-radius: 50%; transition: background .3s, box-shadow .3s, transform .3s;
-  background: radial-gradient(circle at 35% 35%, #8b85f5, var(--accent) 65%); box-shadow: 0 0 0 16px rgba(79,70,229,.08); }
-.vs-orb.loading, .vs-orb.off { background: radial-gradient(circle at 35% 35%, #e5e7eb, #9ca3af 65%); box-shadow: none; }
-.vs-orb.listening { background: radial-gradient(circle at 35% 35%, #4ade80, var(--user) 65%); box-shadow: 0 0 0 16px rgba(22,163,74,.14), 0 0 0 34px rgba(22,163,74,.06); animation: vs-pulse 1.2s ease-in-out infinite; }
-.vs-orb.transcribing, .vs-orb.thinking { opacity: .75; animation: vs-pulse 1.6s ease-in-out infinite; }
-.vs-orb.speaking { box-shadow: 0 0 0 16px rgba(79,70,229,.14), 0 0 0 36px rgba(79,70,229,.07); animation: vs-rings 1.4s ease-in-out infinite; }
-@keyframes vs-pulse { 50% { transform: scale(1.06); } }
-@keyframes vs-rings { 50% { box-shadow: 0 0 0 22px rgba(79,70,229,.12), 0 0 0 48px rgba(79,70,229,.05); } }
-.vs-label { font-size: 15px; color: var(--tool); text-align: center; }
-.vs-caption { max-width: 330px; text-align: center; font-size: 19px; line-height: 1.35; max-height: 34vh; overflow: hidden; }
-.vs-you { display: block; color: var(--tool); font-size: 15px; margin-bottom: 10px; }
-.vs-timing { font-size: 12px; color: var(--tool); text-align: center; line-height: 1.5; min-height: 2.8em; }
-.vs-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.vs-round { width: 56px; height: 56px; border-radius: 50%; border: none; background: var(--bubble); color: var(--fg); font-size: 18px; font-weight: 600; flex-shrink: 0; }
-.vs-end { background: var(--stop, #dc2626); color: #fff; }
-.vs-talk { flex: 1; height: 56px; border-radius: 28px; border: none; background: var(--accent); color: #fff; font-size: 17px; font-weight: 600;
-  touch-action: none; user-select: none; -webkit-user-select: none; }
-.vs-talk.active { background: var(--user); }
-.vs-talk[hidden] { display: none; }
-.vs-spacer { flex: 1; }
 </style>
 </head>
 <body>
@@ -456,32 +423,9 @@ details.tools summary::-webkit-details-marker { display: none; }
       <button id="attach-btn" class="cbtn" aria-label="Attach file">＋</button>
       <textarea id="input" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
       <button id="send-btn" class="cbtn" data-mode="send" aria-label="Send" disabled>↑</button>
-      <button id="voice-btn" class="cbtn" aria-label="Voice mode" aria-pressed="false">🎙</button>
     </div>
-    <div id="voice-bar" hidden><span id="voice-state"></span></div>
     <input id="file-input" type="file" hidden multiple
       accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.docx,.md,.txt,.csv,.json,.yaml,.yml,.log,.xml,.toml,.ini">
-  </div>
-</div>
-
-<!-- ============================ Voice screen (#617) ==================== -->
-<div id="voice-screen" hidden>
-  <div class="vs-top">
-    <button id="vs-back" class="vs-icon" aria-label="Back to the keyboard">‹</button>
-    <span class="vs-title">Voice</span>
-    <span id="vs-mode" class="vs-pill"></span>
-  </div>
-  <div class="vs-body">
-    <div id="vs-orb" class="vs-orb loading" role="button" aria-label="Interrupt"></div>
-    <div id="vs-label" class="vs-label"></div>
-    <div class="vs-caption"><span id="vs-you" class="vs-you"></span><span id="vs-reply"></span></div>
-    <div id="vs-timing" class="vs-timing"></div>
-  </div>
-  <div class="vs-bottom">
-    <button id="vs-keyboard" class="vs-round" aria-label="Back to typing">Aa</button>
-    <button id="ptt-btn" class="vs-talk" hidden>Hold to talk</button>
-    <span id="vs-spacer" class="vs-spacer"></span>
-    <button id="vs-end" class="vs-round vs-end" aria-label="End voice">✕</button>
   </div>
 </div>
 
@@ -512,7 +456,6 @@ details.tools summary::-webkit-details-marker { display: none; }
 
 <div id="print-doc" aria-hidden="true"></div>
 
-<script src="/voice/screen.js"></script>
 <script>
 // ============================================================================
 // Mobile portal SPA (#304). Standalone shell that speaks the SAME /ws/browser
@@ -733,11 +676,7 @@ function onServerMessage(msg) {
   // Drop frames for a session other than the one currently open (the portal
   // socket is multiplexed; a stale turn may still be streaming).
   if (msg.session_id && msg.session_id !== sessionId) return;
-  if (msg.type === "audio_chunk") { voiceAudio(msg); return; }
-  if (msg.type === "voice_state") { voiceState(msg); return; }
-  if (msg.type === "transcript") { voiceTranscript(msg); return; }
-  if (msg.type) return; // a frame type this page does not know
-  voiceText(msg);
+  if (msg.type) return; // a frame type this page does not know (voice lives on /m/voice)
   renderAgentChunk(msg);
 }
 
@@ -1091,278 +1030,6 @@ function launchSkill(slashText) {
 }
 
 // === Send / interrupt ===
-// === Voice mode (#614, #617, docs/voice-mode-plan.md) ===
-// The phone is the microphone and speaker; the container listens, thinks and
-// speaks. Mic audio goes up as `audio` frames (PCM16 16 kHz), the reply comes
-// back as `audio_chunk` frames (PCM16 24 kHz) next to the usual text. With a
-// server turn detector the mic is always open (hands-free); without one the
-// user holds the button to talk and the release ends the utterance. The voice
-// screen (#voice-screen) shows the state as an orb, the exchange as captions
-// and the timings; the chat underneath keeps receiving the same frames.
-const voice = {
-  on: false, serverVad: false, ptt: false, provider: null, ctx: null, micNode: null,
-  playerNode: null, stream: null, talking: false, state: "off",
-  lastPlayedSeq: 0, turn: null, interruptedTurn: null, t0: null,
-  caption: null, firstAudioMs: null, stages: null,
-  lastDataSeq: 0, audioClosed: false, hint: null,
-  ready: false, readyTimer: null,
-};
-const VOICE_READY_TIMEOUT_MS = 10000; // an agent without voice never answers voice_on
-const voiceBtn = document.getElementById("voice-btn");
-const voiceBar = document.getElementById("voice-bar");
-const voiceStateEl = document.getElementById("voice-state");
-const vs = {
-  screen: document.getElementById("voice-screen"), orb: document.getElementById("vs-orb"),
-  label: document.getElementById("vs-label"), mode: document.getElementById("vs-mode"),
-  you: document.getElementById("vs-you"), reply: document.getElementById("vs-reply"),
-  timing: document.getElementById("vs-timing"), spacer: document.getElementById("vs-spacer"),
-};
-const pttBtn = document.getElementById("ptt-btn");
-const { orbState, modePill, foldCaption, timingLine, playbackDone } = window.VoiceScreen || {
-  // /voice/screen.js did not load (a cookie race on an auth-gated asset): the chat must
-  // still work, voice is simply unavailable.
-  orbState: () => ({ cls: "off", label: "voice unavailable, reload the page" }),
-  modePill: () => "", foldCaption: (c) => c || { text: "", segment: null }, timingLine: () => [], playbackDone: () => true,
-};
-if (!window.VoiceScreen) voiceBtn.disabled = true;
-
-voiceBtn.addEventListener("click", () => { if (voice.on) showVoiceScreen(); else voiceOn(); });
-document.getElementById("vs-back").addEventListener("click", hideVoiceScreen);
-document.getElementById("vs-keyboard").addEventListener("click", hideVoiceScreen);
-document.getElementById("vs-end").addEventListener("click", () => { voiceOff(); hideVoiceScreen(); });
-vs.orb.addEventListener("click", () => {
-  if (voice.state !== "speaking") return;
-  voiceInterrupt();
-  // A finished speaker sends no closing frame and a cleared queue reports nothing played,
-  // so nothing else would paint the end of the reply.
-  setVoiceState("ready");
-});
-
-function showVoiceScreen() { vs.screen.hidden = false; voiceBar.hidden = true; }
-function hideVoiceScreen() { vs.screen.hidden = true; voiceBar.hidden = !voice.on; }
-
-// One place paints the state: the orb and its line on the screen, the status line
-// under the composer when the screen is closed.
-function setVoiceState(state, detail) {
-  voice.state = state;
-  let { cls, label } = orbState(state, { ptt: voice.ptt, talking: voice.talking, detail });
-  if (state === "ready" && voice.hint) { label = voice.hint; voice.hint = null; } // painted once, then the default
-  vs.orb.className = `vs-orb ${cls}`;
-  vs.label.textContent = label;
-  voiceStateEl.textContent = label;
-  if (!voice.on && vs.screen.hidden) voiceBar.hidden = true; // voice is over: nothing stale under the composer
-}
-
-function renderTiming() {
-  vs.timing.innerHTML = "";
-  for (const line of timingLine(voice.firstAudioMs, voice.stages)) {
-    const div = document.createElement("div");
-    div.textContent = line;
-    vs.timing.appendChild(div);
-  }
-}
-
-async function voiceOn() {
-  if (!agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
-  showVoiceScreen();
-  vs.mode.textContent = "";
-  vs.you.textContent = ""; vs.reply.textContent = ""; vs.timing.textContent = "";
-  setVoiceState("loading");
-  try {
-    // Safari only starts audio inside the tap. The microphone first: an iPhone switches
-    // its hardware rate when the mic opens, so the one shared AudioContext for mic and
-    // player is created after the grant and never sees the rate change.
-    voice.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    voice.ctx = new AudioContext();
-    await voice.ctx.resume();
-    await voice.ctx.audioWorklet.addModule("/voice/player-worklet.js");
-    await voice.ctx.audioWorklet.addModule("/voice/mic-worklet.js");
-    voice.playerNode = new AudioWorkletNode(voice.ctx, "player");
-    voice.playerNode.connect(voice.ctx.destination);
-    voice.playerNode.port.onmessage = (e) => {
-      const m = e.data;
-      if (m.type === "played") {
-        voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
-        if (voice.state === "speaking" && playbackDone({ closed: voice.audioClosed, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) {
-          setVoiceState("ready");
-        }
-      }
-      if (m.type === "playback_start" && voice.t0 !== null) {
-        voice.firstAudioMs = performance.now() - voice.t0;
-        voice.t0 = null;
-        renderTiming();
-      }
-    };
-    const source = voice.ctx.createMediaStreamSource(voice.stream);
-    voice.micNode = new AudioWorkletNode(voice.ctx, "mic");
-    const mute = voice.ctx.createGain();
-    mute.gain.value = 0;
-    source.connect(voice.micNode).connect(mute).connect(voice.ctx.destination);
-    voice.micNode.port.onmessage = (e) => {
-      if (e.data.type !== "pcm") return;
-      // Nothing goes up before the agent has said ready: an agent without voice would
-      // read audio frames as chat messages, one empty turn after another.
-      if (!voice.on || !voice.ready || !ws || ws.readyState !== WebSocket.OPEN) return;
-      if (voice.ptt && !voice.talking) return;
-      ws.send(JSON.stringify({ type: "audio", session_id: sessionId, data: b64(e.data.buf) }));
-    };
-  } catch (err) {
-    voiceTeardown();
-    setVoiceState("error", err.message);
-    return;
-  }
-  voice.on = true;
-  voice.ready = false;
-  voiceBtn.setAttribute("aria-pressed", "true");
-  ws.send(JSON.stringify({ type: "voice_on", session_id: sessionId }));
-  clearTimeout(voice.readyTimer);
-  voice.readyTimer = setTimeout(() => {
-    if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("unavailable"); }
-  }, VOICE_READY_TIMEOUT_MS);
-}
-
-function voiceOff() {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice_off", session_id: sessionId }));
-  voiceTeardown();
-  setVoiceState("off");
-}
-
-function voiceTeardown() {
-  voice.on = false;
-  voice.ready = false;
-  voice.talking = false;
-  clearTimeout(voice.readyTimer);
-  voiceBtn.setAttribute("aria-pressed", "false");
-  pttBtn.hidden = true; vs.spacer.hidden = false;
-  voice.stream?.getTracks().forEach((t) => t.stop());
-  voice.ctx?.close();
-  voice.ctx = voice.micNode = voice.playerNode = voice.stream = null;
-}
-
-// Barge-in, both modes: stop what is playing here at once, forget the rest of that
-// turn's slices still in flight, and tell the agent what was heard (played_seq is the
-// one number only this side knows). Sent whether or not a text turn is in progress:
-// the audio outlives the text final by design.
-function voiceInterrupt() {
-  if (!voice.on) return;
-  voiceClearPlayback();
-  voice.interruptedTurn = voice.turn;
-  voice.audioClosed = true; voice.lastDataSeq = 0;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId, played_seq: voice.lastPlayedSeq }));
-  }
-  if (inProgressMsg) inProgressMsg.classList.add("stopping");
-}
-
-function voiceState(msg) {
-  if (!voice.on) return;
-  if (msg.state === "loading") clearTimeout(voice.readyTimer); // the agent answered; models are loading
-  if (msg.state === "ready" && typeof msg.server_vad === "boolean") {
-    voice.ready = true;
-    clearTimeout(voice.readyTimer);
-    voice.serverVad = msg.server_vad;
-    voice.ptt = !msg.server_vad;
-    voice.provider = msg.provider || voice.provider;
-    pttBtn.hidden = !voice.ptt; vs.spacer.hidden = voice.ptt;
-    vs.mode.textContent = modePill(voice.provider, voice.serverVad);
-  }
-  if (msg.state === "unavailable" || msg.state === "off") {
-    voiceTeardown();
-    setVoiceState(msg.state);
-    return;
-  }
-  if (msg.state === "listening" && voice.serverVad) voiceInterrupt(); // the agent heard you start
-  setVoiceState(msg.state);
-}
-
-function voiceTranscript(msg) {
-  voice.interruptedTurn = null; // a new reply may come now
-  voice.lastPlayedSeq = 0; // an interrupt before its first slice must not carry the old reply's number
-  voice.firstAudioMs = null; voice.stages = null; renderTiming();
-  if (voice.serverVad) {
-    // The server's clock is not ours: count back the stages it reports.
-    voice.t0 = performance.now() - (msg.stt_ms || 0) - (msg.vad_silence_ms || 0);
-  }
-  if (!msg.text) { voice.hint = "heard nothing, try again"; return; } // the ready frame right behind paints it
-  vs.you.textContent = `“${msg.text}”`;
-  vs.reply.textContent = "";
-  voice.caption = null;
-  setVoiceState("thinking");
-  const el = appendMessage("user");
-  el.querySelector(".body").textContent = msg.text;
-  if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
-  updateComposerMode();
-}
-
-// The chat's text frames for this session also feed the caption on the screen.
-function voiceText(msg) {
-  if (!voice.on || (!msg.delta && !msg.final)) return;
-  voice.caption = foldCaption(voice.caption, msg);
-  vs.reply.textContent = voice.caption.text;
-}
-
-function voiceAudio(msg) {
-  if (!voice.on || !voice.playerNode) return;
-  if (msg.turn_id === voice.interruptedTurn && !msg.final) return; // still in flight after the barge-in
-  if (msg.turn_id !== voice.turn) {
-    voice.turn = msg.turn_id;
-    voice.lastPlayedSeq = 0; // seq restarts with every reply
-    voice.lastDataSeq = 0; voice.audioClosed = false;
-    voice.playerNode.port.postMessage({ type: "mark", turn: msg.turn_id });
-    setVoiceState("speaking");
-  }
-  if (msg.data) {
-    voice.lastDataSeq = Math.max(voice.lastDataSeq, msg.seq);
-    const bytes = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
-    voice.playerNode.port.postMessage({ type: "audio", pcm: bytes.buffer, seq: msg.seq }, [bytes.buffer]);
-  }
-  if (msg.final) {
-    // Synthesis is over; the phone's speaker is not. Stay in speaking until the last
-    // slice has played (the worklet reports each one), unless the turn was stopped.
-    voice.audioClosed = true;
-    if (msg.stopped) voiceClearPlayback();
-    if (msg.stages) { voice.stages = msg.stages; renderTiming(); }
-    if (msg.stopped || playbackDone({ closed: true, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) setVoiceState("ready");
-  }
-}
-
-function voiceClearPlayback() {
-  voice.playerNode?.port.postMessage({ type: "clear" });
-}
-
-// Hold to talk: hold to send audio, release to end the utterance. Pressing while the
-// reply plays is a barge-in: stop playback and tell the agent.
-function pttDown(e) {
-  e.preventDefault();
-  if (!voice.on || voice.talking) return;
-  voice.talking = true;
-  pttBtn.classList.add("active");
-  voiceInterrupt();
-  setVoiceState("ready");
-}
-function pttUp(e) {
-  e.preventDefault();
-  if (!voice.on || !voice.talking) return;
-  voice.talking = false;
-  pttBtn.classList.remove("active");
-  voice.t0 = performance.now();
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "audio_end", session_id: sessionId }));
-  setVoiceState("transcribing");
-}
-pttBtn.addEventListener("pointerdown", pttDown);
-pttBtn.addEventListener("pointerup", pttUp);
-pttBtn.addEventListener("pointercancel", pttUp);
-pttBtn.addEventListener("pointerleave", (e) => { if (voice.talking) pttUp(e); });
-
-function b64(buf) {
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
-}
-
 function send() {
   const content = inputEl.value.trim();
   if (!content && staged.length === 0) return;
@@ -1397,8 +1064,7 @@ function send() {
 
 function interrupt() {
   if (!inProgressMsg || !agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId, ...(voice.on ? { played_seq: voice.lastPlayedSeq } : {}) }));
-  if (voice.on) voiceClearPlayback();
+  ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId }));
   inProgressMsg.classList.add("stopping");
   sendBtn.dataset.mode = "send";
   sendBtn.textContent = "↑";

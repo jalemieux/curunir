@@ -145,6 +145,13 @@ async def mobile(user=Depends(auth.current_user)):
     return FileResponse(_STATIC_DIR / "mobile.html")
 
 
+@app.get("/m/voice")
+async def mobile_voice(user=Depends(auth.current_user)):
+    """Curunir Voice: a page of its own next to the chat (#617). Same /ws/browser backend,
+    its own conversation; nothing in the chat UI changes. Gated like /m."""
+    return FileResponse(_STATIC_DIR / "voice.html")
+
+
 @app.get("/voice/{asset}")
 async def voice_asset(asset: str, user=Depends(auth.current_user)):
     """The mobile page's audio worklets (portal/static/voice/). Gated like /m."""

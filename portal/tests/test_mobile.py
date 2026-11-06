@@ -145,3 +145,23 @@ def test_mobile_shell_rebootstraps_on_agent_online():
     src = _MOBILE_HTML.read_text()
     assert "bootstrapSync" in src
     assert "bootstrappedOnline" in src
+
+
+@pytest.mark.asyncio
+async def test_voice_page_requires_auth(client):
+    resp = await client.get("/m/voice")
+    assert resp.status_code in (401, 302, 303, 307)
+
+
+@pytest.mark.asyncio
+async def test_voice_page_serves_shell_when_authed(client):
+    resp = await client.get("/m/voice", cookies=await _auth_cookie())
+    assert resp.status_code == 200
+    assert "Curunir Voice" in resp.text
+    assert "/voice/screen.js" in resp.text and "/ws/browser" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_chat_page_has_no_voice_button(client):
+    resp = await client.get("/m", cookies=await _auth_cookie())
+    assert "voice-btn" not in resp.text and "voice_on" not in resp.text

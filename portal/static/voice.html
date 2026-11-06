@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
+<title>Curunir Voice</title>
+<link rel="icon" href="/icon.svg">
+<style>
+  :root { --bg:#ffffff; --fg:#1a1a1f; --tool:#6b7280; --accent:#4f46e5; --user:#16a34a; --bubble:#f4f4f8; --stop:#dc2626;
+    --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f0f12; --fg:#ececf1; --tool:#9ca3af; --bubble:#1c1c22; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+  #screen { height: 100%; display: flex; flex-direction: column; padding: calc(12px + var(--safe-top)) 20px calc(24px + var(--safe-bottom)); }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
+  .title { font-weight: 600; font-size: 18px; }
+  .pill { font-size: 12px; color: var(--tool); background: var(--bubble); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  .status { font-size: 12px; color: var(--tool); }
+  .status.offline { color: var(--stop); }
+  /* Fixed geometry: the orb is the one indicator, so it stays put. Rows have fixed
+     heights; the captions grow and clip inside theirs instead of pushing the orb around. */
+  .body { flex: 1; display: grid; grid-template-rows: minmax(0, 1fr) 150px 44px minmax(0, 2fr) 3em; align-items: center; justify-items: center; min-height: 0; }
+  .orb-slot { grid-row: 2; }
+  .label { grid-row: 3; align-self: start; padding-top: 14px; }
+  .caption { grid-row: 4; align-self: start; max-height: 100%; }
+  .timing { grid-row: 5; align-self: start; }
+  .orb { width: 150px; height: 150px; border-radius: 50%; border: none; padding: 0; transition: background .3s, box-shadow .3s, transform .3s;
+    background: radial-gradient(circle at 35% 35%, #8b85f5, var(--accent) 65%); box-shadow: 0 0 0 16px rgba(79,70,229,.08); }
+  .orb.idle { background: radial-gradient(circle at 35% 35%, #c7c4fb, #8b85f5 65%); box-shadow: 0 0 0 16px rgba(79,70,229,.05); }
+  .orb.loading, .orb.off { background: radial-gradient(circle at 35% 35%, #e5e7eb, #9ca3af 65%); box-shadow: none; }
+  .orb.listening { background: radial-gradient(circle at 35% 35%, #4ade80, var(--user) 65%); box-shadow: 0 0 0 16px rgba(22,163,74,.14), 0 0 0 34px rgba(22,163,74,.06); animation: pulse 1.2s ease-in-out infinite; }
+  .orb.transcribing, .orb.thinking { opacity: .75; animation: pulse 1.6s ease-in-out infinite; }
+  .orb.speaking { box-shadow: 0 0 0 16px rgba(79,70,229,.14), 0 0 0 36px rgba(79,70,229,.07); animation: rings 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.06); } }
+  @keyframes rings { 50% { box-shadow: 0 0 0 22px rgba(79,70,229,.12), 0 0 0 48px rgba(79,70,229,.05); } }
+  .label { font-size: 15px; color: var(--tool); text-align: center; }
+  .caption { max-width: 330px; text-align: center; font-size: 19px; line-height: 1.35; overflow: hidden; }
+  .you { display: block; color: var(--tool); font-size: 15px; margin-bottom: 10px; }
+  .timing { font-size: 12px; color: var(--tool); text-align: center; line-height: 1.5; min-height: 2.8em; }
+  .bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; } /* same height with or without buttons: the orb above never moves */
+  .round { width: 56px; height: 56px; border-radius: 50%; border: none; background: var(--bubble); color: var(--fg); font-size: 18px; font-weight: 600; flex-shrink: 0; text-decoration: none; display: flex; align-items: center; justify-content: center; }
+  .end { background: var(--stop); color: #fff; }
+  .talk { flex: 1; height: 56px; border-radius: 28px; border: none; background: var(--accent); color: #fff; font-size: 17px; font-weight: 600; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .talk.active { background: var(--user); }
+  [hidden] { display: none !important; }
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div id="screen">
+  <div class="top">
+    <a id="to-chat" class="round" href="/m" aria-label="Back to the chat">Aa</a>
+    <span class="title">Voice</span>
+    <span id="mode" class="pill"></span>
+  </div>
+  <div class="body">
+    <div class="orb-slot"><button id="orb" class="orb idle" aria-label="Start voice"></button></div>
+    <div id="label" class="label">tap the orb to start</div>
+    <div class="caption"><span id="you" class="you"></span><span id="reply"></span></div>
+    <div id="timing" class="timing"></div>
+  </div>
+  <div class="bottom">
+    <span id="status" class="status">connecting</span>
+    <button id="ptt" class="talk" hidden>Hold to talk</button>
+    <span id="spacer" class="spacer"></span>
+    <button id="end" class="round end" aria-label="End voice" hidden>✕</button>
+  </div>
+</div>
+<script src="/voice/screen.js"></script>
+<script>
+// Curunir Voice (#617): a page of its own, next to the chat at /m. Same sign-in, same
+// portal relay (/ws/browser), its own conversation. The phone is the microphone and
+// speaker; the container listens, thinks and speaks (docs/voice-mode-plan.md). Mic
+// audio goes up as `audio` frames (PCM16 16 kHz), the reply comes back as `audio_chunk`
+// frames (PCM16 24 kHz) next to the text frames, which feed the captions here.
+const $ = (id) => document.getElementById(id);
+const el = { orb: $("orb"), label: $("label"), mode: $("mode"), you: $("you"), reply: $("reply"), timing: $("timing"),
+             status: $("status"), ptt: $("ptt"), spacer: $("spacer"), end: $("end") };
+const { orbState, modePill, foldCaption, timingLine, playbackDone } = window.VoiceScreen || {
+  orbState: () => ({ cls: "off", label: "voice unavailable, reload the page" }), modePill: () => "",
+  foldCaption: (c) => c || { text: "", segment: null }, timingLine: () => [], playbackDone: () => true,
+};
+const VOICE_READY_TIMEOUT_MS = 10000; // an agent without the voice release never answers voice_on
+
+// One conversation per visit; a reload within the tab continues it.
+let sessionId = sessionStorage.getItem("voice-session") || crypto.randomUUID();
+sessionStorage.setItem("voice-session", sessionId);
+
+let ws = null, backoff = 1000, agentOnline = false;
+const voice = {
+  on: false, ready: false, readyTimer: null, serverVad: false, ptt: false, provider: null,
+  ctx: null, micNode: null, playerNode: null, stream: null, talking: false, state: "idle",
+  lastPlayedSeq: 0, turn: null, interruptedTurn: null, t0: null, caption: null,
+  firstAudioMs: null, stages: null, lastDataSeq: 0, audioClosed: false, hint: null,
+};
+
+// === socket ===
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws/browser`);
+  ws.onopen = () => { backoff = 1000; };
+  ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
+  ws.onclose = () => {
+    setStatus("offline");
+    if (voice.on) { voiceTeardown(); setVoiceState("off"); }
+    setTimeout(connect, backoff + Math.random() * 500);
+    backoff = Math.min(backoff * 2, 30000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+function setStatus(state) {
+  agentOnline = state === "online";
+  el.status.textContent = state === "online" ? "agent online" : state === "offline" ? "agent offline" : state;
+  el.status.className = `status ${agentOnline ? "" : "offline"}`;
+}
+function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ...obj, session_id: sessionId })); }
+
+function onServerMessage(msg) {
+  if (msg.type === "agent_status") { setStatus(msg.status); return; }
+  if (msg.session_id && msg.session_id !== sessionId) return;
+  if (msg.type === "audio_chunk") { voiceAudio(msg); return; }
+  if (msg.type === "voice_state") { voiceState(msg); return; }
+  if (msg.type === "transcript") { voiceTranscript(msg); return; }
+  if (msg.type) return; // snapshots and frames this page does not use
+  voiceText(msg);
+}
+
+// === state painting ===
+function setVoiceState(state, detail) {
+  voice.state = state;
+  let { cls, label } = state === "idle" ? { cls: "idle", label: "tap the orb to start" }
+                                        : orbState(state, { ptt: voice.ptt, talking: voice.talking, detail });
+  if (state === "ready" && voice.hint) { label = voice.hint; voice.hint = null; }
+  el.orb.className = `orb ${cls}`;
+  el.orb.setAttribute("aria-label", state === "idle" ? "Start voice" : state === "speaking" ? "Interrupt" : "Voice");
+  el.label.textContent = label;
+  el.end.hidden = !voice.on;
+}
+function renderTiming() {
+  el.timing.innerHTML = "";
+  for (const line of timingLine(voice.firstAudioMs, voice.stages)) {
+    const div = document.createElement("div");
+    div.textContent = line;
+    el.timing.appendChild(div);
+  }
+}
+
+// === voice on / off ===
+el.orb.addEventListener("click", () => {
+  if (!voice.on) { voiceOn(); return; }
+  if (voice.state === "speaking") { voiceInterrupt(); setVoiceState("ready"); }
+});
+el.end.addEventListener("click", voiceOff);
+
+async function voiceOn() {
+  if (!agentOnline || !ws || ws.readyState !== WebSocket.OPEN) { el.label.textContent = "the agent is offline"; return; }
+  el.mode.textContent = ""; el.you.textContent = ""; el.reply.textContent = ""; el.timing.textContent = "";
+  voice.on = true; voice.ready = false;
+  setVoiceState("loading");
+  try {
+    // Safari only starts audio inside the tap. The microphone first: an iPhone switches its
+    // hardware rate when the mic opens, so the one shared AudioContext is created after the
+    // grant and never sees the rate change.
+    voice.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    voice.ctx = new AudioContext();
+    await voice.ctx.resume();
+    await voice.ctx.audioWorklet.addModule("/voice/player-worklet.js");
+    await voice.ctx.audioWorklet.addModule("/voice/mic-worklet.js");
+    voice.playerNode = new AudioWorkletNode(voice.ctx, "player");
+    voice.playerNode.connect(voice.ctx.destination);
+    voice.playerNode.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "played") {
+        voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
+        if (voice.state === "speaking" && playbackDone({ closed: voice.audioClosed, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) {
+          setVoiceState("ready");
+        }
+      }
+      if (m.type === "playback_start" && voice.t0 !== null) {
+        voice.firstAudioMs = performance.now() - voice.t0;
+        voice.t0 = null;
+        renderTiming();
+      }
+    };
+    const source = voice.ctx.createMediaStreamSource(voice.stream);
+    voice.micNode = new AudioWorkletNode(voice.ctx, "mic");
+    const mute = voice.ctx.createGain();
+    mute.gain.value = 0;
+    source.connect(voice.micNode).connect(mute).connect(voice.ctx.destination);
+    voice.micNode.port.onmessage = (e) => {
+      if (e.data.type !== "pcm") return;
+      // Nothing goes up before the agent has said ready: an agent without voice would read
+      // audio frames as chat messages, one empty turn after another.
+      if (!voice.on || !voice.ready || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (voice.ptt && !voice.talking) return;
+      send({ type: "audio", data: b64(e.data.buf) });
+    };
+  } catch (err) {
+    voiceTeardown();
+    setVoiceState("error", err.message);
+    return;
+  }
+  send({ type: "voice_on", ptt: true }); // first version: it listens only while the button is held
+  clearTimeout(voice.readyTimer);
+  voice.readyTimer = setTimeout(() => {
+    if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("no_voice"); } // nothing answered at all
+  }, VOICE_READY_TIMEOUT_MS);
+}
+
+function voiceOff() {
+  send({ type: "voice_off" });
+  voiceTeardown();
+  setVoiceState("idle");
+}
+
+function voiceTeardown() {
+  voice.on = false; voice.ready = false; voice.talking = false;
+  clearTimeout(voice.readyTimer);
+  el.ptt.hidden = true; el.spacer.hidden = false;
+  voice.stream?.getTracks().forEach((t) => t.stop());
+  voice.ctx?.close();
+  voice.ctx = voice.micNode = voice.playerNode = voice.stream = null;
+}
+
+// Barge-in, both modes: stop what is playing here at once, forget the rest of that turn's
+// slices still in flight, and tell the agent what was heard (played_seq is the one number
+// only this side knows).
+function voiceInterrupt() {
+  if (!voice.on) return;
+  voiceClearPlayback();
+  voice.interruptedTurn = voice.turn;
+  voice.audioClosed = true; voice.lastDataSeq = 0;
+  send({ command: "interrupt", played_seq: voice.lastPlayedSeq });
+}
+
+// === frames from the agent ===
+function voiceState(msg) {
+  if (!voice.on) return;
+  if (msg.state === "loading") clearTimeout(voice.readyTimer);
+  if (msg.state === "ready" && typeof msg.server_vad === "boolean") {
+    voice.ready = true;
+    clearTimeout(voice.readyTimer);
+    voice.serverVad = msg.server_vad;
+    voice.ptt = !msg.server_vad;
+    voice.provider = msg.provider || voice.provider;
+    el.ptt.hidden = !voice.ptt; el.spacer.hidden = voice.ptt;
+    el.mode.textContent = modePill(voice.provider, voice.serverVad);
+  }
+  if (msg.state === "unavailable" || msg.state === "off") { voiceTeardown(); setVoiceState(msg.state); return; }
+  if (msg.state === "listening" && voice.serverVad) voiceInterrupt(); // the agent heard you start
+  setVoiceState(msg.state);
+}
+
+function voiceTranscript(msg) {
+  voice.interruptedTurn = null;
+  voice.lastPlayedSeq = 0;
+  voice.firstAudioMs = null; voice.stages = null; renderTiming();
+  if (voice.serverVad) voice.t0 = performance.now() - (msg.stt_ms || 0) - (msg.vad_silence_ms || 0); // server durations only
+  if (!msg.text) { voice.hint = "heard nothing, try again"; return; }
+  el.you.textContent = `“${msg.text}”`;
+  el.reply.textContent = "";
+  voice.caption = null;
+  setVoiceState("thinking");
+}
+
+function voiceText(msg) {
+  if (!voice.on || (!msg.delta && !msg.final)) return;
+  voice.caption = foldCaption(voice.caption, msg);
+  el.reply.textContent = voice.caption.text;
+}
+
+function voiceAudio(msg) {
+  if (!voice.on || !voice.playerNode) return;
+  if (msg.turn_id === voice.interruptedTurn && !msg.final) return; // still in flight after the barge-in
+  if (msg.turn_id !== voice.turn) {
+    voice.turn = msg.turn_id;
+    voice.lastPlayedSeq = 0; voice.lastDataSeq = 0; voice.audioClosed = false;
+    voice.playerNode.port.postMessage({ type: "mark", turn: msg.turn_id });
+    setVoiceState("speaking");
+  }
+  if (msg.data) {
+    voice.lastDataSeq = Math.max(voice.lastDataSeq, msg.seq);
+    const bytes = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+    voice.playerNode.port.postMessage({ type: "audio", pcm: bytes.buffer, seq: msg.seq }, [bytes.buffer]);
+  }
+  if (msg.final) {
+    // Synthesis is over; the phone's speaker is not. Stay in speaking until the last slice
+    // has played (the worklet reports each one), unless the turn was stopped.
+    voice.audioClosed = true;
+    if (msg.stopped) voiceClearPlayback();
+    if (msg.stages) { voice.stages = msg.stages; renderTiming(); }
+    if (msg.stopped || playbackDone({ closed: true, lastDataSeq: voice.lastDataSeq, playedSeq: voice.lastPlayedSeq })) setVoiceState("ready");
+  }
+}
+function voiceClearPlayback() { voice.playerNode?.port.postMessage({ type: "clear" }); }
+
+// === hold to talk (when the agent has no turn detector) ===
+function pttDown(e) {
+  e.preventDefault();
+  if (!voice.on || !voice.ready || voice.talking) return;
+  voice.talking = true;
+  el.ptt.classList.add("active");
+  voiceInterrupt();
+  setVoiceState("ready");
+}
+function pttUp(e) {
+  e.preventDefault();
+  if (!voice.on || !voice.talking) return;
+  voice.talking = false;
+  el.ptt.classList.remove("active");
+  voice.t0 = performance.now();
+  send({ type: "audio_end" });
+  setVoiceState("transcribing");
+}
+el.ptt.addEventListener("pointerdown", pttDown);
+el.ptt.addEventListener("pointerup", pttUp);
+el.ptt.addEventListener("pointercancel", pttUp);
+el.ptt.addEventListener("pointerleave", (e) => { if (voice.talking) pttUp(e); });
+
+function b64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// The phone's lock screen suspends the AudioContext; resume it when the page comes back.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && voice.ctx && voice.ctx.state === "suspended") voice.ctx.resume();
+});
+
+connect();
+</script>
+</body>
+</html>
