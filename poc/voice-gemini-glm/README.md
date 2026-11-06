@@ -41,7 +41,8 @@ speaker bleed. A new Gemini session is created on every Connect, so switch
 modes by disconnecting first.
 
 Everything is configured in `.env` (see `.env.example`): models, voice, GLM
-timeout, and whether `ask_agent` is BLOCKING (Gemini waits silently) or
+timeout, the agent endpoint (`AGENT_BASE_URL`, any OpenAI-compatible server,
+so a local Ollama or LM Studio model can replace GLM), and whether `ask_agent` is BLOCKING (Gemini waits silently) or
 NON_BLOCKING (Gemini may keep talking and the answer arrives with
 `scheduling=INTERRUPT`).
 

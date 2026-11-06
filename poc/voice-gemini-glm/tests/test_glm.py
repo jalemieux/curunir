@@ -68,3 +68,17 @@ def test_timeout_becomes_error_result():
 def test_empty_answer_is_an_error():
     result, _ = run(lambda r: httpx.Response(200, content=sse('{"choices":[{"delta":{}}]}', '[DONE]')))
     assert result == {"error": "agent returned an empty answer"}
+
+
+def test_no_auth_header_without_key():
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, content=sse('{"choices":[{"delta":{"content":"ok"}}]}', '[DONE]'))
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await ask_glm("q", Turn(n=1), http, "")
+
+    assert asyncio.run(go()) == {"answer": "ok"} and seen["auth"] is None

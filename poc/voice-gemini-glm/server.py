@@ -39,7 +39,10 @@ log = logging.getLogger("voice-poc")
 GEMINI_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-live")
 GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Kore")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "z-ai/glm-5.2")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Any OpenAI-compatible chat completions endpoint: OpenRouter by default, or a local
+# server such as Ollama (http://127.0.0.1:11434/v1) or LM Studio (http://127.0.0.1:1234/v1).
+AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+OPENROUTER_URL = AGENT_BASE_URL + "/chat/completions"
 GLM_TIMEOUT_S = float(os.getenv("GLM_TIMEOUT_S", "30"))
 # BLOCKING: Gemini waits silently for the answer (cleanest latency measurement).
 # NON_BLOCKING: Gemini may keep talking; the answer is delivered with scheduling=INTERRUPT.
@@ -154,7 +157,7 @@ async def ask_glm(question: str, turn: Turn, http: httpx.AsyncClient, api_key: s
             {"role": "user", "content": question},
         ],
     }
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     turn.glm_start = now_ms()
     chunks: list[str] = []
     try:
@@ -398,9 +401,10 @@ async def ws_endpoint(ws: WebSocket, mode: str = "gemini"):
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
     if mode not in MODES:
         mode = "gemini"
-    if not gemini_key or (mode != "gemini" and not openrouter_key):
+    needs_agent_key = mode != "gemini" and "openrouter.ai" in AGENT_BASE_URL
+    if not gemini_key or (needs_agent_key and not openrouter_key):
         await ws.send_text(json.dumps({"type": "status", "state": "error",
-                                       "detail": "GEMINI_API_KEY (and OPENROUTER_API_KEY for glm mode) must be set"}))
+                                       "detail": "GEMINI_API_KEY (and OPENROUTER_API_KEY for glm/always modes) must be set"}))
         await ws.close()
         return
     gemini = genai.Client(api_key=gemini_key)
