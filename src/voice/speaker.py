@@ -146,7 +146,15 @@ class VoiceSpeaker:
         try:
             while True:
                 while len(pending) < self.lookahead:
-                    item = await self.queue.get()
+                    if pending:
+                        # Run ahead when more text is already here, but never hold a
+                        # synthesized sentence back waiting for the next one to arrive.
+                        try:
+                            item = self.queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    else:
+                        item = await self.queue.get()
                     if item is None:
                         if not pending:
                             return
@@ -208,6 +216,7 @@ class VoiceSpeaker:
 class _Session:
     speaker: VoiceSpeaker
     reply_text: str | None = None  # the final text the worker persisted for this turn
+    rewritten: bool = False
 
 
 @dataclass
@@ -226,24 +235,50 @@ class SpeakerRegistry:
         return speaker.start()
 
     def set_reply(self, speaker: VoiceSpeaker, text: str) -> None:
-        entry = self._speakers.get((speaker.agent, speaker.session_id))
-        if entry is not None and entry.speaker is speaker:
-            entry.reply_text = text
+        """The worker's final text for the turn, once handle() returns. A barge-in
+        that came earlier (the model still streaming) is recorded now."""
+        key = (speaker.agent, speaker.session_id)
+        entry = self._speakers.get(key)
+        if entry is None or entry.speaker is not speaker:
+            return
+        entry.reply_text = text
+        if speaker.stopped:
+            self._record_rewrite(key, entry, speaker.heard or "")
+
+    def _record_rewrite(self, key, entry: _Session, heard: str) -> None:
+        if entry.reply_text is None or entry.rewritten:
+            return
+        entry.rewritten = True
+        self._rewrites[key] = (entry.reply_text, heard)
 
     def stop(self, session_id: str, agent: str | None = None, played_seq: int | None = None) -> bool:
-        """Stop the session's speaker, if one is live. True when something was stopped."""
+        """Barge-in on the session's reply. True when there was a reply to interrupt.
+
+        Three cases. The speaker is still running: stop it. It has finished
+        sending but, by ``played_seq``, the client has not played it all (synthesis
+        runs well ahead of playback, so this is the common case): nothing to
+        stop, but the reply was interrupted and is rewritten. Already stopped,
+        or played to the end: nothing."""
         keys = [k for k in self._speakers if k[1] == session_id and (agent is None or k[0] == agent)]
-        stopped = False
+        interrupted = False
         for key in keys:
-            entry = self._speakers.pop(key)
+            entry = self._speakers[key]
             speaker = entry.speaker
-            if speaker.stopped or (speaker._task is not None and speaker._task.done()):
+            if speaker.stopped:
+                continue
+            if speaker._task is not None and speaker._task.done():
+                heard = speaker.heard_prefix(played_seq)
+                if played_seq is None or heard == " ".join(speaker.sentences):
+                    continue  # played to the end, or the client did not say: nothing was cut off
+                speaker.stopped = True
+                speaker.heard = heard
+                self._record_rewrite(key, entry, heard)
+                interrupted = True
                 continue
             speaker.stop(played_seq)
-            stopped = True
-            if entry.reply_text is not None:
-                self._rewrites[key] = (entry.reply_text, speaker.heard or "")
-        return stopped
+            interrupted = True
+            self._record_rewrite(key, entry, speaker.heard or "")
+        return interrupted
 
     def take_rewrite(self, session_id: str, agent: str | None = None) -> tuple[str, str] | None:
         """``(reply_text, heard_prefix)`` recorded by a stop, once."""

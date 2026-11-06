@@ -242,19 +242,23 @@ def _resample(pcm16: bytes, src: int, dst: int) -> bytes:
 class LocalSpeechToText:
     def __init__(self, models: LocalModels):
         self._models = models
+        self._lock = asyncio.Lock()  # one transcription at a time: the models are not thread-safe
 
     async def transcribe(self, pcm16: bytes) -> str:
         await self._models.ready()
-        return await asyncio.to_thread(self._models.transcribe, pcm16)
+        async with self._lock:
+            return await asyncio.to_thread(self._models.transcribe, pcm16)
 
 
 class LocalTextToSpeech:
     def __init__(self, models: LocalModels):
         self._models = models
+        self._lock = asyncio.Lock()  # the speaker runs ahead on two sentences; Kokoro and MLX take one call at a time
 
     async def stream(self, text: str) -> AsyncIterator[bytes]:
         await self._models.ready()
-        pcm = await asyncio.to_thread(self._models.synthesize, text)
+        async with self._lock:
+            pcm = await asyncio.to_thread(self._models.synthesize, text)
         for piece in slices(pcm):
             yield piece
 

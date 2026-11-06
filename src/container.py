@@ -35,6 +35,7 @@ import yaml
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import AgentConfig
 from src.persona import DEFAULT_PERSONA, load_persona
+from src.voice.speaker import registry as voice_speakers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.agent.agent import Agent
@@ -450,14 +451,12 @@ class Container:
 
         Also stops the session's voice speaker, which usually outlives the
         turn (src/voice/speaker.py); ``played_seq`` says what was heard."""
-        from src.voice.speaker import registry as speakers
-
         if agent:
             target = self.agents.get(agent)
             cancelled = bool(target and target.request_cancel(session_id))
         else:
             cancelled = any(a.request_cancel(session_id) for a in self.agents.values())
-        stopped = speakers.stop(session_id, agent, played_seq)
+        stopped = voice_speakers.stop(session_id, agent, played_seq)
         return cancelled or stopped
 
     def describe(self) -> list[dict]:
