@@ -73,7 +73,8 @@ NON_BLOCKING (Gemini may keep talking and the answer arrives with
   transcript) and "TTS first sentence" (first sentence handed to Kokoro to its
   audio sent). "speech end" is the last voice heard by
   the browser's energy VAD (converted to the server clock with a ping-based
-  offset), or by Silero in mode D. The mic level meter shows what the browser
+  offset; the last one before Gemini reacts wins, so a pause mid-sentence does
+  not stamp the turn early), or by Silero in mode D. The mic level meter shows what the browser
   VAD hears; if it says "speaking" while you are silent, the room is too
   noisy for the energy VAD and the Gemini-mode timestamps are off. "first audio" is the first audio chunk received from Gemini on the
   server. "playback" is when the first sample of the reply left the browser's

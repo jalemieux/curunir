@@ -355,7 +355,8 @@ class VoiceSession(BrowserSession):
     async def on_browser_event(self, ev: dict) -> bool:
         if await super().on_browser_event(ev):
             return True
-        if ev.get("type") == "speech_end" and self.turn.speech_end is None:
+        if ev.get("type") == "speech_end" and self.turn.first_audio is None and self.turn.tool_call is None:
+            # Last speech end before Gemini reacts wins: a pause mid-sentence must not stamp the turn early.
             self.turn.speech_end = to_server_time(ev["t_client"], self.offset_ms)
             self.turn.speech_end_source = "browser-vad"
             await self.event("speech_end", source="browser-vad")
@@ -555,6 +556,9 @@ class LocalVoiceSession(BrowserSession):
         except AgentError as e:
             await self.event("glm_error", detail=str(e))
             await queue.put(AGENT_FAILED_LINE)
+        except asyncio.CancelledError:
+            speaker.cancel()  # barge-in: drop the queued sentences instead of synthesizing them first
+            raise
         finally:
             turn.glm_done = now_ms()
             await queue.put(None)

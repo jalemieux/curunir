@@ -67,3 +67,17 @@ def test_crashed_glm_call_reports_error_to_gemini(monkeypatch):
     asyncio.run(s.handle_tool_call(SimpleNamespace(id="c", name="ask_agent", args={"question": "q"}), 1.0))
     (resp,) = s.session.responses
     assert resp.response == {"error": "agent call failed: RuntimeError"}
+
+
+def test_later_speech_end_wins_until_gemini_reacts():
+    s = make_session()
+
+    async def go():
+        await s.on_browser_event({"type": "speech_end", "t_client": 1000.0})
+        await s.on_browser_event({"type": "speech_end", "t_client": 2000.0})  # pause mid-sentence, then more speech
+        assert s.turn.speech_end == 2000.0
+        s.turn.tool_call = 2100.0
+        await s.on_browser_event({"type": "speech_end", "t_client": 3000.0})  # Gemini already reacted: ignored
+        assert s.turn.speech_end == 2000.0
+
+    asyncio.run(go())

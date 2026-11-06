@@ -1,4 +1,4 @@
-google-genai>=2.34
+google-genai>=2.34,<3   # 3.0.0 gets HTTP 404 on the Live handshake
 fastapi
 uvicorn[standard]
 websockets

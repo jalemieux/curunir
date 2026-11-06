@@ -146,3 +146,35 @@ def test_browser_vad_events_are_ignored_in_local_mode():
     asyncio.run(s.on_browser_event({"type": "speech_start"}))
     asyncio.run(s.on_browser_event({"type": "speech_end", "t_client": 1.0}))
     assert s.utterance is None and s.turn_task is None
+
+
+def test_barge_in_drops_queued_sentences_without_synthesizing_them(monkeypatch):
+    """GLM streams faster than Kokoro speaks: cancelling must not wait for the queue to drain."""
+    import time
+
+    class SlowSpeech(FakeSpeech):
+        def synthesize(self, sentence):
+            time.sleep(0.05)
+            return super().synthesize(sentence)
+
+    async def stream(messages, http, api_key):
+        yield ("content", "One sentence here. Two sentences here. Three sentences here. ")
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(server, "stream_chat", stream)
+    s = make(SlowSpeech())
+
+    async def go():
+        s.vad.script = ["start", "end"]
+        await s.on_audio(b"\x00" * 1280)
+        await s.on_audio(b"\x00" * 1280)
+        await asyncio.sleep(0.02)  # first sentence is in flight, two are queued
+        t = time.monotonic()
+        s.vad.script = ["start"]
+        await s.on_audio(b"\x00" * 1280)  # barge-in
+        return time.monotonic() - t
+
+    took = asyncio.run(go())
+    assert s.speech.synthesized == ["One sentence here."]
+    assert took < 0.1
+    assert {"type": "clear"} in s.ws.sent
