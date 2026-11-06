@@ -40,6 +40,8 @@ from src.scheduler import run_scheduler
 from src.skills import load_skill, portal_skill_list
 from src.slash_commands import SlashContext, maybe_handle_slash
 from src.turn_context import TurnContext, current_turn
+from src.voice.providers import get_providers as get_voice_providers
+from src.voice.speaker import VoiceSpeaker, registry as voice_speakers, rewrite_interrupted_reply
 from src.usage_store import UsageStore
 
 
@@ -356,6 +358,10 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             "Processing message from %s (session %s, agent %s)",
             msg.channel, msg.session_id, agent_name,
         )
+        # A voice reply the user interrupted: before this session's next turn,
+        # the persisted reply becomes what was actually heard, so the model
+        # knows it was cut off (src/voice/speaker.py).
+        _rewrite_interrupted_voice_reply(agent, msg.session_id, agent_name, msg.channel)
         if msg.attachments:
             logger.info(
                 "Inbound attachments: %s",
@@ -449,6 +455,11 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         # response. Each goes out as a non-final OutgoingMessage.
         segments = TextSegments()
 
+        # A voice turn also speaks the text as it streams (#551). The speaker
+        # is its own task and outlives handle(): the worker never waits on
+        # audio, so other sessions are not blocked behind one reply's voice.
+        speaker = _start_speaker(msg, agent_name, out_queue)
+
         async def on_tool_call(name: str, args_str: str):
             segments.tool_call()
             await out_queue.put(OutgoingMessage(
@@ -472,6 +483,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 agent=agent_name,
                 segment=segments.text(),
             ))
+            if speaker is not None:
+                speaker.feed(chunk)
 
         # Outbound sinks the agent fills during the turn: any files it wants
         # to attach to its reply, and a metadata bag for workflow/stats.
@@ -505,6 +518,9 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         except Exception as e:
             logger.exception("Agent error for session %s: %s", msg.session_id, e)
             text = "Sorry, I encountered an error processing your message."
+        if speaker is not None:
+            voice_speakers.set_reply(speaker, text)
+            speaker.finish(text)
 
         # llama.cpp exposes per-request server stats over HTTP — fold them in
         # alongside the agent's own stats so the UI can show both.
@@ -537,6 +553,42 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             handoffs=turn.handoffs or None,
             segment=segments.final(),
         ))
+
+
+def _start_speaker(msg: "IncomingMessage", agent_name: str, out_queue: asyncio.Queue):
+    """The speaker task for a voice turn, or None for a text turn."""
+    if not msg.voice:
+        return None
+    try:
+        tts = get_voice_providers().tts
+    except Exception:
+        logger.exception("Voice turn on session %s: speech provider unavailable; text only", msg.session_id)
+        return None
+
+    async def emit(audio: dict) -> None:
+        await out_queue.put(OutgoingMessage(
+            content="", channel=msg.channel, session_id=msg.session_id,
+            reply_address=msg.reply_address, final=False, agent=agent_name, audio=audio,
+        ))
+
+    speaker = VoiceSpeaker(tts, emit, session_id=msg.session_id, agent=agent_name)
+    voice_speakers.start(speaker)
+    return speaker
+
+
+def _rewrite_interrupted_voice_reply(agent: Agent, session_id: str, agent_name: str, channel: str) -> None:
+    rewrite = voice_speakers.take_rewrite(session_id, agent_name)
+    if rewrite is None:
+        return
+    reply_text, heard = rewrite
+    history = agent.sessions.get(session_id)
+    if history is None:
+        record = conversation_store.load(agent.config.context_dir, session_id)
+        history = record["history"] if record else None
+    if not history or not rewrite_interrupted_reply(history, reply_text, heard):
+        return
+    if not is_scratch(session_id):
+        conversation_store.save(agent.config.context_dir, session_id, history, channel=channel)
 
 
 class TextSegments:

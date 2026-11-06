@@ -310,6 +310,17 @@ class VoiceProviders:
         return SileroTurnDetector(self.settings.vad_silence_ms)
 
 
+_providers: VoiceProviders | None = None
+
+
+def get_providers() -> VoiceProviders:
+    """The process-wide providers, built from the environment on first use."""
+    global _providers
+    if _providers is None:
+        _providers = make_providers()
+    return _providers
+
+
 def make_providers(settings: VoiceSettings | None = None) -> VoiceProviders:
     settings = settings or VoiceSettings.from_env()
     if settings.provider == "local":

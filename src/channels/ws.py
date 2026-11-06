@@ -270,7 +270,8 @@ class WebSocketChannel:
                 if agent is not None:
                     last_agent = agent
                 if data.get("command") == "interrupt":
-                    delivered = request_cancel(self.cancel_session, session_id, agent)
+                    delivered = request_cancel(self.cancel_session, session_id, agent,
+                                               played_seq=data.get("played_seq"))
                     logger.info(
                         "Interrupt requested for cli session %s (delivered=%s)",
                         session_id, delivered,
@@ -347,6 +348,7 @@ class WebSocketChannel:
             command=data.get("command") or None,
             attachments=manifest,
             agent=agent_of(data),
+            voice=bool(data.get("voice")),
         )
         await self.in_queue.put(msg)
 
@@ -359,6 +361,10 @@ class WebSocketChannel:
             )
             return
 
+        if msg.audio:
+            payload = {**msg.audio, **({"agent": msg.agent} if msg.agent else {})}
+            await self._send_payload(connection, msg.session_id, payload)
+            return
         if msg.attachments:
             _enrich_attachments(msg.attachments, self.project_root)
 
@@ -375,9 +381,12 @@ class WebSocketChannel:
             payload["agent"] = msg.agent
         if msg.segment is not None:
             payload["segment"] = msg.segment
+        await self._send_payload(connection, msg.session_id, payload)
+
+    async def _send_payload(self, connection, session_id: str, payload: dict) -> None:
         try:
             await connection.send(json.dumps(payload))
         except websockets.exceptions.ConnectionClosed:
-            if self._connections.get(msg.session_id) is connection:
-                del self._connections[msg.session_id]
+            if self._connections.get(session_id) is connection:
+                del self._connections[session_id]
             logger.warning("WebSocket connection closed while sending; message dropped")
