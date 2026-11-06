@@ -19,6 +19,10 @@ class IncomingMessage:
     # A voice turn (#551): the worker speaks the reply as audio_chunk frames
     # alongside the text. Set by channels from the client's ``voice`` field.
     voice: bool = False
+    # Server-clock stamps (epoch ms) of the voice turn's stages so far, set by
+    # the listener: ``speech_end``, ``transcript``. The worker and the speaker
+    # add theirs; the closing audio frame carries the durations.
+    voice_stamps: dict | None = None
 
 
 @dataclass

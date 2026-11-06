@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable, Protocol
@@ -52,8 +53,9 @@ class _Sentence:
 
 class VoiceSpeaker:
     def __init__(self, tts: TextToSpeech, emit: Emit, *, session_id: str, agent: str | None = None,
-                 lookahead: int = 2, turn_id: str | None = None):
+                 lookahead: int = 2, turn_id: str | None = None, stamps: dict | None = None):
         self.tts = tts
+        self.stamps = stamps if stamps is not None else {}  # server-clock epoch ms per stage
         self.emit = emit
         self.session_id = session_id
         self.agent = agent
@@ -195,6 +197,12 @@ class VoiceSpeaker:
 
     def _frame(self, item: _Sentence, data: bytes, *, first: bool) -> dict:
         self.seq += 1
+        if self.seq == 1:
+            self.stamps["first_audio_chunk_sent"] = time.time() * 1000.0
+            stages = self.stages()
+            if stages:
+                logger.info("voice: session %s first audio %s", self.session_id,
+                            ", ".join(f"{k} {v} ms" for k, v in stages.items()))
         frame = {
             "type": "audio_chunk", "turn_id": self.turn_id, "seq": self.seq, "sentence": item.index,
             "mime": AUDIO_MIME, "data": base64.b64encode(data).decode("ascii"), "final": False,
@@ -205,8 +213,18 @@ class VoiceSpeaker:
 
     def _closing_frame(self) -> dict:
         self.seq += 1
+        self.stamps["audio_final"] = time.time() * 1000.0
         return {"type": "audio_chunk", "turn_id": self.turn_id, "seq": self.seq, "sentence": len(self.sentences),
-                "mime": AUDIO_MIME, "data": "", "final": True, "stopped": self.stopped}
+                "mime": AUDIO_MIME, "data": "", "final": True, "stopped": self.stopped, "stages": self.stages()}
+
+    def stages(self) -> dict[str, int]:
+        """Durations in ms from the end of the user's speech to each stage reached so far
+        (docs/voice-mode-plan.md §6 item 1). Empty without a speech_end stamp."""
+        t0 = self.stamps.get("speech_end")
+        if t0 is None:
+            return {}
+        return {k: round(v - t0) for k, v in self.stamps.items()
+                if k != "speech_end" and isinstance(v, (int, float))}
 
 
 # --------------------------------------------------------------------------- registry
@@ -279,6 +297,12 @@ class SpeakerRegistry:
             interrupted = True
             self._record_rewrite(key, entry, speaker.heard or "")
         return interrupted
+
+    def forget(self, session_id: str, agent: str | None = None) -> None:
+        """A text turn follows: the voice reply before it can no longer be interrupted."""
+        entry = self._speakers.pop((agent, session_id), None)
+        if entry is not None and not entry.speaker.stopped and entry.speaker._task and not entry.speaker._task.done():
+            entry.speaker.stop()
 
     def take_rewrite(self, session_id: str, agent: str | None = None) -> tuple[str, str] | None:
         """``(reply_text, heard_prefix)`` recorded by a stop, once."""

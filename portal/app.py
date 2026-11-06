@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -143,6 +143,15 @@ async def mobile(user=Depends(auth.current_user)):
     """Mobile-first chat UI. Shares the /ws/browser backend with the desktop
     SPA — frontend split only. Gated by auth like the desktop chat surface."""
     return FileResponse(_STATIC_DIR / "mobile.html")
+
+
+@app.get("/voice/{asset}")
+async def voice_asset(asset: str, user=Depends(auth.current_user)):
+    """The mobile page's audio worklets (portal/static/voice/). Gated like /m."""
+    path = (_STATIC_DIR / "voice" / asset).resolve()
+    if path.parent != (_STATIC_DIR / "voice").resolve() or not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="text/javascript")
 
 
 @app.get("/manifest.json")

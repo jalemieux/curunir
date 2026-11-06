@@ -49,6 +49,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels._agent_field import agent_of, call_provider, request_cancel
+from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame, listeners as voice_listeners
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -186,6 +187,7 @@ class PortalChannel:
                 raise
             finally:
                 self._connection = None
+                voice_listeners.close_channel("portal")  # the browsers are gone with the relay
 
             if self._terminate:
                 return
@@ -256,6 +258,16 @@ class PortalChannel:
         # The portal service forwards the browser payload verbatim, so an
         # `agent` field set by the browser reaches us with no service change.
         agent = agent_of(payload)
+        if payload.get("type") in VOICE_FRAME_TYPES:
+            async def emit(frame: dict) -> None:
+                await self._deliver(json.dumps({"type": "agent_message", "payload": frame}), ephemeral=True)
+
+            await handle_voice_frame(
+                payload, channel="portal", session_id=session_id, agent=agent,
+                enqueue=self.in_queue.put, emit=emit,
+                cancel=lambda: request_cancel(self.cancel_session, session_id, agent),
+            )
+            return
         if payload.get("command") == "interrupt":
             delivered = request_cancel(self.cancel_session, session_id, agent,
                                        played_seq=payload.get("played_seq"))
