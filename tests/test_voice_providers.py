@@ -146,3 +146,31 @@ def test_make_providers_selects_by_setting():
     assert isinstance(p.tts, LocalTextToSpeech)
     with pytest.raises(ValueError):
         make_providers(VoiceSettings(provider="gemini"))
+
+
+async def test_local_tts_calls_are_serialized(monkeypatch):
+    """The speaker runs two sentences ahead; the local models take one call at a time."""
+    pytest.importorskip("numpy")
+    import asyncio
+    import time
+
+    m = _warm_models(monkeypatch)
+    active = {"n": 0, "max": 0}
+
+    def slow_kokoro(text, voice):
+        import numpy as np
+
+        active["n"] += 1
+        active["max"] = max(active["max"], active["n"])
+        time.sleep(0.02)
+        active["n"] -= 1
+        yield ("g", "p", np.zeros(2400, dtype=np.float32))
+
+    m._tts = slow_kokoro
+    tts = LocalTextToSpeech(m)
+
+    async def one(text):
+        return [c async for c in tts.stream(text)]
+
+    await asyncio.gather(one("a"), one("b"), one("c"))
+    assert active["max"] == 1
