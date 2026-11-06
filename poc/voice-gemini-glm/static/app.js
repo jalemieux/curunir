@@ -39,6 +39,8 @@ async function onServerEvent(ev) {
         await syncClock();
         await startAudio();
         setStatus(`live (${ev.mode}, ${ev.model})`);
+      } else if (ev.state === "loading") {
+        setStatus(ev.detail);
       } else if (ev.state === "error") {
         setStatus(`error: ${ev.detail}`);
       }
@@ -104,7 +106,12 @@ async function startAudio() {
     const m = e.data;
     if (m.type === "pcm") { if (ws?.readyState === 1) ws.send(m.buf); }
     else if (m.type === "speech_end") send({ type: "speech_end", t_client: Date.now() - m.silence_ms });
-    else if (m.type === "speech_start") logLine("browser-vad speech_start");
+    else if (m.type === "speech_start") {
+      // Barge-in: stop local playback at once, whatever the server decides. The server may have
+      // finished sending a reply that is still playing here.
+      playerNode?.port.postMessage({ type: "clear" });
+      send({ type: "speech_start" });
+    }
   };
   logLine(`audio started: mic ${micCtx.sampleRate} Hz, out ${outCtx.sampleRate} Hz, output latency ${Math.round((outCtx.outputLatency || 0) * 1000)} ms`);
 }
@@ -126,8 +133,8 @@ function renderTurn(t) {
   const cell = (k) => (d[k] === undefined ? "" : d[k]);
   const note = [t.interrupted ? "interrupted" : "", t.speech_end ? "" : "no speech end", t.question ? `q: ${t.question}` : ""].filter(Boolean).join("; ");
   row.innerHTML = [t.n, mode, cell("speech_end_to_first_audio"), cell("speech_end_to_playback"), cell("speech_end_to_tool_call"),
-    cell("glm_first_token"), cell("glm_total"), cell("glm_done_to_first_audio"), t.answer_chars || "",
-    mode === "gemini" ? "" : (t.tool_call ? "yes" : "no"), escapeHtml(note)]
+    cell("stt"), cell("glm_first_token"), cell("glm_total"), cell("tts_first"), cell("glm_done_to_first_audio"), t.answer_chars || "",
+    mode === "gemini" ? "" : mode === "local" ? "yes" : (t.tool_call ? "yes" : "no"), escapeHtml(note)]
     .map((v) => `<td>${v}</td>`).join("");
 }
 

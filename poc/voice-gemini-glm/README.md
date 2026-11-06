@@ -10,6 +10,10 @@ Gemini Live through a small FastAPI backend. Three modes:
 - **C, Gemini as voice only**: every user turn goes through `ask_agent`, and
   Gemini is told to speak the answer word for word. GLM is the only brain;
   every turn pays its latency.
+- **D, local voice**: no Gemini. The browser's energy VAD is the turn
+  detector, Whisper (MLX) transcribes, GLM's token stream is cut into
+  sentences, Kokoro speaks each sentence as soon as it is complete, and
+  barge-in cancels the turn. Only the transcript reaches the agent model.
 
 The page measures the latency of every stage so the modes can be compared on
 the same questions. In modes B and C it also counts how many turns Gemini
@@ -17,10 +21,15 @@ actually delegated, because the Live API cannot force a function call: the
 prompt asks, the model decides.
 
 ```
+modes A-C
 browser mic (PCM16 16 kHz) --ws--> server.py --Gemini Live--> gemini-3.8-live
                                       |  ask_agent(question)        |
                                       +--> OpenRouter (z-ai/glm-5.2) |
 browser speakers (PCM16 24 kHz) <--ws-- server.py <-- audio ---------+
+
+mode D
+browser mic --ws--> server.py --> Whisper (local) --> OpenRouter (GLM) token stream
+browser speakers <--ws-- server.py <-- Kokoro (local) <-- sentence splitter <-+
 ```
 
 ## Setup
@@ -35,6 +44,16 @@ cp .env.example .env    # fill in GEMINI_API_KEY and OPENROUTER_API_KEY
 python server.py        # http://127.0.0.1:8787
 ```
 
+Mode D needs Apple Silicon and the local speech stack on top:
+
+```bash
+pip install -r requirements-local.txt
+brew install espeak-ng     # optional: Kokoro falls back to it for words outside its dictionary
+```
+
+The first connect in mode D downloads about 2 GB of models (Whisper turbo,
+Kokoro) and then loads and warms them, about 20 s; later connects are instant.
+
 Open the page in Chrome, pick a mode, press Connect and allow the microphone.
 Use headphones: the browser's energy VAD and Gemini's barge-in both react to
 speaker bleed. A new Gemini session is created on every Connect, so switch
@@ -48,7 +67,9 @@ NON_BLOCKING (Gemini may keep talking and the answer arrives with
 
 ## What the page shows
 
-- **Latency per turn**, in milliseconds. "speech end" is the last voice heard by
+- **Latency per turn**, in milliseconds. Mode D adds "STT" (turn detected to
+  transcript) and "TTS first sentence" (first sentence handed to Kokoro to its
+  audio sent). "speech end" is the last voice heard by
   the browser's energy VAD (converted to the server clock with a ping-based
   offset). "first audio" is the first audio chunk received from Gemini on the
   server. "playback" is when the first sample of the reply left the browser's
@@ -64,7 +85,11 @@ Server logs carry the same events.
 
 Speaking over Gemini makes it send `interrupted`; the server forwards a `clear`
 message, the browser drops its playback queue, and the turn is closed as
-interrupted. If Gemini cancels a pending `ask_agent` call
+interrupted. In mode D the browser VAD's `speech_start` cancels the running
+turn (GLM stream and TTS), sends `clear`, and the sentences already sent are
+kept in the conversation history marked as interrupted. In every mode the
+browser also clears its own playback queue when its VAD hears the user start,
+because the server can be done sending a reply the speakers are still playing. If Gemini cancels a pending `ask_agent` call
 (`tool_call_cancellation`), the GLM request still finishes but its result is
 dropped instead of being sent back, so no stale answer is spoken.
 
@@ -75,8 +100,11 @@ dropped instead of being sent back, so no stale answer is spoken.
 ```
 
 The tests cover the OpenRouter streaming client (answer, first-token timing,
-timeout, HTTP error, empty answer) and the latency arithmetic. The Gemini
-Live path needs a key and a microphone and is exercised by hand.
+timeout, HTTP error, empty answer), the latency arithmetic, the sentence
+splitter, and the local session (streaming into TTS, agent error spoken,
+silence ignored, barge-in cancels). The Gemini Live path needs a key and a
+microphone and is exercised by hand; the local speech models are exercised
+by hand too (they take 20 s to load).
 
 ## Test scenarios (section 4 of the brief)
 

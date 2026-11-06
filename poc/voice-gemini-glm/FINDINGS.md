@@ -12,7 +12,8 @@ same questions.
    "speech end → playback" column.
 3. Mode B: disconnect, switch mode, connect, ask the same questions.
    Then mode C the same way; note the "delegated n/n turns" counter, which
-   says how often Gemini obeyed the always-delegate instruction.
+   says how often Gemini obeyed the always-delegate instruction. Then mode D
+   (local voice); its STT and TTS columns say what the local stack costs.
 4. Interrupt Gemini mid-sentence once in each mode and check that no stale
    audio plays after the interruption.
 5. Copy the table rows here.
@@ -44,6 +45,12 @@ Stage costs that cannot be avoided in the mode B design:
   to dominate**; `glm_total` is the number to watch.
 - Gemini reading the function result and starting to speak: the
   "GLM done → first audio" column.
+
+Mode D pays Whisper once per turn and Kokoro once per sentence, but it starts
+speaking after GLM's first sentence instead of its last token, so for long
+answers it should beat mode C by most of "GLM total" minus "GLM first token".
+Measured on this M5 Pro, warm: Whisper turbo about 0.2 s for a short
+utterance, Kokoro about 0.3 s per sentence.
 
 If "speech end → playback" in mode B is not acceptable in conversation, the
 next experiment named in the brief applies: stream GLM's tokens into
