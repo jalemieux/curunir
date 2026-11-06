@@ -1,0 +1,3 @@
+# Build context is the deployment directory (secrets/, context/, workspace/); the
+# Dockerfile copies nothing, so send nothing to the daemon.
+*

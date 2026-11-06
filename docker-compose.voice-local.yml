@@ -4,10 +4,17 @@
 #   docker compose -f docker-compose.yml -f docker-compose.voice-local.yml up -d --build
 #
 # It builds Dockerfile.voice-local on top of the published image (CPU torch, Whisper,
-# Kokoro, Silero; about 1.5 GB more) and keeps the downloaded models (Whisper base
-# ~150 MB, Kokoro ~330 MB, fetched on the first voice session) in a named volume so a
-# rebuild or restart does not fetch them again. Kept out of docker-compose.yml on
+# Kokoro, Silero; about half a gigabyte more) and keeps the downloaded models (Whisper
+# base ~150 MB, Kokoro ~330 MB, fetched on the first voice session) in a named volume so
+# a rebuild or restart does not fetch them again. Kept out of docker-compose.yml on
 # purpose, like the webcam override: most instances do not need the packages.
+#
+# Three files go to the deployment directory: this one, Dockerfile.voice-local and
+# Dockerfile.voice-local.dockerignore (the build context is that directory, which holds
+# secrets/ and context/; the ignore file keeps them out of the daemon's hands). `pull:
+# true` fetches the newest base tag on every rebuild, so updating the instance is the
+# same command again, not a separate pull. The base image must contain the voice code
+# (requirements-voice-local.txt is read from inside it).
 #
 # Tuning in .env (defaults are right for a CPU box): LOCAL_STT_MODEL (base; small for
 # more accuracy at 3x the time), LOCAL_TTS_VOICE, VAD_SILENCE_MS, TTS_THREADS, STT_THREADS.
@@ -16,13 +23,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.voice-local
+      pull: true
       args:
         CURUNIR_TAG: ${CURUNIR_TAG:-latest}
     image: curunir-voice-local:${CURUNIR_TAG:-latest}
     environment:
       VOICE_PROVIDER: local
       HF_HOME: /app/models/huggingface
-      TORCH_HOME: /app/models/torch
     volumes:
       - voice-models:/app/models
 

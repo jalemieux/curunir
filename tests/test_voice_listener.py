@@ -161,6 +161,8 @@ async def test_handle_voice_frame_opens_routes_and_closes(monkeypatch):
     assert await handle_voice_frame({"type": "audio", "data": "AAAA"}, **kw) is True
     assert len(emitted) == 1  # said once, not per audio frame
     assert await handle_voice_frame({"type": "voice_on"}, **kw) is True
+    import asyncio
+    await asyncio.sleep(0.02)  # the listener opens in a task
     assert emitted[-1]["state"] == "ready"
     pcm = b"\x01" * 1280
     assert await handle_voice_frame({"type": "audio", "data": base64.b64encode(pcm).decode()}, **kw) is True
@@ -172,29 +174,58 @@ async def test_handle_voice_frame_opens_routes_and_closes(monkeypatch):
     assert await handle_voice_frame({"type": "audio", "data": "bad base64!"}, **kw) is True  # dropped quietly
 
 
-async def test_voice_on_warms_the_models_first(monkeypatch):
-    monkeypatch.setattr(listener_mod, "listeners", Listeners())
+async def test_voice_on_warms_the_models_in_a_task_and_drops_audio_meanwhile(monkeypatch):
+    import asyncio
+
+    reg = Listeners()
+    monkeypatch.setattr(listener_mod, "listeners", reg)
     emitted, order = [], []
 
     async def emit(frame):
         emitted.append(frame)
 
     class Warm(FakeProviders):
+        needs_warm = True
+
         async def warm(self):
             order.append("warm")
+            await asyncio.sleep(0.05)
 
-    await handle_voice_frame({"type": "voice_on"}, channel="portal", session_id="p", agent=None,
-                             enqueue=None, emit=emit, cancel=lambda: None, providers=Warm())
+    kw = dict(channel="portal", session_id="p", agent=None, enqueue=None, emit=emit, cancel=lambda: None)
+    t = asyncio.get_event_loop().time()
+    await handle_voice_frame({"type": "voice_on"}, providers=Warm(), **kw)
+    assert asyncio.get_event_loop().time() - t < 0.02  # the receive loop did not wait
+    assert reg.loading("portal", "p", None)
+    await handle_voice_frame({"type": "audio", "data": "AAAA"}, **kw)  # dropped, no "off"
+    await asyncio.sleep(0.1)
     assert [f["state"] for f in emitted] == ["loading", "ready"] and order == ["warm"]
+    assert not reg.loading("portal", "p", None) and reg.get("portal", "p", None) is not None
 
     class Broken(FakeProviders):
+        needs_warm = True
+
         async def warm(self):
             raise RuntimeError("no model")
 
     emitted.clear()
     await handle_voice_frame({"type": "voice_on"}, channel="portal", session_id="q", agent=None,
                              enqueue=None, emit=emit, cancel=lambda: None, providers=Broken())
+    await asyncio.sleep(0.02)
     assert [f["state"] for f in emitted] == ["loading", "unavailable"]
+
+    emitted.clear()  # hosted provider: nothing to load, no "loading" flash
+    await handle_voice_frame({"type": "voice_on"}, channel="portal", session_id="r", agent=None,
+                             enqueue=None, emit=emit, cancel=lambda: None, providers=FakeProviders())
+    await asyncio.sleep(0.02)
+    assert [f["state"] for f in emitted] == ["ready"]
+
+    # voice_off while loading cancels the warm-up
+    emitted.clear()
+    await handle_voice_frame({"type": "voice_on"}, providers=Warm(), **kw)
+    await handle_voice_frame({"type": "voice_off"}, **kw)
+    await asyncio.sleep(0.1)
+    assert not reg.loading("portal", "p", None) and reg.get("portal", "p", None) is None
+    assert "ready" not in [f["state"] for f in emitted]  # cancelled before it opened
 
 
 async def test_handle_voice_frame_reports_unavailable_providers(monkeypatch):
