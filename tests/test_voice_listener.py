@@ -172,6 +172,31 @@ async def test_handle_voice_frame_opens_routes_and_closes(monkeypatch):
     assert await handle_voice_frame({"type": "audio", "data": "bad base64!"}, **kw) is True  # dropped quietly
 
 
+async def test_voice_on_warms_the_models_first(monkeypatch):
+    monkeypatch.setattr(listener_mod, "listeners", Listeners())
+    emitted, order = [], []
+
+    async def emit(frame):
+        emitted.append(frame)
+
+    class Warm(FakeProviders):
+        async def warm(self):
+            order.append("warm")
+
+    await handle_voice_frame({"type": "voice_on"}, channel="portal", session_id="p", agent=None,
+                             enqueue=None, emit=emit, cancel=lambda: None, providers=Warm())
+    assert [f["state"] for f in emitted] == ["loading", "ready"] and order == ["warm"]
+
+    class Broken(FakeProviders):
+        async def warm(self):
+            raise RuntimeError("no model")
+
+    emitted.clear()
+    await handle_voice_frame({"type": "voice_on"}, channel="portal", session_id="q", agent=None,
+                             enqueue=None, emit=emit, cancel=lambda: None, providers=Broken())
+    assert [f["state"] for f in emitted] == ["loading", "unavailable"]
+
+
 async def test_handle_voice_frame_reports_unavailable_providers(monkeypatch):
     monkeypatch.setattr(listener_mod, "listeners", Listeners())
     emitted = []

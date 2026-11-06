@@ -313,6 +313,13 @@ class VoiceProviders:
             return None
         return SileroTurnDetector(self.settings.vad_silence_ms)
 
+    async def warm(self) -> None:
+        """Load and warm the local models now (20 s to a minute on a CPU box, plus the
+        first-time download), so the first utterance of a session does not pay for it."""
+        models = getattr(self.tts, "_models", None)
+        if models is not None:
+            await models.ready()
+
 
 _providers: VoiceProviders | None = None
 

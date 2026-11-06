@@ -196,6 +196,15 @@ async def handle_voice_frame(payload: dict, *, channel: str, session_id: str, ag
                 logger.exception("voice: speech providers unavailable")
                 await emit({"type": "voice_state", "state": "unavailable", "session_id": session_id})
                 return True
+        warm = getattr(providers, "warm", None)
+        if warm is not None:
+            await emit({"type": "voice_state", "state": "loading", "session_id": session_id})
+            try:
+                await warm()
+            except Exception:
+                logger.exception("voice: speech models failed to load")
+                await emit({"type": "voice_state", "state": "unavailable", "session_id": session_id})
+                return True
         listener = listeners.open(VoiceListener(
             providers, channel=channel, session_id=session_id, agent=agent,
             enqueue=enqueue, emit=emit, cancel=cancel,

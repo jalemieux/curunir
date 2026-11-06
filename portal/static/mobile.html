@@ -1157,7 +1157,7 @@ function voiceState(msg) {
     return;
   }
   if (msg.state === "listening" && voice.serverVad) voiceInterrupt(); // the agent heard you start
-  const label = { ready: voice.ptt ? "hold the button and talk" : "listening for you", listening: "hearing you", transcribing: "transcribing" }[msg.state] || msg.state;
+  const label = { ready: voice.ptt ? "hold the button and talk" : "listening for you", listening: "hearing you", transcribing: "transcribing", loading: "loading speech models, up to a minute the first time" }[msg.state] || msg.state;
   voiceStateEl.textContent = label;
   voiceStateEl.className = msg.state === "listening" ? "listening" : "";
 }
