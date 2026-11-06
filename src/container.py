@@ -35,6 +35,7 @@ import yaml
 from src.channels.base import IncomingMessage, OutgoingMessage
 from src.config import AgentConfig
 from src.persona import DEFAULT_PERSONA, load_persona
+from src.voice.speaker import registry as voice_speakers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.agent.agent import Agent
@@ -444,12 +445,19 @@ class Container:
             return self.default_agent
         return self.agents.get(name)
 
-    def request_cancel(self, session_id: str, agent: str | None = None) -> bool:
-        """Cancel an in-flight turn; without ``agent`` every agent is tried."""
+    def request_cancel(self, session_id: str, agent: str | None = None,
+                       played_seq: int | None = None) -> bool:
+        """Cancel an in-flight turn; without ``agent`` every agent is tried.
+
+        Also stops the session's voice speaker, which usually outlives the
+        turn (src/voice/speaker.py); ``played_seq`` says what was heard."""
         if agent:
             target = self.agents.get(agent)
-            return bool(target and target.request_cancel(session_id))
-        return any(a.request_cancel(session_id) for a in self.agents.values())
+            cancelled = bool(target and target.request_cancel(session_id))
+        else:
+            cancelled = any(a.request_cancel(session_id) for a in self.agents.values())
+        stopped = voice_speakers.stop(session_id, agent, played_seq)
+        return cancelled or stopped
 
     def describe(self) -> list[dict]:
         """``[{name, persona, description, default}]`` for hello/meta frames."""

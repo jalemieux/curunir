@@ -491,7 +491,7 @@ class LocalWebChannel:
         echo = {"agent": agent} if agent else {}
 
         if command == "interrupt":
-            delivered = request_cancel(self.cancel_session, sid, agent)
+            delivered = request_cancel(self.cancel_session, sid, agent, played_seq=payload.get("played_seq"))
             logger.info(
                 "Interrupt requested for local session %s (delivered=%s)",
                 sid, delivered,
@@ -589,6 +589,7 @@ class LocalWebChannel:
             command=command or None,
             attachments=manifest or None,
             agent=agent,
+            voice=bool(payload.get("voice")),
         ))
 
     # --- document upload + eager ingestion ----------------------------------
@@ -716,6 +717,10 @@ class LocalWebChannel:
         ws = self._socket
         if ws is None:
             return
+        if msg.audio:
+            frame = {**msg.audio, "session_id": msg.session_id, **({"agent": msg.agent} if msg.agent else {})}
+            await self._send_frame(ws, frame)
+            return
         if msg.attachments:
             _enrich_attachments(msg.attachments, self.project_root)
         frame = {
@@ -734,6 +739,9 @@ class LocalWebChannel:
             frame["handoffs"] = msg.handoffs
         if msg.segment is not None:
             frame["segment"] = msg.segment
+        await self._send_frame(ws, frame)
+
+    async def _send_frame(self, ws, frame: dict) -> None:
         try:
             await ws.send_text(json.dumps(frame))
         except (WebSocketDisconnect, RuntimeError):

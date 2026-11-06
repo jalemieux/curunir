@@ -988,3 +988,28 @@ async def test_conversations_request_no_connection_no_send(portal_server):
     # No start() — _connection is None.
     await ch._handle_conversations_request({})
     assert ch._connection is None
+
+
+@pytest.mark.asyncio
+async def test_audio_chunk_rides_the_agent_message_envelope_and_is_ephemeral(portal_server):
+    """Audio slices are ephemeral like deltas: never buffered for a reconnect."""
+    in_q: asyncio.Queue = asyncio.Queue()
+    ch = PortalChannel(in_queue=in_q, url=portal_server["url"], token="t")
+    audio = {"type": "audio_chunk", "turn_id": "t", "seq": 1, "sentence": 0, "mime": "audio/pcm;rate=24000",
+             "data": "", "final": True}
+    await ch.send(OutgoingMessage(
+        content="", channel="portal", session_id="s", reply_address={}, final=False, agent="default", audio=audio,
+    ))
+    assert len(ch._outbound) == 0
+
+    sent = []
+
+    class FakeConn:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    ch._connection = FakeConn()
+    await ch.send(OutgoingMessage(
+        content="", channel="portal", session_id="s", reply_address={}, final=False, agent="default", audio=audio,
+    ))
+    assert sent == [{"type": "agent_message", "payload": {**audio, "session_id": "s", "agent": "default"}}]

@@ -16,6 +16,9 @@ class IncomingMessage:
     # agent, which is every pre-multi-agent client). route_inbound resolves
     # it and stamps the canonical name before the worker sees the message.
     agent: str | None = None
+    # A voice turn (#551): the worker speaks the reply as audio_chunk frames
+    # alongside the text. Set by channels from the client's ``voice`` field.
+    voice: bool = False
 
 
 @dataclass
@@ -40,6 +43,10 @@ class OutgoingMessage:
     # ``TextSegments`` in run.py). Set on text deltas and on the final reply;
     # a client that ignores it behaves as before.
     segment: int | None = None
+    # One ``audio_chunk`` frame of a voice turn (src/voice/speaker.py). A
+    # message carrying it has no text: channels send it as its own frame
+    # type and a client that does not know it ignores it.
+    audio: dict | None = None
 
 
 class Channel(Protocol):

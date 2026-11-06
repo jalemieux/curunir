@@ -1053,3 +1053,35 @@ async def test_upload_flow_end_to_end_over_websocket(config, tmp_path):
             assert card["type"] == "document_card"
             assert card["status"] == "ok"
             assert card["upload_id"] == "e2e"
+
+
+# --- voice turns (#551) -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_audio_chunk_is_its_own_frame_type(channel):
+    sent = []
+
+    class FakeSocket:
+        async def send_text(self, data):
+            sent.append(json.loads(data))
+
+    channel._socket = FakeSocket()
+    audio = {"type": "audio_chunk", "turn_id": "t", "seq": 1, "sentence": 0, "mime": "audio/pcm;rate=24000",
+             "data": "AAA=", "final": False, "text": "Hi."}
+    await channel.send(OutgoingMessage(
+        content="", channel="local_web", session_id="s1", reply_address={}, final=False, agent="default", audio=audio,
+    ))
+    assert sent == [{**audio, "session_id": "s1", "agent": "default"}]
+    assert "content" not in sent[0]  # not a chat chunk: chat.js routes it by type
+
+
+@pytest.mark.asyncio
+async def test_inbound_voice_flag_and_played_seq_reach_the_worker_and_the_cancel(channel):
+    await channel._handle_inbound_frame({"content": "hello", "voice": True})
+    msg = channel.in_queue.get_nowait()
+    assert msg.voice is True and msg.content == "hello"
+    await channel._handle_inbound_frame({"content": "text only"})
+    assert channel.in_queue.get_nowait().voice is False
+    await channel._handle_inbound_frame({"command": "interrupt", "session_id": "s1", "played_seq": 7})
+    channel.cancel_session.assert_called_with("s1", played_seq=7)

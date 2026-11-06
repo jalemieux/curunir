@@ -257,7 +257,8 @@ class PortalChannel:
         # `agent` field set by the browser reaches us with no service change.
         agent = agent_of(payload)
         if payload.get("command") == "interrupt":
-            delivered = request_cancel(self.cancel_session, session_id, agent)
+            delivered = request_cancel(self.cancel_session, session_id, agent,
+                                       played_seq=payload.get("played_seq"))
             logger.info(
                 "Interrupt requested for portal session %s (delivered=%s)",
                 session_id, delivered,
@@ -333,6 +334,7 @@ class PortalChannel:
             command=payload.get("command") or None,
             attachments=manifest,
             agent=agent,
+            voice=bool(payload.get("voice")),
         ))
 
     def _is_duplicate(self, payload: dict) -> bool:
@@ -430,6 +432,13 @@ class PortalChannel:
         if msg.attachments:
             _enrich_attachments(msg.attachments, self.project_root)
 
+        if msg.audio:
+            # Its own frame shape inside the relay envelope: the service only
+            # needs ``session_id`` to route it, the browser sees ``type``.
+            payload = {**msg.audio, "session_id": msg.session_id, **({"agent": msg.agent} if msg.agent else {})}
+            await self._deliver(json.dumps({"type": "agent_message", "payload": payload}), ephemeral=True)
+            return
+
         wrapped = {
             "type": "agent_message",
             "payload": {
@@ -445,12 +454,15 @@ class PortalChannel:
                 **({"segment": msg.segment} if msg.segment is not None else {}),
             },
         }
-        frame = json.dumps(wrapped)
+        await self._deliver(json.dumps(wrapped), ephemeral=msg.delta)
 
+    async def _deliver(self, frame: str, *, ephemeral: bool) -> None:
+        """Send one wrapped frame; buffer it for the reconnect unless ephemeral.
+
+        Streaming deltas and audio slices are ephemeral UI updates: the final
+        message carries the full content, so they are dropped silently."""
         if self._connection is None:
-            if msg.delta:
-                # Streaming deltas are ephemeral UI updates; the final
-                # message carries the full content, so drop them silently.
+            if ephemeral:
                 return
             self._outbound.append(frame)
             logger.info("PortalChannel: no connection; buffered outbound "
@@ -460,7 +472,7 @@ class PortalChannel:
             await self._connection.send(frame)
         except websockets.exceptions.ConnectionClosed:
             self._connection = None
-            if msg.delta:
+            if ephemeral:
                 logger.warning("Portal closed while sending delta; dropped")
                 return
             self._outbound.append(frame)

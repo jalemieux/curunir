@@ -324,3 +324,14 @@ def test_default_agent_email_is_allowed_and_logged(personas, tmp_path, caplog):
         m = load_container(_write(tmp_path, text), environ={})
     assert m.default_agent.email == "home@curunir.ai"
     assert "default agent 'everyday' sets `email`" in caplog.text
+
+
+def test_request_cancel_also_stops_the_sessions_voice_speaker(monkeypatch):
+    from src.voice import speaker as speaker_mod
+
+    calls = []
+    monkeypatch.setattr(speaker_mod.registry, "stop", lambda sid, agent=None, played_seq=None: calls.append((sid, agent, played_seq)) or True)
+    c = _container()
+    c.agents["finance"].request_cancel.return_value = False
+    assert c.request_cancel("s1", agent="finance", played_seq=3) is True  # nothing running, speaker stopped
+    assert calls == [("s1", "finance", 3)]
