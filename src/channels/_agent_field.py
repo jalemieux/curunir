@@ -42,6 +42,15 @@ def request_cancel(
     kwargs = {}
     if agent is not None:
         kwargs["agent"] = agent
+    if isinstance(played_seq, bool):
+        played_seq = None
+    elif isinstance(played_seq, (int, float, str)):
+        try:
+            played_seq = int(played_seq)
+        except ValueError:
+            played_seq = None
+    else:
+        played_seq = None
     if played_seq is not None:
         kwargs["played_seq"] = played_seq
     try:

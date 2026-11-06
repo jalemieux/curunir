@@ -170,15 +170,62 @@ async def test_registry_stops_the_live_speaker_and_hands_over_the_rewrite():
     await asyncio.wait_for(sp._task, 5)
 
 
-async def test_registry_without_agent_stops_any_agent_and_a_finished_speaker_is_not_a_stop():
+async def test_registry_without_agent_stops_any_agent_and_a_fully_played_reply_is_not_a_stop():
     reg = SpeakerRegistry()
     frames, emit = collector()
     sp = VoiceSpeaker(FakeTTS(), emit, session_id="cli", agent="coach")
     reg.start(sp)
-    sp.finish("Done.")
+    sp.finish("Done now.")
+    reg.set_reply(sp, "Done now.")
     await asyncio.wait_for(sp._task, 5)
-    assert reg.stop("cli") is False  # audio already over: nothing to stop, no rewrite
+    last_data_seq = max(f["seq"] for f in frames if f["data"])
+    assert reg.stop("cli", played_seq=last_data_seq) is False  # played to the end
+    assert reg.stop("cli") is False  # no played_seq: the client did not say anything was cut off
     assert reg.take_rewrite("cli", "coach") is None
+
+
+async def test_barge_in_after_synthesis_finished_but_before_playback_ended_is_recorded():
+    """Synthesis runs ahead of playback: the speaker task is done for most of a reply."""
+    reg = SpeakerRegistry()
+    frames, emit = collector()
+    sp = VoiceSpeaker(FakeTTS(), emit, session_id="portal", agent="default")
+    reg.start(sp)
+    text = "One two three. Four five six. Seven eight nine."
+    sp.feed(text)
+    sp.finish(text)
+    reg.set_reply(sp, text)
+    await asyncio.wait_for(sp._task, 5)
+    assert reg.stop("portal", "default", played_seq=2) is True
+    assert reg.take_rewrite("portal", "default") == (text, "One two three.")
+    assert reg.stop("portal", "default", played_seq=2) is False  # once
+
+
+async def test_barge_in_while_the_model_still_streams_is_recorded_when_the_reply_lands():
+    reg = SpeakerRegistry()
+    frames, emit = collector()
+    sp = VoiceSpeaker(FakeTTS(delay=0.05), emit, session_id="s", agent="a")
+    reg.start(sp)
+    sp.feed("One two three. Four five six. ")
+    await asyncio.sleep(0.08)  # first sentence out, model still streaming
+    assert reg.stop("s", "a", played_seq=2) is True
+    assert reg.take_rewrite("s", "a") is None  # the worker has not persisted the reply yet
+    reg.set_reply(sp, "One two three. Four five six. Seven eight nine.")  # handle() returns later
+    assert reg.take_rewrite("s", "a") == ("One two three. Four five six. Seven eight nine.", "One two three.")
+    await asyncio.wait_for(sp._task, 5)
+
+
+async def test_first_sentence_is_spoken_while_the_model_is_still_streaming():
+    """The look-ahead must not hold a synthesized sentence back waiting for the next one."""
+    frames, emit = collector()
+    sp = VoiceSpeaker(FakeTTS(delay=0.01), emit, session_id="s")
+    sp.start()
+    sp.feed("First sentence here. Sec")  # the model parks here
+    await asyncio.sleep(0.1)
+    assert [f["sentence"] for f in frames] == [0, 0]
+    sp.feed("ond sentence here.")
+    sp.finish(None)
+    await asyncio.wait_for(sp._task, 5)
+    assert [f["sentence"] for f in frames] == [0, 0, 1, 1, 2]
 
 
 async def test_a_new_speaker_on_the_same_session_stops_the_old_one():
@@ -291,11 +338,6 @@ async def test_worker_rewrites_the_interrupted_reply_before_the_next_turn(agent_
             await in_q.put(IncomingMessage(content="again", channel="local_web", session_id="s1", reply_address={}))
             while True:
                 f = await asyncio.wait_for(out_q.get(), 5)
-                if f.final and not f.audio and f.content == text and f.session_id == "s1":
-                    pass
-                if f.final and not f.audio and f.content == text:
-                    # the second turn's final (same scripted text); check the history now
-                    pass
                 if f.final and not f.audio:
                     finals = [m for m in agent.sessions["s1"] if m.get("role") == "assistant"]
                     if len(finals) >= 2:
