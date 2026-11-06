@@ -12,6 +12,9 @@ assert.equal(orbState("listening").cls, "listening");
 assert.equal(orbState("speaking").cls, "speaking");
 assert.equal(orbState("loading").cls, "loading");
 assert.equal(orbState("off").cls, "off");
+assert.notEqual(orbState("unavailable").label, orbState("no_voice").label);  // models failed vs no voice release: told apart
+assert.match(orbState("no_voice").label, /no voice yet/);
+assert.match(orbState("unavailable").label, /did not load/);
 assert.equal(orbState("error", { detail: "mic denied" }).label, "voice unavailable: mic denied");
 assert.equal(orbState("mystery").label, "mystery");
 

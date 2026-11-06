@@ -201,7 +201,7 @@ async function voiceOn() {
   send({ type: "voice_on" });
   clearTimeout(voice.readyTimer);
   voice.readyTimer = setTimeout(() => {
-    if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("unavailable"); }
+    if (voice.on && !voice.ready && voice.state === "loading") { voiceTeardown(); setVoiceState("no_voice"); } // nothing answered at all
   }, VOICE_READY_TIMEOUT_MS);
 }
 
