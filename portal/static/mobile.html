@@ -1128,7 +1128,13 @@ voiceBtn.addEventListener("click", () => { if (voice.on) showVoiceScreen(); else
 document.getElementById("vs-back").addEventListener("click", hideVoiceScreen);
 document.getElementById("vs-keyboard").addEventListener("click", hideVoiceScreen);
 document.getElementById("vs-end").addEventListener("click", () => { voiceOff(); hideVoiceScreen(); });
-vs.orb.addEventListener("click", () => { if (voice.state === "speaking") voiceInterrupt(); });
+vs.orb.addEventListener("click", () => {
+  if (voice.state !== "speaking") return;
+  voiceInterrupt();
+  // A finished speaker sends no closing frame and a cleared queue reports nothing played,
+  // so nothing else would paint the end of the reply.
+  setVoiceState("ready");
+});
 
 function showVoiceScreen() { vs.screen.hidden = false; voiceBar.hidden = true; }
 function hideVoiceScreen() { vs.screen.hidden = true; voiceBar.hidden = !voice.on; }
