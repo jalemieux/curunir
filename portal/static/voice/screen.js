@@ -9,7 +9,7 @@
     transcribing: { cls: "transcribing", label: "transcribing" },
     thinking:     { cls: "thinking",     label: "thinking" },
     speaking:     { cls: "speaking",     label: "speaking, talk over it or tap the orb to interrupt" },
-    off:          { cls: "off",          label: "voice mode ended, tap the mic to start again" },
+    off:          { cls: "off",          label: "voice mode ended, tap the orb to start again" },
     unavailable:  { cls: "off",          label: "voice is on this agent, but its speech models did not load (see the agent log)" },
     no_voice:     { cls: "off",          label: "this agent has no voice yet (it needs the voice release)" },
     error:        { cls: "off",          label: null },
