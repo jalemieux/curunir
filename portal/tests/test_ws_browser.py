@@ -140,3 +140,21 @@ def test_browser_frame_binds_session_on_routing_table(sync_client):
         assert routing.browsers_for_session(user.id, "tab-XYZ"), (
             "browser ws should be bound to session tab-XYZ"
         )
+
+
+def test_typed_voice_frame_with_no_agent_does_not_reply_offline(sync_client):
+    """Voice frames (#614) carry a ``type`` and no ``command``; they are not
+    chat messages, so a failed forward must not produce an offline bubble."""
+    user = _create_user(sync_client, "voice@example.com")
+    cookie = auth.sign_session(user.id)
+    with sync_client.websocket_connect(
+        "/ws/browser",
+        cookies={auth.SESSION_COOKIE: cookie},
+        headers=GOOD_ORIGIN,
+    ) as ws:
+        _status = ws.receive_text()
+        ws.send_text(json.dumps({"type": "voice_on", "session_id": "tab-1"}))
+        ws.send_text(json.dumps({"type": "audio", "session_id": "tab-1", "data": "AAAA"}))
+        ws.send_text(json.dumps({"content": "hi", "session_id": "tab-1"}))
+        reply = json.loads(ws.receive_text())
+        assert reply["content"] == "Agent offline."

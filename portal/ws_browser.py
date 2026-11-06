@@ -97,7 +97,9 @@ async def ws_browser(ws: WebSocket) -> None:
                 # in the transcript once the agent reconnects. The browser's
                 # offline modal already communicates the disconnected state.
                 command = payload.get("command")
-                if command in (None, "slash"):
+                # Typed frames (voice audio and control, #614) are not chat
+                # messages either: no bubble for them.
+                if command in (None, "slash") and not payload.get("type"):
                     await ws.send_text(json.dumps({
                         "content": "Agent offline.",
                         "final": True,

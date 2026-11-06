@@ -49,6 +49,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.channels._agent_field import agent_of, call_provider, request_cancel
+from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame, listeners as voice_listeners
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -459,6 +460,7 @@ class LocalWebChannel:
         finally:
             if self._socket is ws:
                 self._socket = None
+            voice_listeners.close_channel("local_web")
             logger.info("Local web console disconnected")
             # Mirror ws.py: flush the conversation into memory extraction.
             await self.in_queue.put(IncomingMessage(
@@ -489,6 +491,19 @@ class LocalWebChannel:
         sid = payload.get("session_id") or LOCAL_SESSION_ID
         agent = agent_of(payload)
         echo = {"agent": agent} if agent else {}
+
+        if payload.get("type") in VOICE_FRAME_TYPES:
+            # Mic audio and voice-mode control (src/voice/listener.py).
+            async def emit(frame: dict) -> None:
+                if respond is not None:
+                    await respond(frame)
+
+            await handle_voice_frame(
+                payload, channel="local_web", session_id=sid, agent=agent,
+                enqueue=self.in_queue.put, emit=emit,
+                cancel=lambda: request_cancel(self.cancel_session, sid, agent),
+            )
+            return
 
         if command == "interrupt":
             delivered = request_cancel(self.cancel_session, sid, agent, played_seq=payload.get("played_seq"))

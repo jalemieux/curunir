@@ -1085,3 +1085,36 @@ async def test_inbound_voice_flag_and_played_seq_reach_the_worker_and_the_cancel
     assert channel.in_queue.get_nowait().voice is False
     await channel._handle_inbound_frame({"command": "interrupt", "session_id": "s1", "played_seq": 7})
     channel.cancel_session.assert_called_with("s1", played_seq=7)
+
+
+@pytest.mark.asyncio
+async def test_voice_frames_open_a_listener_and_enqueue_the_transcript(channel, monkeypatch):
+    from src.voice import listener as listener_mod
+
+    monkeypatch.setattr(listener_mod, "listeners", listener_mod.Listeners())
+
+    class STT:
+        async def transcribe(self, pcm):
+            return "hello there"
+
+    class Providers:
+        stt = STT()
+
+        def turn_detector(self):
+            return None
+
+    monkeypatch.setattr("src.voice.providers.get_providers", lambda: Providers())
+    replies = []
+
+    async def respond(frame):
+        replies.append(frame)
+
+    await channel._handle_inbound_frame({"type": "voice_on", "session_id": "s1"}, respond=respond)
+    assert replies[-1] == {"type": "voice_state", "state": "ready", "server_vad": False, "session_id": "s1"}
+    await channel._handle_inbound_frame({"type": "audio", "session_id": "s1", "data": "AQEBAQ=="}, respond=respond)
+    await channel._handle_inbound_frame({"type": "audio_end", "session_id": "s1"}, respond=respond)
+    msg = channel.in_queue.get_nowait()
+    assert (msg.content, msg.voice, msg.channel, msg.session_id) == ("hello there", True, "local_web", "s1")
+    assert replies[-1]["type"] == "transcript" and replies[-1]["text"] == "hello there"
+    await channel._handle_inbound_frame({"type": "voice_off", "session_id": "s1"}, respond=respond)
+    assert listener_mod.listeners.get("local_web", "s1", None) is None

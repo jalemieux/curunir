@@ -11,6 +11,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels._agent_field import agent_of, request_cancel
+from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -269,6 +270,17 @@ class WebSocketChannel:
                 agent = agent_of(data)
                 if agent is not None:
                     last_agent = agent
+                if data.get("type") in VOICE_FRAME_TYPES:
+                    async def emit(frame: dict, _conn=websocket, _sid=session_id) -> None:
+                        await self._send_payload(_conn, _sid, frame)
+
+                    await handle_voice_frame(
+                        data, channel="cli", session_id=session_id, agent=agent,
+                        enqueue=self.in_queue.put, emit=emit,
+                        cancel=lambda _sid=session_id, _agent=agent: request_cancel(self.cancel_session, _sid, _agent),
+                    )
+                    continue
+
                 if data.get("command") == "interrupt":
                     delivered = request_cancel(self.cancel_session, session_id, agent,
                                                played_seq=data.get("played_seq"))

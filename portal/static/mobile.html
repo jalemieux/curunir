@@ -390,6 +390,13 @@ details.tools summary::-webkit-details-marker { display: none; }
   #print-doc { display: block !important; color: #000; background: #fff; }
 }
 #print-doc { display: none; }
+#voice-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+#voice-bar { display: flex; align-items: center; gap: 10px; padding: 6px 2px 2px; font-size: 13px; color: var(--tool); }
+#voice-bar[hidden] { display: none; }
+#ptt-btn { flex: 1; padding: 12px; border-radius: 12px; border: 1px solid var(--muted); background: var(--bubble); font-size: 15px; touch-action: none; user-select: none; -webkit-user-select: none; }
+#ptt-btn.active { background: var(--user); color: #fff; }
+#voice-state.listening { color: var(--user); }
+#voice-state.speaking { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -423,6 +430,12 @@ details.tools summary::-webkit-details-marker { display: none; }
       <button id="attach-btn" class="cbtn" aria-label="Attach file">＋</button>
       <textarea id="input" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
       <button id="send-btn" class="cbtn" data-mode="send" aria-label="Send" disabled>↑</button>
+      <button id="voice-btn" class="cbtn" aria-label="Voice mode" aria-pressed="false">🎙</button>
+    </div>
+    <div id="voice-bar" hidden>
+      <button id="ptt-btn" hidden>Hold to talk</button>
+      <span id="voice-state">voice off</span>
+      <span id="voice-metric"></span>
     </div>
     <input id="file-input" type="file" hidden multiple
       accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.docx,.md,.txt,.csv,.json,.yaml,.yml,.log,.xml,.toml,.ini">
@@ -676,6 +689,10 @@ function onServerMessage(msg) {
   // Drop frames for a session other than the one currently open (the portal
   // socket is multiplexed; a stale turn may still be streaming).
   if (msg.session_id && msg.session_id !== sessionId) return;
+  if (msg.type === "audio_chunk") { voiceAudio(msg); return; }
+  if (msg.type === "voice_state") { voiceState(msg); return; }
+  if (msg.type === "transcript") { voiceTranscript(msg); return; }
+  if (msg.type) return; // a frame type this page does not know
   renderAgentChunk(msg);
 }
 
@@ -1029,6 +1046,173 @@ function launchSkill(slashText) {
 }
 
 // === Send / interrupt ===
+// === Voice mode (#614, docs/voice-mode-plan.md) ===
+// The phone is the microphone and speaker; the container listens, thinks and
+// speaks. Mic audio goes up as `audio` frames (PCM16 16 kHz), the reply comes
+// back as `audio_chunk` frames (PCM16 24 kHz) next to the usual text. With a
+// server turn detector the mic is always open (hands-free); without one the
+// user holds the button to talk and the release ends the utterance.
+const voice = {
+  on: false, serverVad: false, ptt: false, micCtx: null, outCtx: null, micNode: null,
+  playerNode: null, stream: null, talking: false, speaking: false,
+  lastPlayedSeq: 0, turn: null, t0: null,
+};
+const voiceBtn = document.getElementById("voice-btn");
+const voiceBar = document.getElementById("voice-bar");
+const pttBtn = document.getElementById("ptt-btn");
+const voiceStateEl = document.getElementById("voice-state");
+const voiceMetricEl = document.getElementById("voice-metric");
+
+voiceBtn.addEventListener("click", () => (voice.on ? voiceOff() : voiceOn()));
+
+async function voiceOn() {
+  if (!agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    // Safari only starts audio inside the tap: contexts, worklets and the mic here.
+    voice.outCtx = new AudioContext();
+    await voice.outCtx.resume();
+    await voice.outCtx.audioWorklet.addModule("/voice/player-worklet.js");
+    voice.playerNode = new AudioWorkletNode(voice.outCtx, "player");
+    voice.playerNode.connect(voice.outCtx.destination);
+    voice.playerNode.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "played") voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
+      if (m.type === "playback_start" && voice.t0 !== null) {
+        voiceMetricEl.textContent = `first audio ${((performance.now() - voice.t0) / 1000).toFixed(2)} s after you stopped`;
+        voice.t0 = null;
+      }
+    };
+    voice.micCtx = new AudioContext();
+    await voice.micCtx.resume();
+    await voice.micCtx.audioWorklet.addModule("/voice/mic-worklet.js");
+    voice.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const source = voice.micCtx.createMediaStreamSource(voice.stream);
+    voice.micNode = new AudioWorkletNode(voice.micCtx, "mic");
+    const mute = voice.micCtx.createGain();
+    mute.gain.value = 0;
+    source.connect(voice.micNode).connect(mute).connect(voice.micCtx.destination);
+    voice.micNode.port.onmessage = (e) => {
+      if (e.data.type !== "pcm") return;
+      if (!voice.on || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (voice.ptt && !voice.talking) return;
+      ws.send(JSON.stringify({ type: "audio", session_id: sessionId, data: b64(e.data.buf) }));
+    };
+  } catch (err) {
+    voiceTeardown();
+    voiceStateEl.textContent = `voice unavailable: ${err.message}`;
+    voiceBar.hidden = false;
+    return;
+  }
+  voice.on = true;
+  voiceBtn.setAttribute("aria-pressed", "true");
+  voiceBar.hidden = false;
+  voiceStateEl.textContent = "starting";
+  ws.send(JSON.stringify({ type: "voice_on", session_id: sessionId }));
+}
+
+function voiceOff() {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice_off", session_id: sessionId }));
+  voiceTeardown();
+  voiceBar.hidden = true;
+  voiceStateEl.textContent = "voice off";
+}
+
+function voiceTeardown() {
+  voice.on = false;
+  voice.talking = false;
+  voiceBtn.setAttribute("aria-pressed", "false");
+  pttBtn.hidden = true;
+  voice.stream?.getTracks().forEach((t) => t.stop());
+  voice.micCtx?.close();
+  voice.outCtx?.close();
+  voice.micCtx = voice.outCtx = voice.micNode = voice.playerNode = voice.stream = null;
+}
+
+function voiceState(msg) {
+  if (!voice.on) return;
+  if (msg.state === "ready" && typeof msg.server_vad === "boolean") {
+    voice.serverVad = msg.server_vad;
+    voice.ptt = !msg.server_vad;
+    pttBtn.hidden = !voice.ptt;
+  }
+  if (msg.state === "unavailable" || msg.state === "off") {
+    voiceStateEl.textContent = "voice unavailable on the agent";
+    voiceTeardown();
+    return;
+  }
+  const label = { ready: voice.ptt ? "hold the button and talk" : "listening for you", listening: "hearing you", transcribing: "transcribing" }[msg.state] || msg.state;
+  voiceStateEl.textContent = label;
+  voiceStateEl.className = msg.state === "listening" ? "listening" : "";
+}
+
+function voiceTranscript(msg) {
+  if (voice.serverVad) {
+    // The server's clock is not ours: count back the stages it reports.
+    voice.t0 = performance.now() - (msg.stt_ms || 0) - (msg.vad_silence_ms || 0);
+  }
+  if (!msg.text) { voiceMetricEl.textContent = "heard nothing"; return; }
+  const el = appendMessage("user");
+  el.querySelector(".body").textContent = msg.text;
+  if (!inProgressMsg) inProgressMsg = appendMessage("assistant", true);
+  updateComposerMode();
+}
+
+function voiceAudio(msg) {
+  if (!voice.on || !voice.playerNode) return;
+  if (msg.turn_id !== voice.turn) {
+    voice.turn = msg.turn_id;
+    voice.playerNode.port.postMessage({ type: "mark", turn: msg.turn_id });
+    voiceStateEl.textContent = "speaking";
+    voiceStateEl.className = "speaking";
+  }
+  if (msg.data) {
+    const bytes = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+    voice.playerNode.port.postMessage({ type: "audio", pcm: bytes.buffer, seq: msg.seq }, [bytes.buffer]);
+  }
+  if (msg.final) {
+    if (msg.stopped) voiceClearPlayback();
+    voiceStateEl.textContent = voice.ptt ? "hold the button and talk" : "listening for you";
+    voiceStateEl.className = "";
+  }
+}
+
+function voiceClearPlayback() {
+  voice.playerNode?.port.postMessage({ type: "clear" });
+}
+
+// Push-to-talk: hold to send audio, release to end the utterance. Pressing
+// while the reply plays is a barge-in: stop playback and tell the agent.
+function pttDown(e) {
+  e.preventDefault();
+  if (!voice.on || voice.talking) return;
+  voice.talking = true;
+  pttBtn.classList.add("active");
+  if (inProgressMsg) interrupt(); else voiceClearPlayback();
+  voiceStateEl.textContent = "hearing you";
+  voiceStateEl.className = "listening";
+}
+function pttUp(e) {
+  e.preventDefault();
+  if (!voice.on || !voice.talking) return;
+  voice.talking = false;
+  pttBtn.classList.remove("active");
+  voice.t0 = performance.now();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "audio_end", session_id: sessionId }));
+}
+pttBtn.addEventListener("pointerdown", pttDown);
+pttBtn.addEventListener("pointerup", pttUp);
+pttBtn.addEventListener("pointercancel", pttUp);
+pttBtn.addEventListener("pointerleave", (e) => { if (voice.talking) pttUp(e); });
+
+function b64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 function send() {
   const content = inputEl.value.trim();
   if (!content && staged.length === 0) return;
@@ -1063,7 +1247,8 @@ function send() {
 
 function interrupt() {
   if (!inProgressMsg || !agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId }));
+  ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId, ...(voice.on ? { played_seq: voice.lastPlayedSeq } : {}) }));
+  if (voice.on) voiceClearPlayback();
   inProgressMsg.classList.add("stopping");
   sendBtn.dataset.mode = "send";
   sendBtn.textContent = "↑";
