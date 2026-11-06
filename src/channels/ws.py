@@ -11,7 +11,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels._agent_field import agent_of, request_cancel
-from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame
+from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame, listeners as voice_listeners
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -321,6 +321,7 @@ class WebSocketChannel:
         finally:
             if self._connections.get(session_id) is websocket:
                 del self._connections[session_id]
+            voice_listeners.close_session("cli", session_id)
             logger.info(
                 "Client disconnected from %s (session %s)", remote, session_id
             )

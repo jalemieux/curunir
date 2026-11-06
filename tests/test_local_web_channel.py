@@ -1113,6 +1113,7 @@ async def test_voice_frames_open_a_listener_and_enqueue_the_transcript(channel, 
     assert replies[-1] == {"type": "voice_state", "state": "ready", "server_vad": False, "session_id": "s1"}
     await channel._handle_inbound_frame({"type": "audio", "session_id": "s1", "data": "AQEBAQ=="}, respond=respond)
     await channel._handle_inbound_frame({"type": "audio_end", "session_id": "s1"}, respond=respond)
+    await listener_mod.listeners.get("local_web", "s1", None).flush()
     msg = channel.in_queue.get_nowait()
     assert (msg.content, msg.voice, msg.channel, msg.session_id) == ("hello there", True, "local_web", "s1")
     assert replies[-1]["type"] == "transcript" and replies[-1]["text"] == "hello there"

@@ -1053,9 +1053,9 @@ function launchSkill(slashText) {
 // server turn detector the mic is always open (hands-free); without one the
 // user holds the button to talk and the release ends the utterance.
 const voice = {
-  on: false, serverVad: false, ptt: false, micCtx: null, outCtx: null, micNode: null,
+  on: false, serverVad: false, ptt: false, ctx: null, micNode: null,
   playerNode: null, stream: null, talking: false, speaking: false,
-  lastPlayedSeq: 0, turn: null, t0: null,
+  lastPlayedSeq: 0, turn: null, interruptedTurn: null, t0: null,
 };
 const voiceBtn = document.getElementById("voice-btn");
 const voiceBar = document.getElementById("voice-bar");
@@ -1068,12 +1068,18 @@ voiceBtn.addEventListener("click", () => (voice.on ? voiceOff() : voiceOn()));
 async function voiceOn() {
   if (!agentOnline || !ws || ws.readyState !== WebSocket.OPEN) return;
   try {
-    // Safari only starts audio inside the tap: contexts, worklets and the mic here.
-    voice.outCtx = new AudioContext();
-    await voice.outCtx.resume();
-    await voice.outCtx.audioWorklet.addModule("/voice/player-worklet.js");
-    voice.playerNode = new AudioWorkletNode(voice.outCtx, "player");
-    voice.playerNode.connect(voice.outCtx.destination);
+    // Safari only starts audio inside the tap. The microphone first: an iPhone switches
+    // its hardware rate when the mic opens, so the one shared AudioContext for mic and
+    // player is created after the grant and never sees the rate change.
+    voice.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    voice.ctx = new AudioContext();
+    await voice.ctx.resume();
+    await voice.ctx.audioWorklet.addModule("/voice/player-worklet.js");
+    await voice.ctx.audioWorklet.addModule("/voice/mic-worklet.js");
+    voice.playerNode = new AudioWorkletNode(voice.ctx, "player");
+    voice.playerNode.connect(voice.ctx.destination);
     voice.playerNode.port.onmessage = (e) => {
       const m = e.data;
       if (m.type === "played") voice.lastPlayedSeq = Math.max(voice.lastPlayedSeq, m.seq);
@@ -1082,17 +1088,11 @@ async function voiceOn() {
         voice.t0 = null;
       }
     };
-    voice.micCtx = new AudioContext();
-    await voice.micCtx.resume();
-    await voice.micCtx.audioWorklet.addModule("/voice/mic-worklet.js");
-    voice.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    const source = voice.micCtx.createMediaStreamSource(voice.stream);
-    voice.micNode = new AudioWorkletNode(voice.micCtx, "mic");
-    const mute = voice.micCtx.createGain();
+    const source = voice.ctx.createMediaStreamSource(voice.stream);
+    voice.micNode = new AudioWorkletNode(voice.ctx, "mic");
+    const mute = voice.ctx.createGain();
     mute.gain.value = 0;
-    source.connect(voice.micNode).connect(mute).connect(voice.micCtx.destination);
+    source.connect(voice.micNode).connect(mute).connect(voice.ctx.destination);
     voice.micNode.port.onmessage = (e) => {
       if (e.data.type !== "pcm") return;
       if (!voice.on || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1125,9 +1125,22 @@ function voiceTeardown() {
   voiceBtn.setAttribute("aria-pressed", "false");
   pttBtn.hidden = true;
   voice.stream?.getTracks().forEach((t) => t.stop());
-  voice.micCtx?.close();
-  voice.outCtx?.close();
-  voice.micCtx = voice.outCtx = voice.micNode = voice.playerNode = voice.stream = null;
+  voice.ctx?.close();
+  voice.ctx = voice.micNode = voice.playerNode = voice.stream = null;
+}
+
+// Barge-in, both modes: stop what is playing here at once, forget the rest of that
+// turn's slices still in flight, and tell the agent what was heard (played_seq is the
+// one number only this side knows). Sent whether or not a text turn is in progress:
+// the audio outlives the text final by design.
+function voiceInterrupt() {
+  if (!voice.on) return;
+  voiceClearPlayback();
+  voice.interruptedTurn = voice.turn;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: "interrupt", session_id: sessionId, played_seq: voice.lastPlayedSeq }));
+  }
+  if (inProgressMsg) inProgressMsg.classList.add("stopping");
 }
 
 function voiceState(msg) {
@@ -1138,17 +1151,21 @@ function voiceState(msg) {
     pttBtn.hidden = !voice.ptt;
   }
   if (msg.state === "unavailable" || msg.state === "off") {
-    voiceStateEl.textContent = "voice unavailable on the agent";
+    voiceStateEl.textContent = msg.state === "off" ? "voice mode ended, tap 🎙 to start again" : "voice unavailable on the agent";
     voiceTeardown();
+    voiceBar.hidden = false;
     return;
   }
+  if (msg.state === "listening" && voice.serverVad) voiceInterrupt(); // the agent heard you start
   const label = { ready: voice.ptt ? "hold the button and talk" : "listening for you", listening: "hearing you", transcribing: "transcribing" }[msg.state] || msg.state;
   voiceStateEl.textContent = label;
   voiceStateEl.className = msg.state === "listening" ? "listening" : "";
 }
 
 function voiceTranscript(msg) {
+  voice.interruptedTurn = null; // a new reply may come now
   if (voice.serverVad) {
+    voiceMetricEl.textContent = "";
     // The server's clock is not ours: count back the stages it reports.
     voice.t0 = performance.now() - (msg.stt_ms || 0) - (msg.vad_silence_ms || 0);
   }
@@ -1161,8 +1178,10 @@ function voiceTranscript(msg) {
 
 function voiceAudio(msg) {
   if (!voice.on || !voice.playerNode) return;
+  if (msg.turn_id === voice.interruptedTurn && !msg.final) return; // still in flight after the barge-in
   if (msg.turn_id !== voice.turn) {
     voice.turn = msg.turn_id;
+    voice.lastPlayedSeq = 0; // seq restarts with every reply
     voice.playerNode.port.postMessage({ type: "mark", turn: msg.turn_id });
     voiceStateEl.textContent = "speaking";
     voiceStateEl.className = "speaking";
@@ -1173,6 +1192,12 @@ function voiceAudio(msg) {
   }
   if (msg.final) {
     if (msg.stopped) voiceClearPlayback();
+    if (msg.stages && msg.stages.first_audio_chunk_sent !== undefined) {
+      const st = msg.stages;
+      const part = (k, label) => (st[k] !== undefined ? `${label} ${(st[k] / 1000).toFixed(2)}` : null);
+      const text = [part("transcript", "transcript"), part("first_text_delta", "first text"), part("first_audio_chunk_sent", "first audio sent")].filter(Boolean).join(", ");
+      voiceMetricEl.textContent += `${voiceMetricEl.textContent ? " · " : ""}agent: ${text} s after speech end`;
+    }
     voiceStateEl.textContent = voice.ptt ? "hold the button and talk" : "listening for you";
     voiceStateEl.className = "";
   }
@@ -1189,7 +1214,8 @@ function pttDown(e) {
   if (!voice.on || voice.talking) return;
   voice.talking = true;
   pttBtn.classList.add("active");
-  if (inProgressMsg) interrupt(); else voiceClearPlayback();
+  voiceInterrupt();
+  voiceMetricEl.textContent = "";
   voiceStateEl.textContent = "hearing you";
   voiceStateEl.className = "listening";
 }

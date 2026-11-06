@@ -67,13 +67,17 @@ async def test_client_endpointing_without_a_server_detector():
     await lst.audio(b"\x02" * 1280)
     assert enqueued == []
     await lst.audio_end()
+    assert enqueued == []  # transcription runs in its own task; the receive loop is free
+    await lst.flush()
     assert providers.stt.heard == [b"\x01" * 1280 + b"\x02" * 1280]
     transcript = next(f for f in emitted if f["type"] == "transcript")
     assert transcript["text"] == "what time is it" and transcript["audio_ms"] == 80 and transcript["vad_silence_ms"] == 0
     (msg,) = enqueued
     assert (msg.content, msg.channel, msg.session_id, msg.agent, msg.voice) == ("what time is it", "portal", "s1", "default", True)
-    assert cancels == []  # no server detector: the client handles barge-in itself
+    assert set(msg.voice_stamps) == {"speech_end", "transcript"} and msg.voice_stamps["transcript"] >= msg.voice_stamps["speech_end"]
+    assert cancels == []  # barge-in is the client's call, in both modes
     await lst.audio_end()  # nothing buffered: no second turn
+    await lst.flush()
     assert len(enqueued) == 1
 
 
@@ -86,14 +90,40 @@ async def test_server_detector_ends_turns_and_barges_in_on_start():
     await lst.audio(b"\x00" * 1280)  # preroll only
     for _ in range(3):
         await lst.audio(b"\x01" * 1280)
-    assert cancels == [1]  # speech start stops whatever was playing
+    await lst.flush()
+    assert cancels == []  # the client interrupts on "listening", with its played_seq
     assert [f["state"] for f in emitted if f["type"] == "voice_state"] == ["ready", "listening", "transcribing"]
     assert providers.stt.heard == [b"\x00" * 1280 + b"\x01" * 1280 * 3]  # preroll included
     assert enqueued[0].voice is True and enqueued[0].channel == "local_web"
     transcript = next(f for f in emitted if f["type"] == "transcript")
     assert transcript["vad_silence_ms"] == 500
+    assert enqueued[0].voice_stamps["speech_end"] <= enqueued[0].voice_stamps["transcript"] - 0  # end counted back by the silence window
     lst.close()
     assert det.resets == 1
+
+
+async def test_two_utterances_keep_their_order_and_do_not_block_each_other():
+    import asyncio
+
+    class SlowSTT:
+        def __init__(self):
+            self.calls = []
+
+        async def transcribe(self, pcm):
+            self.calls.append(pcm)
+            await asyncio.sleep(0.05 if pcm[:1] == b"\x01" else 0.0)
+            return "first" if pcm[:1] == b"\x01" else "second"
+
+    providers = FakeProviders(stt=SlowSTT())
+    lst, emitted, enqueued, _ = harness(providers)
+    await lst.audio(b"\x01" * 1280)
+    t = asyncio.get_event_loop().time()
+    await lst.audio_end()
+    assert asyncio.get_event_loop().time() - t < 0.02  # did not wait for STT
+    await lst.audio(b"\x02" * 1280)
+    await lst.audio_end()
+    await lst.flush()
+    assert [m.content for m in enqueued] == ["first", "second"]
 
 
 async def test_silence_and_failures_leave_no_turn_and_return_to_ready():
@@ -101,12 +131,14 @@ async def test_silence_and_failures_leave_no_turn_and_return_to_ready():
     lst, emitted, enqueued, _ = harness(providers)
     await lst.audio(b"\x00" * 1280)
     await lst.audio_end()
+    await lst.flush()
     assert enqueued == [] and emitted[-1]["state"] == "ready"
 
     providers = FakeProviders(stt=FakeSTT(fail=True))
     lst, emitted, enqueued, _ = harness(providers)
     await lst.audio(b"\x00" * 1280)
     await lst.audio_end()
+    await lst.flush()
     assert enqueued == []
     assert next(f for f in emitted if f["type"] == "transcript")["text"] == ""
 
@@ -126,11 +158,14 @@ async def test_handle_voice_frame_opens_routes_and_closes(monkeypatch):
     assert await handle_voice_frame({"content": "hello"}, **kw) is False
     assert await handle_voice_frame({"type": "audio", "data": "AAAA"}, **kw) is True
     assert emitted[-1]["state"] == "off"  # audio before voice_on
+    assert await handle_voice_frame({"type": "audio", "data": "AAAA"}, **kw) is True
+    assert len(emitted) == 1  # said once, not per audio frame
     assert await handle_voice_frame({"type": "voice_on"}, **kw) is True
     assert emitted[-1]["state"] == "ready"
     pcm = b"\x01" * 1280
     assert await handle_voice_frame({"type": "audio", "data": base64.b64encode(pcm).decode()}, **kw) is True
     assert await handle_voice_frame({"type": "audio_end"}, **kw) is True
+    await listener_mod.listeners.get("cli", "cli", None).flush()
     assert providers.stt.heard == [pcm] and enqueued[0].content == "what time is it"
     assert await handle_voice_frame({"type": "voice_off"}, **kw) is True
     assert listener_mod.listeners.get("cli", "cli", None) is None

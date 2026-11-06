@@ -49,7 +49,7 @@ import websockets
 import websockets.exceptions
 
 from src.channels._agent_field import agent_of, call_provider, request_cancel
-from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame
+from src.voice.listener import VOICE_FRAME_TYPES, handle_voice_frame, listeners as voice_listeners
 from src.channels._attachments import (
     _decode_attachments,
     _enrich_attachments,
@@ -187,6 +187,7 @@ class PortalChannel:
                 raise
             finally:
                 self._connection = None
+                voice_listeners.close_channel("portal")  # the browsers are gone with the relay
 
             if self._terminate:
                 return

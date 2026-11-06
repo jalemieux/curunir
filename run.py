@@ -484,6 +484,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
                 segment=segments.text(),
             ))
             if speaker is not None:
+                if "first_text_delta" not in speaker.stamps:
+                    speaker.stamps["first_text_delta"] = time.time() * 1000.0
                 speaker.feed(chunk)
 
         # Outbound sinks the agent fills during the turn: any files it wants
@@ -521,6 +523,8 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
         if speaker is not None:
             voice_speakers.set_reply(speaker, text)
             speaker.finish(text)
+            if speaker.stages():
+                metadata.setdefault("stats", {})["voice"] = speaker.stages()
 
         # llama.cpp exposes per-request server stats over HTTP — fold them in
         # alongside the agent's own stats so the UI can show both.
@@ -572,7 +576,8 @@ def _start_speaker(msg: "IncomingMessage", agent_name: str, out_queue: asyncio.Q
             reply_address=msg.reply_address, final=False, agent=agent_name, audio=audio,
         ))
 
-    speaker = VoiceSpeaker(tts, emit, session_id=msg.session_id, agent=agent_name)
+    speaker = VoiceSpeaker(tts, emit, session_id=msg.session_id, agent=agent_name,
+                           stamps=dict(msg.voice_stamps or {}))
     voice_speakers.start(speaker)
     return speaker
 

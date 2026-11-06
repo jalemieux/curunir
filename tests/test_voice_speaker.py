@@ -66,7 +66,7 @@ async def test_sentences_are_spoken_in_order_with_text_on_the_first_slice():
     assert [f["sentence"] for f in frames] == [0, 0, 1, 1, 2, 2, 3]
     assert [f.get("text") for f in frames] == ["Hello there, friend.", None, "Second one here.", None, "Third!", None, None]
     assert frames[-1] == {"type": "audio_chunk", "turn_id": "t1", "seq": 7, "sentence": 3,
-                          "mime": "audio/pcm;rate=24000", "data": "", "final": True, "stopped": False}
+                          "mime": "audio/pcm;rate=24000", "data": "", "final": True, "stopped": False, "stages": {}}
     assert all(f["mime"] == "audio/pcm;rate=24000" and f["turn_id"] == "t1" for f in frames)
     assert data(frames[0]) == b"Hell"
     assert sp.last_seq_of_sentence == {0: 2, 1: 4, 2: 6}
@@ -182,6 +182,22 @@ async def test_registry_without_agent_stops_any_agent_and_a_fully_played_reply_i
     assert reg.stop("cli", played_seq=last_data_seq) is False  # played to the end
     assert reg.stop("cli") is False  # no played_seq: the client did not say anything was cut off
     assert reg.take_rewrite("cli", "coach") is None
+
+
+async def test_stages_count_from_the_end_of_speech_into_the_closing_frame():
+    import time
+
+    frames, emit = collector()
+    t0 = time.time() * 1000.0 - 1000
+    sp = VoiceSpeaker(FakeTTS(), emit, session_id="s", stamps={"speech_end": t0, "transcript": t0 + 200})
+    sp.start()
+    sp.feed("Hello there friend.")
+    sp.finish(None)
+    await asyncio.wait_for(sp._task, 5)
+    stages = frames[-1]["stages"]
+    assert stages["transcript"] == 200
+    assert 1000 <= stages["first_audio_chunk_sent"] <= stages["audio_final"] < 3000
+    assert VoiceSpeaker(FakeTTS(), emit, session_id="s").stages() == {}  # no speech_end: nothing to count from
 
 
 async def test_a_text_turn_forgets_the_previous_voice_reply():
@@ -311,6 +327,39 @@ async def test_worker_speaks_a_voice_turn_after_the_text_final(agent_config):
     assert frames[text_final].content == "Hello there. Bye now."
     deltas = [f.content for f in frames if f.delta]
     assert deltas == ["Hello ", "there. ", "Bye now."]
+
+
+async def test_worker_stamps_first_text_delta_and_reports_voice_stats(agent_config):
+    import time
+
+    async def fake_llm(*args, on_text_delta=None, **kwargs):
+        await on_text_delta("Hi there.")
+        return LLMResponse(text="Hi there.", tool_calls=None)
+
+    class Providers:
+        pass
+
+    providers = Providers()
+    providers.tts = FakeTTS()
+    in_q, out_q = asyncio.Queue(), asyncio.Queue()
+    t0 = time.time() * 1000.0 - 500
+    await in_q.put(IncomingMessage(content="hi", channel="cli", session_id="s1", reply_address={}, voice=True,
+                                   voice_stamps={"speech_end": t0, "transcript": t0 + 100}))
+    frames = []
+    with patch("src.agent.agent.call_llm", new=fake_llm), patch("run.get_voice_providers", return_value=providers):
+        task = asyncio.create_task(agent_worker(Agent(agent_config), in_q, out_q))
+        try:
+            while True:
+                f = await asyncio.wait_for(out_q.get(), 5)
+                frames.append(f)
+                if f.audio and f.audio.get("final"):
+                    break
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    final = next(f for f in frames if f.final and not f.audio)
+    assert final.stats["voice"]["transcript"] == 100 and final.stats["voice"]["first_text_delta"] >= 500
+    assert frames[-1].audio["stages"]["first_audio_chunk_sent"] >= 500
 
 
 async def test_worker_text_turn_has_no_audio(agent_config):
