@@ -558,6 +558,7 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
 def _start_speaker(msg: "IncomingMessage", agent_name: str, out_queue: asyncio.Queue):
     """The speaker task for a voice turn, or None for a text turn."""
     if not msg.voice:
+        voice_speakers.forget(msg.session_id, agent_name)  # a later played_seq must not rewrite the old reply
         return None
     try:
         tts = get_voice_providers().tts

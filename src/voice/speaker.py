@@ -280,6 +280,12 @@ class SpeakerRegistry:
             self._record_rewrite(key, entry, speaker.heard or "")
         return interrupted
 
+    def forget(self, session_id: str, agent: str | None = None) -> None:
+        """A text turn follows: the voice reply before it can no longer be interrupted."""
+        entry = self._speakers.pop((agent, session_id), None)
+        if entry is not None and not entry.speaker.stopped and entry.speaker._task and not entry.speaker._task.done():
+            entry.speaker.stop()
+
     def take_rewrite(self, session_id: str, agent: str | None = None) -> tuple[str, str] | None:
         """``(reply_text, heard_prefix)`` recorded by a stop, once."""
         return self._rewrites.pop((agent, session_id), None)

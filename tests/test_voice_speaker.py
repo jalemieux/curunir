@@ -184,6 +184,18 @@ async def test_registry_without_agent_stops_any_agent_and_a_fully_played_reply_i
     assert reg.take_rewrite("cli", "coach") is None
 
 
+async def test_a_text_turn_forgets_the_previous_voice_reply():
+    reg = SpeakerRegistry()
+    frames, emit = collector()
+    sp = VoiceSpeaker(FakeTTS(), emit, session_id="s", agent="a")
+    reg.start(sp)
+    sp.finish("One two three. Four five six.")
+    reg.set_reply(sp, "One two three. Four five six.")
+    await asyncio.wait_for(sp._task, 5)
+    reg.forget("s", "a")  # the session moved on to a text turn
+    assert reg.stop("s", "a", played_seq=1) is False and reg.take_rewrite("s", "a") is None
+
+
 async def test_barge_in_after_synthesis_finished_but_before_playback_ended_is_recorded():
     """Synthesis runs ahead of playback: the speaker task is done for most of a reply."""
     reg = SpeakerRegistry()
