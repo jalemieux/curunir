@@ -45,6 +45,8 @@ class VoiceListener:
                  enqueue: Enqueue, emit: Emit, cancel: Cancel):
         self.stt = providers.stt
         self.detector = providers.turn_detector()  # None: the client ends utterances
+        settings = getattr(providers, "settings", None)
+        self.provider = getattr(settings, "provider", None) or "unknown"
         self.channel, self.session_id, self.agent = channel, session_id, agent
         self.enqueue, self.emit, self.cancel = enqueue, emit, cancel
         self.preroll: collections.deque[bytes] = collections.deque(maxlen=PREROLL_CHUNKS)
@@ -59,7 +61,8 @@ class VoiceListener:
         return {**frame, "session_id": self.session_id, **({"agent": self.agent} if self.agent else {})}
 
     async def ready(self) -> None:
-        await self.emit(self._frame({"type": "voice_state", "state": "ready", "server_vad": self.server_vad}))
+        await self.emit(self._frame({"type": "voice_state", "state": "ready", "server_vad": self.server_vad,
+                                     "provider": self.provider}))
 
     async def audio(self, pcm16: bytes) -> None:
         if self.detector is None:

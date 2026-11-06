@@ -1111,7 +1111,7 @@ async def test_voice_frames_open_a_listener_and_enqueue_the_transcript(channel, 
 
     await channel._handle_inbound_frame({"type": "voice_on", "session_id": "s1"}, respond=respond)
     await asyncio.sleep(0.02)  # the listener opens in a task
-    assert replies[-1] == {"type": "voice_state", "state": "ready", "server_vad": False, "session_id": "s1"}
+    assert replies[-1] == {"type": "voice_state", "state": "ready", "server_vad": False, "provider": "unknown", "session_id": "s1"}
     await channel._handle_inbound_frame({"type": "audio", "session_id": "s1", "data": "AQEBAQ=="}, respond=respond)
     await channel._handle_inbound_frame({"type": "audio_end", "session_id": "s1"}, respond=respond)
     await listener_mod.listeners.get("local_web", "s1", None).flush()

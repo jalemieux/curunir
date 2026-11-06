@@ -61,7 +61,7 @@ async def test_client_endpointing_without_a_server_detector():
     providers = FakeProviders()
     lst, emitted, enqueued, cancels = harness(providers)
     await lst.ready()
-    assert emitted[-1] == {"type": "voice_state", "state": "ready", "server_vad": False,
+    assert emitted[-1] == {"type": "voice_state", "state": "ready", "server_vad": False, "provider": "unknown",
                            "session_id": "s1", "agent": "default"}
     await lst.audio(b"\x01" * 1280)
     await lst.audio(b"\x02" * 1280)
