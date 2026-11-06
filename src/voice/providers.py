@@ -313,6 +313,16 @@ class VoiceProviders:
             return None
         return SileroTurnDetector(self.settings.vad_silence_ms)
 
+    @property
+    def needs_warm(self) -> bool:
+        """The local models take 20 s to a minute to load on a CPU box; hosted needs nothing."""
+        return self.settings.provider == "local"
+
+    async def warm(self) -> None:
+        """Load and warm the local models now, so the first utterance does not pay for it."""
+        if self.needs_warm:
+            await self.tts._models.ready()
+
 
 _providers: VoiceProviders | None = None
 

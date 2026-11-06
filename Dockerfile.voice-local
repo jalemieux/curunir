@@ -1,0 +1,20 @@
+# Local speech stack on top of the published image: Silero VAD, Whisper (faster-whisper,
+# CPU), Kokoro. Built per host by docker-compose.voice-local.yml, so the base image stays
+# slim and multi-arch. Needs nothing from the repository checkout: the requirements file
+# is already inside the base image.
+ARG CURUNIR_TAG=latest
+FROM ghcr.io/jalemieux/curunir:${CURUNIR_TAG}
+
+# espeak-ng: Kokoro's fallback for words outside its dictionary.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends espeak-ng && \
+    rm -rf /var/lib/apt/lists/*
+
+# CPU wheels for torch (the default index would pull CUDA, several GB). The spaCy model
+# Kokoro's phonemizer wants is installed here rather than downloaded at first use.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r /app/requirements-voice-local.txt && \
+    pip install --no-cache-dir \
+        https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+ENV VOICE_PROVIDER=local

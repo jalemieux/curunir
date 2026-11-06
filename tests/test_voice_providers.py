@@ -138,6 +138,20 @@ async def test_local_tts_streams_100ms_slices(monkeypatch):
     assert len(out) == 10 and all(len(c) == SLICE_BYTES for c in out)
 
 
+async def test_warm_loads_the_local_models_only(monkeypatch):
+    p = make_providers(VoiceSettings(provider="local"))
+    calls = []
+
+    async def ready():
+        calls.append(1)
+
+    monkeypatch.setattr(p.tts._models, "ready", ready)
+    await p.warm()
+    assert calls == [1]
+    with patch("openai.AsyncOpenAI"):
+        await make_providers(VoiceSettings(provider="openai")).warm()  # nothing to load
+
+
 def test_make_providers_selects_by_setting():
     with patch("openai.AsyncOpenAI"):
         p = make_providers(VoiceSettings(provider="openai"))

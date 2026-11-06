@@ -142,6 +142,7 @@ class Listeners:
 
     _by_key: dict[tuple[str, str, str | None], VoiceListener] = field(default_factory=dict)
     _told_off: set[tuple[str, str]] = field(default_factory=set)  # (channel, session) told "off" once
+    _loading: dict[tuple[str, str, str | None], asyncio.Task] = field(default_factory=dict)  # warming up
 
     def get(self, channel: str, session_id: str, agent: str | None) -> VoiceListener | None:
         return self._by_key.get((channel, session_id, agent))
@@ -155,9 +156,29 @@ class Listeners:
         return listener
 
     def close(self, channel: str, session_id: str, agent: str | None) -> None:
+        loading = self._loading.pop((channel, session_id, agent), None)
+        if loading is not None:
+            loading.cancel()
         old = self._by_key.pop((channel, session_id, agent), None)
         if old is not None:
             old.close()
+
+    def loading(self, channel: str, session_id: str, agent: str | None) -> bool:
+        return (channel, session_id, agent) in self._loading
+
+    def open_after(self, key: tuple[str, str, str | None], coro) -> asyncio.Task:
+        """Open the listener once ``coro`` (the warm-up) is done; audio meanwhile is dropped."""
+        self.close(*key)
+
+        async def run():
+            try:
+                await coro
+            finally:
+                self._loading.pop(key, None)
+
+        task = asyncio.create_task(run())
+        self._loading[key] = task
+        return task
 
     def close_session(self, channel: str, session_id: str) -> None:
         for key in [k for k in self._by_key if k[0] == channel and k[1] == session_id]:
@@ -196,18 +217,34 @@ async def handle_voice_frame(payload: dict, *, channel: str, session_id: str, ag
                 logger.exception("voice: speech providers unavailable")
                 await emit({"type": "voice_state", "state": "unavailable", "session_id": session_id})
                 return True
-        listener = listeners.open(VoiceListener(
-            providers, channel=channel, session_id=session_id, agent=agent,
-            enqueue=enqueue, emit=emit, cancel=cancel,
-        ))
         listeners._told_off.discard((channel, session_id))
-        await listener.ready()
+
+        async def open_listener() -> None:
+            # Loading the local models and building the turn detector take seconds to a
+            # minute on a CPU box, and the channel's receive loop must not wait on it (on
+            # the portal it is the one relay socket for every session).
+            if getattr(providers, "needs_warm", False):
+                await emit({"type": "voice_state", "state": "loading", "session_id": session_id})
+                try:
+                    await providers.warm()
+                except Exception:
+                    logger.exception("voice: speech models failed to load")
+                    await emit({"type": "voice_state", "state": "unavailable", "session_id": session_id})
+                    return
+            listener = await asyncio.to_thread(VoiceListener, providers, channel=channel, session_id=session_id,
+                                               agent=agent, enqueue=enqueue, emit=emit, cancel=cancel)
+            listeners.open(listener)
+            await listener.ready()
+
+        listeners.open_after((channel, session_id, agent), open_listener())
         return True
     if kind == "voice_off":
         listeners.close(channel, session_id, agent)
         return True
     listener = listeners.get(channel, session_id, agent)
     if listener is None:
+        if listeners.loading(channel, session_id, agent):
+            return True  # models still loading: the client was told, its audio can wait
         # Audio after a restart or a voice_off: say so once, not 25 times a second.
         if listeners.tell_off_once(channel, session_id):
             await emit({"type": "voice_state", "state": "off", "session_id": session_id})
