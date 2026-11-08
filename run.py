@@ -450,6 +450,17 @@ async def agent_worker(agent: Agent, in_queue: asyncio.Queue, out_queue: asyncio
             ))
             continue
 
+        # A turn with no text and no attachments has nothing to answer, and
+        # each one re-sends the whole conversation to the model. A client that
+        # emits such frames in a stream (an older container fed the portal's
+        # voice audio frames) would otherwise burn tokens on every one.
+        if not (msg.content or "").strip() and not msg.attachments:
+            logger.warning(
+                "Dropping blank turn from %s (session %s, command %r)",
+                msg.channel, msg.session_id, msg.command,
+            )
+            continue
+
         # Streaming hooks: the agent loop fires these mid-turn so the user
         # sees tool activity and partial text without waiting for the final
         # response. Each goes out as a non-final OutgoingMessage.

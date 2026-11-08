@@ -268,6 +268,15 @@ class PortalChannel:
                 cancel=lambda: request_cancel(self.cancel_session, session_id, agent),
             )
             return
+        if payload.get("type") is not None:
+            # Chat frames never carry `type`; only frame kinds the portal added
+            # do. One this container doesn't know (the portal deploys ahead of
+            # containers) is not a chat turn, so drop it rather than answer it.
+            logger.warning(
+                "PortalChannel: ignoring unknown frame type %r (session %s)",
+                payload.get("type"), session_id,
+            )
+            return
         if payload.get("command") == "interrupt":
             delivered = request_cancel(self.cancel_session, session_id, agent,
                                        played_seq=payload.get("played_seq"))
